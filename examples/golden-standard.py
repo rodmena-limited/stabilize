@@ -96,3 +96,22 @@ class EventReceiverTask(Task):
 
     def execute(self, stage: StageExecution) -> TaskResult:
         return TaskResult.success(outputs={"phase3_token": "PHASE3_EVENT_RECEIVED"})
+
+class JoinGateTask(Task):
+    """
+    Phase 4: Join gate that waits for all branches.
+
+    This stage depends on all parallel branches completing.
+    """
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        return TaskResult.success(outputs={"phase4_token": "PHASE4_SYNC_GATE_PASSED"})
+
+class LoopIterationTask(Task):
+    """
+    Phase 5: Loop iteration with conditional logic.
+
+    Reads counter from stage context and outputs based on value:
+    - counter == 2: PHASE5_LOOP_IF_2
+    - counter != 2: PHASE5_LOOP_ELSE_{counter}
+    """
