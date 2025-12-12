@@ -82,3 +82,17 @@ class EventEmitterTask(Task):
 
     Just completes successfully - downstream stages depend on this.
     """
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        return TaskResult.success(outputs={"event_emitted": True})
+
+class EventReceiverTask(Task):
+    """
+    Branch D: Receives event from Branch C.
+
+    This stage depends on Branch C (event emitter), so it only runs
+    after the event is "emitted" (i.e., Branch C completes).
+    """
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        return TaskResult.success(outputs={"phase3_token": "PHASE3_EVENT_RECEIVED"})
