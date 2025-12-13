@@ -61,3 +61,21 @@ class StageGraphBuilder:
         from stabilize.models.stage import SyntheticStageOwner
 
         return cls(parent, SyntheticStageOwner.STAGE_BEFORE)
+
+    def after_stages(
+        cls,
+        parent: StageExecution,
+        requisite_stage_ref_ids: set[str] | None = None,
+    ) -> StageGraphBuilder:
+        """
+        Create a builder for after stages.
+
+        After stages run after the parent completes.
+        """
+        from stabilize.models.stage import SyntheticStageOwner
+
+        return cls(
+            parent,
+            SyntheticStageOwner.STAGE_AFTER,
+            requisite_stage_ref_ids or set(),
+        )
