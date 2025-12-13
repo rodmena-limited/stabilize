@@ -157,3 +157,7 @@ class StageGraphBuilder:
     def last_stage(self) -> StageExecution | None:
         """Get the last added stage."""
         return self._last_stage
+
+    def is_empty(self) -> bool:
+        """Check if no stages have been added."""
+        return len(self._stages) == 0
