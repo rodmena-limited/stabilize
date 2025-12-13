@@ -126,3 +126,17 @@ class StageGraphBuilder:
         if self._last_stage:
             self.connect(self._last_stage, stage)
         return self.add(stage)
+
+    def connect(self, previous: StageExecution, next_stage: StageExecution) -> None:
+        """
+        Connect two stages with a dependency.
+
+        The next stage will depend on the previous stage.
+
+        Args:
+            previous: The stage that must complete first
+            next_stage: The stage that depends on previous
+        """
+        requisites = set(next_stage.requisite_stage_ref_ids)
+        requisites.add(previous.ref_id)
+        next_stage.requisite_stage_ref_ids = requisites
