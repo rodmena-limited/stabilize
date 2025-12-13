@@ -149,3 +149,7 @@ class StageGraphBuilder:
             List of configured synthetic stages
         """
         return list(self._stages)
+
+    def stages(self) -> list[StageExecution]:
+        """Get the current list of stages."""
+        return list(self._stages)
