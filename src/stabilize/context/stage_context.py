@@ -65,3 +65,17 @@ class StageContext(MutableMapping[str, Any]):
     def __iter__(self) -> Iterator[str]:
         """Iterate over keys."""
         return iter(self._delegate)
+
+    def __len__(self) -> int:
+        """Get number of keys in own context."""
+        return len(self._delegate)
+
+    def __contains__(self, key: object) -> bool:
+        """Check if key exists in context or ancestors."""
+        if key in self._delegate:
+            return True
+        if isinstance(key, str):
+            for ancestor in self._stage.ancestors():
+                if key in ancestor.outputs:
+                    return True
+        return False
