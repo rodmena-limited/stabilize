@@ -110,3 +110,19 @@ class StageGraphBuilder:
         self._last_stage = stage
 
         return self
+
+    def append(self, stage: StageExecution) -> StageGraphBuilder:
+        """
+        Append a stage after the last added stage.
+
+        Creates a sequential dependency from the last stage to this one.
+
+        Args:
+            stage: The stage to append
+
+        Returns:
+            self for method chaining
+        """
+        if self._last_stage:
+            self.connect(self._last_stage, stage)
+        return self.add(stage)
