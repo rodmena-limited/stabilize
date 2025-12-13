@@ -35,3 +35,25 @@ class StageContext(MutableMapping[str, Any]):
     def stage(self) -> StageExecution:
         """Get the stage this context belongs to."""
         return self._stage
+
+    def __getitem__(self, key: str) -> Any:
+        """
+        Get a value by key.
+
+        First checks the stage's own context, then falls back to
+        ancestor outputs.
+        """
+        # Check own context first
+        if key in self._delegate:
+            return self._delegate[key]
+
+        # Search ancestor outputs
+        for ancestor in self._stage.ancestors():
+            if key in ancestor.outputs:
+                return ancestor.outputs[key]
+
+        raise KeyError(key)
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        """Set a value in the context."""
+        self._delegate[key] = value
