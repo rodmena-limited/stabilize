@@ -79,3 +79,34 @@ class StageGraphBuilder:
             SyntheticStageOwner.STAGE_AFTER,
             requisite_stage_ref_ids or set(),
         )
+
+    def add(self, stage: StageExecution) -> StageGraphBuilder:
+        """
+        Add a stage to the graph.
+
+        The stage will be configured as a synthetic stage of the parent.
+        If this is the first stage and requisite_stage_ref_ids is set,
+        those requisites will be applied.
+
+        Args:
+            stage: The stage to add
+
+        Returns:
+            self for method chaining
+        """
+        # Configure as synthetic stage
+        stage.parent_stage_id = self.parent.id
+        stage.synthetic_stage_owner = self.owner
+
+        # Set execution reference if parent has one
+        if self.parent.has_execution():
+            stage._execution = self.parent._execution
+
+        # Apply initial requisites to first stage
+        if not self._stages and self.requisite_stage_ref_ids:
+            stage.requisite_stage_ref_ids = stage.requisite_stage_ref_ids.union(self.requisite_stage_ref_ids)
+
+        self._stages.append(stage)
+        self._last_stage = stage
+
+        return self
