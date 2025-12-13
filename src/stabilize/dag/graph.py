@@ -2,6 +2,22 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+def connect_stages_linearly(stages: list[StageExecution]) -> None:
+    """
+    Connect a list of stages in linear sequence.
+
+    Each stage will depend on the previous one.
+
+    Args:
+        stages: List of stages to connect
+    """
+    for i in range(1, len(stages)):
+        previous = stages[i - 1]
+        current = stages[i]
+        requisites = set(current.requisite_stage_ref_ids)
+        requisites.add(previous.ref_id)
+        current.requisite_stage_ref_ids = requisites
+
 class StageGraphBuilder:
     """
     Builder for constructing graphs of synthetic stages.
