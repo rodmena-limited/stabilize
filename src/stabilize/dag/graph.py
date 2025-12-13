@@ -153,3 +153,7 @@ class StageGraphBuilder:
     def stages(self) -> list[StageExecution]:
         """Get the current list of stages."""
         return list(self._stages)
+
+    def last_stage(self) -> StageExecution | None:
+        """Get the last added stage."""
+        return self._last_stage
