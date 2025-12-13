@@ -1,6 +1,19 @@
+"""
+Stage context with ancestor output lookup.
+
+The StageContext class provides access to stage inputs with automatic
+fallback to ancestor stage outputs. This enables data flow between
+stages in a pipeline.
+"""
+
 from __future__ import annotations
+
 from collections.abc import Iterator, MutableMapping
 from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from stabilize.models.stage import StageExecution
+
 
 class StageContext(MutableMapping[str, Any]):
     """
@@ -17,6 +30,7 @@ class StageContext(MutableMapping[str, Any]):
         context = StageContext(stage_b, stage_b.context)
         deployment_id = context["deploymentId"]  # Returns "abc123" from stage A
     """
+
     def __init__(
         self,
         stage: StageExecution,
@@ -32,6 +46,7 @@ class StageContext(MutableMapping[str, Any]):
         self._stage = stage
         self._delegate = delegate
 
+    @property
     def stage(self) -> StageExecution:
         """Get the stage this context belongs to."""
         return self._stage
@@ -110,3 +125,46 @@ class StageContext(MutableMapping[str, Any]):
     def to_dict(self) -> dict[str, Any]:
         """Get the underlying dictionary."""
         return dict(self._delegate)
+
+    def merge_with_ancestors(self) -> dict[str, Any]:
+        """
+        Get merged context including all ancestor outputs.
+
+        Returns a new dictionary with all keys from this context
+        and all ancestor outputs. Own values take precedence.
+        """
+        merged = {}
+
+        # Start with ancestor outputs (reversed so closest overwrites)
+        for ancestor in reversed(self._stage.ancestors()):
+            merged.update(ancestor.outputs)
+
+        # Own context takes precedence
+        merged.update(self._delegate)
+
+        return merged
+
+
+def create_merged_context(stage: StageExecution) -> StageContext:
+    """
+    Create a StageContext with merged ancestor data.
+
+    The returned context will have the stage's own context merged
+    with ancestor outputs, with the stage's values taking precedence.
+
+    Args:
+        stage: The stage to create context for
+
+    Returns:
+        A StageContext with merged data
+    """
+    merged = {}
+
+    # Collect ancestor outputs
+    for ancestor in reversed(stage.ancestors()):
+        merged.update(ancestor.outputs)
+
+    # Own context takes precedence
+    merged.update(stage.context)
+
+    return StageContext(stage, merged)
