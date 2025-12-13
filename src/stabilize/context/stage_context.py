@@ -94,3 +94,19 @@ class StageContext(MutableMapping[str, Any]):
         Does not search ancestor outputs.
         """
         return self._delegate.get(key, default)
+
+    def get_all(self, key: str) -> list[Any]:
+        """
+        Get all values of a key from ancestors.
+
+        Returns values sorted by proximity (closest ancestor first).
+        """
+        values = []
+        for ancestor in self._stage.ancestors():
+            if key in ancestor.outputs:
+                values.append(ancestor.outputs[key])
+        return values
+
+    def to_dict(self) -> dict[str, Any]:
+        """Get the underlying dictionary."""
+        return dict(self._delegate)
