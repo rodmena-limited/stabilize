@@ -57,3 +57,11 @@ class StageContext(MutableMapping[str, Any]):
     def __setitem__(self, key: str, value: Any) -> None:
         """Set a value in the context."""
         self._delegate[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        """Delete a value from the context."""
+        del self._delegate[key]
+
+    def __iter__(self) -> Iterator[str]:
+        """Iterate over keys."""
+        return iter(self._delegate)
