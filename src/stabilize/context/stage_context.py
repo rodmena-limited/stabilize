@@ -79,3 +79,18 @@ class StageContext(MutableMapping[str, Any]):
                 if key in ancestor.outputs:
                     return True
         return False
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get with default value."""
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def get_current_only(self, key: str, default: Any = None) -> Any:
+        """
+        Get a value only from the current stage's context.
+
+        Does not search ancestor outputs.
+        """
+        return self._delegate.get(key, default)
