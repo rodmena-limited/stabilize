@@ -51,3 +51,13 @@ class StageGraphBuilder:
         self.requisite_stage_ref_ids = requisite_stage_ref_ids or set()
         self._stages: list[StageExecution] = []
         self._last_stage: StageExecution | None = None
+
+    def before_stages(cls, parent: StageExecution) -> StageGraphBuilder:
+        """
+        Create a builder for before stages.
+
+        Before stages run before the parent's tasks.
+        """
+        from stabilize.models.stage import SyntheticStageOwner
+
+        return cls(parent, SyntheticStageOwner.STAGE_BEFORE)
