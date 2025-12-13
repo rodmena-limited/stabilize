@@ -140,3 +140,12 @@ class StageGraphBuilder:
         requisites = set(next_stage.requisite_stage_ref_ids)
         requisites.add(previous.ref_id)
         next_stage.requisite_stage_ref_ids = requisites
+
+    def build(self) -> list[StageExecution]:
+        """
+        Build and return the list of stages.
+
+        Returns:
+            List of configured synthetic stages
+        """
+        return list(self._stages)
