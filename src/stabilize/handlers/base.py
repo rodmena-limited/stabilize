@@ -29,3 +29,7 @@ class MessageHandler(ABC, Generic[M]):
 
     Each handler processes a specific type of message.
     """
+
+    def message_type(self) -> type[M]:
+        """Return the type of message this handler processes."""
+        pass
