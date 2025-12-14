@@ -22,3 +22,10 @@ from stabilize.queue.messages import (
 )
 logger = logging.getLogger(__name__)
 M = TypeVar("M", bound=Message)
+
+class MessageHandler(ABC, Generic[M]):
+    """
+    Base class for message handlers.
+
+    Each handler processes a specific type of message.
+    """
