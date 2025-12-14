@@ -33,3 +33,7 @@ class MessageHandler(ABC, Generic[M]):
     def message_type(self) -> type[M]:
         """Return the type of message this handler processes."""
         pass
+
+    def handle(self, message: M) -> None:
+        """Handle a message."""
+        pass
