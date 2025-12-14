@@ -18,3 +18,6 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
     2. If there's a next task: Push StartTask
     3. Otherwise: Push CompleteStage
     """
+
+    def message_type(self) -> type[CompleteTask]:
+        return CompleteTask
