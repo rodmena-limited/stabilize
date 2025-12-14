@@ -64,6 +64,20 @@ def topological_sort(
 
     return sorted_stages
 
+def topological_sort_all_stages(stages: list[StageExecution]) -> list[StageExecution]:
+    """
+    Sort all stages including synthetic stages.
+
+    Unlike topological_sort(), this does not filter out synthetic stages.
+
+    Args:
+        stages: List of stages to sort
+
+    Returns:
+        List of all stages sorted in execution order
+    """
+    return topological_sort(stages, stage_filter=lambda s: True)
+
 class CircularDependencyError(Exception):
     """
     Raised when a circular dependency is detected in the stage graph.
