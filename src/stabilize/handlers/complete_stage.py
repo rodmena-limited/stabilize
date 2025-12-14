@@ -24,3 +24,6 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
     6. If status allows continuation: startNext()
     7. Otherwise: CancelStage + CompleteWorkflow
     """
+
+    def message_type(self) -> type[CompleteStage]:
+        return CompleteStage
