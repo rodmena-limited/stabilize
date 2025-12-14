@@ -1,6 +1,31 @@
+"""
+Topological sort for stage execution ordering.
+
+This module implements a topological sort algorithm for stages based on their
+requisite_stage_ref_ids (DAG edges).
+"""
+
 from __future__ import annotations
+
 from collections.abc import Callable
 from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from stabilize.models.stage import StageExecution
+
+
+class CircularDependencyError(Exception):
+    """
+    Raised when a circular dependency is detected in the stage graph.
+
+    This indicates an invalid pipeline configuration where stages depend
+    on each other in a cycle.
+    """
+
+    def __init__(self, message: str, stages: list[StageExecution] | None = None):
+        super().__init__(message)
+        self.stages = stages or []
+
 
 def topological_sort(
     stages: list[StageExecution],
@@ -64,6 +89,7 @@ def topological_sort(
 
     return sorted_stages
 
+
 def topological_sort_all_stages(stages: list[StageExecution]) -> list[StageExecution]:
     """
     Sort all stages including synthetic stages.
@@ -77,6 +103,7 @@ def topological_sort_all_stages(stages: list[StageExecution]) -> list[StageExecu
         List of all stages sorted in execution order
     """
     return topological_sort(stages, stage_filter=lambda s: True)
+
 
 def validate_dag(stages: list[StageExecution]) -> bool:
     """
@@ -96,6 +123,7 @@ def validate_dag(stages: list[StageExecution]) -> bool:
     topological_sort(stages)
     return True
 
+
 def find_initial_stages(stages: list[StageExecution]) -> list[StageExecution]:
     """
     Find all initial stages (those with no dependencies and not synthetic).
@@ -107,6 +135,7 @@ def find_initial_stages(stages: list[StageExecution]) -> list[StageExecution]:
         List of initial stages
     """
     return [stage for stage in stages if stage.is_initial() and not stage.is_synthetic()]
+
 
 def find_terminal_stages(stages: list[StageExecution]) -> list[StageExecution]:
     """
@@ -129,13 +158,42 @@ def find_terminal_stages(stages: list[StageExecution]) -> list[StageExecution]:
     # Terminal stages are those whose ref_id is not in any requisite set
     return [stage for stage in stages if not stage.is_synthetic() and stage.ref_id not in all_requisites]
 
-class CircularDependencyError(Exception):
-    """
-    Raised when a circular dependency is detected in the stage graph.
 
-    This indicates an invalid pipeline configuration where stages depend
-    on each other in a cycle.
+def get_execution_layers(stages: list[StageExecution]) -> list[list[StageExecution]]:
     """
-    def __init__(self, message: str, stages: list[StageExecution] | None = None):
-        super().__init__(message)
-        self.stages = stages or []
+    Group stages into execution layers.
+
+    Stages in the same layer can execute in parallel.
+    Each layer depends only on stages in previous layers.
+
+    Args:
+        stages: List of stages to group
+
+    Returns:
+        List of layers, where each layer is a list of stages that can run in parallel
+
+    Example:
+        # A -> [B, C] -> D
+        # Layer 0: [A]
+        # Layer 1: [B, C]
+        # Layer 2: [D]
+    """
+    unsorted: list[StageExecution] = [s for s in stages if s.parent_stage_id is None]
+    layers: list[list[StageExecution]] = []
+    ref_ids: set[str] = set()
+
+    while unsorted:
+        # Find all stages whose requisites are satisfied
+        layer = [stage for stage in unsorted if ref_ids.issuperset(stage.requisite_stage_ref_ids)]
+
+        if not layer:
+            # This shouldn't happen if topological_sort passes
+            break
+
+        layers.append(layer)
+
+        for stage in layer:
+            unsorted.remove(stage)
+            ref_ids.add(stage.ref_id)
+
+    return layers
