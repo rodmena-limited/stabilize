@@ -1,10 +1,19 @@
+"""
+Base message handler classes.
+
+This module provides the base classes for all message handlers in the
+pipeline execution engine.
+"""
+
 from __future__ import annotations
+
 import logging
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import timedelta
 from typing import TYPE_CHECKING, Generic, TypeVar
+
 from stabilize.models.stage import StageExecution
 from stabilize.models.task import TaskExecution
 from stabilize.models.workflow import Workflow
@@ -20,8 +29,15 @@ from stabilize.queue.messages import (
     TaskLevel,
     WorkflowLevel,
 )
+
+if TYPE_CHECKING:
+    from stabilize.persistence.store import WorkflowStore
+    from stabilize.queue.queue import Queue
+
 logger = logging.getLogger(__name__)
+
 M = TypeVar("M", bound=Message)
+
 
 class MessageHandler(ABC, Generic[M]):
     """
@@ -30,13 +46,17 @@ class MessageHandler(ABC, Generic[M]):
     Each handler processes a specific type of message.
     """
 
+    @property
+    @abstractmethod
     def message_type(self) -> type[M]:
         """Return the type of message this handler processes."""
         pass
 
+    @abstractmethod
     def handle(self, message: M) -> None:
         """Handle a message."""
         pass
+
 
 class StabilizeHandler(MessageHandler[M], ABC):
     """
@@ -45,6 +65,7 @@ class StabilizeHandler(MessageHandler[M], ABC):
     Provides helper methods for retrieving executions, stages, and tasks,
     as well as the startNext() implementation.
     """
+
     def __init__(
         self,
         queue: Queue,
@@ -54,6 +75,8 @@ class StabilizeHandler(MessageHandler[M], ABC):
         self.queue = queue
         self.repository = repository
         self.retry_delay = retry_delay
+
+    # ========== Execution Retrieval ==========
 
     def with_execution(
         self,
@@ -105,6 +128,7 @@ class StabilizeHandler(MessageHandler[M], ABC):
             )
         except Exception as e:
             logger.error("Failed to retrieve stage %s: %s", message.stage_id, e)
+            # Should we retry or fail? For now, log error.
 
     def with_task(
         self,
@@ -146,6 +170,8 @@ class StabilizeHandler(MessageHandler[M], ABC):
             if task.id == task_id:
                 return task
         return None
+
+    # ========== Stage Navigation ==========
 
     def start_next(self, stage: StageExecution) -> None:
         """
@@ -192,3 +218,9 @@ class StabilizeHandler(MessageHandler[M], ABC):
                     execution_id=execution.id,
                 )
             )
+
+    # ========== Utility Methods ==========
+
+    def current_time_millis(self) -> int:
+        """Get current time in milliseconds."""
+        return int(time.time() * 1000)
