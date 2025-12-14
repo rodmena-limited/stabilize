@@ -1,22 +1,19 @@
+"""
+Stage graph builder for constructing synthetic stages.
+
+This module provides the StageGraphBuilder class for building graphs of
+synthetic stages (before/after stages) that are dynamically injected
+by StageDefinitionBuilders.
+"""
+
 from __future__ import annotations
+
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-def connect_stages_linearly(stages: list[StageExecution]) -> None:
-    """
-    Connect a list of stages in linear sequence.
+if TYPE_CHECKING:
+    from stabilize.models.stage import StageExecution, SyntheticStageOwner
 
-    Each stage will depend on the previous one.
-
-    Args:
-        stages: List of stages to connect
-    """
-    for i in range(1, len(stages)):
-        previous = stages[i - 1]
-        current = stages[i]
-        requisites = set(current.requisite_stage_ref_ids)
-        requisites.add(previous.ref_id)
-        current.requisite_stage_ref_ids = requisites
 
 class StageGraphBuilder:
     """
@@ -47,6 +44,7 @@ class StageGraphBuilder:
             graph.add(validation)
             graph.connect(setup, validation)
     """
+
     def __init__(
         self,
         parent: StageExecution,
@@ -68,6 +66,7 @@ class StageGraphBuilder:
         self._stages: list[StageExecution] = []
         self._last_stage: StageExecution | None = None
 
+    @classmethod
     def before_stages(cls, parent: StageExecution) -> StageGraphBuilder:
         """
         Create a builder for before stages.
@@ -78,6 +77,7 @@ class StageGraphBuilder:
 
         return cls(parent, SyntheticStageOwner.STAGE_BEFORE)
 
+    @classmethod
     def after_stages(
         cls,
         parent: StageExecution,
@@ -166,10 +166,12 @@ class StageGraphBuilder:
         """
         return list(self._stages)
 
+    @property
     def stages(self) -> list[StageExecution]:
         """Get the current list of stages."""
         return list(self._stages)
 
+    @property
     def last_stage(self) -> StageExecution | None:
         """Get the last added stage."""
         return self._last_stage
@@ -177,3 +179,37 @@ class StageGraphBuilder:
     def is_empty(self) -> bool:
         """Check if no stages have been added."""
         return len(self._stages) == 0
+
+
+def connect_stages_linearly(stages: list[StageExecution]) -> None:
+    """
+    Connect a list of stages in linear sequence.
+
+    Each stage will depend on the previous one.
+
+    Args:
+        stages: List of stages to connect
+    """
+    for i in range(1, len(stages)):
+        previous = stages[i - 1]
+        current = stages[i]
+        requisites = set(current.requisite_stage_ref_ids)
+        requisites.add(previous.ref_id)
+        current.requisite_stage_ref_ids = requisites
+
+
+def add_stages_to_execution(
+    stages: list[StageExecution],
+    add_stage: Callable[[StageExecution], None],
+) -> None:
+    """
+    Add multiple stages to an execution.
+
+    Calls the provided add_stage function for each stage.
+
+    Args:
+        stages: List of stages to add
+        add_stage: Function to call to add each stage
+    """
+    for stage in stages:
+        add_stage(stage)
