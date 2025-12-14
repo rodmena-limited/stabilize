@@ -108,6 +108,27 @@ def find_initial_stages(stages: list[StageExecution]) -> list[StageExecution]:
     """
     return [stage for stage in stages if stage.is_initial() and not stage.is_synthetic()]
 
+def find_terminal_stages(stages: list[StageExecution]) -> list[StageExecution]:
+    """
+    Find all terminal stages (those with no downstream stages and not synthetic).
+
+    Terminal stages are the last stages in the pipeline - no other stages
+    depend on them.
+
+    Args:
+        stages: List of stages to search
+
+    Returns:
+        List of terminal stages
+    """
+    # Get all ref_ids that are dependencies
+    all_requisites: set[str] = set()
+    for stage in stages:
+        all_requisites.update(stage.requisite_stage_ref_ids)
+
+    # Terminal stages are those whose ref_id is not in any requisite set
+    return [stage for stage in stages if not stage.is_synthetic() and stage.ref_id not in all_requisites]
+
 class CircularDependencyError(Exception):
     """
     Raised when a circular dependency is detected in the stage graph.
