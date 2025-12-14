@@ -1,6 +1,18 @@
+"""
+CompleteStageHandler - handles stage completion.
+
+This is a critical handler that:
+1. Determines stage status from tasks and synthetic stages
+2. Plans and starts after stages
+3. Plans and starts on-failure stages
+4. Triggers downstream stages via startNext()
+"""
+
 from __future__ import annotations
+
 import logging
 from typing import TYPE_CHECKING
+
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
@@ -9,7 +21,12 @@ from stabilize.queue.messages import (
     CompleteWorkflow,
     StartStage,
 )
+
+if TYPE_CHECKING:
+    from stabilize.models.stage import StageExecution
+
 logger = logging.getLogger(__name__)
+
 
 class CompleteStageHandler(StabilizeHandler[CompleteStage]):
     """
@@ -25,6 +42,7 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
     7. Otherwise: CancelStage + CompleteWorkflow
     """
 
+    @property
     def message_type(self) -> type[CompleteStage]:
         return CompleteStage
 
@@ -177,3 +195,15 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
         """
         # For now, do nothing - after stages should be pre-defined
         pass
+
+    def _plan_on_failure_stages(self, stage: StageExecution) -> bool:
+        """
+        Plan on-failure stages using the stage definition builder.
+
+        TODO: Implement StageDefinitionBuilder integration
+
+        Returns:
+            True if on-failure stages were added
+        """
+        # For now, return False - no on-failure stages
+        return False
