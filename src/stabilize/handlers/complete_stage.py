@@ -168,3 +168,12 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                 )
 
         self.with_stage(message, on_stage)
+
+    def _plan_after_stages(self, stage: StageExecution) -> None:
+        """
+        Plan after stages using the stage definition builder.
+
+        TODO: Implement StageDefinitionBuilder integration
+        """
+        # For now, do nothing - after stages should be pre-defined
+        pass
