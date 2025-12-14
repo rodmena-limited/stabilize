@@ -105,3 +105,33 @@ class StabilizeHandler(MessageHandler[M], ABC):
             )
         except Exception as e:
             logger.error("Failed to retrieve stage %s: %s", message.stage_id, e)
+
+    def with_task(
+        self,
+        message: TaskLevel,
+        block: Callable[[StageExecution, TaskExecution], None],
+    ) -> None:
+        """
+        Execute a block with the stage and task for a message.
+
+        Args:
+            message: Message containing task ID
+            block: Function to call with (stage, task)
+        """
+
+        def on_stage(stage: StageExecution) -> None:
+            task = self._find_task(stage, message.task_id)
+            if task is None:
+                logger.error("Task not found: %s", message.task_id)
+                self.queue.push(
+                    InvalidTaskId(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                        task_id=message.task_id,
+                    )
+                )
+            else:
+                block(stage, task)
+
+        self.with_stage(message, on_stage)
