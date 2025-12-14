@@ -78,6 +78,24 @@ def topological_sort_all_stages(stages: list[StageExecution]) -> list[StageExecu
     """
     return topological_sort(stages, stage_filter=lambda s: True)
 
+def validate_dag(stages: list[StageExecution]) -> bool:
+    """
+    Validate that stages form a valid DAG.
+
+    Returns True if valid, raises CircularDependencyError if invalid.
+
+    Args:
+        stages: List of stages to validate
+
+    Returns:
+        True if DAG is valid
+
+    Raises:
+        CircularDependencyError: If stages have circular dependencies
+    """
+    topological_sort(stages)
+    return True
+
 class CircularDependencyError(Exception):
     """
     Raised when a circular dependency is detected in the stage graph.
