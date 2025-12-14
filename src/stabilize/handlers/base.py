@@ -135,3 +135,14 @@ class StabilizeHandler(MessageHandler[M], ABC):
                 block(stage, task)
 
         self.with_stage(message, on_stage)
+
+    def _find_task(
+        self,
+        stage: StageExecution,
+        task_id: str,
+    ) -> TaskExecution | None:
+        """Find a task by ID in a stage."""
+        for task in stage.tasks:
+            if task.id == task_id:
+                return task
+        return None
