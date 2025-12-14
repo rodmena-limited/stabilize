@@ -78,3 +78,30 @@ class StabilizeHandler(MessageHandler[M], ABC):
                     execution_id=message.execution_id,
                 )
             )
+
+    def with_stage(
+        self,
+        message: StageLevel,
+        block: Callable[[StageExecution], None],
+    ) -> None:
+        """
+        Execute a block with the stage for a message.
+
+        Args:
+            message: Message containing stage ID
+            block: Function to call with the stage
+        """
+        try:
+            stage = self.repository.retrieve_stage(message.stage_id)
+            block(stage)
+        except ValueError:
+            logger.error("Stage not found: %s", message.stage_id)
+            self.queue.push(
+                InvalidStageId(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
+                )
+            )
+        except Exception as e:
+            logger.error("Failed to retrieve stage %s: %s", message.stage_id, e)
