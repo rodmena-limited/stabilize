@@ -146,3 +146,49 @@ class StabilizeHandler(MessageHandler[M], ABC):
             if task.id == task_id:
                 return task
         return None
+
+    def start_next(self, stage: StageExecution) -> None:
+        """
+        Start the next stage(s) after a stage completes.
+
+        This is the critical method for DAG traversal:
+        1. Find downstream stages (those that depend on this stage)
+        2. Push StartStage for each downstream stage
+        3. If this is a synthetic stage, notify parent
+        4. If no downstream and not synthetic, complete execution
+        """
+        execution = stage.execution
+        downstream_stages = self.repository.get_downstream_stages(execution.id, stage.ref_id)
+        phase = stage.synthetic_stage_owner
+
+        if downstream_stages:
+            # Start all downstream stages
+            for downstream in downstream_stages:
+                self.queue.push(
+                    StartStage(
+                        execution_type=execution.type.value,
+                        execution_id=execution.id,
+                        stage_id=downstream.id,
+                    )
+                )
+        elif phase is not None:
+            # Synthetic stage - notify parent
+            parent_id = stage.parent_stage_id
+            if parent_id:
+                self.queue.ensure(
+                    ContinueParentStage(
+                        execution_type=execution.type.value,
+                        execution_id=execution.id,
+                        stage_id=parent_id,
+                        phase=phase,
+                    ),
+                    timedelta(seconds=0),
+                )
+        else:
+            # Top-level stage with no downstream - complete execution
+            self.queue.push(
+                CompleteWorkflow(
+                    execution_type=execution.type.value,
+                    execution_id=execution.id,
+                )
+            )
