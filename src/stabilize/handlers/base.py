@@ -21,3 +21,4 @@ from stabilize.queue.messages import (
     WorkflowLevel,
 )
 logger = logging.getLogger(__name__)
+M = TypeVar("M", bound=Message)
