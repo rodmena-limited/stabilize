@@ -96,6 +96,18 @@ def validate_dag(stages: list[StageExecution]) -> bool:
     topological_sort(stages)
     return True
 
+def find_initial_stages(stages: list[StageExecution]) -> list[StageExecution]:
+    """
+    Find all initial stages (those with no dependencies and not synthetic).
+
+    Args:
+        stages: List of stages to search
+
+    Returns:
+        List of initial stages
+    """
+    return [stage for stage in stages if stage.is_initial() and not stage.is_synthetic()]
+
 class CircularDependencyError(Exception):
     """
     Raised when a circular dependency is detected in the stage graph.
