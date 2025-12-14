@@ -37,3 +37,20 @@ class MessageHandler(ABC, Generic[M]):
     def handle(self, message: M) -> None:
         """Handle a message."""
         pass
+
+class StabilizeHandler(MessageHandler[M], ABC):
+    """
+    Base handler with common utilities.
+
+    Provides helper methods for retrieving executions, stages, and tasks,
+    as well as the startNext() implementation.
+    """
+    def __init__(
+        self,
+        queue: Queue,
+        repository: WorkflowStore,
+        retry_delay: timedelta = timedelta(seconds=15),
+    ) -> None:
+        self.queue = queue
+        self.repository = repository
+        self.retry_delay = retry_delay
