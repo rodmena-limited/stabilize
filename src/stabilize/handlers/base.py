@@ -54,3 +54,27 @@ class StabilizeHandler(MessageHandler[M], ABC):
         self.queue = queue
         self.repository = repository
         self.retry_delay = retry_delay
+
+    def with_execution(
+        self,
+        message: WorkflowLevel,
+        block: Callable[[Workflow], None],
+    ) -> None:
+        """
+        Execute a block with the execution for a message.
+
+        Args:
+            message: Message containing execution ID
+            block: Function to call with the execution
+        """
+        try:
+            execution = self.repository.retrieve(message.execution_id)
+            block(execution)
+        except Exception as e:
+            logger.error("Failed to retrieve execution %s: %s", message.execution_id, e)
+            self.queue.push(
+                InvalidWorkflowId(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                )
+            )
