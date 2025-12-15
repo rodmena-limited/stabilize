@@ -194,3 +194,79 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         if stage.tasks:
             stage.tasks[0].stage_start = True
             stage.tasks[-1].stage_end = True
+
+    def _start_stage(
+        self,
+        stage: StageExecution,
+        message: StartStage,
+    ) -> None:
+        """
+        Start stage execution.
+
+        Order of execution:
+        1. Before stages (if any)
+        2. Tasks (if any)
+        3. After stages (if any)
+        4. Complete stage
+        """
+        from stabilize.models.stage import SyntheticStageOwner
+
+        # Fetch synthetic stages
+        synthetic_stages = self.repository.get_synthetic_stages(stage.execution.id, stage.id)
+
+        # Check for before stages
+        # We need initial before stages (those with no dependencies)
+        before_stages = [
+            s
+            for s in synthetic_stages
+            if s.synthetic_stage_owner == SyntheticStageOwner.STAGE_BEFORE and s.is_initial()
+        ]
+
+        if before_stages:
+            for before in before_stages:
+                self.queue.push(
+                    StartStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=before.id,
+                    )
+                )
+            return
+
+        # No before stages - start first task
+        first_task = stage.first_task()
+        if first_task:
+            self.queue.push(
+                StartTask(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
+                    task_id=first_task.id,
+                )
+            )
+            return
+
+        # No tasks - check for after stages
+        after_stages = [
+            s for s in synthetic_stages if s.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER and s.is_initial()
+        ]
+
+        if after_stages:
+            for after in after_stages:
+                self.queue.push(
+                    StartStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=after.id,
+                    )
+                )
+            return
+
+        # No tasks or synthetic stages - complete immediately
+        self.queue.push(
+            CompleteStage(
+                execution_type=message.execution_type,
+                execution_id=message.execution_id,
+                stage_id=message.stage_id,
+            )
+        )
