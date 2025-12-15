@@ -270,3 +270,24 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                 stage_id=message.stage_id,
             )
         )
+
+    def _should_skip(self, stage: StageExecution) -> bool:
+        """
+        Check if stage should be skipped.
+
+        Checks the 'stageEnabled' context for conditional execution.
+        """
+        stage_enabled = stage.context.get("stageEnabled")
+        if stage_enabled is None:
+            return False
+
+        if isinstance(stage_enabled, dict):
+            expr_type = stage_enabled.get("type")
+            if expr_type == "expression":
+                # TODO: Evaluate expression
+                expression = stage_enabled.get("expression", "true")
+                # For now, just check if it's explicitly "false"
+                if isinstance(expression, str):
+                    return expression.lower() == "false"
+
+        return False
