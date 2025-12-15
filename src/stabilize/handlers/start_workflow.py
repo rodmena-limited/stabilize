@@ -105,3 +105,10 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
             execution.id,
             len(initial_stages),
         )
+
+    def _terminate(self, execution: Workflow) -> None:
+        """Terminate a canceled execution."""
+        # Publish ExecutionComplete event
+        if execution.pipeline_config_id:
+            # Queue start waiting executions
+            pass
