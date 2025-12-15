@@ -63,3 +63,48 @@ class WorkflowLauncher:
         logger.info(f"Launched execution {execution.id} for pipeline {execution.name}")
 
         return execution
+
+    def parse_execution(
+        self,
+        config: dict[str, Any],
+        trigger_config: dict[str, Any] | None = None,
+    ) -> Workflow:
+        """
+        Parse a pipeline configuration into an execution.
+
+        Args:
+            config: Pipeline configuration
+            trigger_config: Optional trigger configuration
+
+        Returns:
+            A Workflow ready to run
+        """
+        # Parse trigger
+        trigger = Trigger()
+        if trigger_config:
+            trigger = Trigger(
+                type=trigger_config.get("type", "manual"),
+                user=trigger_config.get("user", "anonymous"),
+                parameters=trigger_config.get("parameters", {}),
+                artifacts=trigger_config.get("artifacts", []),
+                payload=trigger_config.get("payload", {}),
+            )
+
+        # Parse stages
+        stages = self._parse_stages(config.get("stages", []))
+
+        # Create execution
+        execution = Workflow.create(
+            application=config.get("application", "unknown"),
+            name=config.get("name", "Unnamed Pipeline"),
+            stages=stages,
+            trigger=trigger,
+            pipeline_config_id=config.get("id"),
+        )
+
+        # Set additional properties
+        execution.is_limit_concurrent = config.get("limitConcurrent", False)
+        execution.max_concurrent_executions = config.get("maxConcurrentExecutions", 0)
+        execution.keep_waiting_pipelines = config.get("keepWaitingPipelines", False)
+
+        return execution
