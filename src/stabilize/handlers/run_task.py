@@ -123,3 +123,18 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 self._handle_exception(stage, task_model, task, message, e)
 
         self.with_task(message, on_task)
+
+    def _resolve_task(
+        self,
+        task_type: str,
+        task_model: TaskExecution,
+    ) -> Task:
+        """Resolve the task implementation."""
+        # Try by class name first
+        try:
+            return self.task_registry.get_by_class(task_model.implementing_class)
+        except TaskNotFoundError:
+            pass
+
+        # Try by type name
+        return self.task_registry.get(task_type)
