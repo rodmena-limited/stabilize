@@ -263,3 +263,27 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
 
         # Default backoff
         return timedelta(seconds=1)
+
+    def _handle_cancellation(
+        self,
+        stage: StageExecution,
+        task_model: TaskExecution,
+        task: Task,
+        message: RunTask,
+    ) -> None:
+        """Handle execution cancellation."""
+        result = task.on_cancel(stage) if hasattr(task, "on_cancel") else None
+        if result:
+            stage.context.update(result.context)
+            stage.outputs.update(result.outputs)
+            self.repository.store_stage(stage)
+
+        self.queue.push(
+            CompleteTask(
+                execution_type=message.execution_type,
+                execution_id=message.execution_id,
+                stage_id=message.stage_id,
+                task_id=message.task_id,
+                status=WorkflowStatus.CANCELED,
+            )
+        )
