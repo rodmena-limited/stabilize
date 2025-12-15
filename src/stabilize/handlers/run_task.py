@@ -165,3 +165,82 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
 
         if actual_elapsed > timeout:
             raise TimeoutError(f"Task timed out after {actual_elapsed} (timeout: {timeout})")
+
+    def _process_result(
+        self,
+        stage: StageExecution,
+        task_model: TaskExecution,
+        result: TaskResult,
+        message: RunTask,
+    ) -> None:
+        """Process a task result."""
+        # Store outputs in stage
+        if result.context:
+            stage.context.update(result.context)
+        if result.outputs:
+            stage.outputs.update(result.outputs)
+
+        # Handle based on status
+        if result.status == WorkflowStatus.RUNNING:
+            # Task needs to be re-executed
+            self.repository.store_stage(stage)
+
+            # Calculate backoff
+            delay = self._get_backoff_period(stage, task_model, message)
+            self.queue.push(message, delay)
+
+            logger.debug(
+                "Task %s still running, re-queuing with %s delay",
+                task_model.name,
+                delay,
+            )
+
+        elif result.status in {
+            WorkflowStatus.SUCCEEDED,
+            WorkflowStatus.REDIRECT,
+            WorkflowStatus.SKIPPED,
+            WorkflowStatus.FAILED_CONTINUE,
+            WorkflowStatus.STOPPED,
+        }:
+            self.repository.store_stage(stage)
+            self.queue.push(
+                CompleteTask(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
+                    task_id=message.task_id,
+                    status=result.status,
+                )
+            )
+
+        elif result.status == WorkflowStatus.CANCELED:
+            self.repository.store_stage(stage)
+            status = stage.failure_status(default=result.status)
+            self.queue.push(
+                CompleteTask(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
+                    task_id=message.task_id,
+                    status=status,
+                    original_status=result.status,
+                )
+            )
+
+        elif result.status == WorkflowStatus.TERMINAL:
+            self.repository.store_stage(stage)
+            status = stage.failure_status(default=result.status)
+            self.queue.push(
+                CompleteTask(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
+                    task_id=message.task_id,
+                    status=status,
+                    original_status=result.status,
+                )
+            )
+
+        else:
+            logger.warning("Unhandled task status: %s", result.status)
+            self.repository.store_stage(stage)
