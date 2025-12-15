@@ -244,3 +244,22 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         else:
             logger.warning("Unhandled task status: %s", result.status)
             self.repository.store_stage(stage)
+
+    def _get_backoff_period(
+        self,
+        stage: StageExecution,
+        task_model: TaskExecution,
+        message: RunTask,
+    ) -> timedelta:
+        """Calculate backoff period for retry."""
+        # Try to get the task and use its backoff
+        try:
+            task = self._resolve_task(message.task_type, task_model)
+            if isinstance(task, RetryableTask):
+                elapsed = timedelta(milliseconds=self.current_time_millis() - (task_model.start_time or 0))
+                return task.get_dynamic_backoff_period(stage, elapsed)
+        except TaskNotFoundError:
+            pass
+
+        # Default backoff
+        return timedelta(seconds=1)
