@@ -20,3 +20,6 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
     3. Push StartStage for each initial stage
     4. Mark execution as RUNNING
     """
+
+    def message_type(self) -> type[StartWorkflow]:
+        return StartWorkflow
