@@ -1,6 +1,15 @@
+"""
+CompleteWorkflowHandler - handles execution completion.
+
+This handler determines the final execution status based on all
+top-level stages and marks the execution as complete.
+"""
+
 from __future__ import annotations
+
 import logging
 from typing import TYPE_CHECKING
+
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import CONTINUABLE_STATUSES, WorkflowStatus
 from stabilize.queue.messages import (
@@ -8,7 +17,13 @@ from stabilize.queue.messages import (
     CompleteWorkflow,
     StartWaitingWorkflows,
 )
+
+if TYPE_CHECKING:
+    from stabilize.models.stage import StageExecution
+    from stabilize.models.workflow import Workflow
+
 logger = logging.getLogger(__name__)
+
 
 class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
     """
@@ -22,6 +37,7 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
     5. Start waiting executions if queue is enabled
     """
 
+    @property
     def message_type(self) -> type[CompleteWorkflow]:
         return CompleteWorkflow
 
@@ -123,4 +139,12 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
                 return True
             if stage.status == WorkflowStatus.NOT_STARTED and stage.all_upstream_stages_complete():
                 return True
+        return False
+
+    def _should_override_success(self, execution: Workflow) -> bool:
+        """Check if success should be overridden to failure."""
+        for stage in execution.stages:
+            if stage.status == WorkflowStatus.STOPPED:
+                if stage.context.get("completeOtherBranchesThenFail"):
+                    return True
         return False
