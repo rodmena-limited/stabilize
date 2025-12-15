@@ -21,3 +21,6 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
     4. Cancel any running stages if failed
     5. Start waiting executions if queue is enabled
     """
+
+    def message_type(self) -> type[CompleteWorkflow]:
+        return CompleteWorkflow
