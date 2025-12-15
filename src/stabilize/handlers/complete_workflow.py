@@ -73,3 +73,45 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
                 )
 
         self.with_execution(message, on_execution)
+
+    def _determine_final_status(
+        self,
+        execution: Workflow,
+        message: CompleteWorkflow,
+    ) -> WorkflowStatus | None:
+        """
+        Determine the final execution status.
+
+        Returns None if execution is not ready to complete.
+        """
+        stages = execution.top_level_stages()
+        statuses = [s.status for s in stages]
+
+        # All succeeded/skipped/failed_continue -> SUCCEEDED
+        if all(s in CONTINUABLE_STATUSES for s in statuses):
+            return WorkflowStatus.SUCCEEDED
+
+        # Any TERMINAL -> TERMINAL
+        if WorkflowStatus.TERMINAL in statuses:
+            return WorkflowStatus.TERMINAL
+
+        # Any CANCELED -> CANCELED
+        if WorkflowStatus.CANCELED in statuses:
+            return WorkflowStatus.CANCELED
+
+        # Any STOPPED and no other branches incomplete
+        if WorkflowStatus.STOPPED in statuses:
+            if not self._other_branches_incomplete(stages):
+                # Check for override
+                if self._should_override_success(execution):
+                    return WorkflowStatus.TERMINAL
+                return WorkflowStatus.SUCCEEDED
+
+        # Still running - re-queue
+        logger.debug(
+            "Re-queuing CompleteWorkflow for %s - stages not complete. Statuses: %s",
+            execution.id,
+            statuses,
+        )
+        self.queue.push(message, self.retry_delay)
+        return None
