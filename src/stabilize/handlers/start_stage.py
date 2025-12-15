@@ -114,3 +114,52 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                 )
 
         self.with_stage(message, on_stage)
+
+    def _start_if_ready(
+        self,
+        stage: StageExecution,
+        message: StartStage,
+    ) -> None:
+        """Start the stage if it's ready to run."""
+        # Check if already processed
+        if stage.status != WorkflowStatus.NOT_STARTED:
+            logger.warning(
+                "Ignoring StartStage for %s - already %s",
+                stage.name,
+                stage.status,
+            )
+            return
+
+        # Check if should skip
+        if self._should_skip(stage):
+            logger.info("Skipping optional stage %s", stage.name)
+            self.queue.push(
+                SkipStage(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
+                )
+            )
+            return
+
+        # Check if start time expired
+        if self._is_after_start_time_expiry(stage):
+            logger.warning("Stage %s start time expired, skipping", stage.name)
+            self.queue.push(
+                SkipStage(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
+                )
+            )
+            return
+
+        # Plan and start the stage
+        stage.start_time = self.current_time_millis()
+        self._plan_stage(stage)
+        stage.status = WorkflowStatus.RUNNING
+        self.repository.store_stage(stage)
+
+        self._start_stage(stage, message)
+
+        logger.info("Started stage %s (%s)", stage.name, stage.id)
