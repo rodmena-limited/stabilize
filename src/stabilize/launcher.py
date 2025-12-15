@@ -35,3 +35,31 @@ class WorkflowLauncher:
         self.runner = runner
         self.stage_builder_factory = stage_builder_factory or StageDefinitionBuilderFactory()
         self.task_registry = task_registry
+
+    def start(
+        self,
+        pipeline_config: dict[str, Any],
+        trigger: dict[str, Any] | None = None,
+    ) -> Workflow:
+        """
+        Start a pipeline execution from configuration.
+
+        Args:
+            pipeline_config: Pipeline configuration dictionary
+            trigger: Optional trigger information
+
+        Returns:
+            The created execution
+        """
+        # Parse the execution
+        execution = self.parse_execution(pipeline_config, trigger)
+
+        # Store it
+        self.repository.store(execution)
+
+        # Start it
+        self.runner.start(execution)
+
+        logger.info(f"Launched execution {execution.id} for pipeline {execution.name}")
+
+        return execution
