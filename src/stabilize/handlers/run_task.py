@@ -13,3 +13,6 @@ from stabilize.tasks.interface import RetryableTask, Task
 from stabilize.tasks.registry import TaskNotFoundError, TaskRegistry
 from stabilize.tasks.result import TaskResult
 logger = logging.getLogger(__name__)
+
+class TimeoutError(Exception):
+    """Raised when a task times out."""
