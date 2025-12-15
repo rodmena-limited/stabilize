@@ -287,3 +287,38 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 status=WorkflowStatus.CANCELED,
             )
         )
+
+    def _handle_exception(
+        self,
+        stage: StageExecution,
+        task_model: TaskExecution,
+        task: Task,
+        message: RunTask,
+        exception: Exception,
+    ) -> None:
+        """Handle task execution exception."""
+        # TODO: Check if exception is retryable
+        # For now, treat all exceptions as terminal
+
+        exception_details = {
+            "details": {
+                "error": str(exception),
+                "errors": [str(exception)],
+            }
+        }
+
+        stage.context["exception"] = exception_details
+        task_model.task_exception_details["exception"] = exception_details
+        self.repository.store_stage(stage)
+
+        status = stage.failure_status(default=WorkflowStatus.TERMINAL)
+        self.queue.push(
+            CompleteTask(
+                execution_type=message.execution_type,
+                execution_id=message.execution_id,
+                stage_id=message.stage_id,
+                task_id=message.task_id,
+                status=status,
+                original_status=WorkflowStatus.TERMINAL,
+            )
+        )
