@@ -40,3 +40,86 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
 
     def message_type(self) -> type[RunTask]:
         return RunTask
+
+    def handle(self, message: RunTask) -> None:
+        """Handle the RunTask message."""
+
+        def on_task(stage: StageExecution, task_model: TaskExecution) -> None:
+            execution = stage.execution
+
+            # Resolve task implementation
+            try:
+                task = self._resolve_task(message.task_type, task_model)
+            except TaskNotFoundError as e:
+                logger.error("Task type not found: %s", message.task_type)
+                self._complete_with_error(stage, task_model, message, str(e))
+                return
+
+            # Check execution state
+            if execution.is_canceled:
+                self._handle_cancellation(stage, task_model, task, message)
+                return
+
+            if execution.status.is_complete:
+                self.queue.push(
+                    CompleteTask(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                        task_id=message.task_id,
+                        status=WorkflowStatus.CANCELED,
+                    )
+                )
+                return
+
+            if execution.status == WorkflowStatus.PAUSED:
+                self.queue.push(
+                    PauseTask(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                        task_id=message.task_id,
+                    )
+                )
+                return
+
+            # Check for manual skip
+            if stage.context.get("manualSkip"):
+                self.queue.push(
+                    CompleteTask(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                        task_id=message.task_id,
+                        status=WorkflowStatus.SKIPPED,
+                    )
+                )
+                return
+
+            # Check for timeout
+            try:
+                self._check_for_timeout(stage, task_model, task)
+            except TimeoutError as e:
+                logger.info("Task %s timed out: %s", task_model.name, e)
+                result = task.on_timeout(stage) if hasattr(task, "on_timeout") else None
+                if result is None:
+                    self._complete_with_error(stage, task_model, message, str(e))
+                    return
+                else:
+                    self._process_result(stage, task_model, result, message)
+                    return
+
+            # Execute the task
+            try:
+                result = task.execute(stage)
+                self._process_result(stage, task_model, result, message)
+            except Exception as e:
+                logger.error(
+                    "Error executing task %s: %s",
+                    task_model.name,
+                    e,
+                    exc_info=True,
+                )
+                self._handle_exception(stage, task_model, task, message, e)
+
+        self.with_task(message, on_task)
