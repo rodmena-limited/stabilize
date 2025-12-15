@@ -163,3 +163,34 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         self._start_stage(stage, message)
 
         logger.info("Started stage %s (%s)", stage.name, stage.id)
+
+    def _plan_stage(self, stage: StageExecution) -> None:
+        """
+        Plan the stage - build tasks and before stages.
+
+        This is where StageDefinitionBuilder.buildTasks() and
+        buildBeforeStages() would be called.
+
+        For now, we assume tasks are already defined on the stage.
+        """
+        # Hydrate context with ancestor outputs
+        # This ensures tasks have access to upstream data even with partial loading
+        ancestor_outputs = self.repository.get_merged_ancestor_outputs(stage.execution.id, stage.ref_id)
+
+        merged = ancestor_outputs
+        for key, value in stage.context.items():
+            if key in merged and isinstance(merged[key], list) and isinstance(value, list):
+                # Concatenate lists, avoiding duplicates
+                existing = merged[key]
+                for item in value:
+                    if item not in existing:
+                        existing.append(item)
+            else:
+                merged[key] = value
+
+        stage.context = merged
+
+        # Mark first and last tasks
+        if stage.tasks:
+            stage.tasks[0].stage_start = True
+            stage.tasks[-1].stage_end = True
