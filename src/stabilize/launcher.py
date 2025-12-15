@@ -108,3 +108,24 @@ class WorkflowLauncher:
         execution.keep_waiting_pipelines = config.get("keepWaitingPipelines", False)
 
         return execution
+
+    def _parse_stages(
+        self,
+        stage_configs: list[dict[str, Any]],
+    ) -> list[StageExecution]:
+        """
+        Parse stage configurations into StageExecution objects.
+
+        Args:
+            stage_configs: List of stage configuration dictionaries
+
+        Returns:
+            List of StageExecution objects
+        """
+        stages = []
+
+        for config in stage_configs:
+            stage = self._parse_stage(config)
+            stages.append(stage)
+
+        return stages
