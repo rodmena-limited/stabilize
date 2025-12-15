@@ -9,6 +9,41 @@ from stabilize.models.workflow import (
 from stabilize.stages.builder import StageDefinitionBuilderFactory
 logger = logging.getLogger(__name__)
 
+def create_simple_pipeline(
+    name: str,
+    application: str,
+    stages: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """
+    Create a simple pipeline configuration.
+
+    Helper function for building pipeline configs programmatically.
+
+    Args:
+        name: Pipeline name
+        application: Application name
+        stages: List of stage configurations
+
+    Returns:
+        A pipeline configuration dictionary
+
+    Example:
+        config = create_simple_pipeline(
+            name="Deploy to Prod",
+            application="myapp",
+            stages=[
+                {"refId": "1", "type": "wait", "name": "Wait", "waitTime": 30},
+                {"refId": "2", "type": "deploy", "name": "Deploy",
+                 "requisiteStageRefIds": ["1"]},
+            ],
+        )
+    """
+    return {
+        "name": name,
+        "application": application,
+        "stages": stages,
+    }
+
 class WorkflowLauncher:
     """
     Launcher for pipeline executions.
