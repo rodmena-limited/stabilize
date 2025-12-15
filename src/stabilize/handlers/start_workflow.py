@@ -1,6 +1,16 @@
+"""
+StartWorkflowHandler - handles pipeline execution startup.
+
+This handler is triggered when a new pipeline execution is started.
+It finds initial stages (those with no dependencies) and queues them
+for execution.
+"""
+
 from __future__ import annotations
+
 import logging
 from typing import TYPE_CHECKING
+
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
@@ -8,7 +18,12 @@ from stabilize.queue.messages import (
     StartStage,
     StartWorkflow,
 )
+
+if TYPE_CHECKING:
+    from stabilize.models.workflow import Workflow
+
 logger = logging.getLogger(__name__)
+
 
 class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
     """
@@ -21,6 +36,7 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
     4. Mark execution as RUNNING
     """
 
+    @property
     def message_type(self) -> type[StartWorkflow]:
         return StartWorkflow
 
@@ -112,3 +128,9 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
         if execution.pipeline_config_id:
             # Queue start waiting executions
             pass
+
+    def _is_after_start_time_expiry(self, execution: Workflow) -> bool:
+        """Check if current time is past start time expiry."""
+        if execution.start_time_expiry is None:
+            return False
+        return self.current_time_millis() > execution.start_time_expiry
