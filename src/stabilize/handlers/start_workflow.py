@@ -63,3 +63,45 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
             self._start(execution, message)
 
         self.with_execution(message, on_execution)
+
+    def _start(
+        self,
+        execution: Workflow,
+        message: StartWorkflow,
+    ) -> None:
+        """Start the execution."""
+        initial_stages = execution.initial_stages()
+
+        if not initial_stages:
+            logger.warning("No initial stages found for execution %s", execution.id)
+            execution.status = WorkflowStatus.TERMINAL
+            self.repository.update_status(execution)
+            # Publish ExecutionComplete event
+            return
+
+        # Mark as running
+        execution.status = WorkflowStatus.RUNNING
+        execution.start_time = self.current_time_millis()
+        self.repository.update_status(execution)
+
+        # Queue all initial stages
+        for stage in initial_stages:
+            logger.debug(
+                "Queuing initial stage %s (%s) for execution %s",
+                stage.name,
+                stage.id,
+                execution.id,
+            )
+            self.queue.push(
+                StartStage(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=stage.id,
+                )
+            )
+
+        logger.info(
+            "Started execution %s with %d initial stage(s)",
+            execution.id,
+            len(initial_stages),
+        )
