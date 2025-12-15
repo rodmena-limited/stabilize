@@ -115,3 +115,12 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
         )
         self.queue.push(message, self.retry_delay)
         return None
+
+    def _other_branches_incomplete(self, stages: list[StageExecution]) -> bool:
+        """Check if any other branches are incomplete."""
+        for stage in stages:
+            if stage.status == WorkflowStatus.RUNNING:
+                return True
+            if stage.status == WorkflowStatus.NOT_STARTED and stage.all_upstream_stages_complete():
+                return True
+        return False
