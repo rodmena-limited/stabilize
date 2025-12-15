@@ -37,3 +37,6 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
     ) -> None:
         super().__init__(queue, repository, retry_delay)
         self.task_registry = task_registry
+
+    def message_type(self) -> type[RunTask]:
+        return RunTask
