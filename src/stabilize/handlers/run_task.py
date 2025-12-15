@@ -1,7 +1,16 @@
+"""
+RunTaskHandler - executes tasks.
+
+This is the handler that actually runs task implementations.
+It handles execution, retries, timeouts, and result processing.
+"""
+
 from __future__ import annotations
+
 import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
+
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
@@ -12,10 +21,21 @@ from stabilize.queue.messages import (
 from stabilize.tasks.interface import RetryableTask, Task
 from stabilize.tasks.registry import TaskNotFoundError, TaskRegistry
 from stabilize.tasks.result import TaskResult
+
+if TYPE_CHECKING:
+    from stabilize.models.stage import StageExecution
+    from stabilize.models.task import TaskExecution
+    from stabilize.persistence.store import WorkflowStore
+    from stabilize.queue.queue import Queue
+
 logger = logging.getLogger(__name__)
+
 
 class TimeoutError(Exception):
     """Raised when a task times out."""
+
+    pass
+
 
 class RunTaskHandler(StabilizeHandler[RunTask]):
     """
@@ -28,6 +48,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
     4. Executes the task
     5. Processes the result
     """
+
     def __init__(
         self,
         queue: Queue,
@@ -38,6 +59,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         super().__init__(queue, repository, retry_delay)
         self.task_registry = task_registry
 
+    @property
     def message_type(self) -> type[RunTask]:
         return RunTask
 
@@ -320,5 +342,28 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 task_id=message.task_id,
                 status=status,
                 original_status=WorkflowStatus.TERMINAL,
+            )
+        )
+
+    def _complete_with_error(
+        self,
+        stage: StageExecution,
+        task_model: TaskExecution,
+        message: RunTask,
+        error: str,
+    ) -> None:
+        """Complete task with an error."""
+        stage.context["exception"] = {
+            "details": {"error": error},
+        }
+        self.repository.store_stage(stage)
+
+        self.queue.push(
+            CompleteTask(
+                execution_type=message.execution_type,
+                execution_id=message.execution_id,
+                stage_id=message.stage_id,
+                task_id=message.task_id,
+                status=WorkflowStatus.TERMINAL,
             )
         )
