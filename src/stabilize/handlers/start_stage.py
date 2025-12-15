@@ -1,6 +1,16 @@
+"""
+StartStageHandler - handles stage startup.
+
+This is one of the most critical handlers in the execution engine.
+It checks if upstream stages are complete, plans the stage's tasks
+and synthetic stages, and starts execution.
+"""
+
 from __future__ import annotations
+
 import logging
 from typing import TYPE_CHECKING
+
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
@@ -10,7 +20,12 @@ from stabilize.queue.messages import (
     StartStage,
     StartTask,
 )
+
+if TYPE_CHECKING:
+    from stabilize.models.stage import StageExecution
+
 logger = logging.getLogger(__name__)
+
 
 class StartStageHandler(StabilizeHandler[StartStage]):
     """
@@ -30,6 +45,7 @@ class StartStageHandler(StabilizeHandler[StartStage]):
        - Else: CompleteStage
     """
 
+    @property
     def message_type(self) -> type[StartStage]:
         return StartStage
 
@@ -195,6 +211,11 @@ class StartStageHandler(StabilizeHandler[StartStage]):
             stage.tasks[0].stage_start = True
             stage.tasks[-1].stage_end = True
 
+        # TODO: Call stage definition builder to:
+        # 1. Build tasks
+        # 2. Build before stages
+        # 3. Add context flags
+
     def _start_stage(
         self,
         stage: StageExecution,
@@ -291,3 +312,9 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                     return expression.lower() == "false"
 
         return False
+
+    def _is_after_start_time_expiry(self, stage: StageExecution) -> bool:
+        """Check if current time is past start time expiry."""
+        if stage.start_time_expiry is None:
+            return False
+        return self.current_time_millis() > stage.start_time_expiry
