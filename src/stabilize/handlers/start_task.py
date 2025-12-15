@@ -20,3 +20,6 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
     3. Set task start time
     4. Push RunTask
     """
+
+    def message_type(self) -> type[StartTask]:
+        return StartTask
