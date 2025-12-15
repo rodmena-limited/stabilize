@@ -138,3 +138,30 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
 
         # Try by type name
         return self.task_registry.get(task_type)
+
+    def _check_for_timeout(
+        self,
+        stage: StageExecution,
+        task_model: TaskExecution,
+        task: Task,
+    ) -> None:
+        """Check if task has timed out."""
+        if not isinstance(task, RetryableTask):
+            return
+
+        if task_model.start_time is None:
+            return
+
+        start_time = task_model.start_time
+        current_time = self.current_time_millis()
+        elapsed = timedelta(milliseconds=current_time - start_time)
+
+        # Get timeout (potentially dynamic)
+        timeout = task.get_dynamic_timeout(stage)
+
+        # Account for paused time
+        paused_duration = timedelta(milliseconds=stage.execution.paused_duration_relative_to(start_time))
+        actual_elapsed = elapsed - paused_duration
+
+        if actual_elapsed > timeout:
+            raise TimeoutError(f"Task timed out after {actual_elapsed} (timeout: {timeout})")
