@@ -29,3 +29,6 @@ class StartStageHandler(StabilizeHandler[StartStage]):
        - Else if has tasks: StartTask for first task
        - Else: CompleteStage
     """
+
+    def message_type(self) -> type[StartStage]:
+        return StartStage
