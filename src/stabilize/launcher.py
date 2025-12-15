@@ -179,3 +179,33 @@ class WorkflowLauncher:
             stage.tasks[-1].stage_end = True
 
         return stage
+
+    def create_orchestration(
+        self,
+        application: str,
+        name: str,
+        stages: list[dict[str, Any]],
+    ) -> Workflow:
+        """
+        Create an ad-hoc orchestration (single execution not from a pipeline).
+
+        Args:
+            application: Application name
+            name: Orchestration name
+            stages: Stage configurations
+
+        Returns:
+            The created execution
+        """
+        parsed_stages = self._parse_stages(stages)
+
+        execution = Workflow.create_orchestration(
+            application=application,
+            name=name,
+            stages=parsed_stages,
+        )
+
+        self.repository.store(execution)
+        self.runner.start(execution)
+
+        return execution
