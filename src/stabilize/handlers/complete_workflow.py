@@ -9,3 +9,15 @@ from stabilize.queue.messages import (
     StartWaitingWorkflows,
 )
 logger = logging.getLogger(__name__)
+
+class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
+    """
+    Handler for CompleteWorkflow messages.
+
+    Execution flow:
+    1. Check if execution already complete
+    2. Determine final status from top-level stages
+    3. Update execution status
+    4. Cancel any running stages if failed
+    5. Start waiting executions if queue is enabled
+    """
