@@ -129,3 +129,53 @@ class WorkflowLauncher:
             stages.append(stage)
 
         return stages
+
+    def _parse_stage(self, config: dict[str, Any]) -> StageExecution:
+        """
+        Parse a single stage configuration.
+
+        Args:
+            config: Stage configuration dictionary
+
+        Returns:
+            A StageExecution object
+        """
+        # Get requisite stages
+        requisite_ids: set[str] = set()
+        if "requisiteStageRefIds" in config:
+            requisite_ids = set(config["requisiteStageRefIds"])
+
+        # Create context from config (excluding metadata fields)
+        context = {
+            k: v
+            for k, v in config.items()
+            if k
+            not in {
+                "id",
+                "refId",
+                "type",
+                "name",
+                "requisiteStageRefIds",
+                "parentStageId",
+                "syntheticStageOwner",
+            }
+        }
+
+        stage = StageExecution.create(
+            type=config.get("type", "unknown"),
+            name=config.get("name", config.get("type", "Unknown")),
+            ref_id=config.get("refId", config.get("id", "")),
+            context=context,
+            requisite_stage_ref_ids=requisite_ids,
+        )
+
+        # Build tasks using stage definition builder
+        builder = self.stage_builder_factory.get(stage.type)
+        stage.tasks = builder.build_tasks(stage)
+
+        # Mark first/last tasks
+        if stage.tasks:
+            stage.tasks[0].stage_start = True
+            stage.tasks[-1].stage_end = True
+
+        return stage
