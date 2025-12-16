@@ -59,3 +59,23 @@ class Orchestrator:
                 reason=reason,
             )
         )
+
+    def restart(
+        self,
+        execution: Workflow,
+        stage_id: str,
+    ) -> None:
+        """
+        Restart a stage in an execution.
+
+        Args:
+            execution: The execution
+            stage_id: The stage to restart
+        """
+        self.queue.push(
+            RestartStage(
+                execution_type=execution.type.value,
+                execution_id=execution.id,
+                stage_id=stage_id,
+            )
+        )
