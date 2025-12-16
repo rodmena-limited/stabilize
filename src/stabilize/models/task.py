@@ -69,3 +69,7 @@ class TaskExecution:
     def is_loop_end(self) -> bool:
         """Check if this task ends a loop."""
         return self.loop_end
+
+    def set_exception_details(self, exception: dict[str, Any]) -> None:
+        """Store exception details for this task."""
+        self.task_exception_details["exception"] = exception
