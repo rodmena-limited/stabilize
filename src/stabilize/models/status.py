@@ -77,3 +77,7 @@ class WorkflowStatus(Enum):
         Returns True for: TERMINAL, CANCELED, STOPPED
         """
         return self._halt
+
+    def is_successful(self) -> bool:
+        """Check if this status represents a successful completion."""
+        return self in _SUCCESSFUL_STATUSES
