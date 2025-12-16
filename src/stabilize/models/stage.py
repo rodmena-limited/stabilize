@@ -1,18 +1,37 @@
+"""
+StageExecution model.
+
+A stage represents a logical unit of work in a pipeline. Stages can have:
+- Prerequisites (other stages that must complete first)
+- Tasks (sequential work units)
+- Synthetic stages (before/after stages injected by builders)
+
+The DAG structure is represented via requisite_stage_ref_ids, which contains
+the ref_ids of all stages this stage depends on.
+"""
+
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
+
 from stabilize.models.status import (
     CONTINUABLE_STATUSES,
     WorkflowStatus,
 )
 from stabilize.models.task import TaskExecution
 
+if TYPE_CHECKING:
+    from stabilize.models.workflow import Workflow
+
+
 def _generate_stage_id() -> str:
     """Generate a unique stage ID using ULID."""
     import ulid
 
     return str(ulid.new())
+
 
 class SyntheticStageOwner(Enum):
     """
@@ -21,8 +40,10 @@ class SyntheticStageOwner(Enum):
     STAGE_BEFORE: Runs before the parent's tasks
     STAGE_AFTER: Runs after the parent completes
     """
-    STAGE_BEFORE = 'STAGE_BEFORE'
-    STAGE_AFTER = 'STAGE_AFTER'
+
+    STAGE_BEFORE = "STAGE_BEFORE"
+    STAGE_AFTER = "STAGE_AFTER"
+
 
 @dataclass
 class StageExecution:
@@ -51,10 +72,11 @@ class StageExecution:
         start_time_expiry: If stage not started by this time, skip it
         scheduled_time: When stage is scheduled to execute
     """
+
     id: str = field(default_factory=_generate_stage_id)
-    ref_id: str = ''
-    type: str = ''
-    name: str = ''
+    ref_id: str = ""
+    type: str = ""
+    name: str = ""
     status: WorkflowStatus = WorkflowStatus.NOT_STARTED
     context: dict[str, Any] = field(default_factory=dict)
     outputs: dict[str, Any] = field(default_factory=dict)
@@ -66,14 +88,18 @@ class StageExecution:
     end_time: int | None = None
     start_time_expiry: int | None = None
     scheduled_time: int | None = None
+
+    # Back-reference to parent execution (set after construction)
     _execution: Workflow | None = field(default=None, repr=False)
 
+    @property
     def execution(self) -> Workflow:
         """Get the parent pipeline execution."""
         if self._execution is None:
             raise ValueError("Stage is not attached to an execution")
         return self._execution
 
+    @execution.setter
     def execution(self, value: Workflow) -> None:
         """Set the parent pipeline execution."""
         self._execution = value
@@ -81,6 +107,8 @@ class StageExecution:
     def has_execution(self) -> bool:
         """Check if this stage is attached to an execution."""
         return self._execution is not None
+
+    # ========== DAG Navigation Methods ==========
 
     def is_initial(self) -> bool:
         """Check if this is an initial stage (no dependencies)."""
@@ -138,6 +166,8 @@ class StageExecution:
                 return True
         return False
 
+    # ========== Synthetic Stage Methods ==========
+
     def synthetic_stages(self) -> list[StageExecution]:
         """Get all synthetic stages (children) of this stage."""
         return [stage for stage in self.execution.stages if stage.parent_stage_id == self.id]
@@ -182,6 +212,8 @@ class StageExecution:
         """Check if this is a synthetic stage."""
         return self.parent_stage_id is not None
 
+    # ========== Task Methods ==========
+
     def first_task(self) -> TaskExecution | None:
         """Get the first task in this stage."""
         return self.tasks[0] if self.tasks else None
@@ -199,6 +231,8 @@ class StageExecution:
     def has_tasks(self) -> bool:
         """Check if this stage has any tasks."""
         return len(self.tasks) > 0
+
+    # ========== Status Methods ==========
 
     def determine_status(self) -> WorkflowStatus:
         """Determine the stage status based on synthetic stages and tasks."""
@@ -233,6 +267,123 @@ class StageExecution:
             return default
         return WorkflowStatus.STOPPED
 
+    @property
     def continue_pipeline_on_failure(self) -> bool:
         """Check if pipeline should continue on stage failure."""
         return bool(self.context.get("continuePipelineOnFailure", False))
+
+    def should_fail_pipeline(self) -> bool:
+        """Check if stage failure should fail the pipeline."""
+        return bool(self.context.get("failPipeline", True))
+
+    @property
+    def allow_sibling_stages_to_continue_on_failure(self) -> bool:
+        """Check if sibling stages can continue on this stage's failure."""
+        return bool(self.context.get("allowSiblingStagesToContinueOnFailure", False))
+
+    # ========== Ancestor Traversal ==========
+
+    def ancestors(self) -> list[StageExecution]:
+        """
+        Get all ancestor stages in dependency order.
+
+        Includes requisite stages and parent stages.
+        """
+        visited: set[str] = set()
+        result: list[StageExecution] = []
+
+        def visit(stage: StageExecution) -> None:
+            if stage.id in visited:
+                return
+            visited.add(stage.id)
+            result.append(stage)
+
+            # Visit requisite stages
+            for upstream in stage.upstream_stages():
+                visit(upstream)
+
+            # Visit parent stage
+            if stage.parent_stage_id:
+                try:
+                    visit(stage.parent())
+                except ValueError:
+                    pass
+
+        # Start with upstream stages (not self)
+        for upstream in self.upstream_stages():
+            visit(upstream)
+        if self.parent_stage_id:
+            try:
+                visit(self.parent())
+            except ValueError:
+                pass
+
+        return result
+
+    # ========== Factory Methods ==========
+
+    @classmethod
+    def create(
+        cls,
+        type: str,
+        name: str,
+        ref_id: str,
+        context: dict[str, Any] | None = None,
+        requisite_stage_ref_ids: set[str] | None = None,
+    ) -> StageExecution:
+        """
+        Factory method to create a new stage execution.
+
+        Args:
+            type: Stage type
+            name: Human-readable name
+            ref_id: Reference ID for DAG relationships
+            context: Initial context/parameters
+            requisite_stage_ref_ids: Dependencies (empty = initial stage)
+
+        Returns:
+            A new StageExecution instance
+        """
+        return cls(
+            type=type,
+            name=name,
+            ref_id=ref_id,
+            context=context or {},
+            requisite_stage_ref_ids=requisite_stage_ref_ids or set(),
+        )
+
+    @classmethod
+    def create_synthetic(
+        cls,
+        type: str,
+        name: str,
+        parent: StageExecution,
+        owner: SyntheticStageOwner,
+        context: dict[str, Any] | None = None,
+    ) -> StageExecution:
+        """
+        Factory method to create a synthetic stage.
+
+        Args:
+            type: Stage type
+            name: Human-readable name
+            parent: Parent stage
+            owner: STAGE_BEFORE or STAGE_AFTER
+            context: Initial context/parameters
+
+        Returns:
+            A new synthetic StageExecution
+        """
+        import ulid
+
+        stage = cls(
+            type=type,
+            name=name,
+            ref_id=str(ulid.new()),  # Synthetic stages get unique ref_ids
+            context=context or {},
+            parent_stage_id=parent.id,
+            synthetic_stage_owner=owner,
+        )
+        if parent.has_execution():
+            stage.execution = parent.execution
+        return stage
