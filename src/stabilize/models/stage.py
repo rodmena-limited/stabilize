@@ -1,0 +1,79 @@
+from __future__ import annotations
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import TYPE_CHECKING, Any
+from stabilize.models.status import (
+    CONTINUABLE_STATUSES,
+    WorkflowStatus,
+)
+from stabilize.models.task import TaskExecution
+
+def _generate_stage_id() -> str:
+    """Generate a unique stage ID using ULID."""
+    import ulid
+
+    return str(ulid.new())
+
+class SyntheticStageOwner(Enum):
+    """
+    Indicates the relationship of a synthetic stage to its parent.
+
+    STAGE_BEFORE: Runs before the parent's tasks
+    STAGE_AFTER: Runs after the parent completes
+    """
+    STAGE_BEFORE = 'STAGE_BEFORE'
+    STAGE_AFTER = 'STAGE_AFTER'
+
+@dataclass
+class StageExecution:
+    """
+    Represents a stage execution within a pipeline.
+
+    The DAG structure is encoded in requisite_stage_ref_ids:
+    - Empty set = initial stage (no dependencies)
+    - Single ref_id = sequential dependency
+    - Multiple ref_ids = join point (waits for all)
+
+    Attributes:
+        id: Unique identifier (ULID)
+        ref_id: Reference identifier used for DAG relationships
+        type: Stage type (e.g., "deploy", "bake", "wait")
+        name: Human-readable stage name
+        status: Current execution status
+        context: Input parameters and runtime state (stage-scoped)
+        outputs: Values available to downstream stages (pipeline-scoped)
+        tasks: List of tasks to execute in this stage
+        requisite_stage_ref_ids: Set of ref_ids this stage depends on (DAG edges)
+        parent_stage_id: Parent stage ID for synthetic stages
+        synthetic_stage_owner: STAGE_BEFORE or STAGE_AFTER for synthetic stages
+        start_time: Epoch milliseconds when stage started
+        end_time: Epoch milliseconds when stage completed
+        start_time_expiry: If stage not started by this time, skip it
+        scheduled_time: When stage is scheduled to execute
+    """
+    id: str = field(default_factory=_generate_stage_id)
+    ref_id: str = ''
+    type: str = ''
+    name: str = ''
+    status: WorkflowStatus = WorkflowStatus.NOT_STARTED
+    context: dict[str, Any] = field(default_factory=dict)
+    outputs: dict[str, Any] = field(default_factory=dict)
+    tasks: list[TaskExecution] = field(default_factory=list)
+    requisite_stage_ref_ids: set[str] = field(default_factory=set)
+    parent_stage_id: str | None = None
+    synthetic_stage_owner: SyntheticStageOwner | None = None
+    start_time: int | None = None
+    end_time: int | None = None
+    start_time_expiry: int | None = None
+    scheduled_time: int | None = None
+    _execution: Workflow | None = field(default=None, repr=False)
+
+    def execution(self) -> Workflow:
+        """Get the parent pipeline execution."""
+        if self._execution is None:
+            raise ValueError("Stage is not attached to an execution")
+        return self._execution
+
+    def execution(self, value: Workflow) -> None:
+        """Set the parent pipeline execution."""
+        self._execution = value
