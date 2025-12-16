@@ -30,3 +30,11 @@ CONTINUABLE_STATUSES: frozenset[WorkflowStatus] = frozenset(
         WorkflowStatus.SKIPPED,
     }
 )
+ACTIVE_STATUSES: frozenset[WorkflowStatus] = frozenset(
+    {
+        WorkflowStatus.NOT_STARTED,
+        WorkflowStatus.RUNNING,
+        WorkflowStatus.PAUSED,
+        WorkflowStatus.SUSPENDED,
+    }
+)
