@@ -109,3 +109,49 @@ class StageExecution:
         Returns stages that have this stage's ref_id in their requisite_stage_ref_ids.
         """
         return [stage for stage in self.execution.stages if self.ref_id in stage.requisite_stage_ref_ids]
+
+    def all_upstream_stages_complete(self) -> bool:
+        """
+        Check if all upstream stages have completed successfully.
+
+        Returns True if all upstream stages have status in CONTINUABLE_STATUSES
+        (SUCCEEDED, FAILED_CONTINUE, or SKIPPED).
+        """
+        return all(stage.status in CONTINUABLE_STATUSES for stage in self.upstream_stages())
+
+    def any_upstream_stages_failed(self) -> bool:
+        """
+        Check if any upstream stages have failed with a halt status.
+
+        Returns True if any upstream stage has TERMINAL, STOPPED, or CANCELED status.
+        """
+        halt_statuses = {
+            WorkflowStatus.TERMINAL,
+            WorkflowStatus.STOPPED,
+            WorkflowStatus.CANCELED,
+        }
+        for upstream in self.upstream_stages():
+            if upstream.status in halt_statuses:
+                return True
+            # Check recursively for NOT_STARTED stages
+            if upstream.status == WorkflowStatus.NOT_STARTED and upstream.any_upstream_stages_failed():
+                return True
+        return False
+
+    def synthetic_stages(self) -> list[StageExecution]:
+        """Get all synthetic stages (children) of this stage."""
+        return [stage for stage in self.execution.stages if stage.parent_stage_id == self.id]
+
+    def before_stages(self) -> list[StageExecution]:
+        """Get synthetic stages that run before this stage's tasks."""
+        return [
+            stage
+            for stage in self.synthetic_stages()
+            if stage.synthetic_stage_owner == SyntheticStageOwner.STAGE_BEFORE
+        ]
+
+    def after_stages(self) -> list[StageExecution]:
+        """Get synthetic stages that run after this stage completes."""
+        return [
+            stage for stage in self.synthetic_stages() if stage.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER
+        ]
