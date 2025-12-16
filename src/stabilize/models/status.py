@@ -89,3 +89,6 @@ class WorkflowStatus(Enum):
     def is_skipped(self) -> bool:
         """Check if this status is SKIPPED."""
         return self == WorkflowStatus.SKIPPED
+
+    def __str__(self) -> str:
+        return self._name
