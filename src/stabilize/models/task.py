@@ -45,3 +45,7 @@ class TaskExecution:
     loop_end: bool = False
     task_exception_details: dict[str, Any] = field(default_factory=dict)
     _stage: StageExecution | None = field(default=None, repr=False)
+
+    def stage(self) -> StageExecution | None:
+        """Get the parent stage for this task."""
+        return self._stage
