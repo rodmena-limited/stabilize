@@ -61,3 +61,11 @@ class WorkflowStatus(Enum):
         self._name = name
         self._complete = complete
         self._halt = halt
+
+    def is_complete(self) -> bool:
+        """
+        Indicates that the task/stage/pipeline has finished its work.
+
+        Returns True for: CANCELED, SUCCEEDED, STOPPED, SKIPPED, TERMINAL, FAILED_CONTINUE
+        """
+        return self._complete
