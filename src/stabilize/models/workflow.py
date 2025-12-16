@@ -122,3 +122,24 @@ class Workflow:
         """Set execution reference on all stages after construction."""
         for stage in self.stages:
             stage._execution = self
+
+    def add_stage(self, stage: StageExecution) -> None:
+        """Add a stage to this execution."""
+        stage._execution = self
+        self.stages.append(stage)
+
+    def remove_stage(self, stage_id: str) -> None:
+        """Remove a stage from this execution."""
+        self.stages = [s for s in self.stages if s.id != stage_id]
+
+    def stage_by_id(self, stage_id: str) -> StageExecution:
+        """
+        Get a stage by its ID.
+
+        Raises:
+            ValueError: If stage not found
+        """
+        for stage in self.stages:
+            if stage.id == stage_id:
+                return stage
+        raise ValueError(f"Stage {stage_id} not found")
