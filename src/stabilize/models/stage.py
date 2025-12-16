@@ -77,3 +77,35 @@ class StageExecution:
     def execution(self, value: Workflow) -> None:
         """Set the parent pipeline execution."""
         self._execution = value
+
+    def has_execution(self) -> bool:
+        """Check if this stage is attached to an execution."""
+        return self._execution is not None
+
+    def is_initial(self) -> bool:
+        """Check if this is an initial stage (no dependencies)."""
+        return len(self.requisite_stage_ref_ids) == 0
+
+    def is_join(self) -> bool:
+        """
+        Check if this is a join point (multiple dependencies).
+
+        A join point waits for multiple upstream stages to complete.
+        """
+        return len(self.requisite_stage_ref_ids) > 1
+
+    def upstream_stages(self) -> list[StageExecution]:
+        """
+        Get all stages directly upstream of this stage.
+
+        Returns stages whose ref_id is in this stage's requisite_stage_ref_ids.
+        """
+        return [stage for stage in self.execution.stages if stage.ref_id in self.requisite_stage_ref_ids]
+
+    def downstream_stages(self) -> list[StageExecution]:
+        """
+        Get all stages directly downstream of this stage.
+
+        Returns stages that have this stage's ref_id in their requisite_stage_ref_ids.
+        """
+        return [stage for stage in self.execution.stages if self.ref_id in stage.requisite_stage_ref_ids]
