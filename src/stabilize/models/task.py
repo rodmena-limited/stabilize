@@ -49,3 +49,7 @@ class TaskExecution:
     def stage(self) -> StageExecution | None:
         """Get the parent stage for this task."""
         return self._stage
+
+    def stage(self, value: StageExecution) -> None:
+        """Set the parent stage for this task."""
+        self._stage = value
