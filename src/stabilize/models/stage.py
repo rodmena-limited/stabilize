@@ -155,3 +155,33 @@ class StageExecution:
         return [
             stage for stage in self.synthetic_stages() if stage.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER
         ]
+
+    def first_before_stages(self) -> list[StageExecution]:
+        """Get initial before stages (those with no dependencies among before stages)."""
+        return [stage for stage in self.before_stages() if stage.is_initial()]
+
+    def first_after_stages(self) -> list[StageExecution]:
+        """Get initial after stages (those with no dependencies among after stages)."""
+        return [stage for stage in self.after_stages() if stage.is_initial()]
+
+    def parent(self) -> StageExecution:
+        """
+        Get the parent stage for this synthetic stage.
+
+        Raises:
+            ValueError: If this is not a synthetic stage
+        """
+        if self.parent_stage_id is None:
+            raise ValueError("Not a synthetic stage")
+        for stage in self.execution.stages:
+            if stage.id == self.parent_stage_id:
+                return stage
+        raise ValueError(f"Parent stage {self.parent_stage_id} not found")
+
+    def is_synthetic(self) -> bool:
+        """Check if this is a synthetic stage."""
+        return self.parent_stage_id is not None
+
+    def first_task(self) -> TaskExecution | None:
+        """Get the first task in this stage."""
+        return self.tasks[0] if self.tasks else None
