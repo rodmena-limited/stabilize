@@ -185,3 +185,54 @@ class StageExecution:
     def first_task(self) -> TaskExecution | None:
         """Get the first task in this stage."""
         return self.tasks[0] if self.tasks else None
+
+    def next_task(self, task: TaskExecution) -> TaskExecution | None:
+        """Get the task that follows the given task."""
+        if task.is_stage_end:
+            return None
+        try:
+            index = self.tasks.index(task)
+            return self.tasks[index + 1]
+        except (ValueError, IndexError):
+            return None
+
+    def has_tasks(self) -> bool:
+        """Check if this stage has any tasks."""
+        return len(self.tasks) > 0
+
+    def determine_status(self) -> WorkflowStatus:
+        """Determine the stage status based on synthetic stages and tasks."""
+        synthetic_statuses = [s.status for s in self.synthetic_stages()]
+        task_statuses = [t.status for t in self.tasks]
+        all_statuses = synthetic_statuses + task_statuses
+        after_stage_statuses = [s.status for s in self.after_stages()]
+
+        if not all_statuses:
+            return WorkflowStatus.NOT_STARTED
+
+        if WorkflowStatus.TERMINAL in all_statuses:
+            return self.failure_status()
+        if WorkflowStatus.STOPPED in all_statuses:
+            return WorkflowStatus.STOPPED
+        if WorkflowStatus.CANCELED in all_statuses:
+            return WorkflowStatus.CANCELED
+        if WorkflowStatus.FAILED_CONTINUE in all_statuses:
+            return WorkflowStatus.FAILED_CONTINUE
+        if all(s in {WorkflowStatus.SUCCEEDED, WorkflowStatus.SKIPPED} for s in all_statuses):
+            return WorkflowStatus.SUCCEEDED
+        if WorkflowStatus.NOT_STARTED in after_stage_statuses:
+            return WorkflowStatus.RUNNING
+
+        return WorkflowStatus.TERMINAL
+
+    def failure_status(self, default: WorkflowStatus = WorkflowStatus.TERMINAL) -> WorkflowStatus:
+        """Get the appropriate failure status based on stage configuration."""
+        if self.continue_pipeline_on_failure:
+            return WorkflowStatus.FAILED_CONTINUE
+        if self.should_fail_pipeline():
+            return default
+        return WorkflowStatus.STOPPED
+
+    def continue_pipeline_on_failure(self) -> bool:
+        """Check if pipeline should continue on stage failure."""
+        return bool(self.context.get("continuePipelineOnFailure", False))
