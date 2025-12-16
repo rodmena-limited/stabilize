@@ -36,3 +36,26 @@ class Orchestrator:
                 execution_id=execution.id,
             )
         )
+
+    def cancel(
+        self,
+        execution: Workflow,
+        user: str,
+        reason: str,
+    ) -> None:
+        """
+        Cancel a running execution.
+
+        Args:
+            execution: The execution to cancel
+            user: Who is canceling
+            reason: Why it's being canceled
+        """
+        self.queue.push(
+            CancelWorkflow(
+                execution_type=execution.type.value,
+                execution_id=execution.id,
+                user=user,
+                reason=reason,
+            )
+        )
