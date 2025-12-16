@@ -69,3 +69,11 @@ class WorkflowStatus(Enum):
         Returns True for: CANCELED, SUCCEEDED, STOPPED, SKIPPED, TERMINAL, FAILED_CONTINUE
         """
         return self._complete
+
+    def is_halt(self) -> bool:
+        """
+        Indicates an abnormal completion - nothing downstream should run.
+
+        Returns True for: TERMINAL, CANCELED, STOPPED
+        """
+        return self._halt
