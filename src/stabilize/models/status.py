@@ -38,3 +38,26 @@ ACTIVE_STATUSES: frozenset[WorkflowStatus] = frozenset(
         WorkflowStatus.SUSPENDED,
     }
 )
+
+class WorkflowStatus(Enum):
+    """
+    Execution status enum.
+
+    Each value is a tuple of (name, complete, halt).
+    """
+    NOT_STARTED = ('NOT_STARTED', False, False)
+    RUNNING = ('RUNNING', False, False)
+    PAUSED = ('PAUSED', False, False)
+    SUSPENDED = ('SUSPENDED', False, False)
+    SUCCEEDED = ('SUCCEEDED', True, False)
+    FAILED_CONTINUE = ('FAILED_CONTINUE', True, False)
+    TERMINAL = ('TERMINAL', True, True)
+    CANCELED = ('CANCELED', True, True)
+    REDIRECT = ('REDIRECT', False, False)
+    STOPPED = ('STOPPED', True, True)
+    SKIPPED = ('SKIPPED', True, False)
+    BUFFERED = ('BUFFERED', False, False)
+    def __init__(self, name: str, complete: bool, halt: bool) -> None:
+        self._name = name
+        self._complete = complete
+        self._halt = halt
