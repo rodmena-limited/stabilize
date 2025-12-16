@@ -22,3 +22,17 @@ class Orchestrator:
             queue: The message queue
         """
         self.queue = queue
+
+    def start(self, execution: Workflow) -> None:
+        """
+        Start a pipeline execution.
+
+        Args:
+            execution: The execution to start
+        """
+        self.queue.push(
+            StartWorkflow(
+                execution_type=execution.type.value,
+                execution_id=execution.id,
+            )
+        )
