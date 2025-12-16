@@ -81,3 +81,7 @@ class WorkflowStatus(Enum):
     def is_successful(self) -> bool:
         """Check if this status represents a successful completion."""
         return self in _SUCCESSFUL_STATUSES
+
+    def is_failure(self) -> bool:
+        """Check if this status represents a failure."""
+        return self in _FAILURE_STATUSES
