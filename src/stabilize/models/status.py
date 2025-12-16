@@ -23,3 +23,10 @@ _FAILURE_STATUSES: frozenset[WorkflowStatus] = frozenset(
         WorkflowStatus.FAILED_CONTINUE,
     }
 )
+CONTINUABLE_STATUSES: frozenset[WorkflowStatus] = frozenset(
+    {
+        WorkflowStatus.SUCCEEDED,
+        WorkflowStatus.FAILED_CONTINUE,
+        WorkflowStatus.SKIPPED,
+    }
+)
