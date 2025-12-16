@@ -143,3 +143,22 @@ class Workflow:
             if stage.id == stage_id:
                 return stage
         raise ValueError(f"Stage {stage_id} not found")
+
+    def stage_by_ref_id(self, ref_id: str) -> StageExecution | None:
+        """Get a stage by its reference ID."""
+        for stage in self.stages:
+            if stage.ref_id == ref_id:
+                return stage
+        return None
+
+    def initial_stages(self) -> list[StageExecution]:
+        """
+        Get all initial stages (no dependencies, not synthetic).
+
+        These are the stages that can start immediately when execution begins.
+        """
+        return [stage for stage in self.stages if stage.is_initial() and not stage.is_synthetic()]
+
+    def top_level_stages(self) -> list[StageExecution]:
+        """Get all top-level stages (not synthetic)."""
+        return [stage for stage in self.stages if not stage.is_synthetic()]
