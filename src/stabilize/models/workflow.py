@@ -162,3 +162,37 @@ class Workflow:
     def top_level_stages(self) -> list[StageExecution]:
         """Get all top-level stages (not synthetic)."""
         return [stage for stage in self.stages if not stage.is_synthetic()]
+
+    def get_context(self) -> dict[str, Any]:
+        """
+        Get aggregated context from all stages.
+
+        Returns merged outputs from all stages in topological order.
+        Collections are concatenated, latest value wins for non-collections.
+        """
+        from stabilize.dag.topological import topological_sort
+
+        result: dict[str, Any] = {}
+
+        for stage in topological_sort(self.stages):
+            for key, value in stage.outputs.items():
+                if key in result and isinstance(result[key], list) and isinstance(value, list):
+                    # Concatenate lists, avoiding duplicates
+                    existing = result[key]
+                    for item in value:
+                        if item not in existing:
+                            existing.append(item)
+                else:
+                    result[key] = value
+
+        return result
+
+    def update_status(self, status: WorkflowStatus) -> None:
+        """Update the execution status."""
+        self.status = status
+
+    def cancel(self, user: str, reason: str) -> None:
+        """Mark this execution as canceled."""
+        self.is_canceled = True
+        self.canceled_by = user
+        self.cancellation_reason = reason
