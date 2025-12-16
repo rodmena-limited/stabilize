@@ -65,3 +65,7 @@ class TaskExecution:
     def is_loop_start(self) -> bool:
         """Check if this task starts a loop."""
         return self.loop_start
+
+    def is_loop_end(self) -> bool:
+        """Check if this task ends a loop."""
+        return self.loop_end
