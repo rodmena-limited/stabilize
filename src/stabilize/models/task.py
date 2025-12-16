@@ -61,3 +61,7 @@ class TaskExecution:
     def is_stage_end(self) -> bool:
         """Check if this task ends the stage."""
         return self.stage_end
+
+    def is_loop_start(self) -> bool:
+        """Check if this task starts a loop."""
+        return self.loop_start
