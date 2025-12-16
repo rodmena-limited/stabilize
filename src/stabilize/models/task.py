@@ -53,3 +53,7 @@ class TaskExecution:
     def stage(self, value: StageExecution) -> None:
         """Set the parent stage for this task."""
         self._stage = value
+
+    def is_stage_start(self) -> bool:
+        """Check if this task starts the stage."""
+        return self.stage_start
