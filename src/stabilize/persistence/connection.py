@@ -83,3 +83,40 @@ class ConnectionManager(metaclass=SingletonMeta):
                     )
                     self._postgres_pools[connection_string] = pool
         return self._postgres_pools[connection_string]
+
+    def get_sqlite_connection(self, connection_string: str) -> sqlite3.Connection:
+        """
+        Get or create a thread-local SQLite connection.
+
+        Args:
+            connection_string: SQLite connection string
+
+        Returns:
+            Thread-local Connection instance for this database
+        """
+        db_path = self._parse_sqlite_path(connection_string)
+
+        # Track paths for cleanup
+        with self._sqlite_lock:
+            self._sqlite_paths.add(db_path)
+
+        # Get thread-local storage
+        if not hasattr(self._sqlite_local, "connections"):
+            self._sqlite_local.connections = {}
+
+        connections: dict[str, sqlite3.Connection] = self._sqlite_local.connections
+
+        if db_path not in connections or connections[db_path] is None:
+            conn = sqlite3.connect(
+                db_path,
+                timeout=30,
+                check_same_thread=False,
+            )
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            if db_path != ":memory:":
+                conn.execute("PRAGMA journal_mode = WAL")
+                conn.execute("PRAGMA busy_timeout = 30000")
+            connections[db_path] = conn
+
+        return connections[db_path]
