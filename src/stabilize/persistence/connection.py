@@ -21,3 +21,11 @@ class SingletonMeta(type):
                     instance = super().__call__(*args, **kwargs)
                     cls._instances[cls] = instance
         return cls._instances[cls]
+
+    def reset(mcs, cls: type) -> None:
+        """Reset singleton instance (for testing)."""
+        with mcs._lock:
+            if cls in mcs._instances:
+                instance = mcs._instances.pop(cls)
+                if hasattr(instance, "close_all"):
+                    instance.close_all()
