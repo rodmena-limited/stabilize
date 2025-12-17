@@ -145,3 +145,19 @@ class ConnectionManager(metaclass=SingletonMeta):
             if conn is not None:
                 conn.close()
                 connections[db_path] = None
+
+    def close_all(self) -> None:
+        """Close all connections (for shutdown/testing)."""
+        # Close all PostgreSQL pools
+        with self._postgres_lock:
+            for pool in self._postgres_pools.values():
+                pool.close()
+            self._postgres_pools.clear()
+
+        # Close SQLite connections for current thread
+        if hasattr(self._sqlite_local, "connections"):
+            connections: dict[str, sqlite3.Connection] = self._sqlite_local.connections
+            for conn in connections.values():
+                if conn is not None:
+                    conn.close()
+            connections.clear()
