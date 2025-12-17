@@ -29,3 +29,24 @@ class SingletonMeta(type):
                 instance = mcs._instances.pop(cls)
                 if hasattr(instance, "close_all"):
                     instance.close_all()
+
+class ConnectionManager(metaclass=SingletonMeta):
+    """
+    Singleton connection manager for all database connections.
+
+    Manages:
+    - PostgreSQL connection pools (one pool per connection string)
+    - SQLite thread-local connections (one connection per thread per db path)
+
+    Usage:
+        manager = ConnectionManager()
+        pool = manager.get_postgres_pool("postgresql://...")
+        conn = manager.get_sqlite_connection("sqlite:///./db.sqlite")
+    """
+    def __init__(self) -> None:
+        self._postgres_pools: dict[str, ConnectionPool] = {}
+        self._postgres_lock = threading.Lock()
+
+        self._sqlite_local = threading.local()
+        self._sqlite_lock = threading.Lock()
+        self._sqlite_paths: set[str] = set()
