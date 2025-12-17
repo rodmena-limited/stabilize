@@ -68,3 +68,42 @@ class InMemoryWorkflowStore(WorkflowStore):
         with self._lock:
             if execution_id in self._executions:
                 del self._executions[execution_id]
+
+    def store_stage(self, stage: StageExecution) -> None:
+        """Store or update a stage."""
+        with self._lock:
+            execution_id = stage.execution.id
+            if execution_id not in self._executions:
+                raise WorkflowNotFoundError(execution_id)
+
+            execution = self._executions[execution_id]
+
+            # Find and update or add
+            for i, s in enumerate(execution.stages):
+                if s.id == stage.id:
+                    # Update existing stage
+                    execution.stages[i] = copy.deepcopy(stage)
+                    execution.stages[i]._execution = execution
+                    return
+
+            # Add new stage
+            new_stage = copy.deepcopy(stage)
+            new_stage._execution = execution
+            execution.stages.append(new_stage)
+
+    def add_stage(self, stage: StageExecution) -> None:
+        """Add a new stage."""
+        self.store_stage(stage)
+
+    def remove_stage(
+        self,
+        execution: Workflow,
+        stage_id: str,
+    ) -> None:
+        """Remove a stage."""
+        with self._lock:
+            if execution.id not in self._executions:
+                raise WorkflowNotFoundError(execution.id)
+
+            stored = self._executions[execution.id]
+            stored.stages = [s for s in stored.stages if s.id != stage_id]
