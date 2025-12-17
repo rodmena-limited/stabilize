@@ -107,3 +107,53 @@ class InMemoryWorkflowStore(WorkflowStore):
 
             stored = self._executions[execution.id]
             stored.stages = [s for s in stored.stages if s.id != stage_id]
+
+    def retrieve_stage(self, stage_id: str) -> StageExecution:
+        """Retrieve a single stage by ID."""
+        with self._lock:
+            for execution in self._executions.values():
+                for stage in execution.stages:
+                    if stage.id == stage_id:
+                        # Return deep copy with lightweight execution
+                        stage_copy = copy.deepcopy(stage)
+
+                        exec_copy = copy.deepcopy(execution)
+                        exec_copy.stages = [stage_copy]  # Only include this stage
+                        stage_copy._execution = exec_copy
+
+                        return stage_copy
+
+            raise ValueError(f"Stage {stage_id} not found")
+
+    def get_upstream_stages(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+    ) -> list[StageExecution]:
+        """Get upstream stages."""
+        with self._lock:
+            if execution_id not in self._executions:
+                return []
+
+            execution = self._executions[execution_id]
+
+            # Find target stage to get requisites
+            target_stage = next((s for s in execution.stages if s.ref_id == stage_ref_id), None)
+            if not target_stage:
+                return []
+
+            return [copy.deepcopy(s) for s in execution.stages if s.ref_id in target_stage.requisite_stage_ref_ids]
+
+    def get_downstream_stages(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+    ) -> list[StageExecution]:
+        """Get downstream stages."""
+        with self._lock:
+            if execution_id not in self._executions:
+                return []
+
+            execution = self._executions[execution_id]
+
+            return [copy.deepcopy(s) for s in execution.stages if stage_ref_id in s.requisite_stage_ref_ids]
