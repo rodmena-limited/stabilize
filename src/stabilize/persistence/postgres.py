@@ -163,3 +163,102 @@ class PostgresWorkflowStore(WorkflowStore):
                     self._insert_stage(cur, stage, execution.id)
 
             conn.commit()
+
+    def retrieve(self, execution_id: str) -> Workflow:
+        """Retrieve an execution by ID."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                # Get execution
+                cur.execute(
+                    "SELECT * FROM pipeline_executions WHERE id = %(id)s",
+                    {"id": execution_id},
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise WorkflowNotFoundError(execution_id)
+
+                execution = self._row_to_execution(cast(dict[str, Any], row))
+
+                # Get stages
+                cur.execute(
+                    """
+                    SELECT * FROM stage_executions
+                    WHERE execution_id = %(execution_id)s
+                    """,
+                    {"execution_id": execution_id},
+                )
+                stages = []
+                for stage_row in cur.fetchall():
+                    stage = self._row_to_stage(cast(dict[str, Any], stage_row))
+                    stage._execution = execution
+
+                    # Get tasks for stage
+                    cur.execute(
+                        """
+                        SELECT * FROM task_executions
+                        WHERE stage_id = %(stage_id)s
+                        """,
+                        {"stage_id": stage.id},
+                    )
+                    for task_row in cur.fetchall():
+                        task = self._row_to_task(cast(dict[str, Any], task_row))
+                        task._stage = stage
+                        stage.tasks.append(task)
+
+                    stages.append(stage)
+
+                execution.stages = stages
+                return execution
+
+    def retrieve_execution_summary(self, execution_id: str) -> Workflow:
+        """Retrieve execution metadata without stages."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM pipeline_executions WHERE id = %(id)s",
+                    {"id": execution_id},
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise WorkflowNotFoundError(execution_id)
+
+                return self._row_to_execution(cast(dict[str, Any], row))
+
+    def update_status(self, execution: Workflow) -> None:
+        """Update execution status."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE pipeline_executions SET
+                        status = %(status)s,
+                        start_time = %(start_time)s,
+                        end_time = %(end_time)s,
+                        is_canceled = %(is_canceled)s,
+                        canceled_by = %(canceled_by)s,
+                        cancellation_reason = %(cancellation_reason)s,
+                        paused = %(paused)s::jsonb
+                    WHERE id = %(id)s
+                    """,
+                    {
+                        "id": execution.id,
+                        "status": execution.status.name,
+                        "start_time": execution.start_time,
+                        "end_time": execution.end_time,
+                        "is_canceled": execution.is_canceled,
+                        "canceled_by": execution.canceled_by,
+                        "cancellation_reason": execution.cancellation_reason,
+                        "paused": (json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None),
+                    },
+                )
+            conn.commit()
+
+    def delete(self, execution_id: str) -> None:
+        """Delete an execution."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM pipeline_executions WHERE id = %(id)s",
+                    {"id": execution_id},
+                )
+            conn.commit()
