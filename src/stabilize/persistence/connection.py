@@ -128,3 +128,10 @@ class ConnectionManager(metaclass=SingletonMeta):
         elif connection_string.startswith("sqlite://"):
             return connection_string[9:]
         return connection_string
+
+    def close_postgres_pool(self, connection_string: str) -> None:
+        """Close a specific PostgreSQL pool."""
+        with self._postgres_lock:
+            if connection_string in self._postgres_pools:
+                pool = self._postgres_pools.pop(connection_string)
+                pool.close()
