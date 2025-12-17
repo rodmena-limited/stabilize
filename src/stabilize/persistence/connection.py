@@ -135,3 +135,13 @@ class ConnectionManager(metaclass=SingletonMeta):
             if connection_string in self._postgres_pools:
                 pool = self._postgres_pools.pop(connection_string)
                 pool.close()
+
+    def close_sqlite_connection(self, connection_string: str) -> None:
+        """Close SQLite connection for current thread."""
+        db_path = self._parse_sqlite_path(connection_string)
+        if hasattr(self._sqlite_local, "connections"):
+            connections: dict[str, sqlite3.Connection | None] = self._sqlite_local.connections
+            conn = connections.get(db_path)
+            if conn is not None:
+                conn.close()
+                connections[db_path] = None
