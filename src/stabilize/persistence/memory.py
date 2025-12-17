@@ -36,3 +36,35 @@ class InMemoryWorkflowStore(WorkflowStore):
                 raise WorkflowNotFoundError(execution_id)
             # Return a deep copy to prevent external modifications
             return copy.deepcopy(self._executions[execution_id])
+
+    def retrieve_execution_summary(self, execution_id: str) -> Workflow:
+        """Retrieve execution metadata without stages."""
+        with self._lock:
+            if execution_id not in self._executions:
+                raise WorkflowNotFoundError(execution_id)
+
+            # Deep copy but clear stages
+            execution = copy.deepcopy(self._executions[execution_id])
+            execution.stages = []
+            return execution
+
+    def update_status(self, execution: Workflow) -> None:
+        """Update execution status."""
+        with self._lock:
+            if execution.id not in self._executions:
+                raise WorkflowNotFoundError(execution.id)
+
+            stored = self._executions[execution.id]
+            stored.status = execution.status
+            stored.start_time = execution.start_time
+            stored.end_time = execution.end_time
+            stored.is_canceled = execution.is_canceled
+            stored.canceled_by = execution.canceled_by
+            stored.cancellation_reason = execution.cancellation_reason
+            stored.paused = execution.paused
+
+    def delete(self, execution_id: str) -> None:
+        """Delete an execution."""
+        with self._lock:
+            if execution_id in self._executions:
+                del self._executions[execution_id]
