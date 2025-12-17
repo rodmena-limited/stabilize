@@ -1,7 +1,20 @@
+"""
+Singleton connection manager for database connections.
+
+Provides centralized connection pooling for PostgreSQL and thread-local
+connections for SQLite, ensuring efficient resource usage across all
+repository and queue instances.
+"""
+
 from __future__ import annotations
+
 import sqlite3
 import threading
 from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from psycopg_pool import ConnectionPool
+
 
 class SingletonMeta(type):
     """
@@ -10,6 +23,7 @@ class SingletonMeta(type):
     Ensures only one instance of a class exists, even when accessed
     from multiple threads simultaneously.
     """
+
     _instances: dict[type, Any] = {}
     _lock: threading.Lock = threading.Lock()
 
@@ -22,6 +36,7 @@ class SingletonMeta(type):
                     cls._instances[cls] = instance
         return cls._instances[cls]
 
+    @classmethod
     def reset(mcs, cls: type) -> None:
         """Reset singleton instance (for testing)."""
         with mcs._lock:
@@ -29,6 +44,7 @@ class SingletonMeta(type):
                 instance = mcs._instances.pop(cls)
                 if hasattr(instance, "close_all"):
                     instance.close_all()
+
 
 class ConnectionManager(metaclass=SingletonMeta):
     """
@@ -43,6 +59,7 @@ class ConnectionManager(metaclass=SingletonMeta):
         pool = manager.get_postgres_pool("postgresql://...")
         conn = manager.get_sqlite_connection("sqlite:///./db.sqlite")
     """
+
     def __init__(self) -> None:
         self._postgres_pools: dict[str, ConnectionPool] = {}
         self._postgres_lock = threading.Lock()
@@ -161,3 +178,8 @@ class ConnectionManager(metaclass=SingletonMeta):
                 if conn is not None:
                     conn.close()
             connections.clear()
+
+
+def get_connection_manager() -> ConnectionManager:
+    """Get the singleton ConnectionManager instance."""
+    return ConnectionManager()
