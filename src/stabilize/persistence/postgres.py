@@ -544,3 +544,111 @@ class PostgresWorkflowStore(WorkflowStore):
                     result[key] = value
 
         return result
+
+    def retrieve_by_pipeline_config_id(
+        self,
+        pipeline_config_id: str,
+        criteria: WorkflowCriteria | None = None,
+    ) -> Iterator[Workflow]:
+        """Retrieve executions by pipeline config ID."""
+        query = """
+            SELECT id FROM pipeline_executions
+            WHERE pipeline_config_id = %(config_id)s
+        """
+        params: dict[str, Any] = {"config_id": pipeline_config_id}
+
+        if criteria:
+            if criteria.statuses:
+                status_names = [s.name for s in criteria.statuses]
+                query += " AND status = ANY(%(statuses)s)"
+                params["statuses"] = status_names
+
+        query += " ORDER BY start_time DESC"
+
+        if criteria and criteria.page_size:
+            query += f" LIMIT {criteria.page_size}"
+
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                for row in cur.fetchall():
+                    yield self.retrieve(cast(dict[str, Any], row)["id"])
+
+    def retrieve_by_application(
+        self,
+        application: str,
+        criteria: WorkflowCriteria | None = None,
+    ) -> Iterator[Workflow]:
+        """Retrieve executions by application."""
+        query = """
+            SELECT id FROM pipeline_executions
+            WHERE application = %(application)s
+        """
+        params: dict[str, Any] = {"application": application}
+
+        if criteria:
+            if criteria.statuses:
+                status_names = [s.name for s in criteria.statuses]
+                query += " AND status = ANY(%(statuses)s)"
+                params["statuses"] = status_names
+
+        query += " ORDER BY start_time DESC"
+
+        if criteria and criteria.page_size:
+            query += f" LIMIT {criteria.page_size}"
+
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                for row in cur.fetchall():
+                    yield self.retrieve(cast(dict[str, Any], row)["id"])
+
+    def pause(self, execution_id: str, paused_by: str) -> None:
+        """Pause an execution."""
+        paused = PausedDetails(
+            paused_by=paused_by,
+            pause_time=int(time.time() * 1000),
+        )
+
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE pipeline_executions SET
+                        status = %(status)s,
+                        paused = %(paused)s::jsonb
+                    WHERE id = %(id)s
+                    """,
+                    {
+                        "id": execution_id,
+                        "status": WorkflowStatus.PAUSED.name,
+                        "paused": json.dumps(self._paused_to_dict(paused)),
+                    },
+                )
+            conn.commit()
+
+    def resume(self, execution_id: str) -> None:
+        """Resume a paused execution."""
+        # First get current paused details
+        execution = self.retrieve(execution_id)
+        if execution.paused and execution.paused.pause_time:
+            current_time = int(time.time() * 1000)
+            execution.paused.resume_time = current_time
+            execution.paused.paused_ms = current_time - execution.paused.pause_time
+
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE pipeline_executions SET
+                        status = %(status)s,
+                        paused = %(paused)s::jsonb
+                    WHERE id = %(id)s
+                    """,
+                    {
+                        "id": execution_id,
+                        "status": WorkflowStatus.RUNNING.name,
+                        "paused": (json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None),
+                    },
+                )
+            conn.commit()
