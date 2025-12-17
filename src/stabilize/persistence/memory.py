@@ -1,9 +1,17 @@
+"""
+In-memory execution repository.
+
+Useful for testing and development.
+"""
+
 from __future__ import annotations
+
 import copy
 import threading
 import time
 from collections.abc import Iterator
 from typing import Any
+
 from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.workflow import PausedDetails, Workflow
@@ -13,12 +21,14 @@ from stabilize.persistence.store import (
     WorkflowStore,
 )
 
+
 class InMemoryWorkflowStore(WorkflowStore):
     """
     In-memory implementation of WorkflowStore.
 
     Thread-safe storage for testing and single-process execution.
     """
+
     def __init__(self) -> None:
         self._executions: dict[str, Workflow] = {}
         self._lock = threading.Lock()
@@ -295,3 +305,43 @@ class InMemoryWorkflowStore(WorkflowStore):
                 pause_time=int(time.time() * 1000),
             )
             execution.status = WorkflowStatus.PAUSED
+
+    def resume(self, execution_id: str) -> None:
+        """Resume a paused execution."""
+        with self._lock:
+            if execution_id not in self._executions:
+                raise WorkflowNotFoundError(execution_id)
+
+            execution = self._executions[execution_id]
+            if execution.paused:
+                current_time = int(time.time() * 1000)
+                execution.paused.resume_time = current_time
+                if execution.paused.pause_time:
+                    execution.paused.paused_ms = current_time - execution.paused.pause_time
+            execution.status = WorkflowStatus.RUNNING
+
+    def cancel(
+        self,
+        execution_id: str,
+        canceled_by: str,
+        reason: str,
+    ) -> None:
+        """Cancel an execution."""
+        with self._lock:
+            if execution_id not in self._executions:
+                raise WorkflowNotFoundError(execution_id)
+
+            execution = self._executions[execution_id]
+            execution.is_canceled = True
+            execution.canceled_by = canceled_by
+            execution.cancellation_reason = reason
+
+    def clear(self) -> None:
+        """Clear all executions."""
+        with self._lock:
+            self._executions.clear()
+
+    def count(self) -> int:
+        """Get total number of executions."""
+        with self._lock:
+            return len(self._executions)
