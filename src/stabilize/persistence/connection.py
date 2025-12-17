@@ -50,3 +50,36 @@ class ConnectionManager(metaclass=SingletonMeta):
         self._sqlite_local = threading.local()
         self._sqlite_lock = threading.Lock()
         self._sqlite_paths: set[str] = set()
+
+    def get_postgres_pool(
+        self,
+        connection_string: str,
+        min_size: int = 5,
+        max_size: int = 15,
+    ) -> ConnectionPool:
+        """
+        Get or create a PostgreSQL connection pool.
+
+        Args:
+            connection_string: PostgreSQL connection string
+            min_size: Minimum pool size
+            max_size: Maximum pool size
+
+        Returns:
+            Shared ConnectionPool instance for this connection string
+        """
+        if connection_string not in self._postgres_pools:
+            with self._postgres_lock:
+                if connection_string not in self._postgres_pools:
+                    from psycopg.rows import dict_row
+                    from psycopg_pool import ConnectionPool
+
+                    pool = ConnectionPool(
+                        connection_string,
+                        min_size=min_size,
+                        max_size=max_size,
+                        open=True,
+                        kwargs={"row_factory": dict_row},
+                    )
+                    self._postgres_pools[connection_string] = pool
+        return self._postgres_pools[connection_string]
