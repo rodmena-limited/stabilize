@@ -120,3 +120,11 @@ class ConnectionManager(metaclass=SingletonMeta):
             connections[db_path] = conn
 
         return connections[db_path]
+
+    def _parse_sqlite_path(self, connection_string: str) -> str:
+        """Parse SQLite connection string to extract database path."""
+        if connection_string.startswith("sqlite:///"):
+            return connection_string[10:]
+        elif connection_string.startswith("sqlite://"):
+            return connection_string[9:]
+        return connection_string
