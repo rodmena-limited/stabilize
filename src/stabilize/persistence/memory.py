@@ -244,3 +244,54 @@ class InMemoryWorkflowStore(WorkflowStore):
         executions = self._apply_criteria(executions, criteria)
 
         yield from executions
+
+    def retrieve_by_application(
+        self,
+        application: str,
+        criteria: WorkflowCriteria | None = None,
+    ) -> Iterator[Workflow]:
+        """Retrieve executions by application."""
+        with self._lock:
+            executions = [copy.deepcopy(e) for e in self._executions.values() if e.application == application]
+
+        # Apply criteria
+        executions = self._apply_criteria(executions, criteria)
+
+        yield from executions
+
+    def _apply_criteria(
+        self,
+        executions: list[Workflow],
+        criteria: WorkflowCriteria | None,
+    ) -> list[Workflow]:
+        """Apply query criteria to executions."""
+        if criteria is None:
+            return executions
+
+        # Filter by status
+        if criteria.statuses:
+            executions = [e for e in executions if e.status in criteria.statuses]
+
+        # Filter by start time
+        if criteria.start_time_before:
+            executions = [e for e in executions if e.start_time and e.start_time < criteria.start_time_before]
+
+        if criteria.start_time_after:
+            executions = [e for e in executions if e.start_time and e.start_time > criteria.start_time_after]
+
+        # Sort by start time (newest first) and limit
+        executions.sort(key=lambda e: e.start_time or 0, reverse=True)
+        return executions[: criteria.page_size]
+
+    def pause(self, execution_id: str, paused_by: str) -> None:
+        """Pause an execution."""
+        with self._lock:
+            if execution_id not in self._executions:
+                raise WorkflowNotFoundError(execution_id)
+
+            execution = self._executions[execution_id]
+            execution.paused = PausedDetails(
+                paused_by=paused_by,
+                pause_time=int(time.time() * 1000),
+            )
+            execution.status = WorkflowStatus.PAUSED
