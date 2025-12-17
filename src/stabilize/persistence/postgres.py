@@ -262,3 +262,105 @@ class PostgresWorkflowStore(WorkflowStore):
                     {"id": execution_id},
                 )
             conn.commit()
+
+    def store_stage(self, stage: StageExecution) -> None:
+        """Store or update a stage."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                # Check if stage exists
+                cur.execute(
+                    "SELECT id FROM stage_executions WHERE id = %(id)s",
+                    {"id": stage.id},
+                )
+                exists = cur.fetchone() is not None
+
+                if exists:
+                    # Update
+                    cur.execute(
+                        """
+                        UPDATE stage_executions SET
+                            status = %(status)s,
+                            context = %(context)s::jsonb,
+                            outputs = %(outputs)s::jsonb,
+                            start_time = %(start_time)s,
+                            end_time = %(end_time)s
+                        WHERE id = %(id)s
+                        """,
+                        {
+                            "id": stage.id,
+                            "status": stage.status.name,
+                            "context": json.dumps(stage.context),
+                            "outputs": json.dumps(stage.outputs),
+                            "start_time": stage.start_time,
+                            "end_time": stage.end_time,
+                        },
+                    )
+
+                    # Update tasks
+                    for task in stage.tasks:
+                        self._upsert_task(cur, task, stage.id)
+                else:
+                    self._insert_stage(cur, stage, stage.execution.id)
+
+            conn.commit()
+
+    def add_stage(self, stage: StageExecution) -> None:
+        """Add a new stage."""
+        self.store_stage(stage)
+
+    def remove_stage(
+        self,
+        execution: Workflow,
+        stage_id: str,
+    ) -> None:
+        """Remove a stage."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM stage_executions WHERE id = %(id)s",
+                    {"id": stage_id},
+                )
+            conn.commit()
+
+    def retrieve_stage(self, stage_id: str) -> StageExecution:
+        """Retrieve a single stage by ID."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                # Get stage
+                cur.execute(
+                    "SELECT * FROM stage_executions WHERE id = %(id)s",
+                    {"id": stage_id},
+                )
+                stage_row = cur.fetchone()
+                if not stage_row:
+                    raise ValueError(f"Stage {stage_id} not found")
+
+                stage = self._row_to_stage(cast(dict[str, Any], stage_row))
+
+                # Get execution summary for context
+                # We do this in a separate transaction effectively, but here we reuse connection
+                cur.execute(
+                    "SELECT * FROM pipeline_executions WHERE id = %(id)s",
+                    {"id": stage_row["execution_id"]},  # type: ignore[call-overload]
+                )
+                exec_row = cur.fetchone()
+                if exec_row:
+                    execution = self._row_to_execution(cast(dict[str, Any], exec_row))
+                    stage._execution = execution
+                    # Add stage to execution's stage list so it can be found
+                    execution.stages = [stage]
+
+                # Get tasks
+                cur.execute(
+                    """
+                    SELECT * FROM task_executions
+                    WHERE stage_id = %(stage_id)s
+                    """,
+                    {"stage_id": stage.id},
+                )
+                for task_row in cur.fetchall():
+                    task = self._row_to_task(cast(dict[str, Any], task_row))
+                    task._stage = stage
+                    stage.tasks.append(task)
+
+                return stage
