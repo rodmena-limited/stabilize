@@ -12,3 +12,12 @@ class SingletonMeta(type):
     """
     _instances: dict[type, Any] = {}
     _lock: threading.Lock = threading.Lock()
+
+    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
+        if cls not in cls._instances:
+            with cls._lock:
+                # Double-check locking pattern
+                if cls not in cls._instances:
+                    instance = super().__call__(*args, **kwargs)
+                    cls._instances[cls] = instance
+        return cls._instances[cls]
