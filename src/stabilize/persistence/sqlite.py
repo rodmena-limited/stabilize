@@ -1,9 +1,18 @@
+"""
+SQLite execution repository.
+
+Lightweight persistence using SQLite for development and small deployments.
+Uses singleton ConnectionManager for efficient connection sharing.
+"""
+
 from __future__ import annotations
+
 import json
 import sqlite3
 import time
 from collections.abc import Iterator
 from typing import Any
+
 from stabilize.models.stage import StageExecution, SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.task import TaskExecution
@@ -19,6 +28,7 @@ from stabilize.persistence.store import (
     WorkflowStore,
 )
 
+
 class SqliteWorkflowStore(WorkflowStore):
     """
     SQLite implementation of WorkflowStore.
@@ -33,6 +43,7 @@ class SqliteWorkflowStore(WorkflowStore):
     - Arrays stored as JSON strings
     - Thread-local connections managed by singleton ConnectionManager
     """
+
     def __init__(
         self,
         connection_string: str,
@@ -719,6 +730,8 @@ class SqliteWorkflowStore(WorkflowStore):
         )
         conn.commit()
 
+    # ========== Helper Methods ==========
+
     def _insert_stage(self, conn: sqlite3.Connection, stage: StageExecution, execution_id: str) -> None:
         """Insert a stage."""
         conn.execute(
@@ -809,3 +822,103 @@ class SqliteWorkflowStore(WorkflowStore):
             "keep_waiting_pipelines": 1 if execution.keep_waiting_pipelines else 0,
             "origin": execution.origin,
         }
+
+    def _paused_to_dict(self, paused: PausedDetails | None) -> dict[str, Any] | None:
+        """Convert PausedDetails to dict."""
+        if paused is None:
+            return None
+        return {
+            "paused_by": paused.paused_by,
+            "pause_time": paused.pause_time,
+            "resume_time": paused.resume_time,
+            "paused_ms": paused.paused_ms,
+        }
+
+    def _row_to_execution(self, row: sqlite3.Row) -> Workflow:
+        """Convert database row to Workflow."""
+        trigger_data = json.loads(row["trigger"] or "{}")
+        paused_data = json.loads(row["paused"]) if row["paused"] else None
+
+        paused = None
+        if paused_data:
+            paused = PausedDetails(
+                paused_by=paused_data.get("paused_by", ""),
+                pause_time=paused_data.get("pause_time"),
+                resume_time=paused_data.get("resume_time"),
+                paused_ms=paused_data.get("paused_ms", 0),
+            )
+
+        return Workflow(
+            id=row["id"],
+            type=WorkflowType(row["type"]),
+            application=row["application"],
+            name=row["name"] or "",
+            status=WorkflowStatus[row["status"]],
+            start_time=row["start_time"],
+            end_time=row["end_time"],
+            start_time_expiry=row["start_time_expiry"],
+            trigger=Trigger.from_dict(trigger_data),
+            is_canceled=bool(row["is_canceled"]),
+            canceled_by=row["canceled_by"],
+            cancellation_reason=row["cancellation_reason"],
+            paused=paused,
+            pipeline_config_id=row["pipeline_config_id"],
+            is_limit_concurrent=bool(row["is_limit_concurrent"]),
+            max_concurrent_executions=row["max_concurrent_executions"] or 0,
+            keep_waiting_pipelines=bool(row["keep_waiting_pipelines"]),
+            origin=row["origin"] or "unknown",
+        )
+
+    def _row_to_stage(self, row: sqlite3.Row) -> StageExecution:
+        """Convert database row to StageExecution."""
+        context = json.loads(row["context"] or "{}")
+        outputs = json.loads(row["outputs"] or "{}")
+        requisite_ids = json.loads(row["requisite_stage_ref_ids"] or "[]")
+
+        synthetic_owner = None
+        if row["synthetic_stage_owner"]:
+            synthetic_owner = SyntheticStageOwner(row["synthetic_stage_owner"])
+
+        return StageExecution(
+            id=row["id"],
+            ref_id=row["ref_id"],
+            type=row["type"],
+            name=row["name"] or "",
+            status=WorkflowStatus[row["status"]],
+            context=context,
+            outputs=outputs,
+            requisite_stage_ref_ids=set(requisite_ids),
+            parent_stage_id=row["parent_stage_id"],
+            synthetic_stage_owner=synthetic_owner,
+            start_time=row["start_time"],
+            end_time=row["end_time"],
+            start_time_expiry=row["start_time_expiry"],
+            scheduled_time=row["scheduled_time"],
+        )
+
+    def _row_to_task(self, row: sqlite3.Row) -> TaskExecution:
+        """Convert database row to TaskExecution."""
+        exception_details = json.loads(row["task_exception_details"] or "{}")
+
+        return TaskExecution(
+            id=row["id"],
+            name=row["name"],
+            implementing_class=row["implementing_class"],
+            status=WorkflowStatus[row["status"]],
+            start_time=row["start_time"],
+            end_time=row["end_time"],
+            stage_start=bool(row["stage_start"]),
+            stage_end=bool(row["stage_end"]),
+            loop_start=bool(row["loop_start"]),
+            loop_end=bool(row["loop_end"]),
+            task_exception_details=exception_details,
+        )
+
+    def is_healthy(self) -> bool:
+        """Check if the database connection is healthy."""
+        try:
+            conn = self._get_connection()
+            conn.execute("SELECT 1")
+            return True
+        except Exception:
+            return False
