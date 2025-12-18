@@ -197,3 +197,140 @@ class SqliteWorkflowStore(WorkflowStore):
             self._insert_stage(conn, stage, execution.id)
 
         conn.commit()
+
+    def retrieve(self, execution_id: str) -> Workflow:
+        """Retrieve an execution by ID."""
+        conn = self._get_connection()
+
+        # Get execution
+        result = conn.execute(
+            "SELECT * FROM pipeline_executions WHERE id = :id",
+            {"id": execution_id},
+        )
+        row = result.fetchone()
+        if not row:
+            raise WorkflowNotFoundError(execution_id)
+
+        execution = self._row_to_execution(row)
+
+        # Get stages
+        result = conn.execute(
+            """
+            SELECT * FROM stage_executions
+            WHERE execution_id = :execution_id
+            """,
+            {"execution_id": execution_id},
+        )
+        stages = []
+        for stage_row in result.fetchall():
+            stage = self._row_to_stage(stage_row)
+            stage._execution = execution
+
+            # Get tasks for stage
+            task_result = conn.execute(
+                """
+                SELECT * FROM task_executions
+                WHERE stage_id = :stage_id
+                """,
+                {"stage_id": stage.id},
+            )
+            for task_row in task_result.fetchall():
+                task = self._row_to_task(task_row)
+                task._stage = stage
+                stage.tasks.append(task)
+
+            stages.append(stage)
+
+        execution.stages = stages
+        return execution
+
+    def retrieve_execution_summary(self, execution_id: str) -> Workflow:
+        """Retrieve execution metadata without stages."""
+        conn = self._get_connection()
+        result = conn.execute(
+            "SELECT * FROM pipeline_executions WHERE id = :id",
+            {"id": execution_id},
+        )
+        row = result.fetchone()
+        if not row:
+            raise WorkflowNotFoundError(execution_id)
+
+        return self._row_to_execution(row)
+
+    def update_status(self, execution: Workflow) -> None:
+        """Update execution status."""
+        conn = self._get_connection()
+        conn.execute(
+            """
+            UPDATE pipeline_executions SET
+                status = :status,
+                start_time = :start_time,
+                end_time = :end_time,
+                is_canceled = :is_canceled,
+                canceled_by = :canceled_by,
+                cancellation_reason = :cancellation_reason,
+                paused = :paused
+            WHERE id = :id
+            """,
+            {
+                "id": execution.id,
+                "status": execution.status.name,
+                "start_time": execution.start_time,
+                "end_time": execution.end_time,
+                "is_canceled": 1 if execution.is_canceled else 0,
+                "canceled_by": execution.canceled_by,
+                "cancellation_reason": execution.cancellation_reason,
+                "paused": (json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None),
+            },
+        )
+        conn.commit()
+
+    def delete(self, execution_id: str) -> None:
+        """Delete an execution."""
+        conn = self._get_connection()
+        conn.execute(
+            "DELETE FROM pipeline_executions WHERE id = :id",
+            {"id": execution_id},
+        )
+        conn.commit()
+
+    def store_stage(self, stage: StageExecution) -> None:
+        """Store or update a stage."""
+        conn = self._get_connection()
+
+        # Check if stage exists
+        result = conn.execute(
+            "SELECT id FROM stage_executions WHERE id = :id",
+            {"id": stage.id},
+        )
+        exists = result.fetchone() is not None
+
+        if exists:
+            # Update
+            conn.execute(
+                """
+                UPDATE stage_executions SET
+                    status = :status,
+                    context = :context,
+                    outputs = :outputs,
+                    start_time = :start_time,
+                    end_time = :end_time
+                WHERE id = :id
+                """,
+                {
+                    "id": stage.id,
+                    "status": stage.status.name,
+                    "context": json.dumps(stage.context),
+                    "outputs": json.dumps(stage.outputs),
+                    "start_time": stage.start_time,
+                    "end_time": stage.end_time,
+                },
+            )
+
+            # Update tasks
+            for task in stage.tasks:
+                self._upsert_task(conn, task, stage.id)
+        else:
+            self._insert_stage(conn, stage, stage.execution.id)
+
+        conn.commit()
