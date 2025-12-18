@@ -669,3 +669,143 @@ class SqliteWorkflowStore(WorkflowStore):
             },
         )
         conn.commit()
+
+    def resume(self, execution_id: str) -> None:
+        """Resume a paused execution."""
+        # First get current paused details
+        execution = self.retrieve(execution_id)
+        if execution.paused and execution.paused.pause_time:
+            current_time = int(time.time() * 1000)
+            execution.paused.resume_time = current_time
+            execution.paused.paused_ms = current_time - execution.paused.pause_time
+
+        conn = self._get_connection()
+        conn.execute(
+            """
+            UPDATE pipeline_executions SET
+                status = :status,
+                paused = :paused
+            WHERE id = :id
+            """,
+            {
+                "id": execution_id,
+                "status": WorkflowStatus.RUNNING.name,
+                "paused": (json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None),
+            },
+        )
+        conn.commit()
+
+    def cancel(
+        self,
+        execution_id: str,
+        canceled_by: str,
+        reason: str,
+    ) -> None:
+        """Cancel an execution."""
+        conn = self._get_connection()
+        conn.execute(
+            """
+            UPDATE pipeline_executions SET
+                is_canceled = 1,
+                canceled_by = :canceled_by,
+                cancellation_reason = :reason
+            WHERE id = :id
+            """,
+            {
+                "id": execution_id,
+                "canceled_by": canceled_by,
+                "reason": reason,
+            },
+        )
+        conn.commit()
+
+    def _insert_stage(self, conn: sqlite3.Connection, stage: StageExecution, execution_id: str) -> None:
+        """Insert a stage."""
+        conn.execute(
+            """
+            INSERT INTO stage_executions (
+                id, execution_id, ref_id, type, name, status, context, outputs,
+                requisite_stage_ref_ids, parent_stage_id, synthetic_stage_owner,
+                start_time, end_time, start_time_expiry, scheduled_time
+            ) VALUES (
+                :id, :execution_id, :ref_id, :type, :name, :status,
+                :context, :outputs, :requisite_stage_ref_ids,
+                :parent_stage_id, :synthetic_stage_owner, :start_time,
+                :end_time, :start_time_expiry, :scheduled_time
+            )
+            """,
+            {
+                "id": stage.id,
+                "execution_id": execution_id,
+                "ref_id": stage.ref_id,
+                "type": stage.type,
+                "name": stage.name,
+                "status": stage.status.name,
+                "context": json.dumps(stage.context),
+                "outputs": json.dumps(stage.outputs),
+                "requisite_stage_ref_ids": json.dumps(list(stage.requisite_stage_ref_ids)),
+                "parent_stage_id": stage.parent_stage_id,
+                "synthetic_stage_owner": (stage.synthetic_stage_owner.value if stage.synthetic_stage_owner else None),
+                "start_time": stage.start_time,
+                "end_time": stage.end_time,
+                "start_time_expiry": stage.start_time_expiry,
+                "scheduled_time": stage.scheduled_time,
+            },
+        )
+
+        # Insert tasks
+        for task in stage.tasks:
+            self._upsert_task(conn, task, stage.id)
+
+    def _upsert_task(self, conn: sqlite3.Connection, task: TaskExecution, stage_id: str) -> None:
+        """Insert or update a task."""
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO task_executions (
+                id, stage_id, name, implementing_class, status,
+                start_time, end_time, stage_start, stage_end,
+                loop_start, loop_end, task_exception_details
+            ) VALUES (
+                :id, :stage_id, :name, :implementing_class, :status,
+                :start_time, :end_time, :stage_start, :stage_end,
+                :loop_start, :loop_end, :task_exception_details
+            )
+            """,
+            {
+                "id": task.id,
+                "stage_id": stage_id,
+                "name": task.name,
+                "implementing_class": task.implementing_class,
+                "status": task.status.name,
+                "start_time": task.start_time,
+                "end_time": task.end_time,
+                "stage_start": 1 if task.stage_start else 0,
+                "stage_end": 1 if task.stage_end else 0,
+                "loop_start": 1 if task.loop_start else 0,
+                "loop_end": 1 if task.loop_end else 0,
+                "task_exception_details": json.dumps(task.task_exception_details),
+            },
+        )
+
+    def _execution_to_dict(self, execution: Workflow) -> dict[str, Any]:
+        """Convert execution to dictionary for storage."""
+        return {
+            "id": execution.id,
+            "type": execution.type.value,
+            "application": execution.application,
+            "name": execution.name,
+            "status": execution.status.name,
+            "start_time": execution.start_time,
+            "end_time": execution.end_time,
+            "start_time_expiry": execution.start_time_expiry,
+            "trigger": json.dumps(execution.trigger.to_dict()),
+            "is_canceled": 1 if execution.is_canceled else 0,
+            "canceled_by": execution.canceled_by,
+            "cancellation_reason": execution.cancellation_reason,
+            "paused": (json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None),
+            "pipeline_config_id": execution.pipeline_config_id,
+            "is_limit_concurrent": 1 if execution.is_limit_concurrent else 0,
+            "max_concurrent_executions": execution.max_concurrent_executions,
+            "keep_waiting_pipelines": 1 if execution.keep_waiting_pipelines else 0,
+            "origin": execution.origin,
+        }
