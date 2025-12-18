@@ -478,3 +478,194 @@ class SqliteWorkflowStore(WorkflowStore):
             stages.append(stage)
 
         return stages
+
+    def get_synthetic_stages(
+        self,
+        execution_id: str,
+        parent_stage_id: str,
+    ) -> list[StageExecution]:
+        """Get synthetic stages."""
+        conn = self._get_connection()
+        result = conn.execute(
+            """
+            SELECT * FROM stage_executions
+            WHERE execution_id = :execution_id
+            AND parent_stage_id = :parent_id
+            """,
+            {"execution_id": execution_id, "parent_id": parent_stage_id},
+        )
+
+        stages = []
+        for stage_row in result.fetchall():
+            stage = self._row_to_stage(stage_row)
+            stages.append(stage)
+
+        return stages
+
+    def get_merged_ancestor_outputs(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+    ) -> dict[str, Any]:
+        """Get merged outputs from all ancestor stages."""
+        # Fetch lightweight graph (ref_id, requisites, outputs)
+        conn = self._get_connection()
+        result = conn.execute(
+            """
+            SELECT ref_id, requisite_stage_ref_ids, outputs
+            FROM stage_executions
+            WHERE execution_id = :execution_id
+            """,
+            {"execution_id": execution_id},
+        )
+        rows = result.fetchall()
+
+        # Build graph in memory
+        nodes = {}
+        for row in rows:
+            req_ids = json.loads(row["requisite_stage_ref_ids"] or "[]")
+            outputs = json.loads(row["outputs"] or "{}")
+            nodes[row["ref_id"]] = {
+                "requisites": set(req_ids),
+                "outputs": outputs,
+            }
+
+        if stage_ref_id not in nodes:
+            return {}
+
+        # Find ancestors via BFS
+        ancestors = set()
+        queue = [stage_ref_id]
+        visited = {stage_ref_id}
+
+        while queue:
+            current = queue.pop(0)
+            node = nodes.get(current)
+            if not node:
+                continue
+
+            for req in node["requisites"]:
+                if req not in visited:
+                    visited.add(req)
+                    ancestors.add(req)
+                    queue.append(req)
+
+        # Topological sort of ancestors
+        sorted_ancestors = []
+
+        # Calculate in-degrees within the subgraph of ancestors
+        in_degree = {aid: 0 for aid in ancestors}
+        graph: dict[str, list[str]] = {aid: [] for aid in ancestors}
+
+        for aid in ancestors:
+            for req in nodes[aid]["requisites"]:
+                if req in ancestors:
+                    graph[req].append(aid)
+                    in_degree[aid] += 1
+
+        # Kahn's algorithm
+        queue = [aid for aid in ancestors if in_degree[aid] == 0]
+        while queue:
+            u = queue.pop(0)
+            sorted_ancestors.append(u)
+            for v in graph[u]:
+                in_degree[v] -= 1
+                if in_degree[v] == 0:
+                    queue.append(v)
+
+        # Merge outputs
+        merged_result: dict[str, Any] = {}
+        for aid in sorted_ancestors:
+            outputs = nodes[aid]["outputs"]
+            for key, value in outputs.items():
+                if key in merged_result and isinstance(merged_result[key], list) and isinstance(value, list):
+                    # Concatenate lists
+                    existing = merged_result[key]
+                    for item in value:
+                        if item not in existing:
+                            existing.append(item)
+                else:
+                    merged_result[key] = value
+
+        return merged_result
+
+    def retrieve_by_pipeline_config_id(
+        self,
+        pipeline_config_id: str,
+        criteria: WorkflowCriteria | None = None,
+    ) -> Iterator[Workflow]:
+        """Retrieve executions by pipeline config ID."""
+        query = """
+            SELECT id FROM pipeline_executions
+            WHERE pipeline_config_id = :config_id
+        """
+        params: dict[str, Any] = {"config_id": pipeline_config_id}
+
+        if criteria and criteria.statuses:
+            status_names = [s.name for s in criteria.statuses]
+            placeholders = ", ".join(f":status_{i}" for i in range(len(status_names)))
+            query += f" AND status IN ({placeholders})"
+            for i, name in enumerate(status_names):
+                params[f"status_{i}"] = name
+
+        query += " ORDER BY start_time DESC"
+
+        if criteria and criteria.page_size:
+            query += f" LIMIT {criteria.page_size}"
+
+        conn = self._get_connection()
+        result = conn.execute(query, params)
+        for row in result.fetchall():
+            yield self.retrieve(row[0])
+
+    def retrieve_by_application(
+        self,
+        application: str,
+        criteria: WorkflowCriteria | None = None,
+    ) -> Iterator[Workflow]:
+        """Retrieve executions by application."""
+        query = """
+            SELECT id FROM pipeline_executions
+            WHERE application = :application
+        """
+        params: dict[str, Any] = {"application": application}
+
+        if criteria and criteria.statuses:
+            status_names = [s.name for s in criteria.statuses]
+            placeholders = ", ".join(f":status_{i}" for i in range(len(status_names)))
+            query += f" AND status IN ({placeholders})"
+            for i, name in enumerate(status_names):
+                params[f"status_{i}"] = name
+
+        query += " ORDER BY start_time DESC"
+
+        if criteria and criteria.page_size:
+            query += f" LIMIT {criteria.page_size}"
+
+        conn = self._get_connection()
+        result = conn.execute(query, params)
+        for row in result.fetchall():
+            yield self.retrieve(row[0])
+
+    def pause(self, execution_id: str, paused_by: str) -> None:
+        """Pause an execution."""
+        paused = PausedDetails(
+            paused_by=paused_by,
+            pause_time=int(time.time() * 1000),
+        )
+
+        conn = self._get_connection()
+        conn.execute(
+            """
+            UPDATE pipeline_executions SET
+                status = :status,
+                paused = :paused
+            WHERE id = :id
+            """,
+            {
+                "id": execution_id,
+                "status": WorkflowStatus.PAUSED.name,
+                "paused": json.dumps(self._paused_to_dict(paused)),
+            },
+        )
+        conn.commit()
