@@ -181,3 +181,57 @@ class WorkflowStore(ABC):
             List of synthetic stages
         """
         pass
+
+    def get_merged_ancestor_outputs(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+    ) -> dict[str, Any]:
+        """
+        Get merged outputs from all ancestor stages.
+
+        Traverses the DAG upstream, collects outputs, and merges them
+        according to topological order (latest wins).
+
+        Args:
+            execution_id: The execution ID
+            stage_ref_id: The reference ID of the stage
+
+        Returns:
+            Merged dictionary of outputs
+        """
+        pass
+
+    def retrieve_by_pipeline_config_id(
+        self,
+        pipeline_config_id: str,
+        criteria: WorkflowCriteria | None = None,
+    ) -> Iterator[Workflow]:
+        """
+        Retrieve executions by pipeline config ID.
+
+        Args:
+            pipeline_config_id: The pipeline config ID
+            criteria: Optional query criteria
+
+        Returns:
+            Iterator of matching executions
+        """
+        pass
+
+    def retrieve_by_application(
+        self,
+        application: str,
+        criteria: WorkflowCriteria | None = None,
+    ) -> Iterator[Workflow]:
+        """
+        Retrieve executions by application.
+
+        Args:
+            application: The application name
+            criteria: Optional query criteria
+
+        Returns:
+            Iterator of matching executions
+        """
+        pass
