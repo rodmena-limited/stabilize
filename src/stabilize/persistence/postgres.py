@@ -652,3 +652,124 @@ class PostgresWorkflowStore(WorkflowStore):
                     },
                 )
             conn.commit()
+
+    def cancel(
+        self,
+        execution_id: str,
+        canceled_by: str,
+        reason: str,
+    ) -> None:
+        """Cancel an execution."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE pipeline_executions SET
+                        is_canceled = TRUE,
+                        canceled_by = %(canceled_by)s,
+                        cancellation_reason = %(reason)s
+                    WHERE id = %(id)s
+                    """,
+                    {
+                        "id": execution_id,
+                        "canceled_by": canceled_by,
+                        "reason": reason,
+                    },
+                )
+            conn.commit()
+
+    def _insert_stage(self, cur: Any, stage: StageExecution, execution_id: str) -> None:
+        """Insert a stage."""
+        cur.execute(
+            """
+            INSERT INTO stage_executions (
+                id, execution_id, ref_id, type, name, status, context, outputs,
+                requisite_stage_ref_ids, parent_stage_id, synthetic_stage_owner,
+                start_time, end_time, start_time_expiry, scheduled_time
+            ) VALUES (
+                %(id)s, %(execution_id)s, %(ref_id)s, %(type)s, %(name)s, %(status)s,
+                %(context)s::jsonb, %(outputs)s::jsonb, %(requisite_stage_ref_ids)s,
+                %(parent_stage_id)s, %(synthetic_stage_owner)s, %(start_time)s,
+                %(end_time)s, %(start_time_expiry)s, %(scheduled_time)s
+            )
+            """,
+            {
+                "id": stage.id,
+                "execution_id": execution_id,
+                "ref_id": stage.ref_id,
+                "type": stage.type,
+                "name": stage.name,
+                "status": stage.status.name,
+                "context": json.dumps(stage.context),
+                "outputs": json.dumps(stage.outputs),
+                "requisite_stage_ref_ids": list(stage.requisite_stage_ref_ids),
+                "parent_stage_id": stage.parent_stage_id,
+                "synthetic_stage_owner": (stage.synthetic_stage_owner.value if stage.synthetic_stage_owner else None),
+                "start_time": stage.start_time,
+                "end_time": stage.end_time,
+                "start_time_expiry": stage.start_time_expiry,
+                "scheduled_time": stage.scheduled_time,
+            },
+        )
+
+        # Insert tasks
+        for task in stage.tasks:
+            self._upsert_task(cur, task, stage.id)
+
+    def _upsert_task(self, cur: Any, task: TaskExecution, stage_id: str) -> None:
+        """Insert or update a task."""
+        cur.execute(
+            """
+            INSERT INTO task_executions (
+                id, stage_id, name, implementing_class, status,
+                start_time, end_time, stage_start, stage_end,
+                loop_start, loop_end, task_exception_details
+            ) VALUES (
+                %(id)s, %(stage_id)s, %(name)s, %(implementing_class)s, %(status)s,
+                %(start_time)s, %(end_time)s, %(stage_start)s, %(stage_end)s,
+                %(loop_start)s, %(loop_end)s, %(task_exception_details)s::jsonb
+            )
+            ON CONFLICT (id) DO UPDATE SET
+                status = EXCLUDED.status,
+                start_time = EXCLUDED.start_time,
+                end_time = EXCLUDED.end_time,
+                task_exception_details = EXCLUDED.task_exception_details
+            """,
+            {
+                "id": task.id,
+                "stage_id": stage_id,
+                "name": task.name,
+                "implementing_class": task.implementing_class,
+                "status": task.status.name,
+                "start_time": task.start_time,
+                "end_time": task.end_time,
+                "stage_start": task.stage_start,
+                "stage_end": task.stage_end,
+                "loop_start": task.loop_start,
+                "loop_end": task.loop_end,
+                "task_exception_details": json.dumps(task.task_exception_details),
+            },
+        )
+
+    def _execution_to_dict(self, execution: Workflow) -> dict[str, Any]:
+        """Convert execution to dictionary for storage."""
+        return {
+            "id": execution.id,
+            "type": execution.type.value,
+            "application": execution.application,
+            "name": execution.name,
+            "status": execution.status.name,
+            "start_time": execution.start_time,
+            "end_time": execution.end_time,
+            "start_time_expiry": execution.start_time_expiry,
+            "trigger": json.dumps(execution.trigger.to_dict()),
+            "is_canceled": execution.is_canceled,
+            "canceled_by": execution.canceled_by,
+            "cancellation_reason": execution.cancellation_reason,
+            "paused": (json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None),
+            "pipeline_config_id": execution.pipeline_config_id,
+            "is_limit_concurrent": execution.is_limit_concurrent,
+            "max_concurrent_executions": execution.max_concurrent_executions,
+            "keep_waiting_pipelines": execution.keep_waiting_pipelines,
+            "origin": execution.origin,
+        }
