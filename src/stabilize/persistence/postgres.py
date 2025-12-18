@@ -1,8 +1,17 @@
+"""
+PostgreSQL execution repository.
+
+Production-grade persistence using native psycopg3 with connection pooling.
+Uses singleton ConnectionManager for efficient connection pool sharing.
+"""
+
 from __future__ import annotations
+
 import json
 import time
 from collections.abc import Iterator
 from typing import Any, cast
+
 from stabilize.models.stage import StageExecution, SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.task import TaskExecution
@@ -18,6 +27,7 @@ from stabilize.persistence.store import (
     WorkflowStore,
 )
 
+
 class PostgresWorkflowStore(WorkflowStore):
     """
     PostgreSQL implementation of WorkflowStore.
@@ -29,6 +39,7 @@ class PostgresWorkflowStore(WorkflowStore):
     Connection pools are managed by singleton ConnectionManager for
     efficient resource sharing across all repository instances.
     """
+
     def __init__(
         self,
         connection_string: str,
@@ -678,6 +689,8 @@ class PostgresWorkflowStore(WorkflowStore):
                 )
             conn.commit()
 
+    # ========== Helper Methods ==========
+
     def _insert_stage(self, cur: Any, stage: StageExecution, execution_id: str) -> None:
         """Insert a stage."""
         cur.execute(
@@ -773,3 +786,107 @@ class PostgresWorkflowStore(WorkflowStore):
             "keep_waiting_pipelines": execution.keep_waiting_pipelines,
             "origin": execution.origin,
         }
+
+    def _paused_to_dict(self, paused: PausedDetails | None) -> dict[str, Any] | None:
+        """Convert PausedDetails to dict."""
+        if paused is None:
+            return None
+        return {
+            "paused_by": paused.paused_by,
+            "pause_time": paused.pause_time,
+            "resume_time": paused.resume_time,
+            "paused_ms": paused.paused_ms,
+        }
+
+    def _row_to_execution(self, row: dict[str, Any]) -> Workflow:
+        """Convert database row to Workflow."""
+        trigger_data = row["trigger"] if isinstance(row["trigger"], dict) else json.loads(row["trigger"] or "{}")
+        paused_data = (
+            row["paused"] if isinstance(row["paused"], dict) else json.loads(row["paused"]) if row["paused"] else None
+        )
+
+        paused = None
+        if paused_data:
+            paused = PausedDetails(
+                paused_by=paused_data.get("paused_by", ""),
+                pause_time=paused_data.get("pause_time"),
+                resume_time=paused_data.get("resume_time"),
+                paused_ms=paused_data.get("paused_ms", 0),
+            )
+
+        return Workflow(
+            id=row["id"],
+            type=WorkflowType(row["type"]),
+            application=row["application"],
+            name=row["name"] or "",
+            status=WorkflowStatus[row["status"]],
+            start_time=row["start_time"],
+            end_time=row["end_time"],
+            start_time_expiry=row["start_time_expiry"],
+            trigger=Trigger.from_dict(trigger_data),
+            is_canceled=row["is_canceled"] or False,
+            canceled_by=row["canceled_by"],
+            cancellation_reason=row["cancellation_reason"],
+            paused=paused,
+            pipeline_config_id=row["pipeline_config_id"],
+            is_limit_concurrent=row["is_limit_concurrent"] or False,
+            max_concurrent_executions=row["max_concurrent_executions"] or 0,
+            keep_waiting_pipelines=row["keep_waiting_pipelines"] or False,
+            origin=row["origin"] or "unknown",
+        )
+
+    def _row_to_stage(self, row: dict[str, Any]) -> StageExecution:
+        """Convert database row to StageExecution."""
+        context = row["context"] if isinstance(row["context"], dict) else json.loads(row["context"] or "{}")
+        outputs = row["outputs"] if isinstance(row["outputs"], dict) else json.loads(row["outputs"] or "{}")
+
+        synthetic_owner = None
+        if row["synthetic_stage_owner"]:
+            synthetic_owner = SyntheticStageOwner(row["synthetic_stage_owner"])
+
+        return StageExecution(
+            id=row["id"],
+            ref_id=row["ref_id"],
+            type=row["type"],
+            name=row["name"] or "",
+            status=WorkflowStatus[row["status"]],
+            context=context,
+            outputs=outputs,
+            requisite_stage_ref_ids=set(row["requisite_stage_ref_ids"] or []),
+            parent_stage_id=row["parent_stage_id"],
+            synthetic_stage_owner=synthetic_owner,
+            start_time=row["start_time"],
+            end_time=row["end_time"],
+            start_time_expiry=row["start_time_expiry"],
+            scheduled_time=row["scheduled_time"],
+        )
+
+    def _row_to_task(self, row: dict[str, Any]) -> TaskExecution:
+        """Convert database row to TaskExecution."""
+        exception_details = row["task_exception_details"]
+        if isinstance(exception_details, str):
+            exception_details = json.loads(exception_details or "{}")
+
+        return TaskExecution(
+            id=row["id"],
+            name=row["name"],
+            implementing_class=row["implementing_class"],
+            status=WorkflowStatus[row["status"]],
+            start_time=row["start_time"],
+            end_time=row["end_time"],
+            stage_start=row["stage_start"] or False,
+            stage_end=row["stage_end"] or False,
+            loop_start=row["loop_start"] or False,
+            loop_end=row["loop_end"] or False,
+            task_exception_details=exception_details or {},
+        )
+
+    def is_healthy(self) -> bool:
+        """Check if the database connection is healthy."""
+        try:
+            with self._pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+            return True
+        except Exception:
+            return False
