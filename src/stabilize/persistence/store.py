@@ -130,3 +130,54 @@ class WorkflowStore(ABC):
             ValueError: If stage not found
         """
         pass
+
+    def get_upstream_stages(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+    ) -> list[StageExecution]:
+        """
+        Get upstream stages for a given stage.
+
+        Args:
+            execution_id: The execution ID
+            stage_ref_id: The reference ID of the stage
+
+        Returns:
+            List of upstream stages
+        """
+        pass
+
+    def get_downstream_stages(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+    ) -> list[StageExecution]:
+        """
+        Get downstream stages for a given stage.
+
+        Args:
+            execution_id: The execution ID
+            stage_ref_id: The reference ID of the stage
+
+        Returns:
+            List of downstream stages
+        """
+        pass
+
+    def get_synthetic_stages(
+        self,
+        execution_id: str,
+        parent_stage_id: str,
+    ) -> list[StageExecution]:
+        """
+        Get synthetic stages for a given parent stage.
+
+        Args:
+            execution_id: The execution ID
+            parent_stage_id: The parent stage ID
+
+        Returns:
+            List of synthetic stages
+        """
+        pass
