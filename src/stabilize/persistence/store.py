@@ -62,3 +62,30 @@ class WorkflowStore(ABC):
             WorkflowNotFoundError: If not found
         """
         pass
+
+    def update_status(self, execution: Workflow) -> None:
+        """
+        Update the status of an execution.
+
+        Args:
+            execution: The execution with updated status
+        """
+        pass
+
+    def delete(self, execution_id: str) -> None:
+        """
+        Delete an execution and all its stages.
+
+        Args:
+            execution_id: The execution ID
+        """
+        pass
+
+    def store_stage(self, stage: StageExecution) -> None:
+        """
+        Store or update a stage.
+
+        Args:
+            stage: The stage to store
+        """
+        pass
