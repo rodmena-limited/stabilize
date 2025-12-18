@@ -1,27 +1,48 @@
+"""
+WorkflowStore interface.
+
+This module defines the abstract interface for execution persistence.
+All storage backends must implement this interface.
+"""
+
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+
 from stabilize.models.status import WorkflowStatus
+
+if TYPE_CHECKING:
+    from stabilize.models.stage import StageExecution
+    from stabilize.models.workflow import Workflow
+
 
 class WorkflowNotFoundError(Exception):
     """Raised when an execution cannot be found."""
+
     def __init__(self, execution_id: str):
         self.execution_id = execution_id
         super().__init__(f"Execution not found: {execution_id}")
 
+
 @dataclass
 class WorkflowCriteria:
     """Criteria for querying executions."""
+
     page_size: int = 20
     statuses: set[WorkflowStatus] | None = None
     start_time_before: int | None = None
     start_time_after: int | None = None
 
+
 class WorkflowStore(ABC):
     """Abstract interface for execution persistence."""
 
+    # ========== Execution Operations ==========
+
+    @abstractmethod
     def store(self, execution: Workflow) -> None:
         """
         Store a complete execution.
@@ -33,6 +54,7 @@ class WorkflowStore(ABC):
         """
         pass
 
+    @abstractmethod
     def retrieve(self, execution_id: str) -> Workflow:
         """
         Retrieve an execution by ID.
@@ -48,6 +70,7 @@ class WorkflowStore(ABC):
         """
         pass
 
+    @abstractmethod
     def retrieve_execution_summary(self, execution_id: str) -> Workflow:
         """
         Retrieve execution metadata without stages.
@@ -63,6 +86,7 @@ class WorkflowStore(ABC):
         """
         pass
 
+    @abstractmethod
     def update_status(self, execution: Workflow) -> None:
         """
         Update the status of an execution.
@@ -72,6 +96,7 @@ class WorkflowStore(ABC):
         """
         pass
 
+    @abstractmethod
     def delete(self, execution_id: str) -> None:
         """
         Delete an execution and all its stages.
@@ -81,6 +106,9 @@ class WorkflowStore(ABC):
         """
         pass
 
+    # ========== Stage Operations ==========
+
+    @abstractmethod
     def store_stage(self, stage: StageExecution) -> None:
         """
         Store or update a stage.
@@ -90,6 +118,7 @@ class WorkflowStore(ABC):
         """
         pass
 
+    @abstractmethod
     def add_stage(self, stage: StageExecution) -> None:
         """
         Add a new stage to an execution.
@@ -99,6 +128,7 @@ class WorkflowStore(ABC):
         """
         pass
 
+    @abstractmethod
     def remove_stage(
         self,
         execution: Workflow,
@@ -113,6 +143,7 @@ class WorkflowStore(ABC):
         """
         pass
 
+    @abstractmethod
     def retrieve_stage(self, stage_id: str) -> StageExecution:
         """
         Retrieve a single stage by ID.
@@ -131,6 +162,7 @@ class WorkflowStore(ABC):
         """
         pass
 
+    @abstractmethod
     def get_upstream_stages(
         self,
         execution_id: str,
@@ -148,6 +180,7 @@ class WorkflowStore(ABC):
         """
         pass
 
+    @abstractmethod
     def get_downstream_stages(
         self,
         execution_id: str,
@@ -165,6 +198,7 @@ class WorkflowStore(ABC):
         """
         pass
 
+    @abstractmethod
     def get_synthetic_stages(
         self,
         execution_id: str,
@@ -182,6 +216,7 @@ class WorkflowStore(ABC):
         """
         pass
 
+    @abstractmethod
     def get_merged_ancestor_outputs(
         self,
         execution_id: str,
@@ -202,6 +237,9 @@ class WorkflowStore(ABC):
         """
         pass
 
+    # ========== Query Operations ==========
+
+    @abstractmethod
     def retrieve_by_pipeline_config_id(
         self,
         pipeline_config_id: str,
@@ -219,6 +257,7 @@ class WorkflowStore(ABC):
         """
         pass
 
+    @abstractmethod
     def retrieve_by_application(
         self,
         application: str,
@@ -235,3 +274,72 @@ class WorkflowStore(ABC):
             Iterator of matching executions
         """
         pass
+
+    # ========== Pause/Resume Operations ==========
+
+    @abstractmethod
+    def pause(
+        self,
+        execution_id: str,
+        paused_by: str,
+    ) -> None:
+        """
+        Pause an execution.
+
+        Args:
+            execution_id: The execution ID
+            paused_by: Who paused it
+        """
+        pass
+
+    @abstractmethod
+    def resume(self, execution_id: str) -> None:
+        """
+        Resume a paused execution.
+
+        Args:
+            execution_id: The execution ID
+        """
+        pass
+
+    # ========== Cancel Operations ==========
+
+    @abstractmethod
+    def cancel(
+        self,
+        execution_id: str,
+        canceled_by: str,
+        reason: str,
+    ) -> None:
+        """
+        Cancel an execution.
+
+        Args:
+            execution_id: The execution ID
+            canceled_by: Who canceled it
+            reason: Cancellation reason
+        """
+        pass
+
+    # ========== Optional Methods ==========
+
+    def is_healthy(self) -> bool:
+        """
+        Check if the repository is healthy.
+
+        Returns:
+            True if healthy
+        """
+        return True
+
+    def count_by_application(self, application: str) -> int:
+        """
+        Count executions for an application.
+
+        Args:
+            application: The application name
+
+        Returns:
+            Number of executions
+        """
+        return sum(1 for _ in self.retrieve_by_application(application))
