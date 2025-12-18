@@ -89,3 +89,44 @@ class WorkflowStore(ABC):
             stage: The stage to store
         """
         pass
+
+    def add_stage(self, stage: StageExecution) -> None:
+        """
+        Add a new stage to an execution.
+
+        Args:
+            stage: The stage to add
+        """
+        pass
+
+    def remove_stage(
+        self,
+        execution: Workflow,
+        stage_id: str,
+    ) -> None:
+        """
+        Remove a stage from an execution.
+
+        Args:
+            execution: The execution
+            stage_id: The stage ID to remove
+        """
+        pass
+
+    def retrieve_stage(self, stage_id: str) -> StageExecution:
+        """
+        Retrieve a single stage by ID.
+
+        The returned stage will have a partial parent execution attached
+        (containing metadata but no other stages).
+
+        Args:
+            stage_id: The stage ID
+
+        Returns:
+            The stage execution
+
+        Raises:
+            ValueError: If stage not found
+        """
+        pass
