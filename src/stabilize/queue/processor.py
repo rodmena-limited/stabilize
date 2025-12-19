@@ -1,4 +1,12 @@
+"""
+Queue processor for handling messages.
+
+This module provides the QueueProcessor class that polls messages from
+the queue and dispatches them to appropriate handlers.
+"""
+
 from __future__ import annotations
+
 import logging
 import threading
 import time
@@ -7,10 +15,14 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Generic, TypeVar
+
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.queue import Queue
+
 logger = logging.getLogger(__name__)
+
 M = TypeVar("M", bound=Message)
+
 
 class MessageHandler(Generic[M]):
     """
@@ -19,6 +31,7 @@ class MessageHandler(Generic[M]):
     Each handler processes a specific type of message.
     """
 
+    @property
     def message_type(self) -> type[M]:
         """Return the type of message this handler processes."""
         raise NotImplementedError
@@ -32,13 +45,23 @@ class MessageHandler(Generic[M]):
         """
         raise NotImplementedError
 
+
 @dataclass
 class QueueProcessorConfig:
     """Configuration for the queue processor."""
+
+    # How often to poll the queue (milliseconds)
     poll_frequency_ms: int = 50
+
+    # Maximum number of concurrent message handlers
     max_workers: int = 10
+
+    # Delay before reprocessing a failed message
     retry_delay: timedelta = timedelta(seconds=15)
+
+    # Whether to stop on unhandled exceptions
     stop_on_error: bool = False
+
 
 class QueueProcessor:
     """
@@ -54,6 +77,7 @@ class QueueProcessor:
         processor.register_handler(StartWorkflowHandler(queue, repository))
         processor.start()
     """
+
     def __init__(
         self,
         queue: Queue,
@@ -246,11 +270,43 @@ class QueueProcessor:
 
         return count
 
+    @property
     def is_running(self) -> bool:
         """Check if the processor is running."""
         return self._running
 
+    @property
     def active_count(self) -> int:
         """Get the number of actively processing messages."""
         with self._lock:
             return self._active_count
+
+
+class SynchronousQueueProcessor(QueueProcessor):
+    """
+    A synchronous queue processor that processes messages immediately.
+
+    Useful for testing where you want deterministic execution order.
+    """
+
+    def __init__(self, queue: Queue) -> None:
+        super().__init__(queue)
+        self._running = True
+
+    def start(self) -> None:
+        """No-op for synchronous processor."""
+        pass
+
+    def stop(self, wait: bool = True) -> None:
+        """No-op for synchronous processor."""
+        pass
+
+    def push_and_process(self, message: Message) -> None:
+        """
+        Push a message and process it immediately.
+
+        Args:
+            message: The message to push and process
+        """
+        self.queue.push(message)
+        self.process_all(timeout=5.0)
