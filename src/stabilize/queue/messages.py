@@ -156,3 +156,38 @@ class ResumeStage(StageLevel):
 
     Continues execution from where it was paused.
     """
+
+@dataclass
+class ContinueParentStage(StageLevel):
+    """
+    Message to continue parent stage after synthetic stage completes.
+
+    Sent when a synthetic stage completes to notify its parent.
+    """
+    phase: SyntheticStageOwner = SyntheticStageOwner.STAGE_AFTER
+
+@dataclass
+class TaskLevel(StageLevel):
+    """
+    Base class for task-level messages.
+
+    These messages target a specific task within a stage.
+    """
+    task_id: str = ''
+
+    def from_stage_level(cls, msg: StageLevel, task_id: str) -> TaskLevel:
+        """Create a task-level message from a stage-level message."""
+        return cls(
+            execution_type=msg.execution_type,
+            execution_id=msg.execution_id,
+            stage_id=msg.stage_id,
+            task_id=task_id,
+        )
+
+@dataclass
+class StartTask(TaskLevel):
+    """
+    Message to start a task.
+
+    Sets task status to RUNNING and triggers RunTask.
+    """
