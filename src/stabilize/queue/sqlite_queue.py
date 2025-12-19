@@ -58,3 +58,18 @@ class SqliteQueue(Queue):
         self.max_attempts = max_attempts
         self._manager = get_connection_manager()
         self._pending: dict[int, dict[str, Any]] = {}
+
+    def _get_connection(self) -> sqlite3.Connection:
+        """
+        Get thread-local connection from ConnectionManager.
+
+        Returns a connection configured with:
+        - Row factory for dict-like access
+        - WAL journal mode for concurrency
+        - 30 second busy timeout
+        """
+        return self._manager.get_sqlite_connection(self.connection_string)
+
+    def close(self) -> None:
+        """Close SQLite connection for current thread."""
+        self._manager.close_sqlite_connection(self.connection_string)
