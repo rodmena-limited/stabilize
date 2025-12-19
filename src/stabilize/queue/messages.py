@@ -124,3 +124,35 @@ class CompleteStage(StageLevel):
 
     Determines stage status, plans after stages, and triggers downstream.
     """
+
+@dataclass
+class SkipStage(StageLevel):
+    """
+    Message to skip a stage.
+
+    Sets stage status to SKIPPED and triggers downstream stages.
+    """
+
+@dataclass
+class CancelStage(StageLevel):
+    """
+    Message to cancel a stage.
+
+    Cancels any running tasks and marks stage as canceled.
+    """
+
+@dataclass
+class RestartStage(StageLevel):
+    """
+    Message to restart a stage.
+
+    Resets stage status and re-executes from the beginning.
+    """
+
+@dataclass
+class ResumeStage(StageLevel):
+    """
+    Message to resume a paused stage.
+
+    Continues execution from where it was paused.
+    """
