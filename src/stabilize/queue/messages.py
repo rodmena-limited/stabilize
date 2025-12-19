@@ -191,3 +191,38 @@ class StartTask(TaskLevel):
 
     Sets task status to RUNNING and triggers RunTask.
     """
+
+@dataclass
+class RunTask(TaskLevel):
+    """
+    Message to execute a task.
+
+    Runs the task implementation and handles the result.
+    """
+    task_type: str = ''
+
+@dataclass
+class CompleteTask(TaskLevel):
+    """
+    Message to complete a task.
+
+    Updates task status and triggers next task or stage completion.
+    """
+    status: WorkflowStatus = WorkflowStatus.SUCCEEDED
+    original_status: WorkflowStatus | None = None
+
+@dataclass
+class PauseTask(TaskLevel):
+    """
+    Message to pause a task.
+
+    Used when execution is paused - task will resume when execution resumes.
+    """
+
+@dataclass
+class InvalidWorkflowId(WorkflowLevel):
+    """
+    Message indicating an invalid execution ID was referenced.
+
+    Logged and dropped - no further processing.
+    """
