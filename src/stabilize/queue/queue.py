@@ -289,3 +289,138 @@ class PostgresQueue(Queue):
     def close(self) -> None:
         """Close the connection pool via connection manager."""
         self._manager.close_postgres_pool(self.connection_string)
+
+    def _serialize_message(self, message: Message) -> str:
+        """Serialize a message to JSON."""
+        from enum import Enum
+
+        data = {}
+        for key, value in message.__dict__.items():
+            if key.startswith("_"):
+                continue
+            if isinstance(value, datetime):
+                data[key] = value.isoformat()
+            elif isinstance(value, Enum):
+                data[key] = value.name  # Use name, not value (which may be a tuple)
+            else:
+                data[key] = value
+        return json.dumps(data)
+
+    def _deserialize_message(self, type_name: str, payload: Any) -> Message:
+        """Deserialize a message from JSON or dict."""
+        from stabilize.models.stage import SyntheticStageOwner
+        from stabilize.models.status import WorkflowStatus
+
+        # psycopg3 returns JSONB as dict directly
+        if isinstance(payload, dict):
+            data = payload
+        else:
+            data = json.loads(payload)
+
+        # Convert enum values
+        if "status" in data and isinstance(data["status"], str):
+            data["status"] = WorkflowStatus[data["status"]]
+        if "original_status" in data and data["original_status"]:
+            data["original_status"] = WorkflowStatus[data["original_status"]]
+        if "phase" in data and isinstance(data["phase"], str):
+            data["phase"] = SyntheticStageOwner[data["phase"]]
+
+        # Remove metadata fields
+        data.pop("message_id", None)
+        data.pop("created_at", None)
+        data.pop("attempts", None)
+        data.pop("max_attempts", None)
+
+        return create_message_from_dict(type_name, data)
+
+    def push(
+        self,
+        message: Message,
+        delay: timedelta | None = None,
+    ) -> None:
+        """Push a message onto the queue."""
+        pool = self._get_pool()
+        deliver_at = datetime.now()
+        if delay:
+            deliver_at += delay
+
+        message_type = get_message_type_name(message)
+        message_id = str(uuid.uuid4())
+        payload = self._serialize_message(message)
+
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    INSERT INTO {self.table_name}
+                    (message_id, message_type, payload, deliver_at, attempts)
+                    VALUES (%(message_id)s, %(type)s, %(payload)s::jsonb, %(deliver_at)s, 0)
+                    """,
+                    {
+                        "message_id": message_id,
+                        "type": message_type,
+                        "payload": payload,
+                        "deliver_at": deliver_at,
+                    },
+                )
+            conn.commit()
+
+    def poll(self, callback: Callable[[Message], None]) -> None:
+        """Poll for a message and process it with the callback."""
+        message = self.poll_one()
+        if message:
+            try:
+                callback(message)
+                self.ack(message)
+            except Exception:
+                # Message will be retried after lock expires
+                raise
+
+    def poll_one(self) -> Message | None:
+        """Poll for a single message without callback."""
+        pool = self._get_pool()
+        locked_until = datetime.now() + self.lock_duration
+
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                # Use SKIP LOCKED to allow concurrent workers
+                cur.execute(
+                    f"""
+                    UPDATE {self.table_name}
+                    SET locked_until = %(locked_until)s,
+                        attempts = attempts + 1
+                    WHERE id = (
+                        SELECT id FROM {self.table_name}
+                        WHERE deliver_at <= NOW()
+                        AND (locked_until IS NULL OR locked_until < NOW())
+                        AND attempts < %(max_attempts)s
+                        ORDER BY deliver_at
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    RETURNING id, message_type, payload, attempts
+                    """,
+                    {
+                        "locked_until": locked_until,
+                        "max_attempts": self.max_attempts,
+                    },
+                )
+                row = cur.fetchone()
+            conn.commit()
+
+            if row:
+                msg_id = row["id"]
+                msg_type = row["message_type"]
+                payload = row["payload"]
+                attempts = row["attempts"]
+
+                message = self._deserialize_message(msg_type, payload)
+                message.message_id = str(msg_id)
+                message.attempts = attempts
+                self._pending[msg_id] = {
+                    "message": message,
+                    "type": msg_type,
+                }
+                return message
+
+            return None
