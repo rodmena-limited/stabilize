@@ -122,3 +122,61 @@ class SqliteQueue(Queue):
             else:
                 data[key] = value
         return json.dumps(data)
+
+    def _deserialize_message(self, type_name: str, payload: Any) -> Message:
+        """Deserialize a message from JSON string or dict."""
+        from stabilize.models.stage import SyntheticStageOwner
+        from stabilize.models.status import WorkflowStatus
+
+        if isinstance(payload, dict):
+            data = payload
+        else:
+            data = json.loads(payload)
+
+        # Convert enum values
+        if "status" in data and isinstance(data["status"], str):
+            data["status"] = WorkflowStatus[data["status"]]
+        if "original_status" in data and data["original_status"]:
+            data["original_status"] = WorkflowStatus[data["original_status"]]
+        if "phase" in data and isinstance(data["phase"], str):
+            data["phase"] = SyntheticStageOwner[data["phase"]]
+
+        # Remove metadata fields
+        data.pop("message_id", None)
+        data.pop("created_at", None)
+        data.pop("attempts", None)
+        data.pop("max_attempts", None)
+
+        return create_message_from_dict(type_name, data)
+
+    def push(
+        self,
+        message: Message,
+        delay: timedelta | None = None,
+    ) -> None:
+        """Push a message onto the queue."""
+        conn = self._get_connection()
+        deliver_at = datetime.now()
+        if delay:
+            deliver_at += delay
+
+        message_type = get_message_type_name(message)
+        message_id = str(uuid.uuid4())
+        payload = self._serialize_message(message)
+
+        conn.execute(
+            f"""
+            INSERT INTO {self.table_name}
+            (message_id, message_type, payload, deliver_at, attempts)
+            VALUES (:message_id, :type, :payload, :deliver_at, 0)
+            """,
+            {
+                "message_id": message_id,
+                "type": message_type,
+                "payload": payload,
+                "deliver_at": deliver_at.isoformat(),
+            },
+        )
+        conn.commit()
+
+        logger.debug(f"Pushed {message_type} (id={message_id}, deliver_at={deliver_at})")
