@@ -107,3 +107,58 @@ class QueueProcessor:
                 handler_func(message)
 
         self.register_handler(FuncHandler())
+
+    def start(self) -> None:
+        """Start the queue processor."""
+        if self._running:
+            return
+
+        self._running = True
+        self._executor = ThreadPoolExecutor(max_workers=self.config.max_workers)
+        self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
+        self._poll_thread.start()
+        logger.info("Queue processor started")
+
+    def stop(self, wait: bool = True) -> None:
+        """
+        Stop the queue processor.
+
+        Args:
+            wait: Whether to wait for pending messages to complete
+        """
+        self._running = False
+
+        if self._poll_thread:
+            self._poll_thread.join(timeout=5.0)
+
+        if self._executor:
+            self._executor.shutdown(wait=wait)
+
+        logger.info("Queue processor stopped")
+
+    def _poll_loop(self) -> None:
+        """Main polling loop."""
+        poll_interval = self.config.poll_frequency_ms / 1000.0
+
+        while self._running:
+            try:
+                # Check if we have capacity
+                with self._lock:
+                    if self._active_count >= self.config.max_workers:
+                        time.sleep(poll_interval)
+                        continue
+
+                # Try to get a message
+                message = self.queue.poll_one()
+
+                if message:
+                    self._submit_message(message)
+                else:
+                    time.sleep(poll_interval)
+
+            except Exception as e:
+                logger.error(f"Error in poll loop: {e}", exc_info=True)
+                if self.config.stop_on_error:
+                    self._running = False
+                    break
+                time.sleep(poll_interval)
