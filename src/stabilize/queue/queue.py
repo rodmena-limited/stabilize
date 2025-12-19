@@ -62,3 +62,51 @@ class Queue(ABC):
             The message or None
         """
         pass
+
+    def ack(self, message: Message) -> None:
+        """
+        Acknowledge a message, removing it from the queue.
+
+        Args:
+            message: The message to acknowledge
+        """
+        pass
+
+    def ensure(
+        self,
+        message: Message,
+        delay: timedelta,
+    ) -> None:
+        """
+        Ensure a message is in the queue with the given delay.
+
+        If the message is already in the queue, updates its delay.
+        If not, adds it with the given delay.
+
+        Args:
+            message: The message to ensure
+            delay: Delay before message is delivered
+        """
+        pass
+
+    def reschedule(
+        self,
+        message: Message,
+        delay: timedelta,
+    ) -> None:
+        """
+        Reschedule a message with a new delay.
+
+        Args:
+            message: The message to reschedule
+            delay: New delay before message is delivered
+        """
+        pass
+
+    def size(self) -> int:
+        """Get the number of messages in the queue."""
+        pass
+
+    def clear(self) -> None:
+        """Clear all messages from the queue."""
+        pass
