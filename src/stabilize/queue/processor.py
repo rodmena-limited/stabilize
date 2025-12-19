@@ -162,3 +162,60 @@ class QueueProcessor:
                     self._running = False
                     break
                 time.sleep(poll_interval)
+
+    def _submit_message(self, message: Message) -> None:
+        """Submit a message to the thread pool for processing."""
+        with self._lock:
+            self._active_count += 1
+
+        def process_and_ack() -> None:
+            try:
+                self._handle_message(message)
+                self.queue.ack(message)
+            except Exception as e:
+                logger.error(
+                    f"Error handling {get_message_type_name(message)}: {e}",
+                    exc_info=True,
+                )
+                # Message will be reprocessed after lock expires or reschedule
+                self.queue.reschedule(message, self.config.retry_delay)
+            finally:
+                with self._lock:
+                    self._active_count -= 1
+
+        if self._executor is not None:
+            self._executor.submit(process_and_ack)
+
+    def _handle_message(self, message: Message) -> None:
+        """Handle a message with the appropriate handler."""
+        message_type = type(message)
+        handler = self._handlers.get(message_type)
+
+        if handler is None:
+            logger.warning(f"No handler registered for {get_message_type_name(message)}")
+            return
+
+        logger.debug(f"Handling {get_message_type_name(message)} (execution={getattr(message, 'execution_id', 'N/A')})")
+
+        handler.handle(message)
+
+    def process_one(self) -> bool:
+        """
+        Process a single message synchronously.
+
+        Useful for testing and debugging.
+
+        Returns:
+            True if a message was processed, False otherwise
+        """
+        message = self.queue.poll_one()
+        if message:
+            try:
+                self._handle_message(message)
+                self.queue.ack(message)
+                return True
+            except Exception as e:
+                logger.error(f"Error handling message: {e}", exc_info=True)
+                self.queue.reschedule(message, self.config.retry_delay)
+                raise
+        return False
