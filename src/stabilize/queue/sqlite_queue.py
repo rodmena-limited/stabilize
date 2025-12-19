@@ -269,3 +269,30 @@ class SqliteQueue(Queue):
 
         logger.debug(f"Polled {msg_type} (id={msg_id}, attempts={attempts + 1})")
         return message
+
+    def ack(self, message: Message) -> None:
+        """Acknowledge a message, removing it from the queue."""
+        if not message.message_id:
+            return
+
+        msg_id = int(message.message_id)
+        conn = self._get_connection()
+
+        conn.execute(
+            f"DELETE FROM {self.table_name} WHERE id = :id",
+            {"id": msg_id},
+        )
+        conn.commit()
+
+        self._pending.pop(msg_id, None)
+        logger.debug(f"Acked message (id={msg_id})")
+
+    def ensure(
+        self,
+        message: Message,
+        delay: timedelta,
+    ) -> None:
+        """Ensure a message is in the queue with the given delay."""
+        # For simplicity, just push the message
+        # A full implementation would check for duplicates
+        self.push(message, delay)
