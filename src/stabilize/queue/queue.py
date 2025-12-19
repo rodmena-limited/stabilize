@@ -1,4 +1,12 @@
+"""
+Queue interface and implementations.
+
+This module provides the abstract Queue interface and concrete implementations
+for different backends (in-memory, PostgreSQL).
+"""
+
 from __future__ import annotations
+
 import heapq
 import json
 import logging
@@ -10,12 +18,15 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
+
 from stabilize.queue.messages import (
     Message,
     create_message_from_dict,
     get_message_type_name,
 )
+
 logger = logging.getLogger(__name__)
+
 
 class Queue(ABC):
     """
@@ -25,6 +36,7 @@ class Queue(ABC):
     that drive stage and task execution.
     """
 
+    @abstractmethod
     def push(
         self,
         message: Message,
@@ -39,6 +51,7 @@ class Queue(ABC):
         """
         pass
 
+    @abstractmethod
     def poll(self, callback: Callable[[Message], None]) -> None:
         """
         Poll for a message and process it with the callback.
@@ -51,6 +64,7 @@ class Queue(ABC):
         """
         pass
 
+    @abstractmethod
     def poll_one(self) -> Message | None:
         """
         Poll for a single message without callback.
@@ -63,6 +77,7 @@ class Queue(ABC):
         """
         pass
 
+    @abstractmethod
     def ack(self, message: Message) -> None:
         """
         Acknowledge a message, removing it from the queue.
@@ -72,6 +87,7 @@ class Queue(ABC):
         """
         pass
 
+    @abstractmethod
     def ensure(
         self,
         message: Message,
@@ -89,6 +105,7 @@ class Queue(ABC):
         """
         pass
 
+    @abstractmethod
     def reschedule(
         self,
         message: Message,
@@ -103,20 +120,25 @@ class Queue(ABC):
         """
         pass
 
+    @abstractmethod
     def size(self) -> int:
         """Get the number of messages in the queue."""
         pass
 
+    @abstractmethod
     def clear(self) -> None:
         """Clear all messages from the queue."""
         pass
 
+
 @dataclass(order=True)
 class QueuedMessage:
     """A message with its delivery time for priority queue ordering."""
+
     deliver_at: float
     message: Message = field(compare=False)
-    message_id: str = field(compare=False, default='')
+    message_id: str = field(compare=False, default="")
+
 
 class InMemoryQueue(Queue):
     """
@@ -125,6 +147,7 @@ class InMemoryQueue(Queue):
     Useful for testing and single-process execution.
     Messages are ordered by delivery time.
     """
+
     def __init__(self) -> None:
         self._queue: list[QueuedMessage] = []
         self._lock = threading.Lock()
@@ -247,6 +270,7 @@ class InMemoryQueue(Queue):
             self._pending.clear()
             self._message_index.clear()
 
+
 class PostgresQueue(Queue):
     """
     PostgreSQL-backed queue implementation.
@@ -257,6 +281,7 @@ class PostgresQueue(Queue):
     Connection pools are managed by singleton ConnectionManager for
     efficient resource sharing across all queue instances.
     """
+
     def __init__(
         self,
         connection_string: str,
@@ -424,3 +449,78 @@ class PostgresQueue(Queue):
                 return message
 
             return None
+
+    def ack(self, message: Message) -> None:
+        """Acknowledge a message, removing it from the queue."""
+        if not message.message_id:
+            return
+
+        msg_id = int(message.message_id)
+        pool = self._get_pool()
+
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"DELETE FROM {self.table_name} WHERE id = %(id)s",
+                    {"id": msg_id},
+                )
+            conn.commit()
+
+        self._pending.pop(msg_id, None)
+
+    def ensure(
+        self,
+        message: Message,
+        delay: timedelta,
+    ) -> None:
+        """Ensure a message is in the queue with the given delay."""
+        # For simplicity, just push the message
+        # In production, would check for duplicates
+        self.push(message, delay)
+
+    def reschedule(
+        self,
+        message: Message,
+        delay: timedelta,
+    ) -> None:
+        """Reschedule a message with a new delay."""
+        if not message.message_id:
+            return
+
+        msg_id = int(message.message_id)
+        deliver_at = datetime.now() + delay
+        pool = self._get_pool()
+
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    UPDATE {self.table_name}
+                    SET deliver_at = %(deliver_at)s,
+                        locked_until = NULL
+                    WHERE id = %(id)s
+                    """,
+                    {"id": msg_id, "deliver_at": deliver_at},
+                )
+            conn.commit()
+
+        self._pending.pop(msg_id, None)
+
+    def size(self) -> int:
+        """Get the number of messages in the queue."""
+        pool = self._get_pool()
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT COUNT(*) as cnt FROM {self.table_name}")
+                row = cur.fetchone()
+                return row["cnt"] if row else 0
+
+    def clear(self) -> None:
+        """Clear all messages from the queue."""
+        pool = self._get_pool()
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"DELETE FROM {self.table_name}")
+            conn.commit()
+
+        self._pending.clear()
