@@ -180,3 +180,92 @@ class SqliteQueue(Queue):
         conn.commit()
 
         logger.debug(f"Pushed {message_type} (id={message_id}, deliver_at={deliver_at})")
+
+    def poll(self, callback: Callable[[Message], None]) -> None:
+        """Poll for a message and process it with the callback."""
+        message = self.poll_one()
+        if message:
+            try:
+                callback(message)
+                self.ack(message)
+            except Exception:
+                # Message will be retried after lock expires
+                raise
+
+    def poll_one(self) -> Message | None:
+        """
+        Poll for a single message using optimistic locking.
+
+        This implementation uses a version column to handle concurrent
+        access without FOR UPDATE SKIP LOCKED:
+
+        1. SELECT a candidate message with current version
+        2. Try to UPDATE with WHERE version = expected
+        3. If rowcount == 0, another worker got it - return None
+        4. If rowcount == 1, we claimed it successfully
+
+        Returns:
+            The claimed message or None if no message available
+        """
+        conn = self._get_connection()
+        locked_until = datetime.now() + self.lock_duration
+
+        # Step 1: Find a candidate message
+        result = conn.execute(
+            f"""
+            SELECT id, message_type, payload, attempts, version
+            FROM {self.table_name}
+            WHERE datetime(deliver_at) <= datetime('now')
+            AND (locked_until IS NULL OR datetime(locked_until) < datetime('now'))
+            AND attempts < :max_attempts
+            ORDER BY deliver_at
+            LIMIT 1
+            """,
+            {"max_attempts": self.max_attempts},
+        )
+        row = result.fetchone()
+
+        if not row:
+            return None
+
+        msg_id = row["id"]
+        msg_type = row["message_type"]
+        payload = row["payload"]
+        attempts = row["attempts"]
+        version = row["version"]
+
+        # Step 2: Try to claim with optimistic lock
+        cursor = conn.execute(
+            f"""
+            UPDATE {self.table_name}
+            SET locked_until = :locked_until,
+                attempts = attempts + 1,
+                version = version + 1
+            WHERE id = :id AND version = :version
+            """,
+            {
+                "id": msg_id,
+                "locked_until": locked_until.isoformat(),
+                "version": version,
+            },
+        )
+        conn.commit()
+
+        # Step 3: Check if we won the race
+        if cursor.rowcount == 0:
+            # Another worker grabbed it
+            logger.debug(f"Lost race for message {msg_id}, will retry")
+            return None
+
+        # Step 4: Successfully claimed - deserialize and return
+        message = self._deserialize_message(msg_type, payload)
+        message.message_id = str(msg_id)
+        message.attempts = attempts + 1
+
+        self._pending[msg_id] = {
+            "message": message,
+            "type": msg_type,
+        }
+
+        logger.debug(f"Polled {msg_type} (id={msg_id}, attempts={attempts + 1})")
+        return message
