@@ -91,3 +91,36 @@ class StartWaitingWorkflows(Message):
     """
     pipeline_config_id: str = ''
     purge_queue: bool = False
+
+@dataclass
+class StageLevel(WorkflowLevel):
+    """
+    Base class for stage-level messages.
+
+    These messages target a specific stage within an execution.
+    """
+    stage_id: str = ''
+
+    def from_execution_level(cls, msg: WorkflowLevel, stage_id: str) -> StageLevel:
+        """Create a stage-level message from an execution-level message."""
+        return cls(
+            execution_type=msg.execution_type,
+            execution_id=msg.execution_id,
+            stage_id=stage_id,
+        )
+
+@dataclass
+class StartStage(StageLevel):
+    """
+    Message to start a stage.
+
+    Checks if upstream stages are complete, then plans and starts the stage.
+    """
+
+@dataclass
+class CompleteStage(StageLevel):
+    """
+    Message to complete a stage.
+
+    Determines stage status, plans after stages, and triggers downstream.
+    """
