@@ -55,3 +55,39 @@ class WorkflowLevel(Message):
     """
     execution_type: str = 'PIPELINE'
     execution_id: str = ''
+
+@dataclass
+class StartWorkflow(WorkflowLevel):
+    """
+    Message to start a pipeline execution.
+
+    Triggers the beginning of pipeline execution, starting initial stages.
+    """
+
+@dataclass
+class CompleteWorkflow(WorkflowLevel):
+    """
+    Message to complete a pipeline execution.
+
+    Sent when all stages have completed or execution should be finalized.
+    """
+
+@dataclass
+class CancelWorkflow(WorkflowLevel):
+    """
+    Message to cancel a pipeline execution.
+
+    Marks the execution as canceled and stops all running stages.
+    """
+    user: str = ''
+    reason: str = ''
+
+@dataclass
+class StartWaitingWorkflows(Message):
+    """
+    Message to start any queued/waiting executions for a pipeline config.
+
+    Sent after an execution completes when concurrent execution limits are enabled.
+    """
+    pipeline_config_id: str = ''
+    purge_queue: bool = False
