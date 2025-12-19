@@ -219,3 +219,38 @@ class QueueProcessor:
                 self.queue.reschedule(message, self.config.retry_delay)
                 raise
         return False
+
+    def process_all(self, timeout: float = 60.0) -> int:
+        """
+        Process all messages synchronously until queue is empty.
+
+        Useful for testing.
+
+        Args:
+            timeout: Maximum time to wait for processing
+
+        Returns:
+            Number of messages processed
+        """
+        count = 0
+        start = time.time()
+
+        while time.time() - start < timeout:
+            if self.queue.size() == 0:
+                break
+            if self.process_one():
+                count += 1
+            else:
+                # No ready messages, wait a bit
+                time.sleep(0.01)
+
+        return count
+
+    def is_running(self) -> bool:
+        """Check if the processor is running."""
+        return self._running
+
+    def active_count(self) -> int:
+        """Get the number of actively processing messages."""
+        with self._lock:
+            return self._active_count
