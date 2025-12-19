@@ -73,3 +73,52 @@ class SqliteQueue(Queue):
     def close(self) -> None:
         """Close SQLite connection for current thread."""
         self._manager.close_sqlite_connection(self.connection_string)
+
+    def _create_table(self) -> None:
+        """Create the queue table if it doesn't exist."""
+        conn = self._get_connection()
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self.table_name} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id TEXT NOT NULL UNIQUE,
+                message_type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                deliver_at TEXT NOT NULL DEFAULT (datetime('now')),
+                attempts INTEGER DEFAULT 0,
+                max_attempts INTEGER DEFAULT 10,
+                locked_until TEXT,
+                version INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """
+        )
+        conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_{self.table_name}_deliver
+            ON {self.table_name}(deliver_at)
+        """
+        )
+        conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_{self.table_name}_locked
+            ON {self.table_name}(locked_until)
+        """
+        )
+        conn.commit()
+
+    def _serialize_message(self, message: Message) -> str:
+        """Serialize a message to JSON."""
+        from enum import Enum
+
+        data = {}
+        for key, value in message.__dict__.items():
+            if key.startswith("_"):
+                continue
+            if isinstance(value, datetime):
+                data[key] = value.isoformat()
+            elif isinstance(value, Enum):
+                data[key] = value.name
+            else:
+                data[key] = value
+        return json.dumps(data)
