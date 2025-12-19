@@ -110,3 +110,66 @@ class Queue(ABC):
     def clear(self) -> None:
         """Clear all messages from the queue."""
         pass
+
+@dataclass(order=True)
+class QueuedMessage:
+    """A message with its delivery time for priority queue ordering."""
+    deliver_at: float
+    message: Message = field(compare=False)
+    message_id: str = field(compare=False, default='')
+
+class InMemoryQueue(Queue):
+    """
+    In-memory queue implementation using a priority queue.
+
+    Useful for testing and single-process execution.
+    Messages are ordered by delivery time.
+    """
+    def __init__(self) -> None:
+        self._queue: list[QueuedMessage] = []
+        self._lock = threading.Lock()
+        self._message_id_counter = 0
+        self._pending: dict[str, QueuedMessage] = {}  # Messages being processed
+        self._message_index: dict[str, QueuedMessage] = {}  # For ensure/reschedule
+
+    def _generate_message_id(self) -> str:
+        """Generate a unique message ID."""
+        self._message_id_counter += 1
+        return f"msg-{self._message_id_counter}"
+
+    def push(
+        self,
+        message: Message,
+        delay: timedelta | None = None,
+    ) -> None:
+        """Push a message onto the queue."""
+        with self._lock:
+            deliver_at = time.time()
+            if delay:
+                deliver_at += delay.total_seconds()
+
+            message_id = self._generate_message_id()
+            message.message_id = message_id
+
+            queued = QueuedMessage(
+                deliver_at=deliver_at,
+                message=message,
+                message_id=message_id,
+            )
+
+            heapq.heappush(self._queue, queued)
+            self._message_index[message_id] = queued
+
+            logger.debug(
+                f"Pushed {get_message_type_name(message)} "
+                f"(id={message_id}, deliver_at={datetime.fromtimestamp(deliver_at)})"
+            )
+
+    def poll(self, callback: Callable[[Message], None]) -> None:
+        """Poll for a message and process it with the callback."""
+        message = self.poll_one()
+        if message:
+            try:
+                callback(message)
+            finally:
+                self.ack(message)
