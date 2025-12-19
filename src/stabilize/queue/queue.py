@@ -233,3 +233,59 @@ class InMemoryQueue(Queue):
         """Get the number of messages in the queue."""
         with self._lock:
             return len(self._queue) + len(self._pending)
+
+    def ready_count(self) -> int:
+        """Get the number of messages ready to be delivered."""
+        with self._lock:
+            now = time.time()
+            return sum(1 for q in self._queue if q.deliver_at <= now)
+
+    def clear(self) -> None:
+        """Clear all messages from the queue."""
+        with self._lock:
+            self._queue.clear()
+            self._pending.clear()
+            self._message_index.clear()
+
+class PostgresQueue(Queue):
+    """
+    PostgreSQL-backed queue implementation.
+
+    Uses FOR UPDATE SKIP LOCKED for concurrent message processing across
+    multiple workers. Messages are stored in a table with delivery time.
+
+    Connection pools are managed by singleton ConnectionManager for
+    efficient resource sharing across all queue instances.
+    """
+    def __init__(
+        self,
+        connection_string: str,
+        table_name: str = "queue_messages",
+        lock_duration: timedelta = timedelta(minutes=5),
+        max_attempts: int = 10,
+    ) -> None:
+        """
+        Initialize the PostgreSQL queue.
+
+        Args:
+            connection_string: PostgreSQL connection string
+            table_name: Name of the queue table
+            lock_duration: How long to lock messages during processing
+            max_attempts: Maximum retry attempts before dropping message
+        """
+        from stabilize.persistence.connection import get_connection_manager
+
+        self.connection_string = connection_string
+        self.table_name = table_name
+        self.lock_duration = lock_duration
+        self.max_attempts = max_attempts
+        self._manager = get_connection_manager()
+        self._pending: dict[int, dict[str, Any]] = {}
+
+    def _get_pool(self) -> Any:
+        """Get the shared connection pool from ConnectionManager."""
+        return self._manager.get_postgres_pool(self.connection_string)
+
+    def close(self) -> None:
+        """Close the connection pool via connection manager."""
+        self._manager.close_postgres_pool(self.connection_string)
