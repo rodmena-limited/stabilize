@@ -173,3 +173,63 @@ class InMemoryQueue(Queue):
                 callback(message)
             finally:
                 self.ack(message)
+
+    def poll_one(self) -> Message | None:
+        """Poll for a single message without callback."""
+        with self._lock:
+            now = time.time()
+
+            # Skip messages that aren't ready yet
+            while self._queue and self._queue[0].deliver_at <= now:
+                queued = heapq.heappop(self._queue)
+                message_id = queued.message_id
+
+                # Remove from index
+                self._message_index.pop(message_id, None)
+
+                # Add to pending
+                self._pending[message_id] = queued
+
+                logger.debug(f"Polled {get_message_type_name(queued.message)} (id={message_id})")
+
+                return queued.message
+
+            return None
+
+    def ack(self, message: Message) -> None:
+        """Acknowledge a message, removing it from pending."""
+        with self._lock:
+            message_id = message.message_id
+            if message_id and message_id in self._pending:
+                del self._pending[message_id]
+                logger.debug(f"Acked {get_message_type_name(message)} (id={message_id})")
+
+    def ensure(
+        self,
+        message: Message,
+        delay: timedelta,
+    ) -> None:
+        """Ensure a message is in the queue with the given delay."""
+        # For in-memory queue, just push the message
+        # In production, would check if similar message exists
+        self.push(message, delay)
+
+    def reschedule(
+        self,
+        message: Message,
+        delay: timedelta,
+    ) -> None:
+        """Reschedule a message with a new delay."""
+        with self._lock:
+            message_id = message.message_id
+            if message_id and message_id in self._pending:
+                # Remove from pending
+                del self._pending[message_id]
+
+        # Push with new delay
+        self.push(message, delay)
+
+    def size(self) -> int:
+        """Get the number of messages in the queue."""
+        with self._lock:
+            return len(self._queue) + len(self._pending)
