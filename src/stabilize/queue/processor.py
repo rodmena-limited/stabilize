@@ -18,3 +18,24 @@ class MessageHandler(Generic[M]):
 
     Each handler processes a specific type of message.
     """
+
+    def message_type(self) -> type[M]:
+        """Return the type of message this handler processes."""
+        raise NotImplementedError
+
+    def handle(self, message: M) -> None:
+        """
+        Handle a message.
+
+        Args:
+            message: The message to handle
+        """
+        raise NotImplementedError
+
+@dataclass
+class QueueProcessorConfig:
+    """Configuration for the queue processor."""
+    poll_frequency_ms: int = 50
+    max_workers: int = 10
+    retry_delay: timedelta = timedelta(seconds=15)
+    stop_on_error: bool = False
