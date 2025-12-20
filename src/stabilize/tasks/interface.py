@@ -112,3 +112,46 @@ class RetryableTask(Task):
                 else:
                     return TaskResult.running()
     """
+
+    def get_timeout(self) -> timedelta:
+        """
+        Get the maximum time this task can run before timing out.
+
+        Returns:
+            Maximum execution time
+        """
+        pass
+
+    def get_backoff_period(
+        self,
+        stage: StageExecution,
+        duration: timedelta,
+    ) -> timedelta:
+        """
+        Get the backoff period before retrying.
+
+        Override to implement dynamic backoff based on how long
+        the task has been running.
+
+        Args:
+            stage: The stage execution context
+            duration: How long the task has been running
+
+        Returns:
+            Time to wait before retrying
+        """
+        return timedelta(seconds=1)
+
+    def get_dynamic_timeout(self, stage: StageExecution) -> timedelta:
+        """
+        Get dynamic timeout based on stage context.
+
+        Override to implement context-based timeouts.
+
+        Args:
+            stage: The stage execution context
+
+        Returns:
+            Timeout duration
+        """
+        return self.get_timeout()
