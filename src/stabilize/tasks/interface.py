@@ -213,3 +213,46 @@ class SkippableTask(Task):
         if not self.is_enabled(stage):
             return TaskResult.skipped()
         return self.do_execute(stage)
+
+    def do_execute(self, stage: StageExecution) -> TaskResult:
+        """
+        Perform the actual task execution.
+
+        Args:
+            stage: The stage execution context
+
+        Returns:
+            TaskResult indicating status
+        """
+        pass
+
+class CallableTask(Task):
+    """
+    A task that wraps a callable function.
+
+    Allows using simple functions as tasks without creating a class.
+
+    Example:
+        def my_task(stage: StageExecution) -> TaskResult:
+            return TaskResult.success(outputs={"result": "done"})
+
+        task = CallableTask(my_task)
+    """
+    def __init__(
+        self,
+        func: Callable[[StageExecution], TaskResult],
+        name: str | None = None,
+    ) -> None:
+        """
+        Initialize with a callable.
+
+        Args:
+            func: The function to call
+            name: Optional name for the task
+        """
+        self._func = func
+        self._name = name or func.__name__
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        """Execute the wrapped function."""
+        return self._func(stage)
