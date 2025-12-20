@@ -256,3 +256,18 @@ class CallableTask(Task):
     def execute(self, stage: StageExecution) -> TaskResult:
         """Execute the wrapped function."""
         return self._func(stage)
+
+    def name(self) -> str:
+        """Get the task name."""
+        return self._name
+
+class NoOpTask(Task):
+    """
+    A task that does nothing.
+
+    Useful for testing or placeholder stages.
+    """
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        """Return success immediately."""
+        return TaskResult.success()
