@@ -1,4 +1,13 @@
+"""
+SQLite-backed queue implementation.
+
+Uses optimistic locking for concurrent message processing since SQLite
+does not support FOR UPDATE SKIP LOCKED.
+Uses singleton ConnectionManager for efficient connection sharing.
+"""
+
 from __future__ import annotations
+
 import json
 import logging
 import sqlite3
@@ -6,13 +15,16 @@ import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
+
 from stabilize.queue.messages import (
     Message,
     create_message_from_dict,
     get_message_type_name,
 )
 from stabilize.queue.queue import Queue
+
 logger = logging.getLogger(__name__)
+
 
 class SqliteQueue(Queue):
     """
@@ -34,6 +46,7 @@ class SqliteQueue(Queue):
     - WAL mode for better concurrent read performance
     - Thread-local connections managed by singleton ConnectionManager
     """
+
     def __init__(
         self,
         connection_string: str,
@@ -296,3 +309,46 @@ class SqliteQueue(Queue):
         # For simplicity, just push the message
         # A full implementation would check for duplicates
         self.push(message, delay)
+
+    def reschedule(
+        self,
+        message: Message,
+        delay: timedelta,
+    ) -> None:
+        """Reschedule a message with a new delay."""
+        if not message.message_id:
+            return
+
+        msg_id = int(message.message_id)
+        deliver_at = datetime.now() + delay
+        conn = self._get_connection()
+
+        conn.execute(
+            f"""
+            UPDATE {self.table_name}
+            SET deliver_at = :deliver_at,
+                locked_until = NULL
+            WHERE id = :id
+            """,
+            {"id": msg_id, "deliver_at": deliver_at.isoformat()},
+        )
+        conn.commit()
+
+        self._pending.pop(msg_id, None)
+        logger.debug(f"Rescheduled message (id={msg_id}, deliver_at={deliver_at})")
+
+    def size(self) -> int:
+        """Get the number of messages in the queue."""
+        conn = self._get_connection()
+        result = conn.execute(f"SELECT COUNT(*) FROM {self.table_name}")
+        row = result.fetchone()
+        return row[0] if row else 0
+
+    def clear(self) -> None:
+        """Clear all messages from the queue."""
+        conn = self._get_connection()
+        conn.execute(f"DELETE FROM {self.table_name}")
+        conn.commit()
+
+        self._pending.clear()
+        logger.debug("Cleared queue")
