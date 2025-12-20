@@ -155,3 +155,34 @@ class RetryableTask(Task):
             Timeout duration
         """
         return self.get_timeout()
+
+    def get_dynamic_backoff_period(
+        self,
+        stage: StageExecution,
+        duration: timedelta,
+    ) -> timedelta:
+        """
+        Get dynamic backoff based on stage context.
+
+        Args:
+            stage: The stage execution context
+            duration: How long the task has been running
+
+        Returns:
+            Time to wait before retrying
+        """
+        return self.get_backoff_period(stage, duration)
+
+class OverridableTimeoutRetryableTask(RetryableTask):
+    """
+    A retryable task whose timeout can be overridden by the stage.
+
+    The stage can set a 'stageTimeoutMs' context value to override
+    the default timeout.
+    """
+
+    def get_dynamic_timeout(self, stage: StageExecution) -> timedelta:
+        """Get timeout, potentially overridden by stage context."""
+        if "stageTimeoutMs" in stage.context:
+            return timedelta(milliseconds=stage.context["stageTimeoutMs"])
+        return self.get_timeout()
