@@ -59,3 +59,56 @@ class Task(ABC):
             Optional TaskResult to use instead of default timeout
         """
         return None
+
+    def on_cancel(self, stage: StageExecution) -> TaskResult | None:
+        """
+        Called when the execution is canceled.
+
+        Override to provide cleanup logic when execution is canceled.
+
+        Args:
+            stage: The stage execution context
+
+        Returns:
+            Optional TaskResult with cleanup results
+        """
+        return None
+
+    def aliases(self) -> list[str]:
+        """
+        Alternative names for this task type.
+
+        Used for backward compatibility when task types are renamed.
+
+        Returns:
+            List of alternative type names
+        """
+        return []
+
+class RetryableTask(Task):
+    """
+    A task that can be retried with timeout and backoff.
+
+    Retryable tasks return RUNNING status while waiting for some condition.
+    They are re-executed after a backoff period until they succeed, fail,
+    or timeout.
+
+    Example:
+        class WaitForDeployTask(RetryableTask):
+            def get_timeout(self) -> timedelta:
+                return timedelta(minutes=30)
+
+            def get_backoff_period(self, stage, duration) -> timedelta:
+                return timedelta(seconds=10)
+
+            def execute(self, stage: StageExecution) -> TaskResult:
+                deployment_id = stage.context.get("deploymentId")
+                status = check_deployment_status(deployment_id)
+
+                if status == "complete":
+                    return TaskResult.success()
+                elif status == "failed":
+                    return TaskResult.terminal("Deployment failed")
+                else:
+                    return TaskResult.running()
+    """
