@@ -186,3 +186,30 @@ class OverridableTimeoutRetryableTask(RetryableTask):
         if "stageTimeoutMs" in stage.context:
             return timedelta(milliseconds=stage.context["stageTimeoutMs"])
         return self.get_timeout()
+
+class SkippableTask(Task):
+    """
+    A task that can be conditionally skipped.
+
+    Override is_enabled() to control when the task should be skipped.
+    """
+
+    def is_enabled(self, stage: StageExecution) -> bool:
+        """
+        Check if this task is enabled.
+
+        Override to implement skip logic.
+
+        Args:
+            stage: The stage execution context
+
+        Returns:
+            True if task should execute, False to skip
+        """
+        return True
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        """Execute the task if enabled."""
+        if not self.is_enabled(stage):
+            return TaskResult.skipped()
+        return self.do_execute(stage)
