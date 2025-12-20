@@ -93,3 +93,46 @@ class StageDefinitionBuilder(ABC):
             graph: Builder for adding synthetic stages
         """
         pass
+
+    def after_stages(
+        self,
+        stage: StageExecution,
+        graph: StageGraphBuilder,
+    ) -> None:
+        """
+        Build synthetic stages that run after this stage completes.
+
+        Override to add cleanup, notification, or other post-processing stages.
+
+        Args:
+            stage: The parent stage
+            graph: Builder for adding synthetic stages
+        """
+        pass
+
+    def on_failure_stages(
+        self,
+        stage: StageExecution,
+        graph: StageGraphBuilder,
+    ) -> None:
+        """
+        Build synthetic stages that run when this stage fails.
+
+        Override to add rollback, alerting, or other failure-handling stages.
+
+        Args:
+            stage: The failed stage
+            graph: Builder for adding synthetic stages
+        """
+        pass
+
+    def add_context_flags(self, stage: StageExecution) -> None:
+        """
+        Add any required context flags to the stage.
+
+        Called before task execution to set up stage context.
+
+        Args:
+            stage: The stage to modify
+        """
+        pass
