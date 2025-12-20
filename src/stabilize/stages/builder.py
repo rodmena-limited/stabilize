@@ -136,3 +136,12 @@ class StageDefinitionBuilder(ABC):
             stage: The stage to modify
         """
         pass
+
+class NoOpStageBuilder(StageDefinitionBuilder):
+    """A stage builder that does nothing."""
+
+    def type(self) -> str:
+        return "noop"
+
+class WaitStageBuilder(StageDefinitionBuilder):
+    """Builder for wait stages."""
