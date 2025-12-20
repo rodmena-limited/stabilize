@@ -59,3 +59,37 @@ class StageDefinitionBuilder(ABC):
         if name.endswith("StageBuilder"):
             name = name[:-12]
         return name.lower()
+
+    def aliases(self) -> list[str]:
+        """Get alternative names for this stage type."""
+        return []
+
+    def build_tasks(self, stage: StageExecution) -> list[TaskExecution]:
+        """
+        Build the tasks for this stage.
+
+        Override to define what tasks the stage should execute.
+
+        Args:
+            stage: The stage being built
+
+        Returns:
+            List of tasks to execute
+        """
+        return []
+
+    def before_stages(
+        self,
+        stage: StageExecution,
+        graph: StageGraphBuilder,
+    ) -> None:
+        """
+        Build synthetic stages that run before this stage's tasks.
+
+        Override to add setup, validation, or other pre-requisite stages.
+
+        Args:
+            stage: The parent stage
+            graph: Builder for adding synthetic stages
+        """
+        pass
