@@ -168,3 +168,33 @@ class StageDefinitionBuilderFactory:
         # Register built-in builders
         self.register(NoOpStageBuilder())
         self.register(WaitStageBuilder())
+
+    def register(self, builder: StageDefinitionBuilder) -> None:
+        """
+        Register a stage definition builder.
+
+        Args:
+            builder: The builder to register
+        """
+        self._builders[builder.type] = builder
+        for alias in builder.aliases:
+            self._builders[alias] = builder
+
+    def register_class(
+        self,
+        builder_class: type[StageDefinitionBuilder],
+    ) -> None:
+        """Register a builder by class."""
+        self.register(builder_class())
+
+    def get(self, stage_type: str) -> StageDefinitionBuilder:
+        """
+        Get the builder for a stage type.
+
+        Args:
+            stage_type: The stage type
+
+        Returns:
+            The builder (or default if not found)
+        """
+        return self._builders.get(stage_type, self._default_builder)
