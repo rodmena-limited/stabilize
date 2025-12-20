@@ -1,9 +1,24 @@
+"""
+Stage definition builders.
+
+Stage definition builders are responsible for:
+1. Building tasks for a stage
+2. Building before stages (setup, validation)
+3. Building after stages (cleanup, notification)
+4. Building on-failure stages (rollback, alerts)
+"""
+
 from __future__ import annotations
+
 from abc import ABC
 from typing import TYPE_CHECKING
+
 from stabilize.dag.graph import StageGraphBuilder
 from stabilize.models.task import TaskExecution
-_default_factory: StageDefinitionBuilderFactory | None = None
+
+if TYPE_CHECKING:
+    from stabilize.models.stage import StageExecution
+
 
 class StageDefinitionBuilder(ABC):
     """
@@ -49,6 +64,7 @@ class StageDefinitionBuilder(ABC):
                 graph.add(validation)
     """
 
+    @property
     def type(self) -> str:
         """
         Get the stage type this builder handles.
@@ -60,6 +76,7 @@ class StageDefinitionBuilder(ABC):
             name = name[:-12]
         return name.lower()
 
+    @property
     def aliases(self) -> list[str]:
         """Get alternative names for this stage type."""
         return []
@@ -137,15 +154,19 @@ class StageDefinitionBuilder(ABC):
         """
         pass
 
+
 class NoOpStageBuilder(StageDefinitionBuilder):
     """A stage builder that does nothing."""
 
+    @property
     def type(self) -> str:
         return "noop"
+
 
 class WaitStageBuilder(StageDefinitionBuilder):
     """Builder for wait stages."""
 
+    @property
     def type(self) -> str:
         return "wait"
 
@@ -159,8 +180,10 @@ class WaitStageBuilder(StageDefinitionBuilder):
             ),
         ]
 
+
 class StageDefinitionBuilderFactory:
     """Factory for resolving stage definition builders."""
+
     def __init__(self) -> None:
         self._builders: dict[str, StageDefinitionBuilder] = {}
         self._default_builder = NoOpStageBuilder()
@@ -198,3 +221,33 @@ class StageDefinitionBuilderFactory:
             The builder (or default if not found)
         """
         return self._builders.get(stage_type, self._default_builder)
+
+    def has(self, stage_type: str) -> bool:
+        """Check if a builder is registered for a stage type."""
+        return stage_type in self._builders
+
+    def list_types(self) -> list[str]:
+        """Get all registered stage types."""
+        return list(self._builders.keys())
+
+
+# Global factory instance
+_default_factory: StageDefinitionBuilderFactory | None = None
+
+
+def get_default_factory() -> StageDefinitionBuilderFactory:
+    """Get the default global stage definition builder factory."""
+    global _default_factory
+    if _default_factory is None:
+        _default_factory = StageDefinitionBuilderFactory()
+    return _default_factory
+
+
+def register_builder(builder: StageDefinitionBuilder) -> None:
+    """Register a builder in the default factory."""
+    get_default_factory().register(builder)
+
+
+def get_builder(stage_type: str) -> StageDefinitionBuilder:
+    """Get a builder from the default factory."""
+    return get_default_factory().get(stage_type)
