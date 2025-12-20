@@ -145,3 +145,26 @@ class NoOpStageBuilder(StageDefinitionBuilder):
 
 class WaitStageBuilder(StageDefinitionBuilder):
     """Builder for wait stages."""
+
+    def type(self) -> str:
+        return "wait"
+
+    def build_tasks(self, stage: StageExecution) -> list[TaskExecution]:
+        return [
+            TaskExecution.create(
+                name="Wait",
+                implementing_class="WaitTask",
+                stage_start=True,
+                stage_end=True,
+            ),
+        ]
+
+class StageDefinitionBuilderFactory:
+    """Factory for resolving stage definition builders."""
+    def __init__(self) -> None:
+        self._builders: dict[str, StageDefinitionBuilder] = {}
+        self._default_builder = NoOpStageBuilder()
+
+        # Register built-in builders
+        self.register(NoOpStageBuilder())
+        self.register(WaitStageBuilder())
