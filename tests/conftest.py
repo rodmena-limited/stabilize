@@ -87,6 +87,36 @@ def repository(
         yield repo
         repo.close()
 
+def queue(
+    backend: str,
+    repository: WorkflowStore,
+    postgres_url: str,
+) -> Generator[Queue, None, None]:
+    """Create queue for current backend."""
+    q: Queue
+    if backend == "sqlite":
+        # Use same connection string as repository - singleton ConnectionManager
+        # ensures they share the same thread-local connection for in-memory SQLite
+        sqlite_q = SqliteQueue(
+            connection_string="sqlite:///:memory:",
+            table_name="queue_messages",
+        )
+        sqlite_q._create_table()
+        q = sqlite_q
+        yield q
+        q.clear()
+    else:
+        # PostgreSQL: migrations already created tables via mg apply
+        postgres_q = PostgresQueue(
+            connection_string=postgres_url,
+            table_name="queue_messages",
+        )
+        postgres_q.clear()
+        q = postgres_q
+        yield q
+        q.clear()
+        postgres_q.close()
+
 class SuccessTask(Task):
     """A task that always succeeds."""
 
