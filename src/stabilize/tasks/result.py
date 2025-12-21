@@ -85,3 +85,39 @@ class TaskResult:
             status=WorkflowStatus.TERMINAL,
             context=ctx,
         )
+
+    def failed_continue(
+        cls,
+        error: str,
+        outputs: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> TaskResult:
+        """
+        Create a failed result that allows pipeline to continue.
+
+        The stage will be marked as failed but downstream stages will run.
+
+        Args:
+            error: Error message
+            outputs: Values available to downstream stages
+            context: Additional context
+
+        Returns:
+            A TaskResult with FAILED_CONTINUE status
+        """
+        ctx = context or {}
+        ctx["error"] = error
+        return cls(
+            status=WorkflowStatus.FAILED_CONTINUE,
+            context=ctx,
+            outputs=outputs or {},
+        )
+
+    def skipped(cls) -> TaskResult:
+        """
+        Create a skipped result.
+
+        Returns:
+            A TaskResult with SKIPPED status
+        """
+        return cls(status=WorkflowStatus.SKIPPED)
