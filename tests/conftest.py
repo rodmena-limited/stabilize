@@ -32,6 +32,11 @@ def reset_connection_manager() -> Generator[None, None, None]:
     # Reset the singleton after each test
     SingletonMeta.reset(ConnectionManager)
 
+def postgres_container() -> Generator[PostgresContainer, None, None]:
+    """Start PostgreSQL container once per test session."""
+    with PostgresContainer("postgres:15") as postgres:
+        yield postgres
+
 class SuccessTask(Task):
     """A task that always succeeds."""
 
