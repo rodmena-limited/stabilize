@@ -31,3 +31,7 @@ class FailTask(Task):
 
     def execute(self, stage: StageExecution) -> TaskResult:
         return TaskResult.terminal("Task failed intentionally")
+
+class CounterTask(Task):
+    """A task that increments a counter."""
+    counter: int = 0
