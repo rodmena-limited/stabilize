@@ -28,3 +28,6 @@ class SuccessTask(Task):
 
 class FailTask(Task):
     """A task that always fails."""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        return TaskResult.terminal("Task failed intentionally")
