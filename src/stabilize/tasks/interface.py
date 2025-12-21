@@ -1,9 +1,22 @@
+"""
+Task interface definitions.
+
+This module defines the Task interface and its variants (RetryableTask,
+SkippableTask) that all task implementations must follow.
+"""
+
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import timedelta
 from typing import TYPE_CHECKING
+
 from stabilize.tasks.result import TaskResult
+
+if TYPE_CHECKING:
+    from stabilize.models.stage import StageExecution
+
 
 class Task(ABC):
     """
@@ -30,6 +43,7 @@ class Task(ABC):
                 )
     """
 
+    @abstractmethod
     def execute(self, stage: StageExecution) -> TaskResult:
         """
         Execute the task.
@@ -74,6 +88,7 @@ class Task(ABC):
         """
         return None
 
+    @property
     def aliases(self) -> list[str]:
         """
         Alternative names for this task type.
@@ -84,6 +99,7 @@ class Task(ABC):
             List of alternative type names
         """
         return []
+
 
 class RetryableTask(Task):
     """
@@ -113,6 +129,7 @@ class RetryableTask(Task):
                     return TaskResult.running()
     """
 
+    @abstractmethod
     def get_timeout(self) -> timedelta:
         """
         Get the maximum time this task can run before timing out.
@@ -173,6 +190,7 @@ class RetryableTask(Task):
         """
         return self.get_backoff_period(stage, duration)
 
+
 class OverridableTimeoutRetryableTask(RetryableTask):
     """
     A retryable task whose timeout can be overridden by the stage.
@@ -186,6 +204,7 @@ class OverridableTimeoutRetryableTask(RetryableTask):
         if "stageTimeoutMs" in stage.context:
             return timedelta(milliseconds=stage.context["stageTimeoutMs"])
         return self.get_timeout()
+
 
 class SkippableTask(Task):
     """
@@ -214,6 +233,7 @@ class SkippableTask(Task):
             return TaskResult.skipped()
         return self.do_execute(stage)
 
+    @abstractmethod
     def do_execute(self, stage: StageExecution) -> TaskResult:
         """
         Perform the actual task execution.
@@ -225,6 +245,7 @@ class SkippableTask(Task):
             TaskResult indicating status
         """
         pass
+
 
 class CallableTask(Task):
     """
@@ -238,6 +259,7 @@ class CallableTask(Task):
 
         task = CallableTask(my_task)
     """
+
     def __init__(
         self,
         func: Callable[[StageExecution], TaskResult],
@@ -257,9 +279,11 @@ class CallableTask(Task):
         """Execute the wrapped function."""
         return self._func(stage)
 
+    @property
     def name(self) -> str:
         """Get the task name."""
         return self._name
+
 
 class NoOpTask(Task):
     """
@@ -271,3 +295,41 @@ class NoOpTask(Task):
     def execute(self, stage: StageExecution) -> TaskResult:
         """Return success immediately."""
         return TaskResult.success()
+
+
+class WaitTask(RetryableTask):
+    """
+    A task that waits for a specified duration.
+
+    Reads 'waitTime' from stage context (in seconds).
+    """
+
+    def get_timeout(self) -> timedelta:
+        """Wait tasks have a long timeout."""
+        return timedelta(hours=24)
+
+    def get_backoff_period(
+        self,
+        stage: StageExecution,
+        duration: timedelta,
+    ) -> timedelta:
+        """Check every second."""
+        return timedelta(seconds=1)
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        """Wait for the specified time."""
+        import time
+
+        wait_time = stage.context.get("waitTime", 0)
+        start_time = stage.context.get("waitStartTime")
+        current_time = int(time.time())
+
+        if start_time is None:
+            # First execution - record start time
+            return TaskResult.running(context={"waitStartTime": current_time})
+
+        elapsed = current_time - start_time
+        if elapsed >= wait_time:
+            return TaskResult.success(outputs={"waitedSeconds": elapsed})
+
+        return TaskResult.running()
