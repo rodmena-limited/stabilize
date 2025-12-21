@@ -189,3 +189,39 @@ class TaskResult:
             A TaskResultBuilder
         """
         return TaskResultBuilder(status)
+
+    def merge_outputs(self, other: TaskResult | None) -> TaskResult:
+        """
+        Merge outputs from another result.
+
+        Args:
+            other: Result to merge outputs from
+
+        Returns:
+            A new TaskResult with merged outputs
+        """
+        if other is None:
+            return self
+
+        merged_context = dict(self.context)
+        merged_context.update(other.context)
+
+        merged_outputs = dict(self.outputs)
+        merged_outputs.update(other.outputs)
+
+        return TaskResult(
+            status=self.status,
+            context=merged_context,
+            outputs=merged_outputs,
+        )
+
+class TaskResultBuilder:
+    """
+    Builder for TaskResult objects.
+
+    Provides a fluent API for constructing complex task results.
+    """
+    def __init__(self, status: WorkflowStatus) -> None:
+        self._status = status
+        self._context: dict[str, Any] = {}
+        self._outputs: dict[str, Any] = {}
