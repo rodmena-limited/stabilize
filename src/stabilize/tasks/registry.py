@@ -98,3 +98,65 @@ class TaskRegistry:
         """
         task_name = name or task_class.__name__
         self.register(task_name, task_class)
+
+    def task(
+        self,
+        name: str,
+        aliases: list[str] | None = None,
+    ) -> Callable[[TaskCallable], TaskCallable]:
+        """
+        Decorator to register a function as a task.
+
+        Args:
+            name: The task type name
+            aliases: Optional alternative names
+
+        Returns:
+            Decorator function
+
+        Example:
+            @registry.task("validate")
+            def validate_inputs(stage):
+                return TaskResult.success()
+        """
+
+        def decorator(func: TaskCallable) -> TaskCallable:
+            self.register(name, func, aliases)
+            return func
+
+        return decorator
+
+    def get(self, name: str) -> Task:
+        """
+        Get a task implementation by name.
+
+        Args:
+            name: The task type name
+
+        Returns:
+            A Task instance
+
+        Raises:
+            TaskNotFoundError: If task not found
+        """
+        # Check aliases first
+        resolved_name = self._aliases.get(name, name)
+
+        if resolved_name not in self._tasks:
+            raise TaskNotFoundError(resolved_name)
+
+        impl = self._tasks[resolved_name]
+
+        # Handle different registration types
+        if isinstance(impl, Task):
+            return impl
+        elif isinstance(impl, type) and issubclass(impl, Task):
+            return impl()
+        elif callable(impl):
+            # Cast to the proper type for CallableTask
+            from typing import cast
+
+            func = cast(TaskCallable, impl)
+            return CallableTask(func, name=resolved_name)
+        else:
+            raise TaskNotFoundError(resolved_name)
