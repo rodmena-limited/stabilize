@@ -160,3 +160,36 @@ class TaskRegistry:
             return CallableTask(func, name=resolved_name)
         else:
             raise TaskNotFoundError(resolved_name)
+
+    def get_by_class(self, class_name: str) -> Task:
+        """
+        Get a task by its implementing class name.
+
+        Args:
+            class_name: Fully qualified or simple class name
+
+        Returns:
+            A Task instance
+
+        Raises:
+            TaskNotFoundError: If task not found
+        """
+        # Try exact match first
+        if class_name in self._tasks:
+            return self.get(class_name)
+
+        # Try simple class name
+        simple_name = class_name.split(".")[-1]
+        if simple_name in self._tasks:
+            return self.get(simple_name)
+
+        # Try lowercase
+        if simple_name.lower() in self._tasks:
+            return self.get(simple_name.lower())
+
+        raise TaskNotFoundError(class_name)
+
+    def has(self, name: str) -> bool:
+        """Check if a task is registered."""
+        resolved_name = self._aliases.get(name, name)
+        return resolved_name in self._tasks
