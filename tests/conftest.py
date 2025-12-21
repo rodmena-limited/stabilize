@@ -62,6 +62,10 @@ def postgres_url(postgres_container: PostgresContainer) -> str:
 
     return str(url)
 
+def backend(request: pytest.FixtureRequest) -> str:
+    """Parameterized backend - runs tests on both SQLite and PostgreSQL."""
+    return str(request.param)
+
 class SuccessTask(Task):
     """A task that always succeeds."""
 
