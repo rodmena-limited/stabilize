@@ -1,9 +1,13 @@
+"""Shared pytest fixtures for parameterized backend testing."""
+
 import os
 import subprocess
 from collections.abc import Generator
 from typing import Any
+
 import pytest
 from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
+
 from stabilize import (
     CompleteStageHandler,
     CompleteTaskHandler,
@@ -26,17 +30,57 @@ from stabilize.persistence.postgres import PostgresWorkflowStore
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue.queue import PostgresQueue, Queue
 
+
+@pytest.fixture(autouse=True)
 def reset_connection_manager() -> Generator[None, None, None]:
     """Reset singleton ConnectionManager between tests for isolation."""
     yield
     # Reset the singleton after each test
     SingletonMeta.reset(ConnectionManager)
 
+
+# =============================================================================
+# Shared Test Task Implementations
+# =============================================================================
+
+
+class SuccessTask(Task):
+    """A task that always succeeds."""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        return TaskResult.success(outputs={"success": True})
+
+
+class FailTask(Task):
+    """A task that always fails."""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        return TaskResult.terminal("Task failed intentionally")
+
+
+class CounterTask(Task):
+    """A task that increments a counter."""
+
+    counter: int = 0
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        CounterTask.counter += 1
+        return TaskResult.success(outputs={"count": CounterTask.counter})
+
+
+# =============================================================================
+# PostgreSQL Container (Session-Scoped)
+# =============================================================================
+
+
+@pytest.fixture(scope="session")
 def postgres_container() -> Generator[PostgresContainer, None, None]:
     """Start PostgreSQL container once per test session."""
     with PostgresContainer("postgres:15") as postgres:
         yield postgres
 
+
+@pytest.fixture(scope="session")
 def postgres_url(postgres_container: PostgresContainer) -> str:
     """Get PostgreSQL connection URL and run migrations."""
     # testcontainers returns psycopg2 style URL, convert to psycopg3
@@ -62,10 +106,19 @@ def postgres_url(postgres_container: PostgresContainer) -> str:
 
     return str(url)
 
+
+# =============================================================================
+# Parameterized Backend Fixtures
+# =============================================================================
+
+
+@pytest.fixture(params=["sqlite", "postgres"])
 def backend(request: pytest.FixtureRequest) -> str:
     """Parameterized backend - runs tests on both SQLite and PostgreSQL."""
     return str(request.param)
 
+
+@pytest.fixture
 def repository(
     backend: str,
     postgres_url: str,
@@ -87,6 +140,8 @@ def repository(
         yield repo
         repo.close()
 
+
+@pytest.fixture
 def queue(
     backend: str,
     repository: WorkflowStore,
@@ -117,22 +172,36 @@ def queue(
         q.clear()
         postgres_q.close()
 
-class SuccessTask(Task):
-    """A task that always succeeds."""
 
-    def execute(self, stage: StageExecution) -> TaskResult:
-        return TaskResult.success(outputs={"success": True})
+# =============================================================================
+# Pipeline Runner Setup Helper
+# =============================================================================
 
-class FailTask(Task):
-    """A task that always fails."""
 
-    def execute(self, stage: StageExecution) -> TaskResult:
-        return TaskResult.terminal("Task failed intentionally")
+def setup_stabilize(
+    repository: WorkflowStore,
+    queue: Queue,
+) -> tuple[Any, Any]:
+    """Set up a complete pipeline runner with all handlers."""
+    task_registry = TaskRegistry()
+    task_registry.register("success", SuccessTask)
+    task_registry.register("fail", FailTask)
+    task_registry.register("counter", CounterTask)
 
-class CounterTask(Task):
-    """A task that increments a counter."""
-    counter: int = 0
+    processor = QueueProcessor(queue)
 
-    def execute(self, stage: StageExecution) -> TaskResult:
-        CounterTask.counter += 1
-        return TaskResult.success(outputs={"count": CounterTask.counter})
+    handlers: list[Any] = [
+        StartWorkflowHandler(queue, repository),
+        StartStageHandler(queue, repository),
+        StartTaskHandler(queue, repository),
+        RunTaskHandler(queue, repository, task_registry),
+        CompleteTaskHandler(queue, repository),
+        CompleteStageHandler(queue, repository),
+        CompleteWorkflowHandler(queue, repository),
+    ]
+
+    for handler in handlers:
+        processor.register_handler(handler)
+
+    runner = Orchestrator(queue)
+    return processor, runner
