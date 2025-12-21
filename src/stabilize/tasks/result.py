@@ -1,7 +1,17 @@
+"""
+TaskResult - result of task execution.
+
+This module defines the TaskResult class that encapsulates the result
+of executing a task, including status, context updates, and outputs.
+"""
+
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any
+
 from stabilize.models.status import WorkflowStatus
+
 
 @dataclass
 class TaskResult:
@@ -16,10 +26,14 @@ class TaskResult:
         context: Data scoped to the current stage (merged into stage.context)
         outputs: Data available to downstream stages (merged into stage.outputs)
     """
+
     status: WorkflowStatus
     context: dict[str, Any] = field(default_factory=dict)
     outputs: dict[str, Any] = field(default_factory=dict)
 
+    # ========== Factory Methods ==========
+
+    @classmethod
     def success(
         cls,
         outputs: dict[str, Any] | None = None,
@@ -41,6 +55,7 @@ class TaskResult:
             outputs=outputs or {},
         )
 
+    @classmethod
     def running(
         cls,
         context: dict[str, Any] | None = None,
@@ -62,6 +77,7 @@ class TaskResult:
             context=context or {},
         )
 
+    @classmethod
     def terminal(
         cls,
         error: str,
@@ -86,6 +102,7 @@ class TaskResult:
             context=ctx,
         )
 
+    @classmethod
     def failed_continue(
         cls,
         error: str,
@@ -113,6 +130,7 @@ class TaskResult:
             outputs=outputs or {},
         )
 
+    @classmethod
     def skipped(cls) -> TaskResult:
         """
         Create a skipped result.
@@ -122,6 +140,7 @@ class TaskResult:
         """
         return cls(status=WorkflowStatus.SKIPPED)
 
+    @classmethod
     def canceled(
         cls,
         outputs: dict[str, Any] | None = None,
@@ -140,6 +159,7 @@ class TaskResult:
             outputs=outputs or {},
         )
 
+    @classmethod
     def stopped(
         cls,
         outputs: dict[str, Any] | None = None,
@@ -158,6 +178,7 @@ class TaskResult:
             outputs=outputs or {},
         )
 
+    @classmethod
     def redirect(
         cls,
         context: dict[str, Any] | None = None,
@@ -178,6 +199,9 @@ class TaskResult:
             context=context or {},
         )
 
+    # ========== Builder Pattern ==========
+
+    @classmethod
     def builder(cls, status: WorkflowStatus) -> TaskResultBuilder:
         """
         Create a builder for more complex results.
@@ -189,6 +213,8 @@ class TaskResult:
             A TaskResultBuilder
         """
         return TaskResultBuilder(status)
+
+    # ========== Utility Methods ==========
 
     def merge_outputs(self, other: TaskResult | None) -> TaskResult:
         """
@@ -215,12 +241,14 @@ class TaskResult:
             outputs=merged_outputs,
         )
 
+
 class TaskResultBuilder:
     """
     Builder for TaskResult objects.
 
     Provides a fluent API for constructing complex task results.
     """
+
     def __init__(self, status: WorkflowStatus) -> None:
         self._status = status
         self._context: dict[str, Any] = {}
@@ -235,3 +263,21 @@ class TaskResultBuilder:
         """Set the outputs."""
         self._outputs = outputs
         return self
+
+    def add_context(self, key: str, value: Any) -> TaskResultBuilder:
+        """Add a context value."""
+        self._context[key] = value
+        return self
+
+    def add_output(self, key: str, value: Any) -> TaskResultBuilder:
+        """Add an output value."""
+        self._outputs[key] = value
+        return self
+
+    def build(self) -> TaskResult:
+        """Build the TaskResult."""
+        return TaskResult(
+            status=self._status,
+            context=self._context,
+            outputs=self._outputs,
+        )
