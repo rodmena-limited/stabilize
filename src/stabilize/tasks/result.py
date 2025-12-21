@@ -225,3 +225,13 @@ class TaskResultBuilder:
         self._status = status
         self._context: dict[str, Any] = {}
         self._outputs: dict[str, Any] = {}
+
+    def context(self, context: dict[str, Any]) -> TaskResultBuilder:
+        """Set the context."""
+        self._context = context
+        return self
+
+    def outputs(self, outputs: dict[str, Any]) -> TaskResultBuilder:
+        """Set the outputs."""
+        self._outputs = outputs
+        return self
