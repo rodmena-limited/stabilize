@@ -47,3 +47,7 @@ class FailTask(Task):
 class CounterTask(Task):
     """A task that increments a counter."""
     counter: int = 0
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        CounterTask.counter += 1
+        return TaskResult.success(outputs={"count": CounterTask.counter})
