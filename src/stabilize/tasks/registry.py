@@ -8,6 +8,21 @@ TaskCallable = Callable[["StageExecution"], TaskResult]
 TaskImplementation = type[Task] | Task | TaskCallable
 _default_registry: TaskRegistry | None = None
 
+def get_default_registry() -> TaskRegistry:
+    """Get the default global task registry."""
+    global _default_registry
+    if _default_registry is None:
+        _default_registry = TaskRegistry()
+    return _default_registry
+
+def register_task(
+    name: str,
+    task: TaskImplementation,
+    aliases: list[str] | None = None,
+) -> None:
+    """Register a task in the default registry."""
+    get_default_registry().register(name, task, aliases)
+
 class TaskNotFoundError(Exception):
     """Raised when a task type cannot be resolved."""
     def __init__(self, task_type: str):
