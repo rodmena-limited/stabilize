@@ -1,33 +1,37 @@
+"""
+Task registry for resolving task implementations.
+
+This module provides the TaskRegistry class for registering and resolving
+task implementations by name or type.
+"""
+
 from __future__ import annotations
+
 import logging
 from collections.abc import Callable
+
 from stabilize.tasks.interface import CallableTask, Task
 from stabilize.tasks.result import TaskResult
+
+if False:  # TYPE_CHECKING
+    from stabilize.models.stage import StageExecution
+
 logger = logging.getLogger(__name__)
+
+# Type for task callable
 TaskCallable = Callable[["StageExecution"], TaskResult]
+
+# Type for task implementation - can be a Task class or callable
 TaskImplementation = type[Task] | Task | TaskCallable
-_default_registry: TaskRegistry | None = None
 
-def get_default_registry() -> TaskRegistry:
-    """Get the default global task registry."""
-    global _default_registry
-    if _default_registry is None:
-        _default_registry = TaskRegistry()
-    return _default_registry
-
-def register_task(
-    name: str,
-    task: TaskImplementation,
-    aliases: list[str] | None = None,
-) -> None:
-    """Register a task in the default registry."""
-    get_default_registry().register(name, task, aliases)
 
 class TaskNotFoundError(Exception):
     """Raised when a task type cannot be resolved."""
+
     def __init__(self, task_type: str):
         self.task_type = task_type
         super().__init__(f"No task found for type: {task_type}")
+
 
 class TaskRegistry:
     """
@@ -57,6 +61,7 @@ class TaskRegistry:
         task = registry.get("deploy")
         result = task.execute(stage)
     """
+
     def __init__(self) -> None:
         self._tasks: dict[str, TaskImplementation] = {}
         self._aliases: dict[str, str] = {}
@@ -217,3 +222,34 @@ class TaskRegistry:
         """Clear all registrations."""
         self._tasks.clear()
         self._aliases.clear()
+
+
+# Global registry instance
+_default_registry: TaskRegistry | None = None
+
+
+def get_default_registry() -> TaskRegistry:
+    """Get the default global task registry."""
+    global _default_registry
+    if _default_registry is None:
+        _default_registry = TaskRegistry()
+    return _default_registry
+
+
+def register_task(
+    name: str,
+    task: TaskImplementation,
+    aliases: list[str] | None = None,
+) -> None:
+    """Register a task in the default registry."""
+    get_default_registry().register(name, task, aliases)
+
+
+def get_task(name: str) -> Task:
+    """Get a task from the default registry."""
+    return get_default_registry().get(name)
+
+
+def task(name: str, aliases: list[str] | None = None) -> Callable[[TaskCallable], TaskCallable]:
+    """Decorator to register a task in the default registry."""
+    return get_default_registry().task(name, aliases)
