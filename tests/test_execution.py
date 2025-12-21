@@ -25,3 +25,6 @@ class SuccessTask(Task):
 
     def execute(self, stage: StageExecution) -> TaskResult:
         return TaskResult.success(outputs={"success": True})
+
+class FailTask(Task):
+    """A task that always fails."""
