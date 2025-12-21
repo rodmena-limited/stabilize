@@ -40,3 +40,48 @@ class TaskResult:
             context=context or {},
             outputs=outputs or {},
         )
+
+    def running(
+        cls,
+        context: dict[str, Any] | None = None,
+    ) -> TaskResult:
+        """
+        Create a running result (task will be re-executed).
+
+        Use this when a task needs to poll/wait for something.
+        The task will be re-queued and executed again after a backoff period.
+
+        Args:
+            context: Updated context values
+
+        Returns:
+            A TaskResult with RUNNING status
+        """
+        return cls(
+            status=WorkflowStatus.RUNNING,
+            context=context or {},
+        )
+
+    def terminal(
+        cls,
+        error: str,
+        context: dict[str, Any] | None = None,
+    ) -> TaskResult:
+        """
+        Create a terminal failure result.
+
+        The stage and pipeline will fail.
+
+        Args:
+            error: Error message
+            context: Additional context
+
+        Returns:
+            A TaskResult with TERMINAL status
+        """
+        ctx = context or {}
+        ctx["error"] = error
+        return cls(
+            status=WorkflowStatus.TERMINAL,
+            context=ctx,
+        )
