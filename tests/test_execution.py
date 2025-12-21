@@ -161,6 +161,88 @@ def test_linear_pipeline_execution() -> None:
     # Verify counter was incremented 3 times
     assert CounterTask.counter == 3
 
+def test_parallel_stages() -> None:
+    """Test parallel stage execution."""
+    queue, repository, processor, runner = setup_stabilize()
+    CounterTask.counter = 0
+
+    # Create a diamond: A -> [B, C] -> D
+    execution = Workflow.create(
+        application="test",
+        name="Parallel Pipeline",
+        stages=[
+            StageExecution(
+                ref_id="a",
+                type="test",
+                name="Stage A",
+                tasks=[
+                    TaskExecution.create(
+                        name="Counter Task",
+                        implementing_class="counter",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            StageExecution(
+                ref_id="b",
+                type="test",
+                name="Stage B",
+                requisite_stage_ref_ids={"a"},
+                tasks=[
+                    TaskExecution.create(
+                        name="Counter Task",
+                        implementing_class="counter",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            StageExecution(
+                ref_id="c",
+                type="test",
+                name="Stage C",
+                requisite_stage_ref_ids={"a"},
+                tasks=[
+                    TaskExecution.create(
+                        name="Counter Task",
+                        implementing_class="counter",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            StageExecution(
+                ref_id="d",
+                type="test",
+                name="Stage D",
+                requisite_stage_ref_ids={"b", "c"},
+                tasks=[
+                    TaskExecution.create(
+                        name="Counter Task",
+                        implementing_class="counter",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    repository.store(execution)
+    runner.start(execution)
+    processor.process_all(timeout=10.0)
+
+    result = repository.retrieve(execution.id)
+    assert result.status == WorkflowStatus.SUCCEEDED
+
+    # Verify all 4 stages succeeded
+    for stage in result.stages:
+        assert stage.status == WorkflowStatus.SUCCEEDED
+
+    # Verify all 4 tasks ran
+    assert CounterTask.counter == 4
+
 class SuccessTask(Task):
     """A task that always succeeds."""
 
