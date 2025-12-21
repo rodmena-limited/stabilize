@@ -56,6 +56,43 @@ def setup_stabilize() -> tuple[
 
     return queue, repository, processor, runner
 
+def test_simple_pipeline_execution() -> None:
+    """Test a simple single-stage pipeline."""
+    queue, repository, processor, runner = setup_stabilize()
+
+    # Create a simple pipeline with one stage
+    execution = Workflow.create(
+        application="test",
+        name="Simple Pipeline",
+        stages=[
+            StageExecution(
+                ref_id="1",
+                type="test",
+                name="Test Stage",
+                tasks=[
+                    TaskExecution.create(
+                        name="Success Task",
+                        implementing_class="success",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    # Store and start
+    repository.store(execution)
+    runner.start(execution)
+
+    # Process all messages
+    processor.process_all(timeout=5.0)
+
+    # Retrieve and verify
+    result = repository.retrieve(execution.id)
+    assert result.status == WorkflowStatus.SUCCEEDED
+    assert result.stages[0].status == WorkflowStatus.SUCCEEDED
+
 class SuccessTask(Task):
     """A task that always succeeds."""
 
