@@ -193,3 +193,12 @@ class TaskRegistry:
         """Check if a task is registered."""
         resolved_name = self._aliases.get(name, name)
         return resolved_name in self._tasks
+
+    def list_tasks(self) -> list[str]:
+        """Get all registered task names."""
+        return list(self._tasks.keys())
+
+    def clear(self) -> None:
+        """Clear all registrations."""
+        self._tasks.clear()
+        self._aliases.clear()
