@@ -66,6 +66,27 @@ def backend(request: pytest.FixtureRequest) -> str:
     """Parameterized backend - runs tests on both SQLite and PostgreSQL."""
     return str(request.param)
 
+def repository(
+    backend: str,
+    postgres_url: str,
+) -> Generator[WorkflowStore, None, None]:
+    """Create repository for current backend."""
+    repo: WorkflowStore
+    if backend == "sqlite":
+        repo = SqliteWorkflowStore(
+            connection_string="sqlite:///:memory:",
+            create_tables=True,
+        )
+        yield repo
+    else:
+        # PostgreSQL: migrations already created tables via mg apply
+        repo = PostgresWorkflowStore(
+            connection_string=postgres_url,
+            create_tables=False,
+        )
+        yield repo
+        repo.close()
+
 class SuccessTask(Task):
     """A task that always succeeds."""
 
