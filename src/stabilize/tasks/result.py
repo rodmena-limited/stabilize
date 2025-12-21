@@ -157,3 +157,35 @@ class TaskResult:
             status=WorkflowStatus.STOPPED,
             outputs=outputs or {},
         )
+
+    def redirect(
+        cls,
+        context: dict[str, Any] | None = None,
+    ) -> TaskResult:
+        """
+        Create a redirect result.
+
+        Indicates a decision branch should be followed.
+
+        Args:
+            context: Context for the redirect
+
+        Returns:
+            A TaskResult with REDIRECT status
+        """
+        return cls(
+            status=WorkflowStatus.REDIRECT,
+            context=context or {},
+        )
+
+    def builder(cls, status: WorkflowStatus) -> TaskResultBuilder:
+        """
+        Create a builder for more complex results.
+
+        Args:
+            status: The execution status
+
+        Returns:
+            A TaskResultBuilder
+        """
+        return TaskResultBuilder(status)
