@@ -31,3 +31,6 @@ def reset_connection_manager() -> Generator[None, None, None]:
     yield
     # Reset the singleton after each test
     SingletonMeta.reset(ConnectionManager)
+
+class SuccessTask(Task):
+    """A task that always succeeds."""
