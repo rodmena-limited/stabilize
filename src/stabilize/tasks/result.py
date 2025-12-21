@@ -121,3 +121,39 @@ class TaskResult:
             A TaskResult with SKIPPED status
         """
         return cls(status=WorkflowStatus.SKIPPED)
+
+    def canceled(
+        cls,
+        outputs: dict[str, Any] | None = None,
+    ) -> TaskResult:
+        """
+        Create a canceled result.
+
+        Args:
+            outputs: Final outputs to preserve
+
+        Returns:
+            A TaskResult with CANCELED status
+        """
+        return cls(
+            status=WorkflowStatus.CANCELED,
+            outputs=outputs or {},
+        )
+
+    def stopped(
+        cls,
+        outputs: dict[str, Any] | None = None,
+    ) -> TaskResult:
+        """
+        Create a stopped result.
+
+        Args:
+            outputs: Final outputs to preserve
+
+        Returns:
+            A TaskResult with STOPPED status
+        """
+        return cls(
+            status=WorkflowStatus.STOPPED,
+            outputs=outputs or {},
+        )
