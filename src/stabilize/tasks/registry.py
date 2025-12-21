@@ -45,3 +45,56 @@ class TaskRegistry:
     def __init__(self) -> None:
         self._tasks: dict[str, TaskImplementation] = {}
         self._aliases: dict[str, str] = {}
+
+    def register(
+        self,
+        name: str,
+        task: TaskImplementation,
+        aliases: list[str] | None = None,
+    ) -> None:
+        """
+        Register a task implementation.
+
+        Args:
+            name: The task type name
+            task: Task class, instance, or callable
+            aliases: Optional alternative names
+
+        Raises:
+            ValueError: If name is already registered
+        """
+        if name in self._tasks:
+            logger.warning(f"Overwriting existing task registration: {name}")
+
+        self._tasks[name] = task
+
+        # Register aliases
+        if aliases:
+            for alias in aliases:
+                self._aliases[alias] = name
+
+        # Check for aliases on the task itself
+        if isinstance(task, type) and issubclass(task, Task):
+            instance = task()
+            for alias in instance.aliases:
+                self._aliases[alias] = name
+        elif isinstance(task, Task):
+            for alias in task.aliases:
+                self._aliases[alias] = name
+
+        logger.debug(f"Registered task: {name}")
+
+    def register_class(
+        self,
+        task_class: type[Task],
+        name: str | None = None,
+    ) -> None:
+        """
+        Register a task class using its class name.
+
+        Args:
+            task_class: The task class to register
+            name: Optional name override
+        """
+        task_name = name or task_class.__name__
+        self.register(task_name, task_class)
