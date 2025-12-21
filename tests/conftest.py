@@ -34,3 +34,6 @@ def reset_connection_manager() -> Generator[None, None, None]:
 
 class SuccessTask(Task):
     """A task that always succeeds."""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        return TaskResult.success(outputs={"success": True})
