@@ -37,6 +37,31 @@ def postgres_container() -> Generator[PostgresContainer, None, None]:
     with PostgresContainer("postgres:15") as postgres:
         yield postgres
 
+def postgres_url(postgres_container: PostgresContainer) -> str:
+    """Get PostgreSQL connection URL and run migrations."""
+    # testcontainers returns psycopg2 style URL, convert to psycopg3
+    url = postgres_container.get_connection_url()
+    # Replace 'postgresql+psycopg2://' with 'postgresql://' for psycopg3
+    if "+psycopg2" in url:
+        url = url.replace("+psycopg2", "")
+
+    # Run migrations using mg command
+    # mg needs to run from project root where mg.yaml and migrations/ exist
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = os.environ.copy()
+    env["MG_DATABASE_URL"] = url
+    result = subprocess.run(
+        ["mg", "apply"],
+        env=env,
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Migration failed: {result.stderr}")
+
+    return str(url)
+
 class SuccessTask(Task):
     """A task that always succeeds."""
 
