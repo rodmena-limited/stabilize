@@ -93,6 +93,74 @@ def test_simple_pipeline_execution() -> None:
     assert result.status == WorkflowStatus.SUCCEEDED
     assert result.stages[0].status == WorkflowStatus.SUCCEEDED
 
+def test_linear_pipeline_execution() -> None:
+    """Test a linear pipeline with multiple stages."""
+    queue, repository, processor, runner = setup_stabilize()
+    CounterTask.counter = 0
+
+    # Create a linear pipeline: A -> B -> C
+    execution = Workflow.create(
+        application="test",
+        name="Linear Pipeline",
+        stages=[
+            StageExecution(
+                ref_id="1",
+                type="test",
+                name="Stage A",
+                tasks=[
+                    TaskExecution.create(
+                        name="Counter Task",
+                        implementing_class="counter",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            StageExecution(
+                ref_id="2",
+                type="test",
+                name="Stage B",
+                requisite_stage_ref_ids={"1"},
+                tasks=[
+                    TaskExecution.create(
+                        name="Counter Task",
+                        implementing_class="counter",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            StageExecution(
+                ref_id="3",
+                type="test",
+                name="Stage C",
+                requisite_stage_ref_ids={"2"},
+                tasks=[
+                    TaskExecution.create(
+                        name="Counter Task",
+                        implementing_class="counter",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    repository.store(execution)
+    runner.start(execution)
+    processor.process_all(timeout=10.0)
+
+    result = repository.retrieve(execution.id)
+    assert result.status == WorkflowStatus.SUCCEEDED
+
+    # Verify all stages succeeded
+    for stage in result.stages:
+        assert stage.status == WorkflowStatus.SUCCEEDED
+
+    # Verify counter was incremented 3 times
+    assert CounterTask.counter == 3
+
 class SuccessTask(Task):
     """A task that always succeeds."""
 
