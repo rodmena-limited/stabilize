@@ -49,3 +49,12 @@ class CompensationTask(Task):
 
 class EventEmitterTask(Task):
     """Branch C: Event emitter - just succeeds."""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        return TaskResult.success(outputs={"event_emitted": True})
+
+class EventReceiverTask(Task):
+    """Branch D: Receives event from Branch C."""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        return TaskResult.success(outputs={"phase3_token": "PHASE3_EVENT_RECEIVED"})
