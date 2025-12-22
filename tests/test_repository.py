@@ -75,3 +75,25 @@ class TestWorkflowStore:
         assert retrieved.stages[0].tasks[0].stage_end is True
 
         repository.delete(execution.id)
+
+    def test_update_status(self, repository: WorkflowStore) -> None:
+        """Test updating execution status."""
+        execution = Workflow.create(
+            application="test-app",
+            name="Test Pipeline",
+            stages=[],
+        )
+
+        repository.store(execution)
+
+        # Update status
+        execution.status = WorkflowStatus.RUNNING
+        execution.start_time = 1234567890
+        repository.update_status(execution)
+
+        # Verify
+        retrieved = repository.retrieve(execution.id)
+        assert retrieved.status == WorkflowStatus.RUNNING
+        assert retrieved.start_time == 1234567890
+
+        repository.delete(execution.id)
