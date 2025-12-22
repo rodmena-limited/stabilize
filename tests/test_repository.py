@@ -168,3 +168,36 @@ class TestWorkflowStore:
         assert retrieved.status == WorkflowStatus.RUNNING
 
         repository.delete(execution.id)
+
+    def test_retrieve_by_application(self, repository: WorkflowStore) -> None:
+        """Test retrieving executions by application."""
+        # Create executions
+        exec1 = Workflow.create(
+            application="app-a",
+            name="Pipeline 1",
+            stages=[],
+        )
+        exec2 = Workflow.create(
+            application="app-a",
+            name="Pipeline 2",
+            stages=[],
+        )
+        exec3 = Workflow.create(
+            application="app-b",
+            name="Pipeline 3",
+            stages=[],
+        )
+
+        repository.store(exec1)
+        repository.store(exec2)
+        repository.store(exec3)
+
+        # Retrieve by application
+        results = list(repository.retrieve_by_application("app-a"))
+        assert len(results) == 2
+        assert all(e.application == "app-a" for e in results)
+
+        # Cleanup
+        repository.delete(exec1.id)
+        repository.delete(exec2.id)
+        repository.delete(exec3.id)
