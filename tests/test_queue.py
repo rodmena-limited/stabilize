@@ -23,3 +23,21 @@ class TestQueue:
 
         queue.ack(polled)
         assert queue.size() == 0
+
+    def test_push_with_delay(self, queue: Queue) -> None:
+        """Test pushing a message with delay."""
+        message = StartWorkflow(
+            execution_type="PIPELINE",
+            execution_id="delayed-123",
+        )
+
+        # Push with 1 hour delay - should not be immediately available
+        queue.push(message, delay=timedelta(hours=1))
+        assert queue.size() == 1
+
+        # Should not be polled (not yet delivered)
+        polled = queue.poll_one()
+        assert polled is None
+
+        # Clear for cleanup
+        queue.clear()
