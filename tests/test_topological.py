@@ -1,4 +1,7 @@
+"""Tests for topological sort algorithm."""
+
 import pytest
+
 from stabilize.dag.topological import (
     CircularDependencyError,
     find_initial_stages,
@@ -9,6 +12,7 @@ from stabilize.dag.topological import (
 from stabilize.models.stage import StageExecution
 from stabilize.models.workflow import Workflow
 
+
 def create_test_execution(*stages: StageExecution) -> Workflow:
     """Create a test execution with the given stages."""
     execution = Workflow(
@@ -17,6 +21,7 @@ def create_test_execution(*stages: StageExecution) -> Workflow:
         stages=list(stages),
     )
     return execution
+
 
 def test_linear_pipeline() -> None:
     """Test linear pipeline: A -> B -> C"""
@@ -42,6 +47,7 @@ def test_linear_pipeline() -> None:
     assert sorted_stages[0].ref_id == "1"
     assert sorted_stages[1].ref_id == "2"
     assert sorted_stages[2].ref_id == "3"
+
 
 def test_parallel_branches() -> None:
     """Test parallel branches: A -> [B, C] -> D"""
@@ -78,6 +84,7 @@ def test_parallel_branches() -> None:
     # D must be last
     assert sorted_stages[3].ref_id == "4"
 
+
 def test_diamond_pattern() -> None:
     """Test diamond pattern: A -> [B, C] -> D"""
     execution = create_test_execution(
@@ -111,6 +118,7 @@ def test_diamond_pattern() -> None:
     assert ref_ids.index("b") < ref_ids.index("d")
     assert ref_ids.index("c") < ref_ids.index("d")
 
+
 def test_multiple_initial_stages() -> None:
     """Test multiple initial stages: [A, B] -> C"""
     execution = create_test_execution(
@@ -128,6 +136,7 @@ def test_multiple_initial_stages() -> None:
 
     # A and B can be in any order
     assert sorted_stages[2].ref_id == "3"
+
 
 def test_circular_dependency_detection() -> None:
     """Test that circular dependencies are detected."""
@@ -148,6 +157,7 @@ def test_circular_dependency_detection() -> None:
 
     with pytest.raises(CircularDependencyError):
         topological_sort(execution.stages)
+
 
 def test_complex_circular_dependency() -> None:
     """Test detection of more complex circular dependency."""
@@ -175,6 +185,7 @@ def test_complex_circular_dependency() -> None:
     with pytest.raises(CircularDependencyError):
         topological_sort(execution.stages)
 
+
 def test_find_initial_stages() -> None:
     """Test finding initial stages."""
     execution = create_test_execution(
@@ -193,6 +204,7 @@ def test_find_initial_stages() -> None:
     assert len(initial) == 2
     ref_ids = {s.ref_id for s in initial}
     assert ref_ids == {"1", "2"}
+
 
 def test_find_terminal_stages() -> None:
     """Test finding terminal stages."""
@@ -217,6 +229,7 @@ def test_find_terminal_stages() -> None:
     assert len(terminal) == 2
     ref_ids = {s.ref_id for s in terminal}
     assert ref_ids == {"2", "3"}
+
 
 def test_execution_layers() -> None:
     """Test grouping stages into execution layers."""
@@ -255,3 +268,17 @@ def test_execution_layers() -> None:
     # Layer 2: D
     assert len(layers[2]) == 1
     assert layers[2][0].ref_id == "4"
+
+
+def test_empty_pipeline() -> None:
+    """Test handling of empty pipeline."""
+    execution = create_test_execution()
+
+    sorted_stages = topological_sort(execution.stages)
+    assert sorted_stages == []
+
+    initial = find_initial_stages(execution.stages)
+    assert initial == []
+
+    layers = get_execution_layers(execution.stages)
+    assert layers == []
