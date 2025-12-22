@@ -41,3 +41,42 @@ class TestQueue:
 
         # Clear for cleanup
         queue.clear()
+
+    def test_multiple_message_types(self, queue: Queue) -> None:
+        """Test different message types."""
+        msg1 = StartWorkflow(
+            execution_type="PIPELINE",
+            execution_id="exec-1",
+        )
+        msg2 = StartStage(
+            execution_type="PIPELINE",
+            execution_id="exec-1",
+            stage_id="stage-1",
+        )
+        msg3 = CompleteTask(
+            execution_type="PIPELINE",
+            execution_id="exec-1",
+            stage_id="stage-1",
+            task_id="task-1",
+            status=WorkflowStatus.SUCCEEDED,
+        )
+
+        queue.push(msg1)
+        queue.push(msg2)
+        queue.push(msg3)
+
+        assert queue.size() == 3
+
+        # Poll and verify types
+        polled1 = queue.poll_one()
+        assert isinstance(polled1, StartWorkflow)
+        queue.ack(polled1)
+
+        polled2 = queue.poll_one()
+        assert isinstance(polled2, StartStage)
+        queue.ack(polled2)
+
+        polled3 = queue.poll_one()
+        assert isinstance(polled3, CompleteTask)
+        assert polled3.status == WorkflowStatus.SUCCEEDED
+        queue.ack(polled3)
