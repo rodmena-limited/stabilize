@@ -126,3 +126,21 @@ class TestWorkflowStore:
         assert retrieved.stages[0].outputs == {"output": "value"}
 
         repository.delete(execution.id)
+
+    def test_cancel_execution(self, repository: WorkflowStore) -> None:
+        """Test canceling an execution."""
+        execution = Workflow.create(
+            application="test-app",
+            name="Test Pipeline",
+            stages=[],
+        )
+
+        repository.store(execution)
+        repository.cancel(execution.id, "user@test.com", "Testing cancellation")
+
+        retrieved = repository.retrieve(execution.id)
+        assert retrieved.is_canceled is True
+        assert retrieved.canceled_by == "user@test.com"
+        assert retrieved.cancellation_reason == "Testing cancellation"
+
+        repository.delete(execution.id)
