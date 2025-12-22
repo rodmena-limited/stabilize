@@ -21,3 +21,22 @@ class SetupTask(Task):
 class RetryTask(Task):
     """Branch A: Simulates retry - first call returns RUNNING, second returns SUCCESS."""
     _attempts: dict[str, int] = {}
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        stage_id = stage.id
+        attempts = RetryTask._attempts.get(stage_id, 0)
+        RetryTask._attempts[stage_id] = attempts + 1
+
+        if attempts < 1:
+            return TaskResult.running(context={"retry_attempt": attempts + 1})
+
+        return TaskResult.success(outputs={"phase2a_token": "PHASE2A_RETRY_SUCCESS"})
+
+class TimeoutTask(Task):
+    """Branch B: Simulates timeout with FAILED_CONTINUE."""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        return TaskResult.failed_continue(
+            error="Task timed out",
+            outputs={"phase2b_timed_out": True},
+        )
