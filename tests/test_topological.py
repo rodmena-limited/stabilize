@@ -174,3 +174,22 @@ def test_complex_circular_dependency() -> None:
 
     with pytest.raises(CircularDependencyError):
         topological_sort(execution.stages)
+
+def test_find_initial_stages() -> None:
+    """Test finding initial stages."""
+    execution = create_test_execution(
+        StageExecution.create(type="stage", name="A", ref_id="1"),
+        StageExecution.create(type="stage", name="B", ref_id="2"),
+        StageExecution.create(
+            type="stage",
+            name="C",
+            ref_id="3",
+            requisite_stage_ref_ids={"1"},
+        ),
+    )
+
+    initial = find_initial_stages(execution.stages)
+
+    assert len(initial) == 2
+    ref_ids = {s.ref_id for s in initial}
+    assert ref_ids == {"1", "2"}
