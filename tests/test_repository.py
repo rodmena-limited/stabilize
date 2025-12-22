@@ -42,3 +42,36 @@ class TestWorkflowStore:
 
         # Cleanup
         repository.delete(execution.id)
+
+    def test_store_execution_with_tasks(self, repository: WorkflowStore) -> None:
+        """Test storing execution with tasks."""
+        task = TaskExecution.create(
+            name="Test Task",
+            implementing_class="test.Task",
+            stage_start=True,
+            stage_end=True,
+        )
+
+        stage = StageExecution.create(
+            type="test",
+            name="Test Stage",
+            ref_id="1",
+        )
+        stage.tasks = [task]
+
+        execution = Workflow.create(
+            application="test-app",
+            name="Test Pipeline",
+            stages=[stage],
+        )
+
+        repository.store(execution)
+        retrieved = repository.retrieve(execution.id)
+
+        assert len(retrieved.stages) == 1
+        assert len(retrieved.stages[0].tasks) == 1
+        assert retrieved.stages[0].tasks[0].name == "Test Task"
+        assert retrieved.stages[0].tasks[0].stage_start is True
+        assert retrieved.stages[0].tasks[0].stage_end is True
+
+        repository.delete(execution.id)
