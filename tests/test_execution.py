@@ -1,4 +1,7 @@
+"""Integration tests for pipeline execution."""
+
 from typing import Any
+
 from stabilize import (
     CompleteStageHandler,
     CompleteTaskHandler,
@@ -19,6 +22,31 @@ from stabilize import (
 )
 from stabilize.persistence.memory import InMemoryWorkflowStore
 from stabilize.queue.queue import InMemoryQueue
+
+
+class SuccessTask(Task):
+    """A task that always succeeds."""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        return TaskResult.success(outputs={"success": True})
+
+
+class FailTask(Task):
+    """A task that always fails."""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        return TaskResult.terminal("Task failed intentionally")
+
+
+class CounterTask(Task):
+    """A task that increments a counter."""
+
+    counter: int = 0
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        CounterTask.counter += 1
+        return TaskResult.success(outputs={"count": CounterTask.counter})
+
 
 def setup_stabilize() -> tuple[
     InMemoryQueue,
@@ -56,6 +84,7 @@ def setup_stabilize() -> tuple[
 
     return queue, repository, processor, runner
 
+
 def test_simple_pipeline_execution() -> None:
     """Test a simple single-stage pipeline."""
     queue, repository, processor, runner = setup_stabilize()
@@ -92,6 +121,7 @@ def test_simple_pipeline_execution() -> None:
     result = repository.retrieve(execution.id)
     assert result.status == WorkflowStatus.SUCCEEDED
     assert result.stages[0].status == WorkflowStatus.SUCCEEDED
+
 
 def test_linear_pipeline_execution() -> None:
     """Test a linear pipeline with multiple stages."""
@@ -160,6 +190,7 @@ def test_linear_pipeline_execution() -> None:
 
     # Verify counter was incremented 3 times
     assert CounterTask.counter == 3
+
 
 def test_parallel_stages() -> None:
     """Test parallel stage execution."""
@@ -243,22 +274,54 @@ def test_parallel_stages() -> None:
     # Verify all 4 tasks ran
     assert CounterTask.counter == 4
 
-class SuccessTask(Task):
-    """A task that always succeeds."""
 
-    def execute(self, stage: StageExecution) -> TaskResult:
-        return TaskResult.success(outputs={"success": True})
+def test_stage_failure() -> None:
+    """Test that stage failure terminates the pipeline."""
+    queue, repository, processor, runner = setup_stabilize()
 
-class FailTask(Task):
-    """A task that always fails."""
+    execution = Workflow.create(
+        application="test",
+        name="Failing Pipeline",
+        stages=[
+            StageExecution(
+                ref_id="1",
+                type="test",
+                name="Failing Stage",
+                tasks=[
+                    TaskExecution.create(
+                        name="Fail Task",
+                        implementing_class="fail",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            StageExecution(
+                ref_id="2",
+                type="test",
+                name="Never Reached",
+                requisite_stage_ref_ids={"1"},
+                tasks=[
+                    TaskExecution.create(
+                        name="Success Task",
+                        implementing_class="success",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
 
-    def execute(self, stage: StageExecution) -> TaskResult:
-        return TaskResult.terminal("Task failed intentionally")
+    repository.store(execution)
+    runner.start(execution)
+    processor.process_all(timeout=10.0)
 
-class CounterTask(Task):
-    """A task that increments a counter."""
-    counter: int = 0
+    result = repository.retrieve(execution.id)
+    assert result.status == WorkflowStatus.TERMINAL
 
-    def execute(self, stage: StageExecution) -> TaskResult:
-        CounterTask.counter += 1
-        return TaskResult.success(outputs={"count": CounterTask.counter})
+    # First stage should be terminal
+    assert result.stages[0].status == WorkflowStatus.TERMINAL
+
+    # Second stage should not have started
+    assert result.stages[1].status == WorkflowStatus.NOT_STARTED
