@@ -67,3 +67,35 @@ class JoinGateTask(Task):
 
 class LoopIterationTask(Task):
     """Phase 5: Loop iteration with conditional logic."""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        counter = stage.context.get("counter", 1)
+
+        if counter == 2:
+            token = "PHASE5_LOOP_IF_2"
+        else:
+            token = f"PHASE5_LOOP_ELSE_{counter}"
+
+        output_key = f"loop{counter}_token"
+        return TaskResult.success(outputs={output_key: token})
+
+class FinalizeTask(Task):
+    """Phase 6: Finalize - collect all tokens and assemble result."""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        context = StageContext(stage, stage.context)
+
+        tokens = [
+            context.get("phase1_token", "MISSING_PHASE1"),
+            context.get("phase2a_token", "MISSING_PHASE2A"),
+            context.get("phase2b_token", "MISSING_PHASE2B"),
+            context.get("phase3_token", "MISSING_PHASE3"),
+            context.get("phase4_token", "MISSING_PHASE4"),
+            context.get("loop1_token", "MISSING_LOOP1"),
+            context.get("loop2_token", "MISSING_LOOP2"),
+            context.get("loop3_token", "MISSING_LOOP3"),
+            "PHASE6_END",
+        ]
+
+        result = "::".join(tokens)
+        return TaskResult.success(outputs={"final_result": result})
