@@ -217,3 +217,41 @@ def test_find_terminal_stages() -> None:
     assert len(terminal) == 2
     ref_ids = {s.ref_id for s in terminal}
     assert ref_ids == {"2", "3"}
+
+def test_execution_layers() -> None:
+    """Test grouping stages into execution layers."""
+    execution = create_test_execution(
+        StageExecution.create(type="stage", name="A", ref_id="1"),
+        StageExecution.create(
+            type="stage",
+            name="B",
+            ref_id="2",
+            requisite_stage_ref_ids={"1"},
+        ),
+        StageExecution.create(
+            type="stage",
+            name="C",
+            ref_id="3",
+            requisite_stage_ref_ids={"1"},
+        ),
+        StageExecution.create(
+            type="stage",
+            name="D",
+            ref_id="4",
+            requisite_stage_ref_ids={"2", "3"},
+        ),
+    )
+
+    layers = get_execution_layers(execution.stages)
+
+    assert len(layers) == 3
+    # Layer 0: A
+    assert len(layers[0]) == 1
+    assert layers[0][0].ref_id == "1"
+    # Layer 1: B and C (parallel)
+    assert len(layers[1]) == 2
+    layer1_refs = {s.ref_id for s in layers[1]}
+    assert layer1_refs == {"2", "3"}
+    # Layer 2: D
+    assert len(layers[2]) == 1
+    assert layers[2][0].ref_id == "4"
