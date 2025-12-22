@@ -201,3 +201,47 @@ class TestWorkflowStore:
         repository.delete(exec1.id)
         repository.delete(exec2.id)
         repository.delete(exec3.id)
+
+    def test_dag_with_requisites(self, repository: WorkflowStore) -> None:
+        """Test storing execution with DAG dependencies."""
+        execution = Workflow.create(
+            application="test-app",
+            name="DAG Pipeline",
+            stages=[
+                StageExecution.create(
+                    type="test",
+                    name="Stage A",
+                    ref_id="a",
+                ),
+                StageExecution.create(
+                    type="test",
+                    name="Stage B",
+                    ref_id="b",
+                    requisite_stage_ref_ids={"a"},
+                ),
+                StageExecution.create(
+                    type="test",
+                    name="Stage C",
+                    ref_id="c",
+                    requisite_stage_ref_ids={"a"},
+                ),
+                StageExecution.create(
+                    type="test",
+                    name="Stage D",
+                    ref_id="d",
+                    requisite_stage_ref_ids={"b", "c"},
+                ),
+            ],
+        )
+
+        repository.store(execution)
+        retrieved = repository.retrieve(execution.id)
+
+        # Verify DAG structure
+        stage_map = {s.ref_id: s for s in retrieved.stages}
+        assert stage_map["a"].requisite_stage_ref_ids == set()
+        assert stage_map["b"].requisite_stage_ref_ids == {"a"}
+        assert stage_map["c"].requisite_stage_ref_ids == {"a"}
+        assert stage_map["d"].requisite_stage_ref_ids == {"b", "c"}
+
+        repository.delete(execution.id)
