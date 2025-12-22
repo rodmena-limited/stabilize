@@ -1,7 +1,11 @@
+"""Parameterized tests for Queue - runs on all backends."""
+
 from datetime import timedelta
+
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import CompleteTask, StartStage, StartWorkflow
 from stabilize.queue.queue import Queue
+
 
 class TestQueue:
     """Parameterized queue tests - runs on both SQLite and PostgreSQL."""
@@ -124,3 +128,17 @@ class TestQueue:
 
         # But queue size should still be 1
         assert queue.size() == 1
+
+    def test_clear(self, queue: Queue) -> None:
+        """Test clearing the queue."""
+        for i in range(5):
+            queue.push(
+                StartWorkflow(
+                    execution_type="PIPELINE",
+                    execution_id=f"exec-{i}",
+                )
+            )
+
+        assert queue.size() == 5
+        queue.clear()
+        assert queue.size() == 0
