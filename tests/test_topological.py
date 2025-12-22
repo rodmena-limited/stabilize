@@ -148,3 +148,29 @@ def test_circular_dependency_detection() -> None:
 
     with pytest.raises(CircularDependencyError):
         topological_sort(execution.stages)
+
+def test_complex_circular_dependency() -> None:
+    """Test detection of more complex circular dependency."""
+    execution = create_test_execution(
+        StageExecution.create(
+            type="stage",
+            name="A",
+            ref_id="1",
+            requisite_stage_ref_ids={"3"},
+        ),
+        StageExecution.create(
+            type="stage",
+            name="B",
+            ref_id="2",
+            requisite_stage_ref_ids={"1"},
+        ),
+        StageExecution.create(
+            type="stage",
+            name="C",
+            ref_id="3",
+            requisite_stage_ref_ids={"2"},
+        ),
+    )
+
+    with pytest.raises(CircularDependencyError):
+        topological_sort(execution.stages)
