@@ -6,3 +6,7 @@ from stabilize.persistence.store import WorkflowStore
 
 class TestWorkflowStore:
     """Parameterized repository tests - runs on both SQLite and PostgreSQL."""
+
+    def test_health_check(self, repository: WorkflowStore) -> None:
+        """Test database health check."""
+        assert repository.is_healthy() is True
