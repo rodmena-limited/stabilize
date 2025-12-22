@@ -118,3 +118,85 @@ class TestPipelineIntegration:
         assert CounterTask.counter == 3
 
         repository.delete(execution.id)
+
+    def test_parallel_stages(
+        self,
+        repository: WorkflowStore,
+        queue: Queue,
+    ) -> None:
+        """Test parallel execution: A -> [B, C] -> D."""
+        processor, runner = setup_stabilize(repository, queue)
+        CounterTask.counter = 0
+
+        execution = Workflow.create(
+            application="test",
+            name="Parallel Pipeline",
+            stages=[
+                StageExecution(
+                    ref_id="a",
+                    type="test",
+                    name="Stage A",
+                    tasks=[
+                        TaskExecution.create(
+                            name="Counter Task",
+                            implementing_class="counter",
+                            stage_start=True,
+                            stage_end=True,
+                        ),
+                    ],
+                ),
+                StageExecution(
+                    ref_id="b",
+                    type="test",
+                    name="Stage B",
+                    requisite_stage_ref_ids={"a"},
+                    tasks=[
+                        TaskExecution.create(
+                            name="Counter Task",
+                            implementing_class="counter",
+                            stage_start=True,
+                            stage_end=True,
+                        ),
+                    ],
+                ),
+                StageExecution(
+                    ref_id="c",
+                    type="test",
+                    name="Stage C",
+                    requisite_stage_ref_ids={"a"},
+                    tasks=[
+                        TaskExecution.create(
+                            name="Counter Task",
+                            implementing_class="counter",
+                            stage_start=True,
+                            stage_end=True,
+                        ),
+                    ],
+                ),
+                StageExecution(
+                    ref_id="d",
+                    type="test",
+                    name="Stage D",
+                    requisite_stage_ref_ids={"b", "c"},
+                    tasks=[
+                        TaskExecution.create(
+                            name="Counter Task",
+                            implementing_class="counter",
+                            stage_start=True,
+                            stage_end=True,
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+        repository.store(execution)
+        runner.start(execution)
+        processor.process_all(timeout=15.0)
+
+        result = repository.retrieve(execution.id)
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert all(s.status == WorkflowStatus.SUCCEEDED for s in result.stages)
+        assert CounterTask.counter == 4
+
+        repository.delete(execution.id)
