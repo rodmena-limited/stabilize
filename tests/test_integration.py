@@ -50,3 +50,71 @@ class TestPipelineIntegration:
 
         # Cleanup
         repository.delete(execution.id)
+
+    def test_linear_pipeline(
+        self,
+        repository: WorkflowStore,
+        queue: Queue,
+    ) -> None:
+        """Test a linear pipeline: A -> B -> C."""
+        processor, runner = setup_stabilize(repository, queue)
+        CounterTask.counter = 0
+
+        execution = Workflow.create(
+            application="test",
+            name="Linear Pipeline",
+            stages=[
+                StageExecution(
+                    ref_id="1",
+                    type="test",
+                    name="Stage A",
+                    tasks=[
+                        TaskExecution.create(
+                            name="Counter Task",
+                            implementing_class="counter",
+                            stage_start=True,
+                            stage_end=True,
+                        ),
+                    ],
+                ),
+                StageExecution(
+                    ref_id="2",
+                    type="test",
+                    name="Stage B",
+                    requisite_stage_ref_ids={"1"},
+                    tasks=[
+                        TaskExecution.create(
+                            name="Counter Task",
+                            implementing_class="counter",
+                            stage_start=True,
+                            stage_end=True,
+                        ),
+                    ],
+                ),
+                StageExecution(
+                    ref_id="3",
+                    type="test",
+                    name="Stage C",
+                    requisite_stage_ref_ids={"2"},
+                    tasks=[
+                        TaskExecution.create(
+                            name="Counter Task",
+                            implementing_class="counter",
+                            stage_start=True,
+                            stage_end=True,
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+        repository.store(execution)
+        runner.start(execution)
+        processor.process_all(timeout=15.0)
+
+        result = repository.retrieve(execution.id)
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert all(s.status == WorkflowStatus.SUCCEEDED for s in result.stages)
+        assert CounterTask.counter == 3
+
+        repository.delete(execution.id)
