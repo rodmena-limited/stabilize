@@ -1,8 +1,11 @@
+"""Parameterized tests for WorkflowStore - runs on all backends."""
+
 from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.task import TaskExecution
 from stabilize.models.workflow import Workflow
 from stabilize.persistence.store import WorkflowStore
+
 
 class TestWorkflowStore:
     """Parameterized repository tests - runs on both SQLite and PostgreSQL."""
@@ -243,5 +246,42 @@ class TestWorkflowStore:
         assert stage_map["b"].requisite_stage_ref_ids == {"a"}
         assert stage_map["c"].requisite_stage_ref_ids == {"a"}
         assert stage_map["d"].requisite_stage_ref_ids == {"b", "c"}
+
+        repository.delete(execution.id)
+
+    def test_json_context_roundtrip(self, repository: WorkflowStore) -> None:
+        """Test that complex JSON context is preserved."""
+        execution = Workflow.create(
+            application="test-app",
+            name="JSON Test",
+            stages=[
+                StageExecution.create(
+                    type="test",
+                    name="Test Stage",
+                    ref_id="1",
+                    context={
+                        "string": "value",
+                        "number": 42,
+                        "float": 3.14,
+                        "boolean": True,
+                        "null": None,
+                        "array": [1, 2, 3],
+                        "nested": {"a": {"b": {"c": "deep"}}},
+                    },
+                ),
+            ],
+        )
+
+        repository.store(execution)
+        retrieved = repository.retrieve(execution.id)
+
+        ctx = retrieved.stages[0].context
+        assert ctx["string"] == "value"
+        assert ctx["number"] == 42
+        assert ctx["float"] == 3.14
+        assert ctx["boolean"] is True
+        assert ctx["null"] is None
+        assert ctx["array"] == [1, 2, 3]
+        assert ctx["nested"]["a"]["b"]["c"] == "deep"
 
         repository.delete(execution.id)
