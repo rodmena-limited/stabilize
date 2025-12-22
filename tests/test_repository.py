@@ -144,3 +144,27 @@ class TestWorkflowStore:
         assert retrieved.cancellation_reason == "Testing cancellation"
 
         repository.delete(execution.id)
+
+    def test_pause_and_resume(self, repository: WorkflowStore) -> None:
+        """Test pausing and resuming an execution."""
+        execution = Workflow.create(
+            application="test-app",
+            name="Test Pipeline",
+            stages=[],
+        )
+
+        repository.store(execution)
+
+        # Pause
+        repository.pause(execution.id, "admin@test.com")
+        retrieved = repository.retrieve(execution.id)
+        assert retrieved.status == WorkflowStatus.PAUSED
+        assert retrieved.paused is not None
+        assert retrieved.paused.paused_by == "admin@test.com"
+
+        # Resume
+        repository.resume(execution.id)
+        retrieved = repository.retrieve(execution.id)
+        assert retrieved.status == WorkflowStatus.RUNNING
+
+        repository.delete(execution.id)
