@@ -110,3 +110,21 @@ def test_diamond_pattern() -> None:
     assert ref_ids.index("a") < ref_ids.index("c")
     assert ref_ids.index("b") < ref_ids.index("d")
     assert ref_ids.index("c") < ref_ids.index("d")
+
+def test_multiple_initial_stages() -> None:
+    """Test multiple initial stages: [A, B] -> C"""
+    execution = create_test_execution(
+        StageExecution.create(type="stage", name="A", ref_id="1"),
+        StageExecution.create(type="stage", name="B", ref_id="2"),
+        StageExecution.create(
+            type="stage",
+            name="C",
+            ref_id="3",
+            requisite_stage_ref_ids={"1", "2"},
+        ),
+    )
+
+    sorted_stages = topological_sort(execution.stages)
+
+    # A and B can be in any order
+    assert sorted_stages[2].ref_id == "3"
