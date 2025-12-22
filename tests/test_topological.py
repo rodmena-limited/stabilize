@@ -77,3 +77,36 @@ def test_parallel_branches() -> None:
     assert middle == {"2", "3"}
     # D must be last
     assert sorted_stages[3].ref_id == "4"
+
+def test_diamond_pattern() -> None:
+    """Test diamond pattern: A -> [B, C] -> D"""
+    execution = create_test_execution(
+        StageExecution.create(type="stage", name="A", ref_id="a"),
+        StageExecution.create(
+            type="stage",
+            name="B",
+            ref_id="b",
+            requisite_stage_ref_ids={"a"},
+        ),
+        StageExecution.create(
+            type="stage",
+            name="C",
+            ref_id="c",
+            requisite_stage_ref_ids={"a"},
+        ),
+        StageExecution.create(
+            type="stage",
+            name="D",
+            ref_id="d",
+            requisite_stage_ref_ids={"b", "c"},
+        ),
+    )
+
+    sorted_stages = topological_sort(execution.stages)
+
+    # Verify order respects dependencies
+    ref_ids = [s.ref_id for s in sorted_stages]
+    assert ref_ids.index("a") < ref_ids.index("b")
+    assert ref_ids.index("a") < ref_ids.index("c")
+    assert ref_ids.index("b") < ref_ids.index("d")
+    assert ref_ids.index("c") < ref_ids.index("d")
