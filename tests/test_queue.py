@@ -80,3 +80,26 @@ class TestQueue:
         assert isinstance(polled3, CompleteTask)
         assert polled3.status == WorkflowStatus.SUCCEEDED
         queue.ack(polled3)
+
+    def test_message_locking(self, queue: Queue) -> None:
+        """Test that polling locks messages to prevent double-processing."""
+        message = StartWorkflow(
+            execution_type="PIPELINE",
+            execution_id="lock-test-123",
+        )
+
+        queue.push(message)
+
+        # First poll succeeds and locks the message
+        polled1 = queue.poll_one()
+        assert polled1 is not None
+        assert isinstance(polled1, StartWorkflow)
+        assert polled1.execution_id == "lock-test-123"
+
+        # Second poll should return None (message is locked)
+        polled2 = queue.poll_one()
+        assert polled2 is None
+
+        # Ack first message
+        queue.ack(polled1)
+        assert queue.size() == 0
