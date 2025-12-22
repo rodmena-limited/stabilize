@@ -40,3 +40,12 @@ class TimeoutTask(Task):
             error="Task timed out",
             outputs={"phase2b_timed_out": True},
         )
+
+class CompensationTask(Task):
+    """Branch B Compensation: Runs after TimeoutTask fails."""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        return TaskResult.success(outputs={"phase2b_token": "PHASE2B_TIMEOUT_COMPENSATED"})
+
+class EventEmitterTask(Task):
+    """Branch C: Event emitter - just succeeds."""
