@@ -103,3 +103,24 @@ class TestQueue:
         # Ack first message
         queue.ack(polled1)
         assert queue.size() == 0
+
+    def test_reschedule(self, queue: Queue) -> None:
+        """Test rescheduling a message."""
+        message = StartWorkflow(
+            execution_type="PIPELINE",
+            execution_id="reschedule-123",
+        )
+
+        queue.push(message)
+        polled = queue.poll_one()
+        assert polled is not None
+
+        # Reschedule with delay
+        queue.reschedule(polled, delay=timedelta(hours=1))
+
+        # Message should not be immediately available
+        polled2 = queue.poll_one()
+        assert polled2 is None
+
+        # But queue size should still be 1
+        assert queue.size() == 1
