@@ -128,3 +128,23 @@ def test_multiple_initial_stages() -> None:
 
     # A and B can be in any order
     assert sorted_stages[2].ref_id == "3"
+
+def test_circular_dependency_detection() -> None:
+    """Test that circular dependencies are detected."""
+    execution = create_test_execution(
+        StageExecution.create(
+            type="stage",
+            name="A",
+            ref_id="1",
+            requisite_stage_ref_ids={"2"},
+        ),
+        StageExecution.create(
+            type="stage",
+            name="B",
+            ref_id="2",
+            requisite_stage_ref_ids={"1"},
+        ),
+    )
+
+    with pytest.raises(CircularDependencyError):
+        topological_sort(execution.stages)
