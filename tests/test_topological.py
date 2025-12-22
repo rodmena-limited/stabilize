@@ -193,3 +193,27 @@ def test_find_initial_stages() -> None:
     assert len(initial) == 2
     ref_ids = {s.ref_id for s in initial}
     assert ref_ids == {"1", "2"}
+
+def test_find_terminal_stages() -> None:
+    """Test finding terminal stages."""
+    execution = create_test_execution(
+        StageExecution.create(type="stage", name="A", ref_id="1"),
+        StageExecution.create(
+            type="stage",
+            name="B",
+            ref_id="2",
+            requisite_stage_ref_ids={"1"},
+        ),
+        StageExecution.create(
+            type="stage",
+            name="C",
+            ref_id="3",
+            requisite_stage_ref_ids={"1"},
+        ),
+    )
+
+    terminal = find_terminal_stages(execution.stages)
+
+    assert len(terminal) == 2
+    ref_ids = {s.ref_id for s in terminal}
+    assert ref_ids == {"2", "3"}
