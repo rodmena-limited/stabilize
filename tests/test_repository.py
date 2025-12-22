@@ -97,3 +97,32 @@ class TestWorkflowStore:
         assert retrieved.start_time == 1234567890
 
         repository.delete(execution.id)
+
+    def test_store_stage(self, repository: WorkflowStore) -> None:
+        """Test updating a stage."""
+        execution = Workflow.create(
+            application="test-app",
+            name="Test Pipeline",
+            stages=[
+                StageExecution.create(
+                    type="test",
+                    name="Test Stage",
+                    ref_id="1",
+                ),
+            ],
+        )
+
+        repository.store(execution)
+
+        # Update stage
+        stage = execution.stages[0]
+        stage.status = WorkflowStatus.RUNNING
+        stage.outputs = {"output": "value"}
+        repository.store_stage(stage)
+
+        # Verify
+        retrieved = repository.retrieve(execution.id)
+        assert retrieved.stages[0].status == WorkflowStatus.RUNNING
+        assert retrieved.stages[0].outputs == {"output": "value"}
+
+        repository.delete(execution.id)
