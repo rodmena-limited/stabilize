@@ -1371,3 +1371,72 @@ def mg_up(db_url: str | None = None) -> None:
     except psycopg.Error as e:
         print(f"Database error: {e}")
         sys.exit(1)
+
+def prompt() -> None:
+    """Output comprehensive documentation for RAG systems and coding agents."""
+    print(PROMPT_TEXT)
+
+def monitor(
+    db_url: str | None,
+    app_filter: str | None,
+    refresh_interval: int,
+    status_filter: str,
+) -> None:
+    """Launch the real-time monitoring dashboard."""
+    from stabilize.monitor import run_monitor
+
+    # Create store based on db_url
+    if db_url is None:
+        # Try to load from config
+        try:
+            config = load_config()
+            db_url = (
+                f"postgres://{config.get('user', 'postgres')}:"
+                f"{config.get('password', '')}@"
+                f"{config.get('host', 'localhost')}:"
+                f"{config.get('port', 5432)}/"
+                f"{config.get('dbname', 'stabilize')}"
+            )
+        except SystemExit:
+            print("Error: No database configuration found.")
+            print("Provide --db-url or set up mg.yaml / MG_DATABASE_URL")
+            sys.exit(1)
+
+    # Determine store type from URL
+    if db_url.startswith("sqlite"):
+        from stabilize.persistence.sqlite import SqliteWorkflowStore
+        from stabilize.queue.sqlite_queue import SqliteQueue
+
+        store = SqliteWorkflowStore(db_url, create_tables=False)
+        # Try to create queue for stats
+        try:
+            queue = SqliteQueue(db_url, table_name="queue_messages")
+        except Exception:
+            queue = None
+    elif db_url.startswith("postgres"):
+        try:
+            from stabilize.persistence.postgres import PostgresWorkflowStore
+            from stabilize.queue.queue import PostgresQueue
+
+            store = PostgresWorkflowStore(db_url)
+            try:
+                queue = PostgresQueue(db_url)
+            except Exception:
+                queue = None
+        except ImportError:
+            print("Error: psycopg not installed")
+            print("Install with: pip install stabilize[postgres]")
+            sys.exit(1)
+    else:
+        print(f"Error: Unsupported database URL: {db_url}")
+        print("Use sqlite:///path or postgres://...")
+        sys.exit(1)
+
+    print(f"Connecting to {db_url[:50]}...")
+    run_monitor(
+        store=store,
+        queue=queue,
+        app_filter=app_filter,
+        refresh_interval=refresh_interval,
+        status_filter=status_filter,
+    )
