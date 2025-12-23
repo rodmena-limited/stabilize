@@ -95,3 +95,96 @@ def example_simple() -> None:
     print("Stage Output (first 200 chars):")
     stdout = result.stages[0].outputs.get("stdout", "")
     print(stdout[:200] + "..." if len(stdout) > 200 else stdout)
+
+def example_sequential() -> None:
+    """Run multiple commands in sequence."""
+    print("\n" + "=" * 60)
+    print("Example 2: Sequential Commands")
+    print("=" * 60)
+
+    # Setup
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    # Create workflow: create dir -> create file -> read file
+    workflow = Workflow.create(
+        application="shell-example",
+        name="Sequential Commands",
+        stages=[
+            StageExecution(
+                ref_id="1",
+                type="shell",
+                name="Create Temp Directory",
+                context={"command": "mkdir -p /tmp/stabilize_test"},
+                tasks=[
+                    TaskExecution.create(
+                        name="mkdir",
+                        implementing_class="shell",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            StageExecution(
+                ref_id="2",
+                type="shell",
+                name="Create File",
+                requisite_stage_ref_ids={"1"},  # depends on stage 1
+                context={"command": "echo 'Hello from Stabilize!' > /tmp/stabilize_test/hello.txt"},
+                tasks=[
+                    TaskExecution.create(
+                        name="create file",
+                        implementing_class="shell",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            StageExecution(
+                ref_id="3",
+                type="shell",
+                name="Read File",
+                requisite_stage_ref_ids={"2"},  # depends on stage 2
+                context={"command": "cat /tmp/stabilize_test/hello.txt"},
+                tasks=[
+                    TaskExecution.create(
+                        name="read file",
+                        implementing_class="shell",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            StageExecution(
+                ref_id="4",
+                type="shell",
+                name="Cleanup",
+                requisite_stage_ref_ids={"3"},
+                context={"command": "rm -rf /tmp/stabilize_test"},
+                tasks=[
+                    TaskExecution.create(
+                        name="cleanup",
+                        implementing_class="shell",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    # Run
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=30.0)
+
+    # Check result
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+    for stage in result.stages:
+        status_icon = "✓" if stage.status == WorkflowStatus.SUCCEEDED else "✗"
+        print(f"  {status_icon} {stage.name}: {stage.status}")
+        if stage.outputs.get("stdout"):
+            print(f"      Output: {stage.outputs['stdout']}")
