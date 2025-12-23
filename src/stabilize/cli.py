@@ -1440,3 +1440,37 @@ def monitor(
         refresh_interval=refresh_interval,
         status_filter=status_filter,
     )
+
+def rag_init(
+    db_url: str | None = None,
+    force: bool = False,
+    additional_context: list[str] | None = None,
+) -> None:
+    """Initialize RAG embeddings from examples, documentation, and additional context."""
+    try:
+        from stabilize.rag import StabilizeRAG, get_cache
+    except ImportError:
+        print("Error: RAG support requires: pip install stabilize[rag]")
+        sys.exit(1)
+
+    cache = get_cache(db_url)
+    rag = StabilizeRAG(cache)
+
+    print("Initializing embeddings...")
+    count = rag.init(force=force, additional_paths=additional_context)
+    if count > 0:
+        print(f"Cached {count} embeddings")
+    else:
+        print("Embeddings already initialized (use --force to regenerate)")
+
+def rag_clear(db_url: str | None = None) -> None:
+    """Clear all cached embeddings."""
+    try:
+        from stabilize.rag import get_cache
+    except ImportError:
+        print("Error: RAG support requires: pip install stabilize[rag]")
+        sys.exit(1)
+
+    cache = get_cache(db_url)
+    cache.clear()
+    print("Embedding cache cleared")
