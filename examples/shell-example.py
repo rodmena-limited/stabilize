@@ -1,5 +1,22 @@
+#!/usr/bin/env python3
+"""
+Shell Command Example - Demonstrates running shell commands with Stabilize.
+
+This example shows how to use the built-in ShellTask for:
+1. Single commands
+2. Sequential pipelines with output passing
+3. Parallel command execution
+
+Run with:
+    python examples/shell-example.py
+"""
+
 import logging
 from typing import Any
+
+# Configure logging before importing stabilize modules
+logging.basicConfig(level=logging.ERROR)  # Suppress all but errors
+
 from stabilize import (
     CompleteStageHandler,
     CompleteTaskHandler,
@@ -21,6 +38,11 @@ from stabilize import (
 )
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue.queue import Queue
+
+# =============================================================================
+# Helper: Setup pipeline infrastructure
+# =============================================================================
+
 
 def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with ShellTask registered."""
@@ -49,6 +71,12 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
     orchestrator = Orchestrator(queue)
 
     return processor, orchestrator
+
+
+# =============================================================================
+# Example 1: Simple Single Command
+# =============================================================================
+
 
 def example_simple() -> None:
     """Run a single shell command."""
@@ -95,6 +123,12 @@ def example_simple() -> None:
     print("Stage Output (first 200 chars):")
     stdout = result.stages[0].outputs.get("stdout", "")
     print(stdout[:200] + "..." if len(stdout) > 200 else stdout)
+
+
+# =============================================================================
+# Example 2: Sequential Commands (Pipeline)
+# =============================================================================
+
 
 def example_sequential() -> None:
     """Run multiple commands in sequence."""
@@ -188,3 +222,126 @@ def example_sequential() -> None:
         print(f"  {status_icon} {stage.name}: {stage.status}")
         if stage.outputs.get("stdout"):
             print(f"      Output: {stage.outputs['stdout']}")
+
+
+# =============================================================================
+# Example 3: Parallel Commands
+# =============================================================================
+
+
+def example_parallel() -> None:
+    """Run commands in parallel branches."""
+    print("\n" + "=" * 60)
+    print("Example 3: Parallel Commands")
+    print("=" * 60)
+
+    # Setup
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    # Create workflow with parallel branches:
+    #      Setup
+    #     /     \
+    #  Check1  Check2
+    #     \     /
+    #     Report
+    workflow = Workflow.create(
+        application="shell-example",
+        name="Parallel Commands",
+        stages=[
+            StageExecution(
+                ref_id="setup",
+                type="shell",
+                name="Setup",
+                context={"command": "echo 'Starting parallel checks...'"},
+                tasks=[
+                    TaskExecution.create(
+                        name="setup",
+                        implementing_class="shell",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            # These two run in parallel (both depend only on setup)
+            StageExecution(
+                ref_id="check1",
+                type="shell",
+                name="Check Python Version",
+                requisite_stage_ref_ids={"setup"},
+                context={"command": "python3 --version"},
+                tasks=[
+                    TaskExecution.create(
+                        name="check python",
+                        implementing_class="shell",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            StageExecution(
+                ref_id="check2",
+                type="shell",
+                name="Check Git Version",
+                requisite_stage_ref_ids={"setup"},
+                context={"command": "git --version"},
+                tasks=[
+                    TaskExecution.create(
+                        name="check git",
+                        implementing_class="shell",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            # This waits for both parallel branches
+            StageExecution(
+                ref_id="report",
+                type="shell",
+                name="Report",
+                requisite_stage_ref_ids={"check1", "check2"},
+                context={"command": "echo 'All checks completed!'"},
+                tasks=[
+                    TaskExecution.create(
+                        name="report",
+                        implementing_class="shell",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    # Run
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=30.0)
+
+    # Check result
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+    for stage in result.stages:
+        status_icon = "✓" if stage.status == WorkflowStatus.SUCCEEDED else "✗"
+        stdout = stage.outputs.get("stdout", "")
+        print(f"  {status_icon} {stage.name}: {stdout}")
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+
+if __name__ == "__main__":
+    print("Stabilize Shell Command Examples")
+    print("=" * 60)
+
+    example_simple()
+    example_sequential()
+    example_parallel()
+
+    print("\n" + "=" * 60)
+    print("All examples completed!")
+    print("=" * 60)
