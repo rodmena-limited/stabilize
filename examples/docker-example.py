@@ -88,3 +88,67 @@ def example_simple_run() -> None:
     result = store.retrieve(workflow.id)
     print(f"\nWorkflow Status: {result.status}")
     print(f"Output: {result.stages[0].outputs.get('stdout')}")
+
+def example_pull_and_run() -> None:
+    """Pull an image then run a container."""
+    print("\n" + "=" * 60)
+    print("Example 2: Pull and Run")
+    print("=" * 60)
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    workflow = Workflow.create(
+        application="docker-example",
+        name="Pull and Run",
+        stages=[
+            StageExecution(
+                ref_id="1",
+                type="docker",
+                name="Pull Image",
+                context={
+                    "action": "pull",
+                    "image": "busybox:latest",
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Docker Pull",
+                        implementing_class="docker",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            StageExecution(
+                ref_id="2",
+                type="docker",
+                name="Run Container",
+                requisite_stage_ref_ids={"1"},
+                context={
+                    "action": "run",
+                    "image": "busybox:latest",
+                    "command": "uname -a",
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Docker Run",
+                        implementing_class="docker",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=120.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+    for stage in result.stages:
+        stdout = stage.outputs.get("stdout", "")
+        print(f"  {stage.name}: {stdout[:100]}")
