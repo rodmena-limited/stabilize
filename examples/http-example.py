@@ -88,3 +88,59 @@ def example_simple_get() -> None:
     print(f"\nWorkflow Status: {result.status}")
     print(f"Response Status: {result.stages[0].outputs.get('status_code')}")
     print(f"Response Body: {result.stages[0].outputs.get('body', '')[:200]}")
+
+def example_post_json() -> None:
+    """Make a POST request with JSON payload."""
+    print("\n" + "=" * 60)
+    print("Example 2: POST with JSON Body")
+    print("=" * 60)
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    workflow = Workflow.create(
+        application="http-example",
+        name="POST JSON",
+        stages=[
+            StageExecution(
+                ref_id="1",
+                type="http",
+                name="Create Resource",
+                context={
+                    "url": "https://httpbin.org/post",
+                    "method": "POST",
+                    "json": {
+                        "name": "Stabilize",
+                        "version": "0.9.0",
+                        "features": ["DAG", "parallel", "retry"],
+                    },
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="HTTP POST",
+                        implementing_class="http",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=30.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+    print(f"Response Status: {result.stages[0].outputs.get('status_code')}")
+
+    body = result.stages[0].outputs.get("body", "")
+    if body:
+        try:
+            data = json.loads(body)
+            print(f"Echoed JSON: {json.dumps(data.get('json', {}), indent=2)}")
+        except json.JSONDecodeError:
+            print(f"Response: {body[:200]}")
