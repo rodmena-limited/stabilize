@@ -1,4 +1,7 @@
+"""Stabilize CLI for database migrations and developer tools."""
+
 from __future__ import annotations
+
 import argparse
 import hashlib
 import os
@@ -7,6 +10,15 @@ import sys
 from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Any
+
+
+# =============================================================================
+# RAG PROMPT - Comprehensive documentation for AI coding agents
+# =============================================================================
+
 PROMPT_TEXT = r'''
 ===============================================================================
 STABILIZE WORKFLOW ENGINE - COMPLETE REFERENCE FOR CODE GENERATION
@@ -1217,24 +1229,10 @@ Object:       "properties", "additionalProperties", "minProperties", "maxPropert
 END OF REFERENCE
 ===============================================================================
 '''
+
+# Migration tracking table
 MIGRATION_TABLE = "stabilize_migrations"
 
-def parse_db_url(url: str) -> dict[str, Any]:
-    """Parse a database URL into connection parameters."""
-    # postgres://user:pass@host:port/dbname
-    pattern = r"postgres(?:ql)?://(?:(?P<user>[^:]+)(?::(?P<password>[^@]+))?@)?(?P<host>[^:/]+)(?::(?P<port>\d+))?/(?P<dbname>[^?]+)"
-    match = re.match(pattern, url)
-    if not match:
-        print(f"Error: Invalid database URL: {url}")
-        sys.exit(1)
-
-    return {
-        "host": match.group("host"),
-        "port": int(match.group("port") or 5432),
-        "user": match.group("user") or "postgres",
-        "password": match.group("password") or "",
-        "dbname": match.group("dbname"),
-    }
 
 def load_config() -> dict[str, Any]:
     """Load database config from mg.yaml or environment."""
@@ -1261,6 +1259,25 @@ def load_config() -> dict[str, Any]:
     print("Either create mg.yaml or set MG_DATABASE_URL environment variable")
     sys.exit(1)
 
+
+def parse_db_url(url: str) -> dict[str, Any]:
+    """Parse a database URL into connection parameters."""
+    # postgres://user:pass@host:port/dbname
+    pattern = r"postgres(?:ql)?://(?:(?P<user>[^:]+)(?::(?P<password>[^@]+))?@)?(?P<host>[^:/]+)(?::(?P<port>\d+))?/(?P<dbname>[^?]+)"
+    match = re.match(pattern, url)
+    if not match:
+        print(f"Error: Invalid database URL: {url}")
+        sys.exit(1)
+
+    return {
+        "host": match.group("host"),
+        "port": int(match.group("port") or 5432),
+        "user": match.group("user") or "postgres",
+        "password": match.group("password") or "",
+        "dbname": match.group("dbname"),
+    }
+
+
 def get_migrations() -> list[tuple[str, str]]:
     """Get all migration files from the package."""
     migrations_pkg = files("stabilize.migrations")
@@ -1275,6 +1292,7 @@ def get_migrations() -> list[tuple[str, str]]:
     migrations.sort(key=lambda x: x[0])
     return migrations
 
+
 def extract_up_migration(content: str) -> str:
     """Extract the UP migration from SQL content."""
     # Find content between "-- migrate: up" and "-- migrate: down"
@@ -1287,9 +1305,11 @@ def extract_up_migration(content: str) -> str:
         return up_match.group(1).strip()
     return content
 
+
 def compute_checksum(content: str) -> str:
     """Compute MD5 checksum of migration content."""
     return hashlib.md5(content.encode()).hexdigest()
+
 
 def mg_up(db_url: str | None = None) -> None:
     """Apply pending migrations to PostgreSQL database."""
@@ -1372,9 +1392,11 @@ def mg_up(db_url: str | None = None) -> None:
         print(f"Database error: {e}")
         sys.exit(1)
 
+
 def prompt() -> None:
     """Output comprehensive documentation for RAG systems and coding agents."""
     print(PROMPT_TEXT)
+
 
 def monitor(
     db_url: str | None,
@@ -1441,6 +1463,7 @@ def monitor(
         status_filter=status_filter,
     )
 
+
 def rag_init(
     db_url: str | None = None,
     force: bool = False,
@@ -1463,6 +1486,7 @@ def rag_init(
     else:
         print("Embeddings already initialized (use --force to regenerate)")
 
+
 def rag_clear(db_url: str | None = None) -> None:
     """Clear all cached embeddings."""
     try:
@@ -1474,3 +1498,272 @@ def rag_clear(db_url: str | None = None) -> None:
     cache = get_cache(db_url)
     cache.clear()
     print("Embedding cache cleared")
+
+
+def rag_generate(
+    prompt_text: str,
+    db_url: str | None = None,
+    execute: bool = False,
+    top_k: int = 5,
+    temperature: float = 0.3,
+    llm_model: str | None = None,
+) -> None:
+    """Generate pipeline code from natural language prompt."""
+    try:
+        from stabilize.rag import StabilizeRAG, get_cache
+    except ImportError:
+        print("Error: RAG support requires: pip install stabilize[rag]")
+        sys.exit(1)
+
+    cache = get_cache(db_url)
+    rag = StabilizeRAG(cache, llm_model=llm_model)
+
+    try:
+        code = rag.generate(prompt_text, top_k=top_k, temperature=temperature)
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    print(code)
+
+    if execute:
+        print("\n--- Executing generated code ---\n")
+        try:
+            exec(code, {"__name__": "__main__"})
+        except ImportError as e:
+            print("\n--- Execution failed: Import error ---")
+            print(f"Error: {e}")
+            print("\nThe generated code has incorrect imports.")
+            print("Review the imports above and compare with examples/shell-example.py")
+            sys.exit(1)
+        except Exception as e:
+            print("\n--- Execution failed ---")
+            print(f"Error: {type(e).__name__}: {e}")
+            print("\nThe generated code may need manual adjustments.")
+            sys.exit(1)
+
+
+def mg_status(db_url: str | None = None) -> None:
+    """Show migration status."""
+    try:
+        import psycopg
+    except ImportError:
+        print("Error: psycopg not installed")
+        print("Install with: pip install stabilize[postgres]")
+        sys.exit(1)
+
+    # Load config
+    if db_url:
+        config = parse_db_url(db_url)
+    else:
+        config = load_config()
+
+    conninfo = (
+        f"host={config['host']} port={config.get('port', 5432)} "
+        f"user={config.get('user', 'postgres')} password={config.get('password', '')} "
+        f"dbname={config['dbname']}"
+    )
+
+    try:
+        with psycopg.connect(conninfo) as conn:
+            with conn.cursor() as cur:
+                # Check if tracking table exists
+                cur.execute(
+                    """
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
+                        WHERE table_name = %s
+                    )
+                """,
+                    (MIGRATION_TABLE,),
+                )
+                row = cur.fetchone()
+                table_exists = row[0] if row else False
+
+                applied = {}
+                if table_exists:
+                    cur.execute(f"SELECT name, checksum, applied_at FROM {MIGRATION_TABLE} ORDER BY applied_at")
+                    applied = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
+
+                migrations = get_migrations()
+
+                print(f"{'Status':<10} {'Migration':<50} {'Applied At'}")
+                print("-" * 80)
+
+                for name, content in migrations:
+                    if name in applied:
+                        checksum, applied_at = applied[name]
+                        expected = compute_checksum(content)
+                        status = "applied" if checksum == expected else "MISMATCH"
+                        print(f"{status:<10} {name:<50} {applied_at}")
+                    else:
+                        print(f"{'pending':<10} {name:<50} -")
+
+    except psycopg.Error as e:
+        print(f"Database error: {e}")
+        sys.exit(1)
+
+
+def main() -> None:
+    """Main CLI entry point."""
+    parser = argparse.ArgumentParser(
+        prog="stabilize",
+        description="Stabilize - Workflow Engine CLI",
+    )
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # mg-up command
+    up_parser = subparsers.add_parser("mg-up", help="Apply pending PostgreSQL migrations")
+    up_parser.add_argument(
+        "--db-url",
+        help="Database URL (postgres://user:pass@host:port/dbname)",
+    )
+
+    # mg-status command
+    status_parser = subparsers.add_parser("mg-status", help="Show migration status")
+    status_parser.add_argument(
+        "--db-url",
+        help="Database URL (postgres://user:pass@host:port/dbname)",
+    )
+
+    # prompt command
+    subparsers.add_parser(
+        "prompt",
+        help="Output comprehensive RAG context for pipeline code generation",
+    )
+
+    # rag command (with subcommands)
+    rag_parser = subparsers.add_parser(
+        "rag",
+        help="RAG-powered pipeline generation",
+    )
+    rag_subparsers = rag_parser.add_subparsers(dest="rag_command")
+
+    # rag init
+    init_parser = rag_subparsers.add_parser(
+        "init",
+        help="Initialize embeddings cache from examples and documentation",
+    )
+    init_parser.add_argument(
+        "--db-url",
+        help="Database URL for caching (postgres://... or sqlite path)",
+    )
+    init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force regeneration even if cache exists",
+    )
+    init_parser.add_argument(
+        "--additional-context",
+        action="append",
+        metavar="PATH",
+        help="Additional file or directory to include in training context (can be specified multiple times)",
+    )
+
+    # rag generate
+    gen_parser = rag_subparsers.add_parser(
+        "generate",
+        help="Generate pipeline code from natural language prompt",
+    )
+    gen_parser.add_argument(
+        "prompt",
+        help="Natural language description of the desired pipeline",
+    )
+    gen_parser.add_argument(
+        "--db-url",
+        help="Database URL for caching",
+    )
+    gen_parser.add_argument(
+        "-x",
+        "--execute",
+        action="store_true",
+        help="Execute the generated code after displaying it",
+    )
+    gen_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=10,
+        help="Number of context chunks to retrieve (default: 10)",
+    )
+    gen_parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.3,
+        help="LLM temperature for generation (default: 0.3)",
+    )
+    gen_parser.add_argument(
+        "--llm-model",
+        default=None,
+        help="LLM model for generation (default: qwen3-vl:235b)",
+    )
+
+    # rag clear
+    clear_parser = rag_subparsers.add_parser(
+        "clear",
+        help="Clear all cached embeddings",
+    )
+    clear_parser.add_argument(
+        "--db-url",
+        help="Database URL for caching",
+    )
+
+    # monitor command
+    monitor_parser = subparsers.add_parser(
+        "monitor",
+        help="Real-time workflow monitoring dashboard (htop-like)",
+    )
+    monitor_parser.add_argument(
+        "--app",
+        help="Filter by application name",
+    )
+    monitor_parser.add_argument(
+        "--db-url",
+        help="Database URL (postgres://... or sqlite:///...)",
+    )
+    monitor_parser.add_argument(
+        "--refresh",
+        type=int,
+        default=2,
+        help="Refresh interval in seconds (default: 2)",
+    )
+    monitor_parser.add_argument(
+        "--status",
+        choices=["all", "running", "failed", "recent"],
+        default="all",
+        help="Filter workflows by status (default: all)",
+    )
+
+    args = parser.parse_args()
+
+    if args.command == "mg-up":
+        mg_up(args.db_url)
+    elif args.command == "mg-status":
+        mg_status(args.db_url)
+    elif args.command == "prompt":
+        prompt()
+    elif args.command == "rag":
+        if args.rag_command == "init":
+            rag_init(args.db_url, args.force, args.additional_context)
+        elif args.rag_command == "generate":
+            rag_generate(
+                args.prompt,
+                args.db_url,
+                args.execute,
+                args.top_k,
+                args.temperature,
+                args.llm_model,
+            )
+        elif args.rag_command == "clear":
+            rag_clear(args.db_url)
+        else:
+            rag_parser.print_help()
+            sys.exit(1)
+    elif args.command == "monitor":
+        monitor(args.db_url, args.app, args.refresh, args.status)
+    else:
+        parser.print_help()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
