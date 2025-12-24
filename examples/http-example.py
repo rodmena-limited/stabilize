@@ -44,3 +44,47 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
 
     orchestrator = Orchestrator(queue)
     return processor, orchestrator
+
+def example_simple_get() -> None:
+    """Make a simple GET request to a public API."""
+    print("\n" + "=" * 60)
+    print("Example 1: Simple GET Request")
+    print("=" * 60)
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    workflow = Workflow.create(
+        application="http-example",
+        name="Simple GET",
+        stages=[
+            StageExecution(
+                ref_id="1",
+                type="http",
+                name="Get IP Info",
+                context={
+                    "url": "https://httpbin.org/ip",
+                    "method": "GET",
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="HTTP GET",
+                        implementing_class="http",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=30.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+    print(f"Response Status: {result.stages[0].outputs.get('status_code')}")
+    print(f"Response Body: {result.stages[0].outputs.get('body', '')[:200]}")
