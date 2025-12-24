@@ -230,3 +230,129 @@ def example_sequential_api() -> None:
         status = stage.outputs.get("status_code", "N/A")
         elapsed = stage.outputs.get("elapsed_ms", "N/A")
         print(f"  {stage.name}: {status} ({elapsed}ms)")
+
+def example_parallel_requests() -> None:
+    """Make parallel requests to multiple endpoints."""
+    print("\n" + "=" * 60)
+    print("Example 4: Parallel Requests")
+    print("=" * 60)
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    #     Start
+    #    /  |  \
+    # EP1  EP2  EP3
+    #    \  |  /
+    #    Collect
+
+    workflow = Workflow.create(
+        application="http-example",
+        name="Parallel Requests",
+        stages=[
+            StageExecution(
+                ref_id="start",
+                type="http",
+                name="Start",
+                context={
+                    "url": "https://httpbin.org/get?stage=start",
+                    "method": "GET",
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Start request",
+                        implementing_class="http",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            # Parallel branches
+            StageExecution(
+                ref_id="ep1",
+                type="http",
+                name="Endpoint 1 (IP)",
+                requisite_stage_ref_ids={"start"},
+                context={
+                    "url": "https://httpbin.org/ip",
+                    "method": "GET",
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Get IP",
+                        implementing_class="http",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            StageExecution(
+                ref_id="ep2",
+                type="http",
+                name="Endpoint 2 (Headers)",
+                requisite_stage_ref_ids={"start"},
+                context={
+                    "url": "https://httpbin.org/headers",
+                    "method": "GET",
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Get Headers",
+                        implementing_class="http",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            StageExecution(
+                ref_id="ep3",
+                type="http",
+                name="Endpoint 3 (User-Agent)",
+                requisite_stage_ref_ids={"start"},
+                context={
+                    "url": "https://httpbin.org/user-agent",
+                    "method": "GET",
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Get User-Agent",
+                        implementing_class="http",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            # Join
+            StageExecution(
+                ref_id="collect",
+                type="http",
+                name="Collect Results",
+                requisite_stage_ref_ids={"ep1", "ep2", "ep3"},
+                context={
+                    "url": "https://httpbin.org/get?stage=complete",
+                    "method": "GET",
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Final request",
+                        implementing_class="http",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=60.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+    for stage in result.stages:
+        status = stage.outputs.get("status_code", "N/A")
+        elapsed = stage.outputs.get("elapsed_ms", "N/A")
+        print(f"  {stage.name}: {status} ({elapsed}ms)")
