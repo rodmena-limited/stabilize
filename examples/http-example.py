@@ -1,6 +1,27 @@
+#!/usr/bin/env python3
+"""
+HTTP Example - Demonstrates making HTTP requests with Stabilize.
+
+This example shows how to use the built-in HTTPTask for:
+1. Simple GET requests
+2. POST with JSON bodies
+3. Sequential API workflows
+4. Parallel requests
+5. All HTTP methods (GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH)
+
+Requirements:
+    None (uses urllib from standard library)
+
+Run with:
+    python examples/http-example.py
+"""
+
 import json
 import logging
 from typing import Any
+
+logging.basicConfig(level=logging.ERROR)
+
 from stabilize import (
     CompleteStageHandler,
     CompleteTaskHandler,
@@ -21,6 +42,11 @@ from stabilize import (
 )
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue.queue import Queue
+
+# =============================================================================
+# Helper: Setup pipeline infrastructure
+# =============================================================================
+
 
 def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with HTTPTask registered."""
@@ -44,6 +70,12 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
 
     orchestrator = Orchestrator(queue)
     return processor, orchestrator
+
+
+# =============================================================================
+# Example 1: Simple GET Request
+# =============================================================================
+
 
 def example_simple_get() -> None:
     """Make a simple GET request to a public API."""
@@ -88,6 +120,12 @@ def example_simple_get() -> None:
     print(f"\nWorkflow Status: {result.status}")
     print(f"Response Status: {result.stages[0].outputs.get('status_code')}")
     print(f"Response Body: {result.stages[0].outputs.get('body', '')[:200]}")
+
+
+# =============================================================================
+# Example 2: POST with JSON Body
+# =============================================================================
+
 
 def example_post_json() -> None:
     """Make a POST request with JSON payload."""
@@ -144,6 +182,12 @@ def example_post_json() -> None:
             print(f"Echoed JSON: {json.dumps(data.get('json', {}), indent=2)}")
         except json.JSONDecodeError:
             print(f"Response: {body[:200]}")
+
+
+# =============================================================================
+# Example 3: Sequential API Workflow
+# =============================================================================
+
 
 def example_sequential_api() -> None:
     """Sequential API calls: GET -> POST -> GET to verify."""
@@ -230,6 +274,12 @@ def example_sequential_api() -> None:
         status = stage.outputs.get("status_code", "N/A")
         elapsed = stage.outputs.get("elapsed_ms", "N/A")
         print(f"  {stage.name}: {status} ({elapsed}ms)")
+
+
+# =============================================================================
+# Example 4: Parallel Requests
+# =============================================================================
+
 
 def example_parallel_requests() -> None:
     """Make parallel requests to multiple endpoints."""
@@ -356,3 +406,94 @@ def example_parallel_requests() -> None:
         status = stage.outputs.get("status_code", "N/A")
         elapsed = stage.outputs.get("elapsed_ms", "N/A")
         print(f"  {stage.name}: {status} ({elapsed}ms)")
+
+
+# =============================================================================
+# Example 5: All HTTP Methods
+# =============================================================================
+
+
+def example_all_methods() -> None:
+    """Demonstrate all supported HTTP methods."""
+    print("\n" + "=" * 60)
+    print("Example 5: All HTTP Methods")
+    print("=" * 60)
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    methods = [
+        ("GET", "https://httpbin.org/get", None),
+        ("POST", "https://httpbin.org/post", {"action": "create"}),
+        ("PUT", "https://httpbin.org/put", {"action": "update"}),
+        ("PATCH", "https://httpbin.org/patch", {"action": "partial"}),
+        ("DELETE", "https://httpbin.org/delete", None),
+        ("HEAD", "https://httpbin.org/get", None),
+        ("OPTIONS", "https://httpbin.org/get", None),
+    ]
+
+    stages = []
+    prev_ref = None
+    for i, (method, url, body) in enumerate(methods, 1):
+        ref_id = str(i)
+        context: dict[str, Any] = {"url": url, "method": method}
+        if body:
+            context["json"] = body
+
+        stage = StageExecution(
+            ref_id=ref_id,
+            type="http",
+            name=f"{method} Request",
+            requisite_stage_ref_ids={prev_ref} if prev_ref else set(),
+            context=context,
+            tasks=[
+                TaskExecution.create(
+                    name=f"HTTP {method}",
+                    implementing_class="http",
+                    stage_start=True,
+                    stage_end=True,
+                ),
+            ],
+        )
+        stages.append(stage)
+        prev_ref = ref_id
+
+    workflow = Workflow.create(
+        application="http-example",
+        name="All HTTP Methods",
+        stages=stages,
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=120.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+    for stage in result.stages:
+        status = stage.outputs.get("status_code", "N/A")
+        elapsed = stage.outputs.get("elapsed_ms", "N/A")
+        print(f"  {stage.name}: {status} ({elapsed}ms)")
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+
+if __name__ == "__main__":
+    print("Stabilize HTTP Examples")
+    print("=" * 60)
+    print("Using httpbin.org for testing")
+
+    example_simple_get()
+    example_post_json()
+    example_sequential_api()
+    example_parallel_requests()
+    example_all_methods()
+
+    print("\n" + "=" * 60)
+    print("All examples completed!")
+    print("=" * 60)
