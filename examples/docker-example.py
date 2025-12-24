@@ -152,3 +152,52 @@ def example_pull_and_run() -> None:
     for stage in result.stages:
         stdout = stage.outputs.get("stdout", "")
         print(f"  {stage.name}: {stdout[:100]}")
+
+def example_with_environment() -> None:
+    """Run container with environment variables and volumes."""
+    print("\n" + "=" * 60)
+    print("Example 3: Container with Environment")
+    print("=" * 60)
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    workflow = Workflow.create(
+        application="docker-example",
+        name="Environment Variables",
+        stages=[
+            StageExecution(
+                ref_id="1",
+                type="docker",
+                name="Run with Env",
+                context={
+                    "action": "run",
+                    "image": "alpine:latest",
+                    "environment": {
+                        "APP_NAME": "Stabilize",
+                        "APP_VERSION": "0.9.0",
+                        "DEBUG": "true",
+                    },
+                    "command": "sh -c 'echo App: $APP_NAME v$APP_VERSION, Debug: $DEBUG'",
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Docker Run",
+                        implementing_class="docker",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=60.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+    print(f"Output: {result.stages[0].outputs.get('stdout')}")
