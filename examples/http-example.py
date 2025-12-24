@@ -144,3 +144,89 @@ def example_post_json() -> None:
             print(f"Echoed JSON: {json.dumps(data.get('json', {}), indent=2)}")
         except json.JSONDecodeError:
             print(f"Response: {body[:200]}")
+
+def example_sequential_api() -> None:
+    """Sequential API calls: GET -> POST -> GET to verify."""
+    print("\n" + "=" * 60)
+    print("Example 3: Sequential API Workflow")
+    print("=" * 60)
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    workflow = Workflow.create(
+        application="http-example",
+        name="Sequential API",
+        stages=[
+            StageExecution(
+                ref_id="1",
+                type="http",
+                name="Step 1: Get Headers",
+                context={
+                    "url": "https://httpbin.org/headers",
+                    "method": "GET",
+                    "headers": {"X-Request-ID": "step-1"},
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="GET headers",
+                        implementing_class="http",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            StageExecution(
+                ref_id="2",
+                type="http",
+                name="Step 2: Post Data",
+                requisite_stage_ref_ids={"1"},
+                context={
+                    "url": "https://httpbin.org/post",
+                    "method": "POST",
+                    "json": {"step": 2, "data": "from step 1"},
+                    "headers": {"X-Request-ID": "step-2"},
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="POST data",
+                        implementing_class="http",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            StageExecution(
+                ref_id="3",
+                type="http",
+                name="Step 3: Verify",
+                requisite_stage_ref_ids={"2"},
+                context={
+                    "url": "https://httpbin.org/get",
+                    "method": "GET",
+                    "headers": {"X-Request-ID": "step-3-verify"},
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="GET verify",
+                        implementing_class="http",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=60.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+    for stage in result.stages:
+        status = stage.outputs.get("status_code", "N/A")
+        elapsed = stage.outputs.get("elapsed_ms", "N/A")
+        print(f"  {stage.name}: {status} ({elapsed}ms)")
