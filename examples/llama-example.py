@@ -57,3 +57,15 @@ class OllamaTask(Task):
     DEFAULT_MODEL = 'deepseek-v3.1:671b-cloud'
     def __init__(self) -> None:
         self._http_task = HTTPTask()
+
+    def _make_http_request(self, stage: StageExecution, context: dict[str, Any]) -> TaskResult:
+        """Execute HTTP request using HTTPTask with a temporary stage."""
+        # Create a temporary stage with the HTTP context
+        temp_stage = StageExecution(
+            ref_id=stage.ref_id,
+            type="http",
+            name=f"{stage.name} (HTTP)",
+            context=context,
+            tasks=[],
+        )
+        return self._http_task.execute(temp_stage)
