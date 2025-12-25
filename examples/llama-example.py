@@ -209,6 +209,110 @@ def example_json_output() -> None:
             print("\nRaw Response:")
             print(result.stages[0].outputs.get("response", ""))
 
+def example_processing_pipeline() -> None:
+    """Chain LLM calls: summarize -> translate -> format."""
+    print("\n" + "=" * 60)
+    print("Example 4: Processing Pipeline")
+    print("=" * 60)
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    original_text = """
+    Stabilize is a lightweight Python workflow execution engine with DAG-based
+    stage orchestration. It supports message-driven execution, parallel and
+    sequential stages, synthetic stages for lifecycle hooks, multiple persistence
+    backends including PostgreSQL and SQLite, and a pluggable task system with
+    retry and timeout support.
+    """
+
+    workflow = Workflow.create(
+        application="llama-example",
+        name="Processing Pipeline",
+        stages=[
+            # Step 1: Summarize
+            StageExecution(
+                ref_id="1",
+                type="ollama",
+                name="Summarize",
+                context={
+                    "system": "You are a technical writer. Summarize text into bullet points.",
+                    "prompt": f"Summarize this into 3 key bullet points:\n\n{original_text}",
+                    "model": "deepseek-v3.1:671b-cloud",
+                    "temperature": 0.3,
+                    "max_tokens": 150,
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Summarize",
+                        implementing_class="ollama",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            # Step 2: Extract keywords
+            StageExecution(
+                ref_id="2",
+                type="ollama",
+                name="Extract Keywords",
+                requisite_stage_ref_ids={"1"},
+                context={
+                    "system": "Extract technical keywords. Output only a comma-separated list.",
+                    "prompt": f"Extract 5 technical keywords from:\n\n{original_text}",
+                    "model": "deepseek-v3.1:671b-cloud",
+                    "temperature": 0.2,
+                    "max_tokens": 50,
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Keywords",
+                        implementing_class="ollama",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            # Step 3: Generate tagline
+            StageExecution(
+                ref_id="3",
+                type="ollama",
+                name="Generate Tagline",
+                requisite_stage_ref_ids={"2"},
+                context={
+                    "system": "You are a marketing copywriter. Be concise and catchy.",
+                    "prompt": f"Create a one-line tagline (max 10 words) for this product:\n\n{original_text}",
+                    "model": "deepseek-v3.1:671b-cloud",
+                    "temperature": 0.8,
+                    "max_tokens": 30,
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Tagline",
+                        implementing_class="ollama",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=300.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+    print("\nPipeline Results:")
+    print("-" * 40)
+    for stage in result.stages:
+        print(f"\n{stage.name}:")
+        response = stage.outputs.get("response", "N/A")
+        print(f"  {response[:200]}")
+
 class OllamaTask(Task):
     """
     Generate text using Ollama local LLM.
