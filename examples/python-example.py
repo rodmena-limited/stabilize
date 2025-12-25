@@ -248,6 +248,178 @@ print(f"Total value: {summary['total_value']}")
         else:
             print(f"  {script_result}")
 
+def example_parallel_processing() -> None:
+    """Process data in parallel branches."""
+    print("\n" + "=" * 60)
+    print("Example 3: Parallel Processing")
+    print("=" * 60)
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    #      Generate
+    #     /    |    \
+    #  Stats  Sort  Filter
+    #     \    |    /
+    #       Combine
+
+    workflow = Workflow.create(
+        application="python-example",
+        name="Parallel Processing",
+        stages=[
+            # Generate
+            StageExecution(
+                ref_id="generate",
+                type="python",
+                name="Generate Numbers",
+                context={
+                    "script": """
+import random
+random.seed(123)
+numbers = [random.randint(1, 1000) for _ in range(100)]
+RESULT = numbers
+print(f"Generated {len(numbers)} numbers")
+""",
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Generate",
+                        implementing_class="python",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            # Parallel: Statistics
+            StageExecution(
+                ref_id="stats",
+                type="python",
+                name="Calculate Statistics",
+                requisite_stage_ref_ids={"generate"},
+                context={
+                    "script": """
+numbers = INPUT.get('numbers') or INPUT.get('result')
+RESULT = {
+    'count': len(numbers),
+    'sum': sum(numbers),
+    'min': min(numbers),
+    'max': max(numbers),
+    'avg': sum(numbers) / len(numbers),
+}
+print(f"Stats: min={RESULT['min']}, max={RESULT['max']}, avg={RESULT['avg']:.2f}")
+""",
+                    "inputs": {"numbers": []},
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Stats",
+                        implementing_class="python",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            # Parallel: Sort
+            StageExecution(
+                ref_id="sort",
+                type="python",
+                name="Sort Numbers",
+                requisite_stage_ref_ids={"generate"},
+                context={
+                    "script": """
+numbers = INPUT.get('numbers') or INPUT.get('result')
+sorted_nums = sorted(numbers)
+RESULT = {
+    'sorted': sorted_nums,
+    'median': sorted_nums[len(sorted_nums)//2],
+}
+print(f"Sorted {len(sorted_nums)} numbers, median={RESULT['median']}")
+""",
+                    "inputs": {"numbers": []},
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Sort",
+                        implementing_class="python",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            # Parallel: Filter
+            StageExecution(
+                ref_id="filter",
+                type="python",
+                name="Filter Numbers",
+                requisite_stage_ref_ids={"generate"},
+                context={
+                    "script": """
+numbers = INPUT.get('numbers') or INPUT.get('result')
+threshold = 500
+above = [n for n in numbers if n > threshold]
+below = [n for n in numbers if n <= threshold]
+RESULT = {
+    'above_threshold': len(above),
+    'below_threshold': len(below),
+    'threshold': threshold,
+}
+print(f"Above {threshold}: {len(above)}, Below: {len(below)}")
+""",
+                    "inputs": {"numbers": []},
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Filter",
+                        implementing_class="python",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            # Combine results
+            StageExecution(
+                ref_id="combine",
+                type="python",
+                name="Combine Results",
+                requisite_stage_ref_ids={"stats", "sort", "filter"},
+                context={
+                    "script": """
+RESULT = {
+    'processing': 'complete',
+    'branches': ['stats', 'sort', 'filter'],
+    'summary': 'All parallel branches completed successfully'
+}
+print("Combined results from all branches")
+""",
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Combine",
+                        implementing_class="python",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=30.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+
+    for stage in result.stages:
+        script_result = stage.outputs.get("result", {})
+        if isinstance(script_result, dict):
+            # Show key metrics
+            display = {k: v for k, v in script_result.items() if k != "sorted"}
+            print(f"  {stage.name}: {display}")
+
 class PythonTask(Task):
     """
     Execute Python code.
