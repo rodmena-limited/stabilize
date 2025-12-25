@@ -48,6 +48,57 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
     orchestrator = Orchestrator(queue)
     return processor, orchestrator
 
+def example_simple_generation() -> None:
+    """Generate text with a simple prompt."""
+    print("\n" + "=" * 60)
+    print("Example 1: Simple Text Generation")
+    print("=" * 60)
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    workflow = Workflow.create(
+        application="llama-example",
+        name="Simple Generation",
+        stages=[
+            StageExecution(
+                ref_id="1",
+                type="ollama",
+                name="Generate Text",
+                context={
+                    "prompt": "Explain what a workflow engine is in 2-3 sentences.",
+                    "model": "deepseek-v3.1:671b-cloud",
+                    "temperature": 0.7,
+                    "max_tokens": 150,
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Generate",
+                        implementing_class="ollama",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=180.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+    if result.status == WorkflowStatus.SUCCEEDED:
+        response = result.stages[0].outputs.get("response", "")
+        tokens = result.stages[0].outputs.get("eval_count", 0)
+        duration = result.stages[0].outputs.get("total_duration_ms", 0)
+        print(f"\nResponse ({tokens} tokens, {duration}ms):")
+        print("-" * 40)
+        print(response)
+
 class OllamaTask(Task):
     """
     Generate text using Ollama local LLM.
