@@ -1,3 +1,20 @@
+#!/usr/bin/env python3
+"""
+Python Script Example - Demonstrates executing Python code with Stabilize.
+
+This example shows how to:
+1. Create a custom Task that executes Python scripts
+2. Run inline Python code or external script files
+3. Pass inputs and capture outputs
+4. Build data processing pipelines
+
+Requirements:
+    None (uses subprocess from standard library)
+
+Run with:
+    python examples/python-example.py
+"""
+
 import json
 import logging
 import subprocess
@@ -5,6 +22,9 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+
+logging.basicConfig(level=logging.ERROR)
+
 from stabilize import (
     CompleteStageHandler,
     CompleteTaskHandler,
@@ -26,6 +46,166 @@ from stabilize import (
 )
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue.queue import Queue
+
+# =============================================================================
+# Custom Task: PythonTask
+# =============================================================================
+
+
+class PythonTask(Task):
+    """
+    Execute Python code.
+
+    Context Parameters:
+        script: Inline Python code to execute (string)
+        script_file: Path to Python script file (alternative to script)
+        args: Command line arguments as list (optional)
+        inputs: Input variables as dict, available as INPUT in script (optional)
+        python_path: Python interpreter path (default: current interpreter)
+        timeout: Execution timeout in seconds (default: 60)
+
+    Outputs:
+        stdout: Standard output
+        stderr: Standard error
+        exit_code: Process exit code
+        result: Value of RESULT variable if set in script
+
+    Notes:
+        - Scripts can access INPUT dict for inputs
+        - Scripts should set RESULT variable for return value
+        - RESULT must be JSON-serializable
+    """
+
+    # Wrapper template that handles INPUT/RESULT
+    WRAPPER_TEMPLATE = """
+import json
+import sys
+
+# Input data
+try:
+    INPUT = json.loads('''{inputs}''')
+except json.JSONDecodeError:
+    # Fallback for simple cases or empty
+    INPUT = {{}}
+
+# User script
+{script}
+
+# Output result if set
+if 'RESULT' in dir():
+    print("__RESULT_START__")
+    print(json.dumps(RESULT))
+    print("__RESULT_END__")
+"""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        script = stage.context.get("script")
+        script_file = stage.context.get("script_file")
+        args = stage.context.get("args", [])
+
+        # Merge inputs with stage context (which contains upstream outputs)
+        # 1. Start with stage context (excludes script, args, etc to keep it clean?)
+        # 2. Update with explicit inputs
+        base_context = {
+            k: v
+            for k, v in stage.context.items()
+            if k not in ("script", "script_file", "args", "inputs", "python_path", "timeout")
+        }
+        explicit_inputs = stage.context.get("inputs", {})
+        inputs = {**base_context, **explicit_inputs}
+
+        python_path = stage.context.get("python_path", sys.executable)
+        timeout = stage.context.get("timeout", 60)
+
+        if not script and not script_file:
+            return TaskResult.terminal(error="Either 'script' or 'script_file' must be specified")
+
+        if script and script_file:
+            return TaskResult.terminal(error="Cannot specify both 'script' and 'script_file'")
+
+        # Handle script file
+        if script_file:
+            script_path = Path(script_file)
+            if not script_path.exists():
+                return TaskResult.terminal(error=f"Script file not found: {script_file}")
+            script = script_path.read_text()
+
+        # At this point, script is guaranteed to be a string (validated above)
+        assert script is not None
+        print(f"  [PythonTask] Executing script ({len(script)} chars)")
+
+        # Create wrapped script
+        wrapped_script = self.WRAPPER_TEMPLATE.format(
+            inputs=json.dumps(inputs),
+            script=script,
+        )
+
+        # Write to temp file and execute
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as tmp:
+            tmp.write(wrapped_script)
+            tmp.flush()
+            tmp_path = tmp.name
+
+        try:
+            cmd = [python_path, tmp_path] + list(args)
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+
+            stdout = result.stdout
+            stderr = result.stderr
+            exit_code = result.returncode
+
+            # Extract RESULT if present
+            script_result = None
+            if "__RESULT_START__" in stdout:
+                start = stdout.index("__RESULT_START__") + len("__RESULT_START__\n")
+                end = stdout.index("__RESULT_END__")
+                result_json = stdout[start:end].strip()
+                try:
+                    script_result = json.loads(result_json)
+                except json.JSONDecodeError:
+                    script_result = result_json
+
+                # Clean stdout
+                stdout = (
+                    stdout[: stdout.index("__RESULT_START__")]
+                    + stdout[stdout.index("__RESULT_END__") + len("__RESULT_END__\n") :]
+                ).strip()
+
+            outputs = {
+                "stdout": stdout,
+                "stderr": stderr,
+                "exit_code": exit_code,
+                "result": script_result,
+            }
+
+            if exit_code == 0:
+                print(f"  [PythonTask] Success, result: {str(script_result)[:100]}")
+                return TaskResult.success(outputs=outputs)
+            else:
+                print(f"  [PythonTask] Failed with exit code {exit_code}")
+                if stderr:
+                    print(f"  [PythonTask] Stderr: {stderr}")
+                return TaskResult.terminal(
+                    error=f"Script exited with code {exit_code}",
+                    context=outputs,
+                )
+
+        except subprocess.TimeoutExpired:
+            return TaskResult.terminal(error=f"Script timed out after {timeout}s")
+
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+
+# =============================================================================
+# Helper: Setup pipeline infrastructure
+# =============================================================================
+
 
 def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with PythonTask registered."""
@@ -49,6 +229,12 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
 
     orchestrator = Orchestrator(queue)
     return processor, orchestrator
+
+
+# =============================================================================
+# Example 1: Simple Calculation
+# =============================================================================
+
 
 def example_simple_calculation() -> None:
     """Run a simple inline Python calculation."""
@@ -107,6 +293,12 @@ print(f"Fibonacci({n}) = {fib(n)}")
     script_result = result.stages[0].outputs.get("result", {})
     print(f"Result: Fibonacci({script_result.get('n')}) = {script_result.get('fibonacci')}")
     print(f"Sequence: {script_result.get('sequence')}")
+
+
+# =============================================================================
+# Example 2: Data Processing Pipeline
+# =============================================================================
+
 
 def example_data_pipeline() -> None:
     """Sequential data processing: generate -> transform -> validate."""
@@ -247,6 +439,12 @@ print(f"Total value: {summary['total_value']}")
             print(f"  {len(script_result)} items")
         else:
             print(f"  {script_result}")
+
+
+# =============================================================================
+# Example 3: Parallel Processing
+# =============================================================================
+
 
 def example_parallel_processing() -> None:
     """Process data in parallel branches."""
@@ -420,130 +618,135 @@ print("Combined results from all branches")
             display = {k: v for k, v in script_result.items() if k != "sorted"}
             print(f"  {stage.name}: {display}")
 
-class PythonTask(Task):
-    """
-    Execute Python code.
 
-    Context Parameters:
-        script: Inline Python code to execute (string)
-        script_file: Path to Python script file (alternative to script)
-        args: Command line arguments as list (optional)
-        inputs: Input variables as dict, available as INPUT in script (optional)
-        python_path: Python interpreter path (default: current interpreter)
-        timeout: Execution timeout in seconds (default: 60)
+# =============================================================================
+# Example 4: Error Handling
+# =============================================================================
 
-    Outputs:
-        stdout: Standard output
-        stderr: Standard error
-        exit_code: Process exit code
-        result: Value of RESULT variable if set in script
 
-    Notes:
-        - Scripts can access INPUT dict for inputs
-        - Scripts should set RESULT variable for return value
-        - RESULT must be JSON-serializable
-    """
-    WRAPPER_TEMPLATE = '\nimport json\nimport sys\n\n# Input data\ntry:\n    INPUT = json.loads(\'\'\'{inputs}\'\'\')\nexcept json.JSONDecodeError:\n    # Fallback for simple cases or empty\n    INPUT = {{}}\n\n# User script\n{script}\n\n# Output result if set\nif \'RESULT\' in dir():\n    print("__RESULT_START__")\n    print(json.dumps(RESULT))\n    print("__RESULT_END__")\n'
+def example_error_handling() -> None:
+    """Demonstrate error handling in Python scripts."""
+    print("\n" + "=" * 60)
+    print("Example 4: Error Handling")
+    print("=" * 60)
 
-    def execute(self, stage: StageExecution) -> TaskResult:
-        script = stage.context.get("script")
-        script_file = stage.context.get("script_file")
-        args = stage.context.get("args", [])
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
 
-        # Merge inputs with stage context (which contains upstream outputs)
-        # 1. Start with stage context (excludes script, args, etc to keep it clean?)
-        # 2. Update with explicit inputs
-        base_context = {
-            k: v
-            for k, v in stage.context.items()
-            if k not in ("script", "script_file", "args", "inputs", "python_path", "timeout")
-        }
-        explicit_inputs = stage.context.get("inputs", {})
-        inputs = {**base_context, **explicit_inputs}
+    workflow = Workflow.create(
+        application="python-example",
+        name="Error Handling",
+        stages=[
+            # Stage 1: Validate input (succeeds)
+            StageExecution(
+                ref_id="1",
+                type="python",
+                name="Validate Input",
+                context={
+                    "script": """
+data = INPUT.get('data', {})
 
-        python_path = stage.context.get("python_path", sys.executable)
-        timeout = stage.context.get("timeout", 60)
+if not isinstance(data, dict):
+    raise ValueError("Data must be a dictionary")
 
-        if not script and not script_file:
-            return TaskResult.terminal(error="Either 'script' or 'script_file' must be specified")
+required_fields = ['name', 'value']
+missing = [f for f in required_fields if f not in data]
 
-        if script and script_file:
-            return TaskResult.terminal(error="Cannot specify both 'script' and 'script_file'")
+if missing:
+    raise ValueError(f"Missing required fields: {missing}")
 
-        # Handle script file
-        if script_file:
-            script_path = Path(script_file)
-            if not script_path.exists():
-                return TaskResult.terminal(error=f"Script file not found: {script_file}")
-            script = script_path.read_text()
+RESULT = {'valid': True, 'data': data}
+print("Validation passed")
+""",
+                    "inputs": {"data": {"name": "test", "value": 42}},
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Validate",
+                        implementing_class="python",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+            # Stage 2: Process with try/except
+            StageExecution(
+                ref_id="2",
+                type="python",
+                name="Safe Processing",
+                requisite_stage_ref_ids={"1"},
+                context={
+                    "script": """
+try:
+    # Simulate processing that might fail
+    value = INPUT['value']
+    result = 100 / value  # Would fail if value is 0
 
-        # At this point, script is guaranteed to be a string (validated above)
-        assert script is not None
-        print(f"  [PythonTask] Executing script ({len(script)} chars)")
+    RESULT = {
+        'success': True,
+        'result': result,
+        'error': None
+    }
+    print(f"Processing succeeded: {result}")
 
-        # Create wrapped script
-        wrapped_script = self.WRAPPER_TEMPLATE.format(
-            inputs=json.dumps(inputs),
-            script=script,
-        )
+except ZeroDivisionError as e:
+    RESULT = {
+        'success': False,
+        'result': None,
+        'error': str(e)
+    }
+    print(f"Processing failed: {e}")
 
-        # Write to temp file and execute
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as tmp:
-            tmp.write(wrapped_script)
-            tmp.flush()
-            tmp_path = tmp.name
+except Exception as e:
+    RESULT = {
+        'success': False,
+        'result': None,
+        'error': f"Unexpected error: {e}"
+    }
+    print(f"Unexpected error: {e}")
+""",
+                    "inputs": {"value": 5},
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Process",
+                        implementing_class="python",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
 
-        try:
-            cmd = [python_path, tmp_path] + list(args)
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=30.0)
 
-            stdout = result.stdout
-            stderr = result.stderr
-            exit_code = result.returncode
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
 
-            # Extract RESULT if present
-            script_result = None
-            if "__RESULT_START__" in stdout:
-                start = stdout.index("__RESULT_START__") + len("__RESULT_START__\n")
-                end = stdout.index("__RESULT_END__")
-                result_json = stdout[start:end].strip()
-                try:
-                    script_result = json.loads(result_json)
-                except json.JSONDecodeError:
-                    script_result = result_json
+    for stage in result.stages:
+        script_result = stage.outputs.get("result", {})
+        print(f"  {stage.name}: {script_result}")
 
-                # Clean stdout
-                stdout = (
-                    stdout[: stdout.index("__RESULT_START__")]
-                    + stdout[stdout.index("__RESULT_END__") + len("__RESULT_END__\n") :]
-                ).strip()
 
-            outputs = {
-                "stdout": stdout,
-                "stderr": stderr,
-                "exit_code": exit_code,
-                "result": script_result,
-            }
+# =============================================================================
+# Main
+# =============================================================================
 
-            if exit_code == 0:
-                print(f"  [PythonTask] Success, result: {str(script_result)[:100]}")
-                return TaskResult.success(outputs=outputs)
-            else:
-                print(f"  [PythonTask] Failed with exit code {exit_code}")
-                if stderr:
-                    print(f"  [PythonTask] Stderr: {stderr}")
-                return TaskResult.terminal(
-                    error=f"Script exited with code {exit_code}",
-                    context=outputs,
-                )
 
-        except subprocess.TimeoutExpired:
-            return TaskResult.terminal(error=f"Script timed out after {timeout}s")
+if __name__ == "__main__":
+    print("Stabilize Python Script Examples")
+    print("=" * 60)
 
-        finally:
-            Path(tmp_path).unlink(missing_ok=True)
+    example_simple_calculation()
+    example_data_pipeline()
+    example_parallel_processing()
+    example_error_handling()
+
+    print("\n" + "=" * 60)
+    print("All examples completed!")
+    print("=" * 60)
