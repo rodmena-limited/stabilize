@@ -149,6 +149,66 @@ def example_with_system_prompt() -> None:
         print("-" * 40)
         print(response)
 
+def example_json_output() -> None:
+    """Generate structured JSON output."""
+    print("\n" + "=" * 60)
+    print("Example 3: JSON Structured Output")
+    print("=" * 60)
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    workflow = Workflow.create(
+        application="llama-example",
+        name="JSON Output",
+        stages=[
+            StageExecution(
+                ref_id="1",
+                type="ollama",
+                name="Generate JSON",
+                context={
+                    "system": "You are a JSON generator. Output only valid JSON, no markdown or explanation.",
+                    "prompt": """Generate a JSON object describing a software project with these fields:
+- name: string
+- version: string (semver)
+- description: string (1 sentence)
+- features: array of 3 strings
+- status: one of "alpha", "beta", "stable"
+""",
+                    "model": "deepseek-v3.1:671b-cloud",
+                    "temperature": 0.3,
+                    "format": "json",
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Generate JSON",
+                        implementing_class="ollama",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=180.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+    if result.status == WorkflowStatus.SUCCEEDED:
+        json_output = result.stages[0].outputs.get("json")
+        if json_output:
+            print("\nParsed JSON:")
+            print("-" * 40)
+            print(json.dumps(json_output, indent=2))
+        else:
+            print("\nRaw Response:")
+            print(result.stages[0].outputs.get("response", ""))
+
 class OllamaTask(Task):
     """
     Generate text using Ollama local LLM.
