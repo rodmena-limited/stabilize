@@ -99,6 +99,56 @@ def example_simple_generation() -> None:
         print("-" * 40)
         print(response)
 
+def example_with_system_prompt() -> None:
+    """Generate text with a system prompt for role/context."""
+    print("\n" + "=" * 60)
+    print("Example 2: Text with System Prompt")
+    print("=" * 60)
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    workflow = Workflow.create(
+        application="llama-example",
+        name="System Prompt",
+        stages=[
+            StageExecution(
+                ref_id="1",
+                type="ollama",
+                name="Technical Explanation",
+                context={
+                    "system": "You are a senior software architect. Provide clear, technical explanations. Be concise.",
+                    "prompt": "What are the benefits of using a DAG (Directed Acyclic Graph) for workflow orchestration?",
+                    "model": "deepseek-v3.1:671b-cloud",
+                    "temperature": 0.5,
+                    "max_tokens": 200,
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Generate",
+                        implementing_class="ollama",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=180.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+    if result.status == WorkflowStatus.SUCCEEDED:
+        response = result.stages[0].outputs.get("response", "")
+        print("\nResponse:")
+        print("-" * 40)
+        print(response)
+
 class OllamaTask(Task):
     """
     Generate text using Ollama local LLM.
