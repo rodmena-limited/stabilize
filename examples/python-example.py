@@ -50,6 +50,64 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
     orchestrator = Orchestrator(queue)
     return processor, orchestrator
 
+def example_simple_calculation() -> None:
+    """Run a simple inline Python calculation."""
+    print("\n" + "=" * 60)
+    print("Example 1: Simple Calculation")
+    print("=" * 60)
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    workflow = Workflow.create(
+        application="python-example",
+        name="Simple Calculation",
+        stages=[
+            StageExecution(
+                ref_id="1",
+                type="python",
+                name="Calculate Fibonacci",
+                context={
+                    "script": """
+def fib(n):
+    if n <= 1:
+        return n
+    return fib(n-1) + fib(n-2)
+
+n = INPUT.get('n', 10)
+RESULT = {
+    'n': n,
+    'fibonacci': fib(n),
+    'sequence': [fib(i) for i in range(n+1)]
+}
+print(f"Fibonacci({n}) = {fib(n)}")
+""",
+                    "inputs": {"n": 10},
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Run Python",
+                        implementing_class="python",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=30.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+    script_result = result.stages[0].outputs.get("result", {})
+    print(f"Result: Fibonacci({script_result.get('n')}) = {script_result.get('fibonacci')}")
+    print(f"Sequence: {script_result.get('sequence')}")
+
 class PythonTask(Task):
     """
     Execute Python code.
