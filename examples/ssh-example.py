@@ -219,3 +219,114 @@ def example_sequential_deployment() -> None:
         stdout = stage.outputs.get("stdout", "")
         first_line = stdout.split("\n")[0][:50] if stdout else "N/A"
         print(f"  {status_mark} {stage.name}: {first_line}")
+
+def example_parallel_health_check() -> None:
+    """Check multiple servers in parallel."""
+    print("\n" + "=" * 60)
+    print("Example 3: Parallel Health Checks")
+    print("=" * 60)
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    # Using localhost multiple times to simulate multiple servers
+    # In production, these would be different hosts
+    hosts = [
+        ("server1", "localhost"),
+        ("server2", "localhost"),
+        ("server3", "localhost"),
+    ]
+
+    #      Start
+    #     /  |  \
+    # S1   S2   S3
+    #     \  |  /
+    #     Report
+
+    stages = [
+        StageExecution(
+            ref_id="start",
+            type="ssh",
+            name="Start Health Check",
+            context={
+                "host": "localhost",
+                "command": "echo 'Starting health checks...'",
+            },
+            tasks=[
+                TaskExecution.create(
+                    name="Start",
+                    implementing_class="ssh",
+                    stage_start=True,
+                    stage_end=True,
+                ),
+            ],
+        ),
+    ]
+
+    # Parallel health checks
+    for name, host in hosts:
+        stages.append(
+            StageExecution(
+                ref_id=name,
+                type="ssh",
+                name=f"Check {name}",
+                requisite_stage_ref_ids={"start"},
+                context={
+                    "host": host,
+                    "command": f"echo 'Checking {name}...' && uptime && echo 'Status: OK'",
+                    "continue_on_failure": True,  # Continue even if one fails
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name=f"Check {name}",
+                        implementing_class="ssh",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            )
+        )
+
+    # Report stage
+    stages.append(
+        StageExecution(
+            ref_id="report",
+            type="ssh",
+            name="Generate Report",
+            requisite_stage_ref_ids={name for name, _ in hosts},
+            context={
+                "host": "localhost",
+                "command": "echo 'Health check complete' && date",
+            },
+            tasks=[
+                TaskExecution.create(
+                    name="Report",
+                    implementing_class="ssh",
+                    stage_start=True,
+                    stage_end=True,
+                ),
+            ],
+        )
+    )
+
+    workflow = Workflow.create(
+        application="ssh-example",
+        name="Parallel Health Check",
+        stages=stages,
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=120.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+    for stage in result.stages:
+        status_mark = "[OK]" if stage.status == WorkflowStatus.SUCCEEDED else "[FAIL]"
+        host = stage.outputs.get("host", "N/A")
+        stdout = stage.outputs.get("stdout", "")
+        status_line = [line for line in stdout.split("\n") if "Status:" in line or "complete" in line.lower()]
+        status = status_line[0] if status_line else "N/A"
+        print(f"  {status_mark} {stage.name} ({host}): {status[:40]}")
