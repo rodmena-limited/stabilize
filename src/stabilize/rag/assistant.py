@@ -1,15 +1,37 @@
+"""StabilizeRAG - RAG assistant for generating Stabilize pipelines."""
+
 from __future__ import annotations
+
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict
+
 import numpy as np
+
 from .cache import CachedEmbedding, EmbeddingCache
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
 
 class ChunkDict(TypedDict):
     """Type for document chunk dictionary."""
+
     doc_id: str
     content: str
     chunk_index: int
+
+
+# Load .env file if present (ragit does this too, but ensure it's loaded early)
+try:
+    from dotenv import load_dotenv
+
+    _env_path = Path.cwd() / ".env"
+    if _env_path.exists():
+        load_dotenv(_env_path)
+except ImportError:
+    pass  # dotenv not required if env vars are set directly
+
 
 class StabilizeRAG:
     """RAG assistant for generating Stabilize pipelines.
@@ -26,13 +48,20 @@ class StabilizeRAG:
         OLLAMA_BASE_URL: Override LLM URL (default: https://ollama.com)
         OLLAMA_EMBEDDING_URL: Override embedding URL (default: http://localhost:11434)
     """
-    DEFAULT_LLM_URL = 'https://ollama.com'
-    DEFAULT_EMBEDDING_URL = 'http://localhost:11434'
-    DEFAULT_EMBEDDING_MODEL = 'nomic-embed-text:latest'
-    DEFAULT_LLM_MODEL = 'qwen3-vl:235b'
+
+    # Default URLs
+    DEFAULT_LLM_URL = "https://ollama.com"
+    DEFAULT_EMBEDDING_URL = "http://localhost:11434"
+
+    # Default models
+    DEFAULT_EMBEDDING_MODEL = "nomic-embed-text:latest"
+    DEFAULT_LLM_MODEL = "qwen3-vl:235b"
+
+    # Chunking defaults
     DEFAULT_CHUNK_SIZE = 512
-    DEFAULT_CHUNK_OVERLAP = 100
-    DEFAULT_TOP_K = 10
+    DEFAULT_CHUNK_OVERLAP = 100  # Increased overlap for better context continuity
+    DEFAULT_TOP_K = 10  # Retrieve more context chunks for better accuracy
+
     def __init__(
         self,
         cache: EmbeddingCache,
@@ -169,53 +198,53 @@ class StabilizeRAG:
 
         # Generate code
         system_prompt = """You are a Stabilize workflow engine expert.
-    Generate ONLY valid Python code that creates a working Stabilize pipeline.
+Generate ONLY valid Python code that creates a working Stabilize pipeline.
 
-    CRITICAL: Follow these EXACT patterns - do not invent your own API calls.
+CRITICAL: Follow these EXACT patterns - do not invent your own API calls.
 
-    === IMPORTS (copy exactly) ===
-    from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
-    from stabilize.persistence.sqlite import SqliteWorkflowStore
-    from stabilize.queue.sqlite_queue import SqliteQueue
-    from stabilize.queue.processor import QueueProcessor
-    from stabilize.orchestrator import Orchestrator
-    from stabilize.tasks.interface import Task
-    from stabilize.tasks.result import TaskResult
-    from stabilize.tasks.registry import TaskRegistry
-    from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
-    from stabilize.handlers.complete_stage import CompleteStageHandler
-    from stabilize.handlers.complete_task import CompleteTaskHandler
-    from stabilize.handlers.run_task import RunTaskHandler
-    from stabilize.handlers.start_workflow import StartWorkflowHandler
-    from stabilize.handlers.start_stage import StartStageHandler
-    from stabilize.handlers.start_task import StartTaskHandler
+=== IMPORTS (copy exactly) ===
+from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
+from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize.queue.sqlite_queue import SqliteQueue
+from stabilize.queue.processor import QueueProcessor
+from stabilize.orchestrator import Orchestrator
+from stabilize.tasks.interface import Task
+from stabilize.tasks.result import TaskResult
+from stabilize.tasks.registry import TaskRegistry
+from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
+from stabilize.handlers.complete_stage import CompleteStageHandler
+from stabilize.handlers.complete_task import CompleteTaskHandler
+from stabilize.handlers.run_task import RunTaskHandler
+from stabilize.handlers.start_workflow import StartWorkflowHandler
+from stabilize.handlers.start_stage import StartStageHandler
+from stabilize.handlers.start_task import StartTaskHandler
 
-    === TASK PATTERN (execute takes stage, not context) ===
-    class MyTask(Task):
+=== TASK PATTERN (execute takes stage, not context) ===
+class MyTask(Task):
     def execute(self, stage: StageExecution) -> TaskResult:
         value = stage.context.get("key")  # Read from stage.context
         return TaskResult.success(outputs={"result": value})  # Use factory methods
 
-    === TASKRESULT FACTORY METHODS ===
-    TaskResult.success(outputs={"key": "value"})  # Success with outputs
-    TaskResult.terminal(error="Error message")     # Failure, halts pipeline
+=== TASKRESULT FACTORY METHODS ===
+TaskResult.success(outputs={"key": "value"})  # Success with outputs
+TaskResult.terminal(error="Error message")     # Failure, halts pipeline
 
-    === WORKFLOWSTATUS ENUM VALUES (use exactly) ===
-    WorkflowStatus.NOT_STARTED  # Initial state
-    WorkflowStatus.RUNNING      # Currently executing
-    WorkflowStatus.SUCCEEDED    # Completed successfully (NOT "COMPLETED")
-    WorkflowStatus.TERMINAL     # Failed/halted
+=== WORKFLOWSTATUS ENUM VALUES (use exactly) ===
+WorkflowStatus.NOT_STARTED  # Initial state
+WorkflowStatus.RUNNING      # Currently executing
+WorkflowStatus.SUCCEEDED    # Completed successfully (NOT "COMPLETED")
+WorkflowStatus.TERMINAL     # Failed/halted
 
-    === SETUP PATTERN ===
-    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
-    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
-    queue._create_table()
+=== SETUP PATTERN ===
+store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+queue._create_table()
 
-    registry = TaskRegistry()
-    registry.register("my_task", MyTask)
+registry = TaskRegistry()
+registry.register("my_task", MyTask)
 
-    processor = QueueProcessor(queue)
-    handlers = [
+processor = QueueProcessor(queue)
+handlers = [
     StartWorkflowHandler(queue, store),
     StartStageHandler(queue, store),
     StartTaskHandler(queue, store),
@@ -223,14 +252,14 @@ class StabilizeRAG:
     CompleteTaskHandler(queue, store),
     CompleteStageHandler(queue, store),
     CompleteWorkflowHandler(queue, store),
-    ]
-    for h in handlers:
+]
+for h in handlers:
     processor.register_handler(h)
 
-    orchestrator = Orchestrator(queue)  # Only takes queue!
+orchestrator = Orchestrator(queue)  # Only takes queue!
 
-    === WORKFLOW PATTERN ===
-    workflow = Workflow.create(
+=== WORKFLOW PATTERN ===
+workflow = Workflow.create(
     application="my-app",
     name="My Pipeline",
     stages=[
@@ -249,25 +278,25 @@ class StabilizeRAG:
             ],
         ),
     ],
-    )
+)
 
-    === EXECUTION ===
-    store.store(workflow)
-    orchestrator.start(workflow)
-    processor.process_all(timeout=30.0)
-    result = store.retrieve(workflow.id)
+=== EXECUTION ===
+store.store(workflow)
+orchestrator.start(workflow)
+processor.process_all(timeout=30.0)
+result = store.retrieve(workflow.id)
 
-    Output ONLY valid Python code. No markdown, no explanations."""
+Output ONLY valid Python code. No markdown, no explanations."""
 
         provider = self._get_provider()
         response = provider.generate(
             prompt=f"""Based on the following reference documentation and examples:
 
-    {context}
+{context}
 
-    Generate a complete, runnable Python script that: {prompt}
+Generate a complete, runnable Python script that: {prompt}
 
-    Remember: Output ONLY valid Python code, no markdown, no explanations.""",
+Remember: Output ONLY valid Python code, no markdown, no explanations.""",
             model=self.llm_model,
             system_prompt=system_prompt,
             temperature=temperature,
@@ -393,3 +422,38 @@ class StabilizeRAG:
         norms = np.linalg.norm(matrix, axis=1, keepdims=True)
         norms = np.where(norms == 0, 1, norms)  # Avoid division by zero
         self._embedding_matrix = matrix / norms
+
+    def _get_context(self, query: str, top_k: int = 5) -> str:
+        """Retrieve relevant context for a query."""
+        if self._cached_embeddings is None or self._embedding_matrix is None:
+            raise RuntimeError("Cache not loaded")
+
+        # Get query embedding
+        provider = self._get_provider()
+        response = provider.embed(query, self.embedding_model)
+        query_embedding = np.array(response.embedding, dtype=np.float64)
+
+        # Normalize query
+        query_norm = np.linalg.norm(query_embedding)
+        if query_norm > 0:
+            query_embedding = query_embedding / query_norm
+
+        # Cosine similarity via dot product (embeddings are pre-normalized)
+        similarities = self._embedding_matrix @ query_embedding
+
+        # Get top-k indices
+        if top_k >= len(similarities):
+            top_indices = np.argsort(similarities)[::-1]
+        else:
+            # Use argpartition for O(n) partial sort
+            top_indices = np.argpartition(similarities, -top_k)[-top_k:]
+            top_indices = top_indices[np.argsort(similarities[top_indices])[::-1]]
+
+        # Build context string
+        context_parts = []
+        for idx in top_indices:
+            emb = self._cached_embeddings[idx]
+            score = similarities[idx]
+            context_parts.append(f"--- {emb.doc_id} (relevance: {score:.3f}) ---\n{emb.content}")
+
+        return "\n\n".join(context_parts)
