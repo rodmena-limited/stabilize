@@ -349,3 +349,29 @@ class StabilizeRAG:
                     print(f"Warning: Path does not exist: {path}")
 
         return docs
+
+    def _chunk_documents(self, documents: list[dict[str, str]]) -> list[ChunkDict]:
+        """Split documents into overlapping chunks."""
+        try:
+            from ragit import chunk_text
+        except ImportError as e:
+            raise ImportError("RAG support requires: pip install stabilize[rag]") from e
+
+        all_chunks: list[ChunkDict] = []
+        for doc in documents:
+            chunks = chunk_text(
+                doc["content"],
+                chunk_size=self.chunk_size,
+                chunk_overlap=self.chunk_overlap,
+                doc_id=doc["id"],
+            )
+            for i, chunk in enumerate(chunks):
+                all_chunks.append(
+                    ChunkDict(
+                        doc_id=doc["id"],
+                        content=chunk.content,
+                        chunk_index=i,
+                    )
+                )
+
+        return all_chunks
