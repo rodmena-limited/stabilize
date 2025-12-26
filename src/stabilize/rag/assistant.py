@@ -283,3 +283,69 @@ class StabilizeRAG:
             code = code[:-3]
 
         return code.strip()
+
+    def _load_documents(self, additional_paths: list[str] | None = None) -> list[dict[str, str]]:
+        """Load PROMPT_TEXT + bundled examples/*.py + additional context as documents.
+
+        Args:
+            additional_paths: Optional list of file/directory paths to include as
+                additional training context.
+
+        Returns:
+            List of documents with 'id' and 'content' keys.
+        """
+        from stabilize.cli import PROMPT_TEXT
+
+        docs = [{"id": "prompt_reference", "content": PROMPT_TEXT}]
+
+        # Try bundled examples from package
+        try:
+            from importlib.resources import files
+
+            examples_pkg = files("stabilize.examples")
+            for item in examples_pkg.iterdir():
+                if item.name.endswith(".py") and item.name != "__init__.py":
+                    content = item.read_text()
+                    docs.append({"id": item.name[:-3], "content": content})
+        except (TypeError, FileNotFoundError, ModuleNotFoundError):
+            pass
+
+        # Fallback: try local examples/ directory (for development)
+        examples_dir = Path(__file__).parent.parent.parent.parent / "examples"
+        if examples_dir.exists():
+            for py_file in examples_dir.glob("*.py"):
+                if py_file.name == "__init__.py":
+                    continue
+                # Skip if already loaded from package
+                doc_id = py_file.stem
+                if any(d["id"] == doc_id for d in docs):
+                    continue
+                content = py_file.read_text()
+                docs.append({"id": doc_id, "content": content})
+
+        # Load additional context from user-provided paths
+        if additional_paths:
+            for path_str in additional_paths:
+                path = Path(path_str)
+                if path.is_file():
+                    # Single file
+                    try:
+                        content = path.read_text()
+                        docs.append({"id": f"additional:{path.name}", "content": content})
+                    except Exception as e:
+                        print(f"Warning: Could not read {path}: {e}")
+                elif path.is_dir():
+                    # Directory - load all .py files recursively
+                    for py_file in path.rglob("*.py"):
+                        if py_file.name == "__init__.py":
+                            continue
+                        try:
+                            content = py_file.read_text()
+                            rel_path = py_file.relative_to(path)
+                            docs.append({"id": f"additional:{rel_path}", "content": content})
+                        except Exception as e:
+                            print(f"Warning: Could not read {py_file}: {e}")
+                else:
+                    print(f"Warning: Path does not exist: {path}")
+
+        return docs
