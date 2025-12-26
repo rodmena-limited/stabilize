@@ -10,3 +10,44 @@ class ChunkDict(TypedDict):
     doc_id: str
     content: str
     chunk_index: int
+
+class StabilizeRAG:
+    """RAG assistant for generating Stabilize pipelines.
+
+    Uses ragit for embeddings and LLM generation, with custom caching layer
+    to persist embeddings in database.
+
+    Configuration:
+        - LLM generation uses ollama.com cloud (requires OLLAMA_API_KEY)
+        - Embeddings use local Ollama (ollama.com doesn't support embeddings)
+
+    Environment Variables:
+        OLLAMA_API_KEY: Required API key for ollama.com cloud
+        OLLAMA_BASE_URL: Override LLM URL (default: https://ollama.com)
+        OLLAMA_EMBEDDING_URL: Override embedding URL (default: http://localhost:11434)
+    """
+    DEFAULT_LLM_URL = 'https://ollama.com'
+    DEFAULT_EMBEDDING_URL = 'http://localhost:11434'
+    DEFAULT_EMBEDDING_MODEL = 'nomic-embed-text:latest'
+    DEFAULT_LLM_MODEL = 'qwen3-vl:235b'
+    DEFAULT_CHUNK_SIZE = 512
+    DEFAULT_CHUNK_OVERLAP = 100
+    DEFAULT_TOP_K = 10
+    def __init__(
+        self,
+        cache: EmbeddingCache,
+        embedding_model: str | None = None,
+        llm_model: str | None = None,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+        chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
+    ):
+        self.cache = cache
+        self.embedding_model = embedding_model or self.DEFAULT_EMBEDDING_MODEL
+        self.llm_model = llm_model or self.DEFAULT_LLM_MODEL
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+
+        # Lazily initialized
+        self._provider = None
+        self._cached_embeddings: list[CachedEmbedding] | None = None
+        self._embedding_matrix: NDArray[np.float64] | None = None
