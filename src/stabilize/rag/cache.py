@@ -54,3 +54,95 @@ class SqliteEmbeddingCache(EmbeddingCache):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _init_schema(self) -> None:
+        """Initialize the database schema."""
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS rag_embeddings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    doc_id TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    embedding TEXT NOT NULL,
+                    embedding_model TEXT NOT NULL,
+                    chunk_index INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    UNIQUE(doc_id, chunk_index, embedding_model)
+                )
+            """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_rag_embeddings_model
+                ON rag_embeddings(embedding_model)
+            """
+            )
+            conn.commit()
+
+    def store(self, embeddings: list[CachedEmbedding]) -> None:
+        """Store embeddings in SQLite."""
+        if not embeddings:
+            return
+
+        with self._get_connection() as conn:
+            # Clear existing embeddings for this model
+            model = embeddings[0].embedding_model
+            conn.execute(
+                "DELETE FROM rag_embeddings WHERE embedding_model = ?",
+                (model,),
+            )
+
+            # Insert new embeddings
+            for emb in embeddings:
+                conn.execute(
+                    """
+                    INSERT INTO rag_embeddings
+                    (doc_id, content, embedding, embedding_model, chunk_index)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        emb.doc_id,
+                        emb.content,
+                        json.dumps(emb.embedding),
+                        emb.embedding_model,
+                        emb.chunk_index,
+                    ),
+                )
+            conn.commit()
+
+    def load(self, embedding_model: str) -> list[CachedEmbedding]:
+        """Load embeddings from SQLite."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT doc_id, content, embedding, embedding_model, chunk_index
+                FROM rag_embeddings
+                WHERE embedding_model = ?
+                ORDER BY doc_id, chunk_index
+                """,
+                (embedding_model,),
+            )
+            results = []
+            for row in cursor:
+                results.append(
+                    CachedEmbedding(
+                        doc_id=row["doc_id"],
+                        content=row["content"],
+                        embedding=json.loads(row["embedding"]),
+                        embedding_model=row["embedding_model"],
+                        chunk_index=row["chunk_index"],
+                    )
+                )
+            return results
+
+    def is_initialized(self, embedding_model: str) -> bool:
+        """Check if cache has embeddings for the given model."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT COUNT(*) FROM rag_embeddings WHERE embedding_model = ?",
+                (embedding_model,),
+            )
+            row = cursor.fetchone()
+            count: int = row[0] if row else 0
+            return count > 0
