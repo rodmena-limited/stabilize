@@ -143,3 +143,143 @@ class StabilizeRAG:
         print(f"Cached {len(cached)} embeddings")
 
         return len(cached)
+
+    def generate(self, prompt: str, top_k: int | None = None, temperature: float = 0.3) -> str:
+        """Generate pipeline code from natural language prompt.
+
+        Args:
+            prompt: Natural language description of desired pipeline.
+            top_k: Number of context chunks to retrieve (default: 10).
+            temperature: LLM temperature for generation.
+
+        Returns:
+            Generated Python code.
+        """
+        if top_k is None:
+            top_k = self.DEFAULT_TOP_K
+
+        if not self.cache.is_initialized(self.embedding_model):
+            raise RuntimeError("Run 'stabilize rag init' first to initialize embeddings")
+
+        # Load cached embeddings
+        self._load_cache()
+
+        # Get relevant context
+        context = self._get_context(prompt, top_k=top_k)
+
+        # Generate code
+        system_prompt = """You are a Stabilize workflow engine expert.
+    Generate ONLY valid Python code that creates a working Stabilize pipeline.
+
+    CRITICAL: Follow these EXACT patterns - do not invent your own API calls.
+
+    === IMPORTS (copy exactly) ===
+    from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
+    from stabilize.persistence.sqlite import SqliteWorkflowStore
+    from stabilize.queue.sqlite_queue import SqliteQueue
+    from stabilize.queue.processor import QueueProcessor
+    from stabilize.orchestrator import Orchestrator
+    from stabilize.tasks.interface import Task
+    from stabilize.tasks.result import TaskResult
+    from stabilize.tasks.registry import TaskRegistry
+    from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
+    from stabilize.handlers.complete_stage import CompleteStageHandler
+    from stabilize.handlers.complete_task import CompleteTaskHandler
+    from stabilize.handlers.run_task import RunTaskHandler
+    from stabilize.handlers.start_workflow import StartWorkflowHandler
+    from stabilize.handlers.start_stage import StartStageHandler
+    from stabilize.handlers.start_task import StartTaskHandler
+
+    === TASK PATTERN (execute takes stage, not context) ===
+    class MyTask(Task):
+    def execute(self, stage: StageExecution) -> TaskResult:
+        value = stage.context.get("key")  # Read from stage.context
+        return TaskResult.success(outputs={"result": value})  # Use factory methods
+
+    === TASKRESULT FACTORY METHODS ===
+    TaskResult.success(outputs={"key": "value"})  # Success with outputs
+    TaskResult.terminal(error="Error message")     # Failure, halts pipeline
+
+    === WORKFLOWSTATUS ENUM VALUES (use exactly) ===
+    WorkflowStatus.NOT_STARTED  # Initial state
+    WorkflowStatus.RUNNING      # Currently executing
+    WorkflowStatus.SUCCEEDED    # Completed successfully (NOT "COMPLETED")
+    WorkflowStatus.TERMINAL     # Failed/halted
+
+    === SETUP PATTERN ===
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+
+    registry = TaskRegistry()
+    registry.register("my_task", MyTask)
+
+    processor = QueueProcessor(queue)
+    handlers = [
+    StartWorkflowHandler(queue, store),
+    StartStageHandler(queue, store),
+    StartTaskHandler(queue, store),
+    RunTaskHandler(queue, store, registry),
+    CompleteTaskHandler(queue, store),
+    CompleteStageHandler(queue, store),
+    CompleteWorkflowHandler(queue, store),
+    ]
+    for h in handlers:
+    processor.register_handler(h)
+
+    orchestrator = Orchestrator(queue)  # Only takes queue!
+
+    === WORKFLOW PATTERN ===
+    workflow = Workflow.create(
+    application="my-app",
+    name="My Pipeline",
+    stages=[
+        StageExecution(
+            ref_id="1",
+            type="my_task",
+            name="My Stage",
+            context={"key": "value"},
+            tasks=[
+                TaskExecution.create(
+                    name="Run Task",
+                    implementing_class="my_task",  # Must match registry.register()
+                    stage_start=True,  # REQUIRED for first task
+                    stage_end=True,    # REQUIRED for last task
+                ),
+            ],
+        ),
+    ],
+    )
+
+    === EXECUTION ===
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=30.0)
+    result = store.retrieve(workflow.id)
+
+    Output ONLY valid Python code. No markdown, no explanations."""
+
+        provider = self._get_provider()
+        response = provider.generate(
+            prompt=f"""Based on the following reference documentation and examples:
+
+    {context}
+
+    Generate a complete, runnable Python script that: {prompt}
+
+    Remember: Output ONLY valid Python code, no markdown, no explanations.""",
+            model=self.llm_model,
+            system_prompt=system_prompt,
+            temperature=temperature,
+        )
+
+        # Clean up response (remove any markdown if present)
+        code: str = response.text.strip()
+        if code.startswith("```python"):
+            code = code[9:]
+        if code.startswith("```"):
+            code = code[3:]
+        if code.endswith("```"):
+            code = code[:-3]
+
+        return code.strip()
