@@ -129,3 +129,26 @@ PARALLEL_URL_FETCHER_WORKFLOW = {
     "variables": {},
     "max_active_runs": 1,
 }
+SIMPLE_HTTP_WORKFLOW = {
+    "name": "simple_http_test",
+    "version": "1.0.0",
+    "description": "Simple HTTP request for integration testing",
+    "start_task": "fetch_test",
+    "tasks": {
+        "fetch_test": {
+            "task_id": "fetch_test",
+            "operator_type": "task",
+            "dependencies": [],
+            "trigger_rule": "all_success",
+            "function": "tools.http.request",
+            "kwargs": {
+                "url": "https://httpbin.org/get",
+                "method": "GET",
+                "timeout": 30,
+            },
+            "result_key": "test_response",
+        },
+    },
+    "variables": {},
+    "max_active_runs": 1,
+}
