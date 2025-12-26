@@ -1,5 +1,25 @@
+#!/usr/bin/env python3
+"""
+SSH Example - Demonstrates executing remote commands via SSH with Stabilize.
+
+This example shows how to use the built-in SSHTask for:
+1. Running commands on remote servers
+2. Building deployment and administration workflows
+3. Parallel health checks across multiple hosts
+
+Requirements:
+    SSH client installed (ssh command available)
+    SSH access to target hosts (key-based auth recommended)
+
+Run with:
+    python examples/ssh-example.py
+"""
+
 import logging
 from typing import Any
+
+logging.basicConfig(level=logging.ERROR)
+
 from stabilize import (
     CompleteStageHandler,
     CompleteTaskHandler,
@@ -21,6 +41,11 @@ from stabilize import (
 )
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue.queue import Queue
+
+# =============================================================================
+# Helper: Setup pipeline infrastructure
+# =============================================================================
+
 
 def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with SSHTask registered."""
@@ -44,6 +69,12 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
 
     orchestrator = Orchestrator(queue)
     return processor, orchestrator
+
+
+# =============================================================================
+# Example 1: Simple Remote Command
+# =============================================================================
+
 
 def example_simple_command() -> None:
     """Execute a simple command on a remote host."""
@@ -93,6 +124,12 @@ def example_simple_command() -> None:
         print(f"Output: {result.stages[0].outputs.get('stdout')}")
     else:
         print(f"Error: {result.stages[0].outputs.get('stderr', 'Connection failed')}")
+
+
+# =============================================================================
+# Example 2: Sequential Deployment Steps
+# =============================================================================
+
 
 def example_sequential_deployment() -> None:
     """Sequential deployment: check -> deploy -> verify."""
@@ -220,6 +257,12 @@ def example_sequential_deployment() -> None:
         first_line = stdout.split("\n")[0][:50] if stdout else "N/A"
         print(f"  {status_mark} {stage.name}: {first_line}")
 
+
+# =============================================================================
+# Example 3: Parallel Health Checks
+# =============================================================================
+
+
 def example_parallel_health_check() -> None:
     """Check multiple servers in parallel."""
     print("\n" + "=" * 60)
@@ -330,3 +373,96 @@ def example_parallel_health_check() -> None:
         status_line = [line for line in stdout.split("\n") if "Status:" in line or "complete" in line.lower()]
         status = status_line[0] if status_line else "N/A"
         print(f"  {status_mark} {stage.name} ({host}): {status[:40]}")
+
+
+# =============================================================================
+# Example 4: Multi-Command Script
+# =============================================================================
+
+
+def example_multi_command() -> None:
+    """Execute a multi-command script on remote host."""
+    print("\n" + "=" * 60)
+    print("Example 4: Multi-Command Script")
+    print("=" * 60)
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    # Multi-line script as single command
+    script = """
+echo '=== System Information ==='
+echo "Hostname: $(hostname)"
+echo "Kernel: $(uname -r)"
+echo "Uptime: $(uptime -p)"
+echo ''
+echo '=== Disk Usage ==='
+df -h / | tail -1
+echo ''
+echo '=== Memory Usage ==='
+free -h | head -2
+echo ''
+echo '=== Load Average ==='
+cat /proc/loadavg
+echo ''
+echo '=== Done ==='
+"""
+
+    workflow = Workflow.create(
+        application="ssh-example",
+        name="System Report",
+        stages=[
+            StageExecution(
+                ref_id="1",
+                type="ssh",
+                name="Generate System Report",
+                context={
+                    "host": "localhost",
+                    "command": script.replace("\n", " && ").strip(" && "),
+                    "timeout": 60,
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="System Report",
+                        implementing_class="ssh",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=60.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nWorkflow Status: {result.status}")
+    if result.status == WorkflowStatus.SUCCEEDED:
+        print("\nSystem Report:")
+        print("-" * 40)
+        print(result.stages[0].outputs.get("stdout", ""))
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+
+if __name__ == "__main__":
+    print("Stabilize SSH Examples")
+    print("=" * 60)
+    print("Requires: SSH client and access to target hosts")
+    print("Note: Examples use localhost - modify hosts for real usage")
+
+    example_simple_command()
+    example_sequential_deployment()
+    example_parallel_health_check()
+    example_multi_command()
+
+    print("\n" + "=" * 60)
+    print("All examples completed!")
+    print("=" * 60)
