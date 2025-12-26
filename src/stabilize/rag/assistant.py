@@ -79,3 +79,67 @@ class StabilizeRAG:
                 api_key=api_key,
             )
         return self._provider
+
+    def init(self, force: bool = False, additional_paths: list[str] | None = None) -> int:
+        """Initialize embeddings from PROMPT_TEXT + examples/ + additional context.
+
+        Args:
+            force: If True, regenerate even if cache exists.
+            additional_paths: Optional list of file/directory paths to include as
+                additional training context.
+
+        Returns:
+            Number of embeddings cached.
+        """
+        if self.cache.is_initialized(self.embedding_model) and not force:
+            print(f"Cache already initialized for {self.embedding_model}")
+            return 0
+
+        # Load documents
+        documents = self._load_documents(additional_paths)
+        if not documents:
+            raise RuntimeError("No documents found to index")
+
+        print(f"Loaded {len(documents)} documents")
+
+        # Chunk documents
+        chunks = self._chunk_documents(documents)
+        print(f"Created {len(chunks)} chunks")
+
+        # Generate embeddings
+        print("Generating embeddings...")
+        provider = self._get_provider()
+        texts = [chunk["content"] for chunk in chunks]
+
+        try:
+            responses = provider.embed_batch(texts, self.embedding_model)
+        except ConnectionError as e:
+            embedding_url = os.environ.get("OLLAMA_EMBEDDING_URL", self.DEFAULT_EMBEDDING_URL)
+            raise RuntimeError(
+                f"Cannot connect to Ollama for embeddings at {embedding_url}\n\n"
+                "Embeddings require a local Ollama instance (ollama.com doesn't support embeddings).\n\n"
+                "To fix this:\n"
+                "  1. Install Ollama: https://ollama.com/download\n"
+                "  2. Start Ollama: ollama serve\n"
+                "  3. Pull embedding model: ollama pull nomic-embed-text\n\n"
+                "Or set OLLAMA_EMBEDDING_URL to point to your Ollama instance."
+            ) from e
+
+        # Build cached embeddings
+        cached = []
+        for i, (chunk, response) in enumerate(zip(chunks, responses)):
+            cached.append(
+                CachedEmbedding(
+                    doc_id=chunk["doc_id"],
+                    content=chunk["content"],
+                    embedding=list(response.embedding),
+                    embedding_model=self.embedding_model,
+                    chunk_index=chunk["chunk_index"],
+                )
+            )
+
+        # Store in cache
+        self.cache.store(cached)
+        print(f"Cached {len(cached)} embeddings")
+
+        return len(cached)
