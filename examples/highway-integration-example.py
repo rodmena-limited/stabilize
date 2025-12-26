@@ -152,3 +152,26 @@ SIMPLE_HTTP_WORKFLOW = {
     "variables": {},
     "max_active_runs": 1,
 }
+
+def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
+    """Create processor and orchestrator with HighwayTask registered."""
+    task_registry = TaskRegistry()
+    task_registry.register("highway", HighwayTask)
+
+    processor = QueueProcessor(queue)
+
+    handlers: list[Any] = [
+        StartWorkflowHandler(queue, store),
+        StartStageHandler(queue, store),
+        StartTaskHandler(queue, store),
+        RunTaskHandler(queue, store, task_registry),
+        CompleteTaskHandler(queue, store),
+        CompleteStageHandler(queue, store),
+        CompleteWorkflowHandler(queue, store),
+    ]
+
+    for handler in handlers:
+        processor.register_handler(handler)
+
+    orchestrator = Orchestrator(queue)
+    return processor, orchestrator
