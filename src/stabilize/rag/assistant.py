@@ -375,3 +375,21 @@ class StabilizeRAG:
                 )
 
         return all_chunks
+
+    def _load_cache(self) -> None:
+        """Load embeddings from cache and build embedding matrix."""
+        if self._cached_embeddings is not None:
+            return
+
+        self._cached_embeddings = self.cache.load(self.embedding_model)
+        if not self._cached_embeddings:
+            raise RuntimeError(f"No embeddings found for model {self.embedding_model}")
+
+        # Build normalized embedding matrix for fast similarity search
+        embeddings = [e.embedding for e in self._cached_embeddings]
+        matrix = np.array(embeddings, dtype=np.float64)
+
+        # Normalize for cosine similarity via dot product
+        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+        norms = np.where(norms == 0, 1, norms)  # Avoid division by zero
+        self._embedding_matrix = matrix / norms
