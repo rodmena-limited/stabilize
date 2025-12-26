@@ -1,4 +1,7 @@
+"""Embedding cache implementations for RAG."""
+
 from __future__ import annotations
+
 import json
 import os
 import sqlite3
@@ -7,39 +10,51 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    import psycopg
+
+
 @dataclass
 class CachedEmbedding:
     """A cached embedding with its metadata."""
+
     doc_id: str
     content: str
     embedding: list[float]
     embedding_model: str
     chunk_index: int
 
+
 class EmbeddingCache(ABC):
     """Abstract interface for embedding cache."""
 
+    @abstractmethod
     def store(self, embeddings: list[CachedEmbedding]) -> None:
         """Store embeddings in cache."""
         ...
 
+    @abstractmethod
     def load(self, embedding_model: str) -> list[CachedEmbedding]:
         """Load embeddings from cache for a specific model."""
         ...
 
+    @abstractmethod
     def is_initialized(self, embedding_model: str) -> bool:
         """Check if cache has embeddings for the given model."""
         ...
 
+    @abstractmethod
     def clear(self) -> None:
         """Clear all cached embeddings."""
         ...
+
 
 class SqliteEmbeddingCache(EmbeddingCache):
     """Store embeddings in SQLite database.
 
     Default location: ~/.stabilize/embeddings.db
     """
+
     def __init__(self, db_path: str | None = None):
         if db_path is None:
             cache_dir = Path.home() / ".stabilize"
@@ -153,11 +168,13 @@ class SqliteEmbeddingCache(EmbeddingCache):
             conn.execute("DELETE FROM rag_embeddings")
             conn.commit()
 
+
 class PostgresEmbeddingCache(EmbeddingCache):
     """Store embeddings in PostgreSQL database.
 
     Uses the rag_embeddings table created by migration.
     """
+
     def __init__(self, connection_string: str):
         self.connection_string = connection_string
         self._conn: psycopg.Connection[tuple[Any, ...]] | None = None
@@ -204,3 +221,74 @@ class PostgresEmbeddingCache(EmbeddingCache):
                     ),
                 )
             conn.commit()
+
+    def load(self, embedding_model: str) -> list[CachedEmbedding]:
+        """Load embeddings from PostgreSQL."""
+        conn = self._get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT doc_id, content, embedding, embedding_model, chunk_index
+                FROM rag_embeddings
+                WHERE embedding_model = %s
+                ORDER BY doc_id, chunk_index
+                """,
+                (embedding_model,),
+            )
+            results = []
+            for row in cur.fetchall():
+                embedding_data = row[2]
+                if isinstance(embedding_data, str):
+                    embedding_data = json.loads(embedding_data)
+                results.append(
+                    CachedEmbedding(
+                        doc_id=row[0],
+                        content=row[1],
+                        embedding=embedding_data,
+                        embedding_model=row[3],
+                        chunk_index=row[4],
+                    )
+                )
+            return results
+
+    def is_initialized(self, embedding_model: str) -> bool:
+        """Check if cache has embeddings for the given model."""
+        conn = self._get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM rag_embeddings WHERE embedding_model = %s",
+                (embedding_model,),
+            )
+            row = cur.fetchone()
+            count: int = row[0] if row else 0
+            return count > 0
+
+    def clear(self) -> None:
+        """Clear all cached embeddings."""
+        conn = self._get_connection()
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM rag_embeddings")
+            conn.commit()
+
+
+def get_cache(db_url: str | None = None) -> EmbeddingCache:
+    """Get appropriate cache based on configuration.
+
+    Priority:
+    1. Explicit db_url parameter
+    2. MG_DATABASE_URL environment variable (if postgres)
+    3. Default SQLite in ~/.stabilize/embeddings.db
+    """
+    if db_url:
+        if db_url.startswith("postgres"):
+            return PostgresEmbeddingCache(db_url)
+        else:
+            return SqliteEmbeddingCache(db_url)
+
+    # Check environment
+    env_url = os.environ.get("MG_DATABASE_URL")
+    if env_url and env_url.startswith("postgres"):
+        return PostgresEmbeddingCache(env_url)
+
+    # Default: SQLite
+    return SqliteEmbeddingCache()
