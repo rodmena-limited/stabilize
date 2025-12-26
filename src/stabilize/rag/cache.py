@@ -146,3 +146,61 @@ class SqliteEmbeddingCache(EmbeddingCache):
             row = cursor.fetchone()
             count: int = row[0] if row else 0
             return count > 0
+
+    def clear(self) -> None:
+        """Clear all cached embeddings."""
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM rag_embeddings")
+            conn.commit()
+
+class PostgresEmbeddingCache(EmbeddingCache):
+    """Store embeddings in PostgreSQL database.
+
+    Uses the rag_embeddings table created by migration.
+    """
+    def __init__(self, connection_string: str):
+        self.connection_string = connection_string
+        self._conn: psycopg.Connection[tuple[Any, ...]] | None = None
+
+    def _get_connection(self) -> psycopg.Connection[tuple[Any, ...]]:
+        """Get a database connection."""
+        try:
+            import psycopg as psycopg_module
+        except ImportError as e:
+            raise ImportError("PostgreSQL support requires: pip install stabilize[postgres]") from e
+
+        if self._conn is None or self._conn.closed:
+            self._conn = psycopg_module.connect(self.connection_string)
+        return self._conn
+
+    def store(self, embeddings: list[CachedEmbedding]) -> None:
+        """Store embeddings in PostgreSQL."""
+        if not embeddings:
+            return
+
+        conn = self._get_connection()
+        with conn.cursor() as cur:
+            # Clear existing embeddings for this model
+            model = embeddings[0].embedding_model
+            cur.execute(
+                "DELETE FROM rag_embeddings WHERE embedding_model = %s",
+                (model,),
+            )
+
+            # Insert new embeddings
+            for emb in embeddings:
+                cur.execute(
+                    """
+                    INSERT INTO rag_embeddings
+                    (doc_id, content, embedding, embedding_model, chunk_index)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (
+                        emb.doc_id,
+                        emb.content,
+                        json.dumps(emb.embedding),
+                        emb.embedding_model,
+                        emb.chunk_index,
+                    ),
+                )
+            conn.commit()
