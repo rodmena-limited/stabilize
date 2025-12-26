@@ -51,3 +51,31 @@ class StabilizeRAG:
         self._provider = None
         self._cached_embeddings: list[CachedEmbedding] | None = None
         self._embedding_matrix: NDArray[np.float64] | None = None
+
+    def _get_provider(self) -> Any:
+        """Get or create OllamaProvider with cloud LLM and local embeddings."""
+        if self._provider is None:
+            try:
+                from ragit import OllamaProvider  # type: ignore[import-untyped]
+            except ImportError as e:
+                raise ImportError("RAG support requires: pip install stabilize[rag]") from e
+
+            # Get configuration from environment or use defaults
+            llm_url = os.environ.get("OLLAMA_BASE_URL", self.DEFAULT_LLM_URL)
+            embedding_url = os.environ.get("OLLAMA_EMBEDDING_URL", self.DEFAULT_EMBEDDING_URL)
+            api_key = os.environ.get("OLLAMA_API_KEY")
+
+            # Validate API key if using cloud
+            if "ollama.com" in llm_url and not api_key:
+                raise RuntimeError(
+                    "OLLAMA_API_KEY environment variable is required for ollama.com.\n"
+                    "Set it in your .env file or export it:\n"
+                    "  export OLLAMA_API_KEY=your_api_key"
+                )
+
+            self._provider = OllamaProvider(
+                base_url=llm_url,
+                embedding_url=embedding_url,
+                api_key=api_key,
+            )
+        return self._provider
