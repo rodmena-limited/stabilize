@@ -26,3 +26,31 @@ class EmbeddingCache(ABC):
     def load(self, embedding_model: str) -> list[CachedEmbedding]:
         """Load embeddings from cache for a specific model."""
         ...
+
+    def is_initialized(self, embedding_model: str) -> bool:
+        """Check if cache has embeddings for the given model."""
+        ...
+
+    def clear(self) -> None:
+        """Clear all cached embeddings."""
+        ...
+
+class SqliteEmbeddingCache(EmbeddingCache):
+    """Store embeddings in SQLite database.
+
+    Default location: ~/.stabilize/embeddings.db
+    """
+    def __init__(self, db_path: str | None = None):
+        if db_path is None:
+            cache_dir = Path.home() / ".stabilize"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            db_path = str(cache_dir / "embeddings.db")
+
+        self.db_path = db_path
+        self._init_schema()
+
+    def _get_connection(self) -> sqlite3.Connection:
+        """Get a database connection."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
