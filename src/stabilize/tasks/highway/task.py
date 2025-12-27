@@ -74,3 +74,38 @@ class HighwayTask(RetryableTask):
         """Get timeout from config or stage context."""
         config = HighwayConfig.from_stage_context(stage.context)
         return config.timeout
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        """Execute Highway workflow.
+
+        Two-phase execution:
+        1. Submit: If no run_id, submit workflow to Highway
+        2. Poll: Check status until terminal state
+
+        Args:
+            stage: The stage execution context
+
+        Returns:
+            TaskResult indicating status
+        """
+        config = HighwayConfig.from_stage_context(stage.context)
+
+        # Validate configuration
+        errors = config.validate()
+        if errors:
+            return TaskResult.terminal(error="; ".join(errors))
+
+        # Log config for debugging (helps diagnose endpoint/key issues)
+        logger.info(
+            "Highway config: endpoint=%s, api_key=%s...",
+            config.api_endpoint,
+            config.api_key[:15] if len(config.api_key) > 15 else "(short key)",
+        )
+
+        # Phase 1: Submit (if not already submitted)
+        run_id = stage.context.get("highway_run_id")
+        if not run_id:
+            return self._submit_workflow(stage, config)
+
+        # Phase 2: Poll status (Black Box - just check if done)
+        return self._poll_workflow(run_id, stage, config)
