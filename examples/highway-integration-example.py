@@ -1,9 +1,44 @@
+#!/usr/bin/env python3
+"""
+Highway Integration Example - Demonstrates Stabilize + Highway Workflow Engine.
+
+This example shows how to:
+1. Define a Highway workflow that fetches multiple URLs in parallel
+2. Use HighwayTask to submit and monitor the workflow from Stabilize
+3. Get results when the Highway workflow completes
+
+Architecture:
+    Stabilize (Control Plane) -> Highway (Execution Plane)
+
+    - Execution: Black Box - Stabilize sends `start`, waits for `completed`
+    - State: Black Box - Stabilize stores only `run_id`
+    - Observability: Glass Box - Stabilize proxies logs/current_step for UI
+
+Environment Variables:
+    HIGHWAY_API_KEY: Your Highway API key (hw_k1_... format)
+    HIGHWAY_API_ENDPOINT: Highway API URL (default: https://highway.solutions)
+
+Run with:
+    python examples/highway-integration-example.py
+
+    Or set environment variables manually:
+    export HIGHWAY_API_KEY="hw_k1_your_key_here"
+    python examples/highway-integration-example.py
+"""
+
 import json
 import logging
 import os
 from pathlib import Path
 from typing import Any
+
+# Load .env file from project root
 from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent.parent / ".env")
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
+
 from stabilize import (
     CompleteStageHandler,
     CompleteTaskHandler,
@@ -24,6 +59,13 @@ from stabilize import (
 )
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue.queue import Queue
+
+# =============================================================================
+# Highway Workflow Definition: Parallel URL Fetcher
+# =============================================================================
+
+# This workflow runs ENTIRELY on Highway - Stabilize just submits and monitors.
+# Highway handles: parallel execution, retries, transactions, checkpoints.
 PARALLEL_URL_FETCHER_WORKFLOW = {
     "name": "parallel_url_fetcher",
     "version": "1.0.0",
@@ -129,6 +171,8 @@ PARALLEL_URL_FETCHER_WORKFLOW = {
     "variables": {},
     "max_active_runs": 1,
 }
+
+# Simpler workflow for quick testing - single HTTP request
 SIMPLE_HTTP_WORKFLOW = {
     "name": "simple_http_test",
     "version": "1.0.0",
@@ -153,6 +197,12 @@ SIMPLE_HTTP_WORKFLOW = {
     "max_active_runs": 1,
 }
 
+
+# =============================================================================
+# Helper: Setup pipeline infrastructure
+# =============================================================================
+
+
 def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with HighwayTask registered."""
     task_registry = TaskRegistry()
@@ -175,6 +225,12 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
 
     orchestrator = Orchestrator(queue)
     return processor, orchestrator
+
+
+# =============================================================================
+# Example 1: Simple Highway Workflow
+# =============================================================================
+
 
 def example_simple_highway() -> None:
     """Submit a simple Highway workflow and wait for completion."""
@@ -248,6 +304,12 @@ def example_simple_highway() -> None:
     else:
         print("No outputs received (check Highway logs)")
 
+
+# =============================================================================
+# Example 2: Parallel URL Fetcher (Full Demo)
+# =============================================================================
+
+
 def example_parallel_fetcher() -> None:
     """Submit a parallel URL fetcher workflow to Highway."""
     print("\n" + "=" * 60)
@@ -319,3 +381,32 @@ def example_parallel_fetcher() -> None:
             print("Highway Result Preview: {}...".format(str(outputs.get("highway_result"))[:200]))
     else:
         print("No outputs received (check Highway logs)")
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+
+def main() -> None:
+    """Run all examples."""
+    print("=" * 60)
+    print("Highway Integration Examples")
+    print("=" * 60)
+    print("\nArchitecture:")
+    print("  Stabilize (Control Plane) -> Highway (Execution Plane)")
+    print("\n  - Execution: Black Box")
+    print("  - State: Black Box (only run_id stored)")
+    print("  - Observability: Glass Box (current_step for UI)")
+
+    # Run examples
+    example_simple_highway()
+    example_parallel_fetcher()
+
+    print("\n" + "=" * 60)
+    print("All examples completed!")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
