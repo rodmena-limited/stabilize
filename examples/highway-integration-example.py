@@ -247,3 +247,75 @@ def example_simple_highway() -> None:
             print("Highway Result: {}".format(json.dumps(outputs.get("highway_result"), indent=2)[:500]))
     else:
         print("No outputs received (check Highway logs)")
+
+def example_parallel_fetcher() -> None:
+    """Submit a parallel URL fetcher workflow to Highway."""
+    print("\n" + "=" * 60)
+    print("Example 2: Parallel URL Fetcher via Highway")
+    print("=" * 60)
+
+    # Check for API key
+    api_key = os.environ.get("HIGHWAY_API_KEY")
+    if not api_key:
+        print("ERROR: HIGHWAY_API_KEY environment variable not set")
+        print("Set it with: export HIGHWAY_API_KEY='hw_k1_your_key_here'")
+        return
+
+    api_endpoint = os.environ.get("HIGHWAY_API_ENDPOINT", "https://highway.solutions")
+    print(f"Using Highway API: {api_endpoint}")
+    print("\nThis workflow will:")
+    print("  1. Fork into 3 parallel branches")
+    print("  2. Each branch fetches a different URL")
+    print("  3. Wait for all branches to complete")
+    print("  4. Return aggregated results")
+    print("\nAll execution happens on Highway (Black Box).")
+    print("Stabilize only monitors completion (Glass Box observability).")
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    workflow = Workflow.create(
+        application="highway-integration",
+        name="Parallel URL Fetcher",
+        stages=[
+            StageExecution(
+                ref_id="highway_parallel",
+                type="highway",
+                name="Highway Parallel Fetch",
+                context={
+                    "highway_workflow_definition": PARALLEL_URL_FETCHER_WORKFLOW,
+                    "highway_inputs": {},
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Highway Parallel Task",
+                        implementing_class="highway",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+
+    print("\nWorkflow submitted. Polling for completion...")
+
+    # Process with longer timeout for parallel execution
+    processor.process_all(timeout=180.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nStabilize Workflow Status: {result.status}")
+
+    if result.stages[0].outputs:
+        outputs = result.stages[0].outputs
+        print("Highway Run ID: {}".format(outputs.get("highway_run_id")))
+        print("Highway Status: {}".format(outputs.get("highway_status")))
+        if outputs.get("highway_result"):
+            print("Highway Result Preview: {}...".format(str(outputs.get("highway_result"))[:200]))
+    else:
+        print("No outputs received (check Highway logs)")
