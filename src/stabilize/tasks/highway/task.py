@@ -109,3 +109,159 @@ class HighwayTask(RetryableTask):
 
         # Phase 2: Poll status (Black Box - just check if done)
         return self._poll_workflow(run_id, stage, config)
+
+    def _submit_workflow(
+        self,
+        stage: StageExecution,
+        config: HighwayConfig,
+    ) -> TaskResult:
+        """Submit workflow to Highway API.
+
+        Uses deterministic idempotency key for crash recovery.
+        If Stabilize crashes after sending but before saving state,
+        the retry sends the SAME key and Highway returns the EXISTING run_id.
+
+        Args:
+            stage: The stage execution context
+            config: Highway configuration
+
+        Returns:
+            TaskResult with run_id in context (running) or error (terminal)
+        """
+        workflow_def = stage.context.get("highway_workflow_definition")
+        if not workflow_def:
+            return TaskResult.terminal(error="highway_workflow_definition not provided in stage context")
+
+        # CRITICAL: Deterministic Idempotency Key
+        # Format: stabilize-{execution_id}-{stage_id}
+        exec_id = stage.execution.id if hasattr(stage, "execution") else "unknown"
+        stage_id = stage.id if hasattr(stage, "id") else "unknown"
+        idempotency_key = f"stabilize-{exec_id}-{stage_id}"
+
+        inputs = dict(stage.context.get("highway_inputs", {}))
+
+        # Support dynamic input mappings from context paths
+        # e.g., {"_artifact_id": "body_json.artifact_id"} maps context body_json.artifact_id to input _artifact_id
+        input_mappings = stage.context.get("highway_input_mappings", {})
+        for input_key, context_path in input_mappings.items():
+            value = self._resolve_context_path(stage.context, context_path)
+            if value is not None:
+                inputs[input_key] = value
+                logger.debug("Mapped context path %s to input %s = %s", context_path, input_key, value)
+
+        payload = {
+            "workflow_definition": workflow_def,
+            "inputs": inputs,
+        }
+
+        url = f"{config.api_endpoint.rstrip('/')}/api/v1/workflows"
+
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {config.api_key}",
+                    "Content-Type": "application/json",
+                    "X-Idempotency-Key": idempotency_key,
+                },
+                method="POST",
+            )
+
+            with urllib.request.urlopen(req, timeout=30) as response:
+                response_data = json.loads(response.read().decode("utf-8"))
+
+            # Extract run_id from response
+            # Highway API returns: {"data": {"workflow_run_id": "..."}}
+            run_id = None
+            if isinstance(response_data, dict):
+                data = response_data.get("data", response_data)
+                run_id = data.get("workflow_run_id") or data.get("run_id")
+
+            if not run_id:
+                logger.error(
+                    "Highway response missing run_id: %s",
+                    response_data,
+                )
+                return TaskResult.terminal(error="Highway response missing workflow_run_id")
+
+            logger.info(
+                "Highway workflow submitted: run_id=%s, idempotency_key=%s",
+                run_id,
+                idempotency_key,
+            )
+
+            # Store run_id immediately for crash recovery
+            return TaskResult.running(
+                context={
+                    "highway_run_id": run_id,
+                    "highway_idempotency_key": idempotency_key,
+                }
+            )
+
+        except urllib.error.HTTPError as e:
+            error_body = ""
+            try:
+                error_body = e.read().decode("utf-8")
+            except Exception:
+                pass
+
+            # 401/403: Auth error - terminal
+            if e.code in (401, 403):
+                logger.error(
+                    "Highway auth error %s: %s",
+                    e.code,
+                    error_body,
+                )
+                return TaskResult.terminal(error=f"Highway authentication failed: {error_body}")
+
+            # 404: Endpoint not found - terminal
+            if e.code == 404:
+                logger.error("Highway endpoint not found: %s", url)
+                return TaskResult.terminal(error=f"Highway endpoint not found: {url}")
+
+            # 409: Conflict (duplicate idempotency key with different payload)
+            if e.code == 409:
+                logger.warning(
+                    "Highway idempotency conflict for key=%s: %s",
+                    idempotency_key,
+                    error_body,
+                )
+                # Try to extract existing run_id from error response
+                try:
+                    error_data = json.loads(error_body)
+                    existing_run_id = error_data.get("existing_run_id")
+                    if existing_run_id:
+                        return TaskResult.running(context={"highway_run_id": existing_run_id})
+                except Exception:
+                    pass
+                return TaskResult.terminal(error=f"Highway idempotency conflict: {error_body}")
+
+            # 5xx: Server error - retry (return running)
+            if e.code >= 500:
+                logger.warning(
+                    "Highway server error %s, will retry: %s",
+                    e.code,
+                    error_body,
+                )
+                return TaskResult.running()
+
+            # Other errors - terminal
+            logger.error(
+                "Highway HTTP error %s: %s",
+                e.code,
+                error_body,
+            )
+            return TaskResult.terminal(error=f"Highway error {e.code}: {error_body}")
+
+        except urllib.error.URLError as e:
+            # Network error - retry
+            logger.warning(
+                "Highway network error, will retry: %s",
+                e.reason,
+            )
+            return TaskResult.running()
+
+        except Exception as e:
+            logger.exception("Unexpected error submitting to Highway")
+            return TaskResult.terminal(error=f"Unexpected error: {e}")
