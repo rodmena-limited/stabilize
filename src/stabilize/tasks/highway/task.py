@@ -52,3 +52,7 @@ class HighwayTask(RetryableTask):
         }
     """
     TERMINAL_STATES = frozenset({'completed', 'failed', 'cancelled'})
+
+    def aliases(self) -> list[str]:
+        """Alternative names for this task."""
+        return ["highway_workflow", "highway-workflow"]
