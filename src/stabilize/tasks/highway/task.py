@@ -265,3 +265,122 @@ class HighwayTask(RetryableTask):
         except Exception as e:
             logger.exception("Unexpected error submitting to Highway")
             return TaskResult.terminal(error=f"Unexpected error: {e}")
+
+    def _poll_workflow(
+        self,
+        run_id: str,
+        stage: StageExecution,
+        config: HighwayConfig,
+    ) -> TaskResult:
+        """Poll Highway for workflow status.
+
+        Black Box: Only check if done, trust Highway for everything else.
+        Glass Box: Expose current_step for UI observability.
+
+        Args:
+            run_id: The Highway workflow run ID
+            stage: The stage execution context
+            config: Highway configuration
+
+        Returns:
+            TaskResult based on Highway status
+        """
+        url = f"{config.api_endpoint.rstrip('/')}/api/v1/workflows/{run_id}"
+
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "Authorization": f"Bearer {config.api_key}",
+                },
+                method="GET",
+            )
+
+            with urllib.request.urlopen(req, timeout=30) as response:
+                response_data = json.loads(response.read().decode("utf-8"))
+
+            # Extract status from response
+            # Highway API returns: {"data": {"state": "...", "result": ...}}
+            data = response_data.get("data", response_data)
+            state = data.get("state", data.get("status", "unknown"))
+            result = data.get("result")
+            current_step = data.get("current_step", data.get("current_task"))
+            progress = data.get("progress", {})
+            error_message = data.get("error") or data.get("failure_reason")
+
+            logger.debug(
+                "Highway workflow %s status: %s, current_step: %s",
+                run_id,
+                state,
+                current_step,
+            )
+
+            # Terminal states
+            if state == "completed":
+                return TaskResult.success(
+                    outputs={
+                        "highway_run_id": run_id,
+                        "highway_status": state,
+                        "highway_result": result,
+                    }
+                )
+
+            if state in ("failed", "cancelled"):
+                return TaskResult.terminal(
+                    error=f"Highway workflow {state}: {error_message or 'No error message'}",
+                    context={
+                        "highway_run_id": run_id,
+                        "highway_status": state,
+                        "highway_result": result,
+                    },
+                )
+
+            # Still running - Glass Box: expose current_step for UI
+            context_updates: dict[str, Any] = {
+                "highway_run_id": run_id,
+            }
+            if current_step:
+                context_updates["highway_current_step"] = current_step
+            if progress:
+                context_updates["highway_progress"] = progress
+
+            return TaskResult.running(context=context_updates)
+
+        except urllib.error.HTTPError as e:
+            error_body = ""
+            try:
+                error_body = e.read().decode("utf-8")
+            except Exception:
+                pass
+
+            # 401/403: Auth error - terminal
+            if e.code in (401, 403):
+                return TaskResult.terminal(error=f"Highway authentication failed: {error_body}")
+
+            # 404: Run not found - terminal
+            if e.code == 404:
+                return TaskResult.terminal(error=f"Highway workflow run not found: {run_id}")
+
+            # 5xx: Server error - retry
+            if e.code >= 500:
+                logger.warning(
+                    "Highway server error %s during poll, will retry: %s",
+                    e.code,
+                    error_body,
+                )
+                return TaskResult.running(context={"highway_run_id": run_id})
+
+            # Other errors - terminal
+            return TaskResult.terminal(error=f"Highway poll error {e.code}: {error_body}")
+
+        except urllib.error.URLError as e:
+            # Network error - retry
+            logger.warning(
+                "Highway network error during poll, will retry: %s",
+                e.reason,
+            )
+            return TaskResult.running(context={"highway_run_id": run_id})
+
+        except Exception as e:
+            logger.exception("Unexpected error polling Highway")
+            return TaskResult.terminal(error=f"Unexpected poll error: {e}")
