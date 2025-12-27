@@ -60,3 +60,12 @@ class HighwayTask(RetryableTask):
     def get_timeout(self) -> timedelta:
         """Default timeout for Highway workflow execution."""
         return timedelta(minutes=30)
+
+    def get_backoff_period(
+        self,
+        stage: StageExecution,
+        duration: timedelta,
+    ) -> timedelta:
+        """Get poll interval from config."""
+        config = HighwayConfig.from_stage_context(stage.context)
+        return config.poll_interval
