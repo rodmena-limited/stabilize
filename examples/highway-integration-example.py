@@ -175,3 +175,75 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
 
     orchestrator = Orchestrator(queue)
     return processor, orchestrator
+
+def example_simple_highway() -> None:
+    """Submit a simple Highway workflow and wait for completion."""
+    print("\n" + "=" * 60)
+    print("Example 1: Simple Highway HTTP Request")
+    print("=" * 60)
+
+    # Check for API key
+    api_key = os.environ.get("HIGHWAY_API_KEY")
+    if not api_key:
+        print("ERROR: HIGHWAY_API_KEY environment variable not set")
+        print("Set it with: export HIGHWAY_API_KEY='hw_k1_your_key_here'")
+        return
+
+    api_endpoint = os.environ.get("HIGHWAY_API_ENDPOINT", "https://highway.solutions")
+    print(f"Using Highway API: {api_endpoint}")
+
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    # Create Stabilize workflow that triggers Highway
+    workflow = Workflow.create(
+        application="highway-integration",
+        name="Simple Highway Test",
+        stages=[
+            StageExecution(
+                ref_id="highway_stage",
+                type="highway",
+                name="Run Highway Workflow",
+                context={
+                    # Highway workflow definition (Black Box - Highway does everything)
+                    "highway_workflow_definition": SIMPLE_HTTP_WORKFLOW,
+                    # Optional inputs for the Highway workflow
+                    "highway_inputs": {},
+                    # Optional overrides (could also use env vars)
+                    # "highway_api_endpoint": api_endpoint,
+                    # "highway_api_key": api_key,
+                },
+                tasks=[
+                    TaskExecution.create(
+                        name="Highway Task",
+                        implementing_class="highway",
+                        stage_start=True,
+                        stage_end=True,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+
+    print("Workflow submitted. Polling for completion...")
+    print("(Highway handles all HTTP requests internally)")
+
+    # Process with longer timeout for Highway
+    processor.process_all(timeout=120.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"\nStabilize Workflow Status: {result.status}")
+
+    if result.stages[0].outputs:
+        outputs = result.stages[0].outputs
+        print("Highway Run ID: {}".format(outputs.get("highway_run_id")))
+        print("Highway Status: {}".format(outputs.get("highway_status")))
+        if outputs.get("highway_result"):
+            print("Highway Result: {}".format(json.dumps(outputs.get("highway_result"), indent=2)[:500]))
+    else:
+        print("No outputs received (check Highway logs)")
