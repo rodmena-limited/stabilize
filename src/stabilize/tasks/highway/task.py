@@ -56,3 +56,7 @@ class HighwayTask(RetryableTask):
     def aliases(self) -> list[str]:
         """Alternative names for this task."""
         return ["highway_workflow", "highway-workflow"]
+
+    def get_timeout(self) -> timedelta:
+        """Default timeout for Highway workflow execution."""
+        return timedelta(minutes=30)
