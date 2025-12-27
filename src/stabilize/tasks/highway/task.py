@@ -69,3 +69,8 @@ class HighwayTask(RetryableTask):
         """Get poll interval from config."""
         config = HighwayConfig.from_stage_context(stage.context)
         return config.poll_interval
+
+    def get_dynamic_timeout(self, stage: StageExecution) -> timedelta:
+        """Get timeout from config or stage context."""
+        config = HighwayConfig.from_stage_context(stage.context)
+        return config.timeout
