@@ -284,3 +284,65 @@ class TestShellTaskTimeout:
         result = shell_task.execute(mock_stage)
 
         assert result.status == WorkflowStatus.SUCCEEDED
+
+    def test_timeout_exceeded(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test command times out."""
+        mock_stage.context = {"command": "sleep 10", "timeout": 1}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.TERMINAL
+        assert "timed out" in str(result.context.get("error", "")).lower()
+
+class TestShellTaskPlaceholders:
+    """Placeholder substitution tests."""
+
+    def test_simple_placeholder(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test simple placeholder substitution."""
+        mock_stage.context = {"command": "echo {message}", "message": "hello"}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["stdout"] == "hello"
+
+    def test_multiple_placeholders(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test multiple placeholder substitution."""
+        mock_stage.context = {
+            "command": "echo {greeting} {name}",
+            "greeting": "Hello",
+            "name": "World",
+        }
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["stdout"] == "Hello World"
+
+    def test_placeholder_not_substituted_if_missing(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test that missing placeholders remain as-is."""
+        mock_stage.context = {"command": "echo {missing}"}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["stdout"] == "{missing}"
+
+    def test_reserved_keys_not_substituted(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test that reserved keys are not substituted."""
+        mock_stage.context = {
+            "command": "echo {timeout}",
+            "timeout": 60,
+        }
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        # {timeout} should not be replaced since it's a reserved key
+        assert result.outputs["stdout"] == "{timeout}"
+
+    def test_numeric_placeholder(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test placeholder with numeric value."""
+        mock_stage.context = {"command": "echo {count}", "count": 42}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["stdout"] == "42"
+
+class TestShellTaskErrorHandling:
+    """Error handling tests."""
