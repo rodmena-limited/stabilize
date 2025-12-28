@@ -141,6 +141,84 @@ def assert_output(
         )
     return stage.outputs[key]
 
+def assert_output_type(
+    stage: StageExecution,
+    key: str,
+    expected_type: type[T],
+    message: str | None = None,
+) -> T:
+    """
+    Assert that an output key exists and has the expected type.
+
+    Args:
+        stage: The stage execution
+        key: The output key to check
+        expected_type: The expected type
+        message: Optional custom error message
+
+    Returns:
+        The typed value from outputs
+
+    Raises:
+        OutputError: If key is missing or has wrong type
+
+    Example:
+        count = assert_output_type(stage, "item_count", int)
+    """
+    value = assert_output(stage, key, message)
+    if not isinstance(value, expected_type):
+        raise OutputError(
+            message or f"Output key '{key}' must be {expected_type.__name__}, got {type(value).__name__}",
+            key=key,
+        )
+    return value
+
+def assert_stage_ready(
+    stage: StageExecution,
+    message: str | None = None,
+) -> None:
+    """
+    Assert that all upstream stages have completed successfully.
+
+    Args:
+        stage: The stage execution to check
+        message: Optional custom error message
+
+    Raises:
+        StageNotReadyError: If any upstream stage hasn't completed
+
+    Example:
+        assert_stage_ready(stage, "Cannot start: upstream stages incomplete")
+    """
+    if not stage.all_upstream_stages_complete():
+        raise StageNotReadyError(
+            message or "Upstream stages have not completed",
+            stage_ref_id=stage.ref_id,
+        )
+
+def assert_no_upstream_failures(
+    stage: StageExecution,
+    message: str | None = None,
+) -> None:
+    """
+    Assert that no upstream stages have failed.
+
+    Args:
+        stage: The stage execution to check
+        message: Optional custom error message
+
+    Raises:
+        StageNotReadyError: If any upstream stage has failed
+
+    Example:
+        assert_no_upstream_failures(stage)
+    """
+    if stage.any_upstream_stages_failed():
+        raise StageNotReadyError(
+            message or "One or more upstream stages have failed",
+            stage_ref_id=stage.ref_id,
+        )
+
 class StabilizeError(Exception):
     """Base exception for Stabilize errors."""
 
