@@ -170,3 +170,68 @@ class TestShellTaskMaxOutput:
 
         assert result.status == WorkflowStatus.SUCCEEDED
         assert result.outputs["truncated"] is False
+
+    def test_output_truncated(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test output over limit is truncated."""
+        # Generate output larger than limit
+        mock_stage.context = {
+            "command": "python3 -c \"print('x' * 1000)\"",
+            "max_output_size": 100,
+        }
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["truncated"] is True
+        assert len(result.outputs["stdout"]) <= 100
+
+class TestShellTaskExpectedCodes:
+    """Expected exit code tests."""
+
+    def test_expected_code_zero(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test success with exit code 0."""
+        mock_stage.context = {"command": "true", "expected_codes": [0]}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+
+    def test_expected_code_nonzero(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test success with non-zero expected code."""
+        mock_stage.context = {"command": "false", "expected_codes": [0, 1]}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["returncode"] == 1
+
+    def test_unexpected_code(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test failure with unexpected exit code."""
+        mock_stage.context = {"command": "exit 5", "expected_codes": [0, 1]}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.TERMINAL
+
+    def test_grep_no_match(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test grep with no match (exit code 1) as success."""
+        mock_stage.context = {
+            "command": "echo 'hello' | grep nonexistent",
+            "expected_codes": [0, 1],
+        }
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["returncode"] == 1
+
+class TestShellTaskSecrets:
+    """Secret masking tests (logs only, not outputs)."""
+
+    def test_secret_in_command(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test that secrets work (masking is for logs, output still works)."""
+        mock_stage.context = {
+            "command": "echo {token}",
+            "token": "secret123",
+            "secrets": ["token"],
+        }
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        # Output should still contain the actual value (masking is for logs)
+        assert result.outputs["stdout"] == "secret123"
