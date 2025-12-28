@@ -53,3 +53,65 @@ class TestShellTaskBasic:
 
 class TestShellTaskCwd:
     """Working directory tests."""
+
+    def test_cwd(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test running command in specific directory."""
+        mock_stage.context = {"command": "pwd", "cwd": "/tmp"}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["stdout"] == "/tmp"
+
+    def test_cwd_with_file_operations(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test file operations in specific directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a file
+            test_file = os.path.join(tmpdir, "test.txt")
+            with open(test_file, "w") as f:
+                f.write("content")
+
+            mock_stage.context = {"command": "cat test.txt", "cwd": tmpdir}
+            result = shell_task.execute(mock_stage)
+
+            assert result.status == WorkflowStatus.SUCCEEDED
+            assert result.outputs["stdout"] == "content"
+
+    def test_invalid_cwd(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test error with invalid working directory."""
+        mock_stage.context = {"command": "pwd", "cwd": "/nonexistent/directory"}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.TERMINAL
+
+class TestShellTaskEnv:
+    """Environment variable tests."""
+
+    def test_env_single_var(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test setting a single environment variable."""
+        mock_stage.context = {"command": "echo $MY_VAR", "env": {"MY_VAR": "hello"}}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["stdout"] == "hello"
+
+    def test_env_multiple_vars(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test setting multiple environment variables."""
+        mock_stage.context = {
+            "command": "echo $VAR1-$VAR2",
+            "env": {"VAR1": "hello", "VAR2": "world"},
+        }
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["stdout"] == "hello-world"
+
+    def test_env_inherits_parent(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test that parent environment is inherited."""
+        mock_stage.context = {"command": "echo $HOME"}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["stdout"] == os.environ["HOME"]
+
+class TestShellTaskShell:
+    """Shell selection tests."""
