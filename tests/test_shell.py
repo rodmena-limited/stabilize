@@ -235,3 +235,52 @@ class TestShellTaskSecrets:
         assert result.status == WorkflowStatus.SUCCEEDED
         # Output should still contain the actual value (masking is for logs)
         assert result.outputs["stdout"] == "secret123"
+
+class TestShellTaskBinary:
+    """Binary output mode tests."""
+
+    def test_binary_output(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test binary output mode."""
+        mock_stage.context = {"command": "echo -n hello", "binary": True}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert isinstance(result.outputs["stdout"], bytes)
+        assert result.outputs["stdout"] == b"hello"
+
+    def test_binary_base64(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test binary output includes base64 encoding."""
+        mock_stage.context = {"command": "echo -n hello", "binary": True}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert "stdout_b64" in result.outputs
+        decoded = base64.b64decode(result.outputs["stdout_b64"])
+        assert decoded == b"hello"
+
+class TestShellTaskContinueOnFailure:
+    """Continue on failure tests."""
+
+    def test_continue_on_failure_false(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test terminal failure when continue_on_failure is False."""
+        mock_stage.context = {"command": "exit 1", "continue_on_failure": False}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.TERMINAL
+
+    def test_continue_on_failure_true(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test soft failure when continue_on_failure is True."""
+        mock_stage.context = {"command": "exit 1", "continue_on_failure": True}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.FAILED_CONTINUE
+
+class TestShellTaskTimeout:
+    """Timeout tests."""
+
+    def test_no_timeout(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test command completes within timeout."""
+        mock_stage.context = {"command": "echo hello", "timeout": 10}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
