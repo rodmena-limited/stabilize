@@ -48,6 +48,99 @@ def assert_context(
         )
     return stage.context[key]
 
+def assert_context_type(
+    stage: StageExecution,
+    key: str,
+    expected_type: type[T],
+    message: str | None = None,
+) -> T:
+    """
+    Assert that a context key exists and has the expected type.
+
+    Args:
+        stage: The stage execution
+        key: The context key to check
+        expected_type: The expected type
+        message: Optional custom error message
+
+    Returns:
+        The typed value from context
+
+    Raises:
+        ContextError: If key is missing or has wrong type
+
+    Example:
+        timeout = assert_context_type(stage, "timeout", int, "Timeout must be an integer")
+    """
+    value = assert_context(stage, key, message)
+    if not isinstance(value, expected_type):
+        raise ContextError(
+            message or f"Context key '{key}' must be {expected_type.__name__}, got {type(value).__name__}",
+            key=key,
+        )
+    return value
+
+def assert_context_in(
+    stage: StageExecution,
+    key: str,
+    allowed_values: list[Any],
+    message: str | None = None,
+) -> Any:
+    """
+    Assert that a context value is in a list of allowed values.
+
+    Args:
+        stage: The stage execution
+        key: The context key to check
+        allowed_values: List of valid values
+        message: Optional custom error message
+
+    Returns:
+        The value from context
+
+    Raises:
+        ContextError: If key is missing or value not allowed
+
+    Example:
+        env = assert_context_in(stage, "env", ["dev", "staging", "prod"])
+    """
+    value = assert_context(stage, key, message)
+    if value not in allowed_values:
+        raise ContextError(
+            message or f"Context key '{key}' must be one of {allowed_values}, got '{value}'",
+            key=key,
+        )
+    return value
+
+def assert_output(
+    stage: StageExecution,
+    key: str,
+    message: str | None = None,
+) -> Any:
+    """
+    Assert that an output key exists and return its value.
+
+    Args:
+        stage: The stage execution
+        key: The output key to check
+        message: Optional custom error message
+
+    Returns:
+        The value from outputs
+
+    Raises:
+        OutputError: If key is not in outputs
+
+    Example:
+        result = assert_output(stage, "deployment_id", "Deployment ID not found")
+    """
+    if key not in stage.outputs:
+        raise OutputError(
+            message or f"Required output key '{key}' is missing",
+            key=key,
+        )
+    return stage.outputs[key]
+
 class StabilizeError(Exception):
     """Base exception for Stabilize errors."""
 
