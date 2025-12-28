@@ -40,3 +40,33 @@ class ContextError(StabilizeFatalError):
     def __init__(self, message: str, key: str | None = None) -> None:
         super().__init__(message)
         self.key = key
+
+class OutputError(StabilizeExpectedError):
+    """
+    Error raised when expected output is missing or invalid.
+
+    Output errors may be recoverable if the task can be retried.
+    """
+    def __init__(self, message: str, key: str | None = None) -> None:
+        super().__init__(message)
+        self.key = key
+
+class ConfigError(StabilizeFatalError):
+    """
+    Error raised when configuration is invalid.
+
+    Config errors are fatal because they indicate invalid setup.
+    """
+    def __init__(self, message: str, field: str | None = None) -> None:
+        super().__init__(message)
+        self.field = field
+
+class VerificationError(StabilizeExpectedError):
+    """
+    Error raised when verification fails.
+
+    Verification errors may allow retry depending on the verifier.
+    """
+    def __init__(self, message: str, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.details = details or {}
