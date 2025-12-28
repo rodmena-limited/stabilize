@@ -1,19 +1,28 @@
+"""Tests for the built-in ShellTask."""
+
 import base64
 import os
 import tempfile
 from unittest.mock import MagicMock
+
 import pytest
+
 from stabilize import ShellTask, StageExecution, WorkflowStatus
 
+
+@pytest.fixture
 def shell_task() -> ShellTask:
     """Create a ShellTask instance."""
     return ShellTask()
 
+
+@pytest.fixture
 def mock_stage() -> MagicMock:
     """Create a mock stage with configurable context."""
     stage = MagicMock(spec=StageExecution)
     stage.context = {}
     return stage
+
 
 class TestShellTaskBasic:
     """Basic command execution tests."""
@@ -51,6 +60,7 @@ class TestShellTaskBasic:
         assert result.status == WorkflowStatus.SUCCEEDED
         assert result.outputs["stdout"] == "Hello"
 
+
 class TestShellTaskCwd:
     """Working directory tests."""
 
@@ -83,6 +93,7 @@ class TestShellTaskCwd:
 
         assert result.status == WorkflowStatus.TERMINAL
 
+
 class TestShellTaskEnv:
     """Environment variable tests."""
 
@@ -113,6 +124,7 @@ class TestShellTaskEnv:
         assert result.status == WorkflowStatus.SUCCEEDED
         assert result.outputs["stdout"] == os.environ["HOME"]
 
+
 class TestShellTaskShell:
     """Shell selection tests."""
 
@@ -131,6 +143,7 @@ class TestShellTaskShell:
 
         assert result.status == WorkflowStatus.SUCCEEDED
         assert result.outputs["stdout"] == "hello"
+
 
 class TestShellTaskStdin:
     """Stdin input tests."""
@@ -160,6 +173,7 @@ class TestShellTaskStdin:
         assert result.status == WorkflowStatus.SUCCEEDED
         assert result.outputs["stdout"] == "4"
 
+
 class TestShellTaskMaxOutput:
     """Output size limit tests."""
 
@@ -183,6 +197,7 @@ class TestShellTaskMaxOutput:
         assert result.status == WorkflowStatus.SUCCEEDED
         assert result.outputs["truncated"] is True
         assert len(result.outputs["stdout"]) <= 100
+
 
 class TestShellTaskExpectedCodes:
     """Expected exit code tests."""
@@ -220,6 +235,7 @@ class TestShellTaskExpectedCodes:
         assert result.status == WorkflowStatus.SUCCEEDED
         assert result.outputs["returncode"] == 1
 
+
 class TestShellTaskSecrets:
     """Secret masking tests (logs only, not outputs)."""
 
@@ -235,6 +251,7 @@ class TestShellTaskSecrets:
         assert result.status == WorkflowStatus.SUCCEEDED
         # Output should still contain the actual value (masking is for logs)
         assert result.outputs["stdout"] == "secret123"
+
 
 class TestShellTaskBinary:
     """Binary output mode tests."""
@@ -258,6 +275,7 @@ class TestShellTaskBinary:
         decoded = base64.b64decode(result.outputs["stdout_b64"])
         assert decoded == b"hello"
 
+
 class TestShellTaskContinueOnFailure:
     """Continue on failure tests."""
 
@@ -274,6 +292,7 @@ class TestShellTaskContinueOnFailure:
         result = shell_task.execute(mock_stage)
 
         assert result.status == WorkflowStatus.FAILED_CONTINUE
+
 
 class TestShellTaskTimeout:
     """Timeout tests."""
@@ -292,6 +311,7 @@ class TestShellTaskTimeout:
 
         assert result.status == WorkflowStatus.TERMINAL
         assert "timed out" in str(result.context.get("error", "")).lower()
+
 
 class TestShellTaskPlaceholders:
     """Placeholder substitution tests."""
@@ -344,5 +364,58 @@ class TestShellTaskPlaceholders:
         assert result.status == WorkflowStatus.SUCCEEDED
         assert result.outputs["stdout"] == "42"
 
+
 class TestShellTaskErrorHandling:
     """Error handling tests."""
+
+    def test_command_not_found(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test error when command not found."""
+        mock_stage.context = {"command": "nonexistent_command_xyz123"}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.TERMINAL
+
+    def test_stderr_captured(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test that stderr is captured."""
+        mock_stage.context = {"command": "echo error >&2"}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["stderr"] == "error"
+
+
+class TestShellTaskIntegration:
+    """Integration tests combining multiple features."""
+
+    def test_full_pipeline_simulation(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test simulating output passing between stages."""
+        # Stage 1: Generate output
+        mock_stage.context = {"command": "echo 'data from stage 1'"}
+        result1 = shell_task.execute(mock_stage)
+
+        assert result1.status == WorkflowStatus.SUCCEEDED
+        stage1_output = result1.outputs["stdout"]
+
+        # Stage 2: Use output from stage 1
+        mock_stage.context = {
+            "command": "echo 'Received: {stdout}'",
+            "stdout": stage1_output,
+        }
+        result2 = shell_task.execute(mock_stage)
+
+        assert result2.status == WorkflowStatus.SUCCEEDED
+        assert "data from stage 1" in result2.outputs["stdout"]
+
+    def test_complex_command_with_all_features(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test complex command using multiple features."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_stage.context = {
+                "command": "echo $MY_VAR > output.txt && cat output.txt",
+                "cwd": tmpdir,
+                "env": {"MY_VAR": "complex_test"},
+                "timeout": 30,
+            }
+            result = shell_task.execute(mock_stage)
+
+            assert result.status == WorkflowStatus.SUCCEEDED
+            assert result.outputs["stdout"] == "complex_test"
