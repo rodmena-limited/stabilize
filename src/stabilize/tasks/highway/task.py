@@ -1,14 +1,32 @@
+"""Highway Task implementation for Stabilize.
+
+This module provides HighwayTask, a RetryableTask that executes
+workflows on Highway Workflow Engine with Black Box execution
+and Glass Box observability.
+
+The Golden Rule:
+    Stabilize knows THAT Highway is running.
+    Highway knows HOW it is running.
+"""
+
 from __future__ import annotations
+
 import json
 import logging
 import urllib.error
 import urllib.request
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
+
 from stabilize.tasks.highway.config import HighwayConfig
 from stabilize.tasks.interface import RetryableTask
 from stabilize.tasks.result import TaskResult
+
+if TYPE_CHECKING:
+    from stabilize.models.stage import StageExecution
+
 logger = logging.getLogger(__name__)
+
 
 class HighwayTask(RetryableTask):
     """Execute workflows on Highway Workflow Engine.
@@ -51,8 +69,10 @@ class HighwayTask(RetryableTask):
             "highway_inputs": {"param": "value"},
         }
     """
-    TERMINAL_STATES = frozenset({'completed', 'failed', 'cancelled'})
 
+    TERMINAL_STATES = frozenset({"completed", "failed", "cancelled"})
+
+    @property
     def aliases(self) -> list[str]:
         """Alternative names for this task."""
         return ["highway_workflow", "highway-workflow"]
@@ -384,3 +404,32 @@ class HighwayTask(RetryableTask):
         except Exception as e:
             logger.exception("Unexpected error polling Highway")
             return TaskResult.terminal(error=f"Unexpected poll error: {e}")
+
+    def _resolve_context_path(
+        self,
+        context: dict[str, Any],
+        path: str,
+    ) -> Any:
+        """Resolve a dotted path in context.
+
+        Examples:
+            _resolve_context_path({"a": {"b": 1}}, "a.b") -> 1
+            _resolve_context_path({"body_json": {"artifact_id": "x"}}, "body_json.artifact_id") -> "x"
+
+        Args:
+            context: The context dictionary
+            path: Dotted path like "body_json.artifact_id"
+
+        Returns:
+            The resolved value, or None if not found
+        """
+        parts = path.split(".")
+        value = context
+
+        for part in parts:
+            if isinstance(value, dict) and part in value:
+                value = value[part]
+            else:
+                return None
+
+        return value
