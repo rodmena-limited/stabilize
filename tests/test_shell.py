@@ -115,3 +115,58 @@ class TestShellTaskEnv:
 
 class TestShellTaskShell:
     """Shell selection tests."""
+
+    def test_bash_shell(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test using bash shell."""
+        mock_stage.context = {"command": "echo $BASH_VERSION", "shell": "/bin/bash"}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["stdout"] != ""  # Should have bash version
+
+    def test_sh_shell(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test using sh shell."""
+        mock_stage.context = {"command": "echo hello", "shell": "/bin/sh"}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["stdout"] == "hello"
+
+class TestShellTaskStdin:
+    """Stdin input tests."""
+
+    def test_stdin_simple(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test sending input to stdin."""
+        mock_stage.context = {"command": "cat", "stdin": "hello world"}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["stdout"] == "hello world"
+
+    def test_stdin_multiline(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test multiline stdin input."""
+        mock_stage.context = {"command": "cat", "stdin": "line1\nline2\nline3"}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert "line1" in result.outputs["stdout"]
+        assert "line2" in result.outputs["stdout"]
+
+    def test_stdin_with_wc(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test stdin with word count."""
+        mock_stage.context = {"command": "wc -w", "stdin": "one two three four"}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["stdout"] == "4"
+
+class TestShellTaskMaxOutput:
+    """Output size limit tests."""
+
+    def test_output_not_truncated(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+        """Test output under limit is not truncated."""
+        mock_stage.context = {"command": "echo hello", "max_output_size": 1000}
+        result = shell_task.execute(mock_stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["truncated"] is False
