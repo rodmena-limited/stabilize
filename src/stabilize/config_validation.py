@@ -256,3 +256,117 @@ class SchemaValidator:
                 )
 
         return errors
+
+    def _validate_number(
+        self,
+        value: int | float,
+        schema: dict[str, Any],
+        path: str,
+    ) -> list[ValidationError]:
+        """Validate number-specific constraints."""
+        errors: list[ValidationError] = []
+
+        if "minimum" in schema and value < schema["minimum"]:
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must be >= {schema['minimum']}",
+                    value,
+                    "minimum",
+                )
+            )
+
+        if "maximum" in schema and value > schema["maximum"]:
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must be <= {schema['maximum']}",
+                    value,
+                    "maximum",
+                )
+            )
+
+        if "exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"]:
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must be > {schema['exclusiveMinimum']}",
+                    value,
+                    "exclusiveMinimum",
+                )
+            )
+
+        if "exclusiveMaximum" in schema and value >= schema["exclusiveMaximum"]:
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must be < {schema['exclusiveMaximum']}",
+                    value,
+                    "exclusiveMaximum",
+                )
+            )
+
+        if "multipleOf" in schema and value % schema["multipleOf"] != 0:
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must be multiple of {schema['multipleOf']}",
+                    value,
+                    "multipleOf",
+                )
+            )
+
+        return errors
+
+    def _validate_array(
+        self,
+        value: list,
+        schema: dict[str, Any],
+        path: str,
+    ) -> list[ValidationError]:
+        """Validate array-specific constraints."""
+        errors: list[ValidationError] = []
+
+        if "minItems" in schema and len(value) < schema["minItems"]:
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must have at least {schema['minItems']} items",
+                    value,
+                    "minItems",
+                )
+            )
+
+        if "maxItems" in schema and len(value) > schema["maxItems"]:
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must have at most {schema['maxItems']} items",
+                    value,
+                    "maxItems",
+                )
+            )
+
+        if "uniqueItems" in schema and schema["uniqueItems"]:
+            # Check for duplicates (works for hashable items)
+            try:
+                if len(value) != len(set(value)):
+                    errors.append(
+                        ValidationError(
+                            path,
+                            "must have unique items",
+                            value,
+                            "uniqueItems",
+                        )
+                    )
+            except TypeError:
+                pass  # Non-hashable items, skip check
+
+        # Validate items
+        if "items" in schema:
+            items_schema = schema["items"]
+            for i, item in enumerate(value):
+                item_path = f"{path}[{i}]" if path else f"[{i}]"
+                errors.extend(self._validate_value(item, items_schema, item_path))
+
+        return errors
