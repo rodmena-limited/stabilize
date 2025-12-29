@@ -201,3 +201,38 @@ class Condition:
             last_transition_time=transition_time,
             observed_generation=data.get("observedGeneration", 0),
         )
+
+class ConditionSet:
+    """
+    A collection of conditions with convenient access methods.
+
+    Example:
+        conditions = ConditionSet()
+        conditions.set(Condition.ready(True, "AllGood", "Everything is fine"))
+        conditions.set(Condition.progressing(False, "Complete", "Done"))
+
+        if conditions.is_ready:
+            print("Ready!")
+    """
+    def __init__(self, conditions: list[Condition] | None = None) -> None:
+        """Initialize with optional conditions."""
+        self._conditions: dict[ConditionType | str, Condition] = {}
+        if conditions:
+            for c in conditions:
+                self._conditions[c.type] = c
+
+    def set(self, condition: Condition) -> None:
+        """
+        Set or update a condition.
+
+        If a condition of the same type exists, it's replaced.
+        """
+        self._conditions[condition.type] = condition
+
+    def get(self, condition_type: ConditionType | str) -> Condition | None:
+        """Get a condition by type."""
+        return self._conditions.get(condition_type)
+
+    def remove(self, condition_type: ConditionType | str) -> None:
+        """Remove a condition by type."""
+        self._conditions.pop(condition_type, None)
