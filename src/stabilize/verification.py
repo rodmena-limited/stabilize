@@ -136,3 +136,37 @@ class Verifier(ABC):
                 except Exception as e:
                     return VerifyResult.retry(f"URL check failed: {e}")
     """
+
+    def verify(self, stage: StageExecution) -> VerifyResult:
+        """
+        Verify the stage outputs.
+
+        Args:
+            stage: The stage execution with outputs to verify
+
+        Returns:
+            VerifyResult indicating the verification status
+        """
+        pass
+
+    def max_retries(self) -> int:
+        """
+        Maximum number of verification retries.
+
+        Override to change the default.
+
+        Returns:
+            Maximum retry count (default: 3)
+        """
+        return 3
+
+    def retry_delay_seconds(self) -> float:
+        """
+        Delay between verification retries in seconds.
+
+        Override to change the default.
+
+        Returns:
+            Retry delay (default: 1.0)
+        """
+        return 1.0
