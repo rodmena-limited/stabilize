@@ -35,6 +35,35 @@ BASE_STAGE_SCHEMA = {
     },
 }
 
+def validate_context(
+    context: dict[str, Any],
+    schema: dict[str, Any],
+) -> list[ValidationError]:
+    """
+    Validate a stage context against a schema.
+
+    Args:
+        context: The stage context dictionary
+        schema: JSON Schema dictionary
+
+    Returns:
+        List of validation errors (empty if valid)
+
+    Example:
+        errors = validate_context(stage.context, {
+            "type": "object",
+            "required": ["command"],
+            "properties": {
+                "command": {"type": "string", "minLength": 1},
+                "timeout": {"type": "integer", "minimum": 0},
+            },
+        })
+        if errors:
+            return TaskResult.terminal(f"Invalid context: {errors[0]}")
+    """
+    validator = SchemaValidator(schema)
+    return validator.validate(context)
+
 @dataclass
 class ValidationError:
     """
@@ -368,5 +397,78 @@ class SchemaValidator:
             for i, item in enumerate(value):
                 item_path = f"{path}[{i}]" if path else f"[{i}]"
                 errors.extend(self._validate_value(item, items_schema, item_path))
+
+        return errors
+
+    def _validate_object(
+        self,
+        value: dict,
+        schema: dict[str, Any],
+        path: str,
+    ) -> list[ValidationError]:
+        """Validate object-specific constraints."""
+        errors: list[ValidationError] = []
+
+        # Required fields
+        if "required" in schema:
+            for field in schema["required"]:
+                if field not in value:
+                    field_path = f"{path}.{field}" if path else field
+                    errors.append(
+                        ValidationError(
+                            field_path,
+                            "is required",
+                            constraint="required",
+                        )
+                    )
+
+        # Properties
+        properties = schema.get("properties", {})
+        for field, field_schema in properties.items():
+            if field in value:
+                field_path = f"{path}.{field}" if path else field
+                errors.extend(self._validate_value(value[field], field_schema, field_path))
+
+        # Additional properties
+        additional = schema.get("additionalProperties", True)
+        if additional is False:
+            allowed = set(properties.keys())
+            extra = set(value.keys()) - allowed
+            if extra:
+                for field in extra:
+                    field_path = f"{path}.{field}" if path else field
+                    errors.append(
+                        ValidationError(
+                            field_path,
+                            "is not an allowed property",
+                            constraint="additionalProperties",
+                        )
+                    )
+        elif isinstance(additional, dict):
+            # Validate additional properties against schema
+            allowed = set(properties.keys())
+            for field in value:
+                if field not in allowed:
+                    field_path = f"{path}.{field}" if path else field
+                    errors.extend(self._validate_value(value[field], additional, field_path))
+
+        # Min/max properties
+        if "minProperties" in schema and len(value) < schema["minProperties"]:
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must have at least {schema['minProperties']} properties",
+                    constraint="minProperties",
+                )
+            )
+
+        if "maxProperties" in schema and len(value) > schema["maxProperties"]:
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must have at most {schema['maxProperties']} properties",
+                    constraint="maxProperties",
+                )
+            )
 
         return errors
