@@ -105,3 +105,34 @@ class VerifyResult:
     def is_retry(self) -> bool:
         """Check if verification should retry."""
         return self.status == VerifyStatus.RETRY
+
+    def is_failed(self) -> bool:
+        """Check if verification failed terminally."""
+        return self.status == VerifyStatus.FAILED
+
+    def is_terminal(self) -> bool:
+        """Check if verification has reached a terminal state (OK, FAILED, or SKIPPED)."""
+        return self.status in {VerifyStatus.OK, VerifyStatus.FAILED, VerifyStatus.SKIPPED}
+
+class Verifier(ABC):
+    """
+    Base class for custom verifiers.
+
+    Verifiers validate stage outputs after task completion.
+    They can be registered in the TaskRegistry and run automatically.
+
+    Example:
+        class URLVerifier(Verifier):
+            def verify(self, stage: StageExecution) -> VerifyResult:
+                url = stage.outputs.get("url")
+                if not url:
+                    return VerifyResult.failed("No URL in outputs")
+
+                try:
+                    response = requests.head(url, timeout=5)
+                    if response.ok:
+                        return VerifyResult.ok(f"URL {url} is reachable")
+                    return VerifyResult.retry(f"URL returned {response.status_code}")
+                except Exception as e:
+                    return VerifyResult.retry(f"URL check failed: {e}")
+    """
