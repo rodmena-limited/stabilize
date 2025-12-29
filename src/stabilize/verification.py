@@ -85,3 +85,23 @@ class VerifyResult:
             message=message,
             details=details or {},
         )
+
+    def skipped(cls, message: str = "Verification skipped") -> VerifyResult:
+        """
+        Create a skipped verification result.
+
+        Args:
+            message: Skip reason
+
+        Returns:
+            A VerifyResult with SKIPPED status
+        """
+        return cls(status=VerifyStatus.SKIPPED, message=message)
+
+    def is_ok(self) -> bool:
+        """Check if verification passed."""
+        return self.status == VerifyStatus.OK
+
+    def is_retry(self) -> bool:
+        """Check if verification should retry."""
+        return self.status == VerifyStatus.RETRY
