@@ -1,6 +1,146 @@
+"""
+Assertion helpers for validating preconditions and results.
+
+This module provides assertion utilities that raise descriptive exceptions
+when conditions are not met. These are useful for:
+- Validating task inputs before processing
+- Checking configuration values
+- Ensuring stage prerequisites are met
+- Verifying outputs after task execution
+
+Example:
+    from stabilize.assertions import assert_context, assert_output
+
+    class MyTask(Task):
+        def execute(self, stage: StageExecution) -> TaskResult:
+            # Validate required inputs
+            assert_context(stage, "api_key", "API key is required")
+            assert_context_type(stage, "timeout", int, "Timeout must be an integer")
+
+            # Do work...
+
+            return TaskResult.success(outputs={"result": "done"})
+"""
+
 from __future__ import annotations
+
 from typing import TYPE_CHECKING, Any, TypeVar
+
+if TYPE_CHECKING:
+    from stabilize.models.stage import StageExecution
+
 T = TypeVar("T")
+
+
+# =============================================================================
+# Exception Classes
+# =============================================================================
+
+
+class StabilizeError(Exception):
+    """Base exception for Stabilize errors."""
+
+    pass
+
+
+class StabilizeFatalError(StabilizeError):
+    """
+    Fatal error that should terminate the pipeline.
+
+    Fatal errors indicate unrecoverable situations like invalid configuration
+    or programming errors.
+    """
+
+    pass
+
+
+class StabilizeExpectedError(StabilizeError):
+    """
+    Expected error that may allow retry or continuation.
+
+    Expected errors occur during normal operation and may be recoverable.
+    """
+
+    pass
+
+
+class PreconditionError(StabilizeExpectedError):
+    """
+    Error raised when a precondition is not met.
+
+    Precondition errors typically indicate that the stage should be
+    retried or that an upstream dependency hasn't completed.
+    """
+
+    def __init__(self, message: str, key: str | None = None) -> None:
+        super().__init__(message)
+        self.key = key
+
+
+class ContextError(StabilizeFatalError):
+    """
+    Error raised when required context is missing or invalid.
+
+    Context errors are fatal because they indicate misconfiguration.
+    """
+
+    def __init__(self, message: str, key: str | None = None) -> None:
+        super().__init__(message)
+        self.key = key
+
+
+class OutputError(StabilizeExpectedError):
+    """
+    Error raised when expected output is missing or invalid.
+
+    Output errors may be recoverable if the task can be retried.
+    """
+
+    def __init__(self, message: str, key: str | None = None) -> None:
+        super().__init__(message)
+        self.key = key
+
+
+class ConfigError(StabilizeFatalError):
+    """
+    Error raised when configuration is invalid.
+
+    Config errors are fatal because they indicate invalid setup.
+    """
+
+    def __init__(self, message: str, field: str | None = None) -> None:
+        super().__init__(message)
+        self.field = field
+
+
+class VerificationError(StabilizeExpectedError):
+    """
+    Error raised when verification fails.
+
+    Verification errors may allow retry depending on the verifier.
+    """
+
+    def __init__(self, message: str, details: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.details = details or {}
+
+
+class StageNotReadyError(StabilizeExpectedError):
+    """
+    Error raised when a stage is not ready for execution.
+
+    This typically means upstream dependencies haven't completed.
+    """
+
+    def __init__(self, message: str, stage_ref_id: str | None = None) -> None:
+        super().__init__(message)
+        self.stage_ref_id = stage_ref_id
+
+
+# =============================================================================
+# Assertion Functions
+# =============================================================================
+
 
 def assert_true(condition: bool, message: str) -> None:
     """
@@ -18,6 +158,7 @@ def assert_true(condition: bool, message: str) -> None:
     """
     if not condition:
         raise PreconditionError(message)
+
 
 def assert_context(
     stage: StageExecution,
@@ -47,6 +188,7 @@ def assert_context(
             key=key,
         )
     return stage.context[key]
+
 
 def assert_context_type(
     stage: StageExecution,
@@ -80,6 +222,7 @@ def assert_context_type(
         )
     return value
 
+
 def assert_context_in(
     stage: StageExecution,
     key: str,
@@ -112,6 +255,7 @@ def assert_context_in(
         )
     return value
 
+
 def assert_output(
     stage: StageExecution,
     key: str,
@@ -140,6 +284,7 @@ def assert_output(
             key=key,
         )
     return stage.outputs[key]
+
 
 def assert_output_type(
     stage: StageExecution,
@@ -173,6 +318,7 @@ def assert_output_type(
         )
     return value
 
+
 def assert_stage_ready(
     stage: StageExecution,
     message: str | None = None,
@@ -195,6 +341,7 @@ def assert_stage_ready(
             message or "Upstream stages have not completed",
             stage_ref_id=stage.ref_id,
         )
+
 
 def assert_no_upstream_failures(
     stage: StageExecution,
@@ -219,81 +366,100 @@ def assert_no_upstream_failures(
             stage_ref_id=stage.ref_id,
         )
 
-class StabilizeError(Exception):
-    """Base exception for Stabilize errors."""
 
-class StabilizeFatalError(StabilizeError):
+def assert_config(
+    condition: bool,
+    message: str,
+    field: str | None = None,
+) -> None:
     """
-    Fatal error that should terminate the pipeline.
+    Assert a configuration condition.
 
-    Fatal errors indicate unrecoverable situations like invalid configuration
-    or programming errors.
-    """
+    Args:
+        condition: The condition to check
+        message: Error message if condition is false
+        field: Optional field name for context
 
-class StabilizeExpectedError(StabilizeError):
-    """
-    Expected error that may allow retry or continuation.
+    Raises:
+        ConfigError: If condition is false
 
-    Expected errors occur during normal operation and may be recoverable.
+    Example:
+        assert_config(timeout > 0, "Timeout must be positive", field="timeout")
     """
+    if not condition:
+        raise ConfigError(message, field=field)
 
-class PreconditionError(StabilizeExpectedError):
-    """
-    Error raised when a precondition is not met.
 
-    Precondition errors typically indicate that the stage should be
-    retried or that an upstream dependency hasn't completed.
+def assert_verified(
+    condition: bool,
+    message: str,
+    details: dict[str, Any] | None = None,
+) -> None:
     """
-    def __init__(self, message: str, key: str | None = None) -> None:
-        super().__init__(message)
-        self.key = key
+    Assert a verification condition.
 
-class ContextError(StabilizeFatalError):
-    """
-    Error raised when required context is missing or invalid.
+    Args:
+        condition: The condition to check
+        message: Error message if condition is false
+        details: Optional details about the failure
 
-    Context errors are fatal because they indicate misconfiguration.
-    """
-    def __init__(self, message: str, key: str | None = None) -> None:
-        super().__init__(message)
-        self.key = key
+    Raises:
+        VerificationError: If condition is false
 
-class OutputError(StabilizeExpectedError):
+    Example:
+        assert_verified(response.ok, "API returned error", {"status": response.status_code})
     """
-    Error raised when expected output is missing or invalid.
+    if not condition:
+        raise VerificationError(message, details=details)
 
-    Output errors may be recoverable if the task can be retried.
-    """
-    def __init__(self, message: str, key: str | None = None) -> None:
-        super().__init__(message)
-        self.key = key
 
-class ConfigError(StabilizeFatalError):
+def assert_not_none(
+    value: T | None,
+    message: str,
+) -> T:
     """
-    Error raised when configuration is invalid.
+    Assert that a value is not None and return it.
 
-    Config errors are fatal because they indicate invalid setup.
-    """
-    def __init__(self, message: str, field: str | None = None) -> None:
-        super().__init__(message)
-        self.field = field
+    Args:
+        value: The value to check
+        message: Error message if value is None
 
-class VerificationError(StabilizeExpectedError):
-    """
-    Error raised when verification fails.
+    Returns:
+        The non-None value
 
-    Verification errors may allow retry depending on the verifier.
-    """
-    def __init__(self, message: str, details: dict[str, Any] | None = None) -> None:
-        super().__init__(message)
-        self.details = details or {}
+    Raises:
+        PreconditionError: If value is None
 
-class StageNotReadyError(StabilizeExpectedError):
+    Example:
+        user = assert_not_none(get_user(id), f"User {id} not found")
     """
-    Error raised when a stage is not ready for execution.
+    if value is None:
+        raise PreconditionError(message)
+    return value
 
-    This typically means upstream dependencies haven't completed.
+
+def assert_non_empty(
+    value: str | list | dict,
+    message: str,
+) -> str | list | dict:
     """
-    def __init__(self, message: str, stage_ref_id: str | None = None) -> None:
-        super().__init__(message)
-        self.stage_ref_id = stage_ref_id
+    Assert that a value is not empty.
+
+    Works with strings, lists, and dicts.
+
+    Args:
+        value: The value to check
+        message: Error message if value is empty
+
+    Returns:
+        The non-empty value
+
+    Raises:
+        PreconditionError: If value is empty
+
+    Example:
+        items = assert_non_empty(stage.context.get("items", []), "Items list is empty")
+    """
+    if not value:
+        raise PreconditionError(message)
+    return value
