@@ -73,3 +73,53 @@ class TestExceptionHierarchy:
         error = VerificationError("verification", details={"code": 500})
         assert isinstance(error, StabilizeExpectedError)
         assert error.details == {"code": 500}
+
+    def test_stage_not_ready_error_is_expected(self) -> None:
+        """Test StageNotReadyError is an expected error."""
+        error = StageNotReadyError("not ready", stage_ref_id="stage-1")
+        assert isinstance(error, StabilizeExpectedError)
+        assert error.stage_ref_id == "stage-1"
+
+class TestAssertTrue:
+    """Tests for assert_true function."""
+
+    def test_passes_on_true(self) -> None:
+        """Test assert_true passes when condition is True."""
+        assert_true(True, "Should not fail")  # Should not raise
+
+    def test_fails_on_false(self) -> None:
+        """Test assert_true fails when condition is False."""
+        with pytest.raises(PreconditionError) as exc_info:
+            assert_true(False, "Condition failed")
+        assert "Condition failed" in str(exc_info.value)
+
+class TestAssertContext:
+    """Tests for context assertion functions."""
+
+    def test_assert_context_returns_value(self) -> None:
+        """Test assert_context returns the value when present."""
+        stage = StageExecution(ref_id="test", context={"api_key": "secret123"})
+        value = assert_context(stage, "api_key")
+        assert value == "secret123"
+
+    def test_assert_context_fails_on_missing(self) -> None:
+        """Test assert_context fails when key is missing."""
+        stage = StageExecution(ref_id="test", context={})
+        with pytest.raises(ContextError) as exc_info:
+            assert_context(stage, "api_key")
+        assert "api_key" in str(exc_info.value)
+        assert exc_info.value.key == "api_key"
+
+    def test_assert_context_custom_message(self) -> None:
+        """Test assert_context with custom message."""
+        stage = StageExecution(ref_id="test", context={})
+        with pytest.raises(ContextError) as exc_info:
+            assert_context(stage, "api_key", "API key is required for authentication")
+        assert "API key is required" in str(exc_info.value)
+
+    def test_assert_context_type_correct_type(self) -> None:
+        """Test assert_context_type with correct type."""
+        stage = StageExecution(ref_id="test", context={"timeout": 30})
+        value = assert_context_type(stage, "timeout", int)
+        assert value == 30
+        assert isinstance(value, int)
