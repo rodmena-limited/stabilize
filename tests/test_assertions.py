@@ -175,3 +175,117 @@ class TestAssertOutput:
 
 class TestAssertStageReady:
     """Tests for stage readiness assertions."""
+
+    def test_assert_stage_ready_passes(self) -> None:
+        """Test assert_stage_ready passes when all upstream complete."""
+        workflow = Workflow.create(
+            application="test",
+            name="Test",
+            stages=[
+                StageExecution(
+                    ref_id="upstream",
+                    type="test",
+                    name="Upstream",
+                    status=WorkflowStatus.SUCCEEDED,
+                ),
+                StageExecution(
+                    ref_id="downstream",
+                    type="test",
+                    name="Downstream",
+                    requisite_stage_ref_ids={"upstream"},
+                ),
+            ],
+        )
+        downstream = workflow.stage_by_ref_id("downstream")
+        assert_stage_ready(downstream)  # Should not raise
+
+    def test_assert_stage_ready_fails(self) -> None:
+        """Test assert_stage_ready fails when upstream not complete."""
+        workflow = Workflow.create(
+            application="test",
+            name="Test",
+            stages=[
+                StageExecution(
+                    ref_id="upstream",
+                    type="test",
+                    name="Upstream",
+                    status=WorkflowStatus.RUNNING,
+                ),
+                StageExecution(
+                    ref_id="downstream",
+                    type="test",
+                    name="Downstream",
+                    requisite_stage_ref_ids={"upstream"},
+                ),
+            ],
+        )
+        downstream = workflow.stage_by_ref_id("downstream")
+        with pytest.raises(StageNotReadyError):
+            assert_stage_ready(downstream)
+
+    def test_assert_no_upstream_failures_passes(self) -> None:
+        """Test assert_no_upstream_failures passes when no failures."""
+        workflow = Workflow.create(
+            application="test",
+            name="Test",
+            stages=[
+                StageExecution(
+                    ref_id="upstream",
+                    type="test",
+                    name="Upstream",
+                    status=WorkflowStatus.SUCCEEDED,
+                ),
+                StageExecution(
+                    ref_id="downstream",
+                    type="test",
+                    name="Downstream",
+                    requisite_stage_ref_ids={"upstream"},
+                ),
+            ],
+        )
+        downstream = workflow.stage_by_ref_id("downstream")
+        assert_no_upstream_failures(downstream)  # Should not raise
+
+    def test_assert_no_upstream_failures_fails(self) -> None:
+        """Test assert_no_upstream_failures fails when upstream failed."""
+        workflow = Workflow.create(
+            application="test",
+            name="Test",
+            stages=[
+                StageExecution(
+                    ref_id="upstream",
+                    type="test",
+                    name="Upstream",
+                    status=WorkflowStatus.TERMINAL,
+                ),
+                StageExecution(
+                    ref_id="downstream",
+                    type="test",
+                    name="Downstream",
+                    requisite_stage_ref_ids={"upstream"},
+                ),
+            ],
+        )
+        downstream = workflow.stage_by_ref_id("downstream")
+        with pytest.raises(StageNotReadyError):
+            assert_no_upstream_failures(downstream)
+
+class TestAssertConfig:
+    """Tests for configuration assertion."""
+
+    def test_assert_config_passes(self) -> None:
+        """Test assert_config passes when condition is True."""
+        assert_config(True, "Should pass")  # Should not raise
+
+    def test_assert_config_fails(self) -> None:
+        """Test assert_config fails when condition is False."""
+        with pytest.raises(ConfigError) as exc_info:
+            assert_config(False, "Invalid config", field="timeout")
+        assert exc_info.value.field == "timeout"
+
+class TestAssertVerified:
+    """Tests for verification assertion."""
+
+    def test_assert_verified_passes(self) -> None:
+        """Test assert_verified passes when condition is True."""
+        assert_verified(True, "Should pass")  # Should not raise
