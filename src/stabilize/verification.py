@@ -170,3 +170,85 @@ class Verifier(ABC):
             Retry delay (default: 1.0)
         """
         return 1.0
+
+class OutputVerifier(Verifier):
+    """
+    Verifier that checks for required outputs.
+
+    Example:
+        verifier = OutputVerifier(required_keys=["url", "status_code"])
+        result = verifier.verify(stage)
+    """
+    def __init__(
+        self,
+        required_keys: list[str] | None = None,
+        type_checks: dict[str, type] | None = None,
+    ) -> None:
+        """
+        Initialize the output verifier.
+
+        Args:
+            required_keys: List of keys that must be present in outputs
+            type_checks: Dict mapping keys to expected types
+        """
+        self.required_keys = required_keys or []
+        self.type_checks = type_checks or {}
+
+    def verify(self, stage: StageExecution) -> VerifyResult:
+        """Verify that required outputs exist with correct types."""
+        missing = []
+        type_errors = []
+
+        for key in self.required_keys:
+            if key not in stage.outputs:
+                missing.append(key)
+
+        for key, expected_type in self.type_checks.items():
+            if key in stage.outputs:
+                actual = stage.outputs[key]
+                if not isinstance(actual, expected_type):
+                    type_errors.append(f"{key}: expected {expected_type.__name__}, got {type(actual).__name__}")
+
+        if missing:
+            return VerifyResult.failed(
+                message=f"Missing required outputs: {', '.join(missing)}",
+                details={"missing_keys": missing},
+            )
+
+        if type_errors:
+            return VerifyResult.failed(
+                message=f"Type errors: {'; '.join(type_errors)}",
+                details={"type_errors": type_errors},
+            )
+
+        return VerifyResult.ok("All required outputs present with correct types")
+
+class CallableVerifier(Verifier):
+    """
+    Verifier that wraps a callable function.
+
+    Example:
+        def check_url(stage):
+            url = stage.outputs.get("url")
+            return VerifyResult.ok() if url else VerifyResult.failed("No URL")
+
+        verifier = CallableVerifier(check_url)
+    """
+    def __init__(
+        self,
+        func: Callable[[StageExecution], VerifyResult],
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+    ) -> None:
+        """
+        Initialize with a callable.
+
+        Args:
+            func: The verification function
+            max_retries: Maximum retry count
+            retry_delay: Delay between retries in seconds
+        """
+
+        self._func = func
+        self._max_retries = max_retries
+        self._retry_delay = retry_delay
