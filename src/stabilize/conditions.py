@@ -67,3 +67,58 @@ class Condition:
                 self.reason = ConditionReason(self.reason)
             except ValueError:
                 pass  # Keep as string for custom reasons
+
+    def ready(
+        cls,
+        status: bool,
+        reason: ConditionReason | str,
+        message: str = "",
+    ) -> Condition:
+        """Create a Ready condition."""
+        return cls(
+            type=ConditionType.READY,
+            status=status,
+            reason=reason,
+            message=message,
+        )
+
+    def progressing(
+        cls,
+        status: bool,
+        reason: ConditionReason | str,
+        message: str = "",
+    ) -> Condition:
+        """Create a Progressing condition."""
+        return cls(
+            type=ConditionType.PROGRESSING,
+            status=status,
+            reason=reason,
+            message=message,
+        )
+
+    def verified(
+        cls,
+        status: bool,
+        reason: ConditionReason | str,
+        message: str = "",
+    ) -> Condition:
+        """Create a Verified condition."""
+        return cls(
+            type=ConditionType.VERIFIED,
+            status=status,
+            reason=reason,
+            message=message,
+        )
+
+    def failed(
+        cls,
+        reason: ConditionReason | str,
+        message: str,
+    ) -> Condition:
+        """Create a Failed condition (always status=True when failed)."""
+        return cls(
+            type=ConditionType.FAILED,
+            status=True,
+            reason=reason,
+            message=message,
+        )
