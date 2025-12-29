@@ -122,3 +122,82 @@ class Condition:
             reason=reason,
             message=message,
         )
+
+    def config_valid(
+        cls,
+        status: bool,
+        reason: ConditionReason | str = ConditionReason.CONFIG_VALID,
+        message: str = "",
+    ) -> Condition:
+        """Create a ConfigValid condition."""
+        return cls(
+            type=ConditionType.CONFIG_VALID,
+            status=status,
+            reason=reason,
+            message=message,
+        )
+
+    def update(
+        self,
+        status: bool | None = None,
+        reason: ConditionReason | str | None = None,
+        message: str | None = None,
+    ) -> Condition:
+        """
+        Create an updated condition with new values.
+
+        Only updates last_transition_time if status actually changed.
+
+        Args:
+            status: New status (or None to keep current)
+            reason: New reason (or None to keep current)
+            message: New message (or None to keep current)
+
+        Returns:
+            New Condition with updated values
+        """
+        new_status = status if status is not None else self.status
+        new_reason = reason if reason is not None else self.reason
+        new_message = message if message is not None else self.message
+
+        # Only update transition time if status changed
+        transition_time = (
+            datetime.now(UTC) if status is not None and status != self.status else self.last_transition_time
+        )
+
+        return Condition(
+            type=self.type,
+            status=new_status,
+            reason=new_reason,
+            message=new_message,
+            last_transition_time=transition_time,
+            observed_generation=self.observed_generation + 1,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "type": self.type.value if isinstance(self.type, ConditionType) else self.type,
+            "status": self.status,
+            "reason": self.reason.value if isinstance(self.reason, ConditionReason) else self.reason,
+            "message": self.message,
+            "lastTransitionTime": self.last_transition_time.isoformat(),
+            "observedGeneration": self.observed_generation,
+        }
+
+    def from_dict(cls, data: dict[str, Any]) -> Condition:
+        """Create from dictionary."""
+        transition_time = data.get("lastTransitionTime")
+        if isinstance(transition_time, str):
+            transition_time = datetime.fromisoformat(transition_time)
+        elif transition_time is None:
+            transition_time = datetime.now(UTC)
+
+        return cls(
+            type=data["type"],
+            status=data["status"],
+            reason=data["reason"],
+            message=data.get("message", ""),
+            last_transition_time=transition_time,
+            observed_generation=data.get("observedGeneration", 0),
+        )
