@@ -289,3 +289,48 @@ class TestAssertVerified:
     def test_assert_verified_passes(self) -> None:
         """Test assert_verified passes when condition is True."""
         assert_verified(True, "Should pass")  # Should not raise
+
+    def test_assert_verified_fails(self) -> None:
+        """Test assert_verified fails when condition is False."""
+        with pytest.raises(VerificationError) as exc_info:
+            assert_verified(False, "Check failed", details={"code": 500})
+        assert exc_info.value.details == {"code": 500}
+
+class TestAssertNotNone:
+    """Tests for assert_not_none function."""
+
+    def test_returns_value_when_not_none(self) -> None:
+        """Test returns the value when it's not None."""
+        result = assert_not_none("hello", "Value required")
+        assert result == "hello"
+
+    def test_fails_when_none(self) -> None:
+        """Test fails when value is None."""
+        with pytest.raises(PreconditionError) as exc_info:
+            assert_not_none(None, "Value required")
+        assert "Value required" in str(exc_info.value)
+
+    def test_allows_falsy_values(self) -> None:
+        """Test allows falsy values that aren't None."""
+        assert assert_not_none(0, "msg") == 0
+        assert assert_not_none("", "msg") == ""
+        assert assert_not_none([], "msg") == []
+        assert assert_not_none(False, "msg") is False
+
+class TestAssertNonEmpty:
+    """Tests for assert_non_empty function."""
+
+    def test_passes_non_empty_string(self) -> None:
+        """Test passes with non-empty string."""
+        result = assert_non_empty("hello", "String required")
+        assert result == "hello"
+
+    def test_fails_empty_string(self) -> None:
+        """Test fails with empty string."""
+        with pytest.raises(PreconditionError):
+            assert_non_empty("", "String required")
+
+    def test_passes_non_empty_list(self) -> None:
+        """Test passes with non-empty list."""
+        result = assert_non_empty([1, 2, 3], "List required")
+        assert result == [1, 2, 3]
