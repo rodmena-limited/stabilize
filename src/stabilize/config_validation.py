@@ -202,3 +202,57 @@ class SchemaValidator:
             errors.extend(self._validate_object(value, schema, path))
 
         return errors
+
+    def _check_type(self, value: Any, type_name: str) -> bool:
+        """Check if value matches the JSON Schema type."""
+        # Special case: integer shouldn't match boolean
+        if type_name == "integer" and isinstance(value, bool):
+            return False
+        expected = self.TYPE_MAP.get(type_name)
+        if expected is None:
+            return True  # Unknown type, allow
+        return isinstance(value, expected)  # type: ignore[arg-type]
+
+    def _validate_string(
+        self,
+        value: str,
+        schema: dict[str, Any],
+        path: str,
+    ) -> list[ValidationError]:
+        """Validate string-specific constraints."""
+        errors: list[ValidationError] = []
+
+        if "minLength" in schema and len(value) < schema["minLength"]:
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must have minimum length {schema['minLength']}",
+                    value,
+                    "minLength",
+                )
+            )
+
+        if "maxLength" in schema and len(value) > schema["maxLength"]:
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must have maximum length {schema['maxLength']}",
+                    value,
+                    "maxLength",
+                )
+            )
+
+        if "pattern" in schema:
+            import re
+
+            if not re.match(schema["pattern"], value):
+                errors.append(
+                    ValidationError(
+                        path,
+                        f"must match pattern {schema['pattern']}",
+                        value,
+                        "pattern",
+                    )
+                )
+
+        return errors
