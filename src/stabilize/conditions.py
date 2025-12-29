@@ -254,3 +254,22 @@ class ConditionSet:
         """Check if Progressing condition is True."""
         progressing = self.get(ConditionType.PROGRESSING)
         return progressing.status if progressing else False
+
+    def is_verified(self) -> bool:
+        """Check if Verified condition is True."""
+        verified = self.get(ConditionType.VERIFIED)
+        return verified.status if verified else False
+
+    def has_failed(self) -> bool:
+        """Check if Failed condition exists and is True."""
+        failed = self.get(ConditionType.FAILED)
+        return failed.status if failed else False
+
+    def is_config_valid(self) -> bool:
+        """Check if ConfigValid condition is True."""
+        config = self.get(ConditionType.CONFIG_VALID)
+        return config.status if config else True  # Default to valid if not set
+
+    def to_list(self) -> list[dict[str, Any]]:
+        """Convert all conditions to list of dicts for serialization."""
+        return [c.to_dict() for c in self._conditions.values()]
