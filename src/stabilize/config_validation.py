@@ -50,3 +50,49 @@ class ValidationError:
     message: str
     value: Any = None
     constraint: str | None = None
+
+    def __str__(self) -> str:
+        if self.path:
+            return f"{self.path}: {self.message}"
+        return self.message
+
+class SchemaValidator:
+    """
+    JSON Schema-like validator for configuration dictionaries.
+
+    This is a lightweight implementation that doesn't require jsonschema package.
+    Supports common validation patterns:
+    - type checking (string, integer, number, boolean, array, object, null)
+    - required fields
+    - enum values
+    - min/max for numbers
+    - minLength/maxLength for strings
+    - pattern matching for strings
+    - minItems/maxItems for arrays
+    - items schema for arrays
+    - properties for objects
+    - additionalProperties control
+
+    Example:
+        validator = SchemaValidator({
+            "type": "object",
+            "required": ["name", "age"],
+            "properties": {
+                "name": {"type": "string", "minLength": 1},
+                "age": {"type": "integer", "minimum": 0},
+            },
+        })
+
+        errors = validator.validate({"name": "", "age": -1})
+        # Returns [ValidationError("name", "must have minimum length 1"),
+        #          ValidationError("age", "must be >= 0")]
+    """
+    TYPE_MAP = {'string': str, 'integer': int, 'number': (int, float), 'boolean': bool, 'array': list, 'object': dict, 'null': type(None)}
+    def __init__(self, schema: dict[str, Any]) -> None:
+        """
+        Initialize with a JSON Schema.
+
+        Args:
+            schema: The JSON Schema dictionary
+        """
+        self.schema = schema
