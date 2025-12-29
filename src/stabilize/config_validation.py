@@ -96,3 +96,109 @@ class SchemaValidator:
             schema: The JSON Schema dictionary
         """
         self.schema = schema
+
+    def validate(self, data: Any, path: str = "") -> list[ValidationError]:
+        """
+        Validate data against the schema.
+
+        Args:
+            data: The data to validate
+            path: Current path in the data structure (for error messages)
+
+        Returns:
+            List of validation errors (empty if valid)
+        """
+        return self._validate_value(data, self.schema, path)
+
+    def _validate_value(
+        self,
+        value: Any,
+        schema: dict[str, Any],
+        path: str,
+    ) -> list[ValidationError]:
+        """Validate a single value against its schema."""
+        errors: list[ValidationError] = []
+
+        # Handle null/None
+        if value is None:
+            if schema.get("type") == "null":
+                return []
+            # Allow None if not explicitly typed
+            if "type" not in schema:
+                return []
+            errors.append(ValidationError(path, "value cannot be null", value))
+            return errors
+
+        # Type validation
+        if "type" in schema:
+            expected_type = schema["type"]
+            if isinstance(expected_type, list):
+                # Union type
+                valid = False
+                for t in expected_type:
+                    if self._check_type(value, t):
+                        valid = True
+                        break
+                if not valid:
+                    errors.append(
+                        ValidationError(
+                            path,
+                            f"must be one of types: {', '.join(expected_type)}",
+                            value,
+                            "type",
+                        )
+                    )
+                    return errors
+            else:
+                if not self._check_type(value, expected_type):
+                    errors.append(
+                        ValidationError(
+                            path,
+                            f"must be {expected_type}, got {type(value).__name__}",
+                            value,
+                            "type",
+                        )
+                    )
+                    return errors
+
+        # Enum validation
+        if "enum" in schema:
+            if value not in schema["enum"]:
+                errors.append(
+                    ValidationError(
+                        path,
+                        f"must be one of: {schema['enum']}",
+                        value,
+                        "enum",
+                    )
+                )
+
+        # Const validation
+        if "const" in schema:
+            if value != schema["const"]:
+                errors.append(
+                    ValidationError(
+                        path,
+                        f"must be exactly {schema['const']!r}",
+                        value,
+                        "const",
+                    )
+                )
+
+        # String validations
+        if isinstance(value, str):
+            errors.extend(self._validate_string(value, schema, path))
+
+        # Number validations
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            errors.extend(self._validate_number(value, schema, path))
+
+        # Array validations
+        if isinstance(value, list):
+            errors.extend(self._validate_array(value, schema, path))
+
+        # Object validations
+        if isinstance(value, dict):
+            errors.extend(self._validate_object(value, schema, path))
+
+        return errors
