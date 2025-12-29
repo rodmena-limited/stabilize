@@ -236,3 +236,21 @@ class ConditionSet:
     def remove(self, condition_type: ConditionType | str) -> None:
         """Remove a condition by type."""
         self._conditions.pop(condition_type, None)
+
+    def all(self) -> list[Condition]:
+        """Get all conditions."""
+        return list(self._conditions.values())
+
+    def clear(self) -> None:
+        """Remove all conditions."""
+        self._conditions.clear()
+
+    def is_ready(self) -> bool:
+        """Check if Ready condition is True."""
+        ready = self.get(ConditionType.READY)
+        return ready.status if ready else False
+
+    def is_progressing(self) -> bool:
+        """Check if Progressing condition is True."""
+        progressing = self.get(ConditionType.PROGRESSING)
+        return progressing.status if progressing else False
