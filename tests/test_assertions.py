@@ -123,3 +123,55 @@ class TestAssertContext:
         value = assert_context_type(stage, "timeout", int)
         assert value == 30
         assert isinstance(value, int)
+
+    def test_assert_context_type_wrong_type(self) -> None:
+        """Test assert_context_type with wrong type."""
+        stage = StageExecution(ref_id="test", context={"timeout": "thirty"})
+        with pytest.raises(ContextError) as exc_info:
+            assert_context_type(stage, "timeout", int)
+        assert "int" in str(exc_info.value)
+
+    def test_assert_context_in_valid(self) -> None:
+        """Test assert_context_in with valid value."""
+        stage = StageExecution(ref_id="test", context={"env": "prod"})
+        value = assert_context_in(stage, "env", ["dev", "staging", "prod"])
+        assert value == "prod"
+
+    def test_assert_context_in_invalid(self) -> None:
+        """Test assert_context_in with invalid value."""
+        stage = StageExecution(ref_id="test", context={"env": "test"})
+        with pytest.raises(ContextError) as exc_info:
+            assert_context_in(stage, "env", ["dev", "staging", "prod"])
+        assert "test" in str(exc_info.value)
+
+class TestAssertOutput:
+    """Tests for output assertion functions."""
+
+    def test_assert_output_returns_value(self) -> None:
+        """Test assert_output returns the value when present."""
+        stage = StageExecution(ref_id="test", outputs={"result": "success"})
+        value = assert_output(stage, "result")
+        assert value == "success"
+
+    def test_assert_output_fails_on_missing(self) -> None:
+        """Test assert_output fails when key is missing."""
+        stage = StageExecution(ref_id="test", outputs={})
+        with pytest.raises(OutputError) as exc_info:
+            assert_output(stage, "result")
+        assert exc_info.value.key == "result"
+
+    def test_assert_output_type_correct(self) -> None:
+        """Test assert_output_type with correct type."""
+        stage = StageExecution(ref_id="test", outputs={"count": 42})
+        value = assert_output_type(stage, "count", int)
+        assert value == 42
+
+    def test_assert_output_type_wrong(self) -> None:
+        """Test assert_output_type with wrong type."""
+        stage = StageExecution(ref_id="test", outputs={"count": "forty-two"})
+        with pytest.raises(OutputError) as exc_info:
+            assert_output_type(stage, "count", int)
+        assert "int" in str(exc_info.value)
+
+class TestAssertStageReady:
+    """Tests for stage readiness assertions."""
