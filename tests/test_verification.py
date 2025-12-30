@@ -67,3 +67,46 @@ class TestVerifyResult:
 
 class TestOutputVerifier:
     """Tests for OutputVerifier class."""
+
+    def test_required_keys_present(self) -> None:
+        """Test verification passes when required keys are present."""
+        verifier = OutputVerifier(required_keys=["url", "status"])
+        stage = StageExecution(
+            ref_id="test",
+            outputs={"url": "http://example.com", "status": "ok"},
+        )
+        result = verifier.verify(stage)
+        assert result.is_ok
+
+    def test_required_keys_missing(self) -> None:
+        """Test verification fails when required keys are missing."""
+        verifier = OutputVerifier(required_keys=["url", "status"])
+        stage = StageExecution(
+            ref_id="test",
+            outputs={"url": "http://example.com"},
+        )
+        result = verifier.verify(stage)
+        assert result.is_failed
+        assert "status" in result.message
+        assert result.details["missing_keys"] == ["status"]
+
+    def test_type_checks_pass(self) -> None:
+        """Test type checking passes with correct types."""
+        verifier = OutputVerifier(type_checks={"count": int, "name": str})
+        stage = StageExecution(
+            ref_id="test",
+            outputs={"count": 5, "name": "test"},
+        )
+        result = verifier.verify(stage)
+        assert result.is_ok
+
+    def test_type_checks_fail(self) -> None:
+        """Test type checking fails with incorrect types."""
+        verifier = OutputVerifier(type_checks={"count": int})
+        stage = StageExecution(
+            ref_id="test",
+            outputs={"count": "not an int"},
+        )
+        result = verifier.verify(stage)
+        assert result.is_failed
+        assert "Type errors" in result.message
