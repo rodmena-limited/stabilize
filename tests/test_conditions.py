@@ -224,3 +224,32 @@ class TestConditionSet:
 
         conditions.set(Condition.ready(True, ConditionReason.TASKS_SUCCEEDED))
         assert conditions.is_ready
+
+    def test_is_verified_property(self) -> None:
+        """Test is_verified property."""
+        conditions = ConditionSet()
+        assert not conditions.is_verified
+
+        conditions.set(Condition.verified(True, ConditionReason.VERIFICATION_PASSED))
+        assert conditions.is_verified
+
+    def test_has_failed_property(self) -> None:
+        """Test has_failed property."""
+        conditions = ConditionSet()
+        assert not conditions.has_failed
+
+        conditions.set(Condition.failed(ConditionReason.TASK_FAILED, "Error"))
+        assert conditions.has_failed
+
+    def test_is_config_valid_default(self) -> None:
+        """Test is_config_valid defaults to True when not set."""
+        conditions = ConditionSet()
+        assert conditions.is_config_valid  # Default to valid
+
+    def test_contains(self) -> None:
+        """Test __contains__ method."""
+        conditions = ConditionSet()
+        assert ConditionType.READY not in conditions
+
+        conditions.set(Condition.ready(True, ConditionReason.TASKS_SUCCEEDED))
+        assert ConditionType.READY in conditions
