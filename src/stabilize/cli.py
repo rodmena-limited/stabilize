@@ -1,4 +1,4 @@
-"""Stabilize CLI for database migrations."""
+"""Stabilize CLI for database migrations and developer tools."""
 
 from __future__ import annotations
 
@@ -13,6 +13,740 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from typing import Any
+
+
+# =============================================================================
+# RAG PROMPT - Comprehensive documentation for AI coding agents
+# =============================================================================
+
+PROMPT_TEXT = r'''
+===============================================================================
+STABILIZE WORKFLOW ENGINE - COMPLETE REFERENCE FOR CODE GENERATION
+===============================================================================
+
+Stabilize is a Python DAG-based workflow orchestration engine. Workflows consist
+of Stages (nodes in the DAG) containing Tasks (atomic work units). Stages can
+run sequentially or in parallel based on their dependencies.
+
+===============================================================================
+1. COMPLETE WORKING EXAMPLE - COPY THIS AS YOUR STARTING TEMPLATE
+===============================================================================
+
+#!/usr/bin/env python3
+"""Minimal working Stabilize workflow example."""
+
+from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
+from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize.queue.sqlite_queue import SqliteQueue
+from stabilize.queue.processor import QueueProcessor
+from stabilize.queue.queue import Queue
+from stabilize.persistence.store import WorkflowStore
+from stabilize.orchestrator import Orchestrator
+from stabilize.tasks.interface import Task
+from stabilize.tasks.result import TaskResult
+from stabilize.tasks.registry import TaskRegistry
+from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
+from stabilize.handlers.complete_stage import CompleteStageHandler
+from stabilize.handlers.complete_task import CompleteTaskHandler
+from stabilize.handlers.run_task import RunTaskHandler
+from stabilize.handlers.start_workflow import StartWorkflowHandler
+from stabilize.handlers.start_stage import StartStageHandler
+from stabilize.handlers.start_task import StartTaskHandler
+
+
+# Step 1: Define your custom Task
+class MyTask(Task):
+    """Custom task implementation."""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        # Read inputs from stage.context
+        input_value = stage.context.get("my_input", "default")
+
+        # Do your work here
+        result = f"Processed: {input_value}"
+
+        # Return success with outputs for downstream stages
+        return TaskResult.success(outputs={"result": result})
+
+
+# Step 2: Setup infrastructure
+def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
+    """Create processor and orchestrator with task registered."""
+    task_registry = TaskRegistry()
+    task_registry.register("my_task", MyTask)  # Register task with name
+
+    processor = QueueProcessor(queue)
+
+    # Register all handlers in order
+    handlers = [
+        StartWorkflowHandler(queue, store),
+        StartStageHandler(queue, store),
+        StartTaskHandler(queue, store),
+        RunTaskHandler(queue, store, task_registry),
+        CompleteTaskHandler(queue, store),
+        CompleteStageHandler(queue, store),
+        CompleteWorkflowHandler(queue, store),
+    ]
+    for handler in handlers:
+        processor.register_handler(handler)
+
+    orchestrator = Orchestrator(queue)
+    return processor, orchestrator
+
+
+# Step 3: Create and run workflow
+def main():
+    # Initialize storage (in-memory SQLite for development)
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    # Create workflow with stages
+    workflow = Workflow.create(
+        application="my-app",
+        name="My Pipeline",
+        stages=[
+            StageExecution(
+                ref_id="1",
+                type="my_task",
+                name="First Stage",
+                context={"my_input": "hello world"},
+                tasks=[
+                    TaskExecution.create(
+                        name="Run MyTask",
+                        implementing_class="my_task",  # Must match registered name
+                        stage_start=True,              # REQUIRED for first task
+                        stage_end=True,                # REQUIRED for last task
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    # Execute workflow
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=30.0)
+
+    # Check result
+    result = store.retrieve(workflow.id)
+    print(f"Status: {result.status}")
+    print(f"Output: {result.stages[0].outputs}")
+
+
+if __name__ == "__main__":
+    main()
+
+===============================================================================
+2. CORE CLASSES API
+===============================================================================
+
+2.1 Workflow
+-------------
+Factory: Workflow.create(application, name, stages, trigger=None, pipeline_config_id=None)
+
+Fields:
+  id: str                    - Unique ULID identifier (auto-generated)
+  status: WorkflowStatus     - Current execution status
+  stages: list[StageExecution] - All stages in the workflow
+  application: str           - Application name
+  name: str                  - Pipeline name
+
+Methods:
+  stage_by_id(stage_id) -> StageExecution    - Get stage by internal ID
+  stage_by_ref_id(ref_id) -> StageExecution  - Get stage by reference ID
+  get_context() -> dict                      - Get merged outputs from all stages
+
+
+2.2 StageExecution
+-------------------
+Constructor: StageExecution(ref_id, type, name, context, tasks, requisite_stage_ref_ids=set())
+
+Fields:
+  ref_id: str                         - UNIQUE reference ID for DAG (e.g., "1", "deploy", "build")
+  type: str                           - Stage type (usually matches task name)
+  name: str                           - Human-readable name
+  context: dict[str, Any]             - INPUT parameters for this stage
+  outputs: dict[str, Any]             - OUTPUT values for downstream stages (populated by tasks)
+  tasks: list[TaskExecution]          - Tasks to execute (sequentially)
+  requisite_stage_ref_ids: set[str]   - Dependencies (ref_ids of upstream stages)
+  status: WorkflowStatus              - Current status
+
+DAG Dependencies:
+  - Empty set: Stage runs immediately (initial stage)
+  - {"A"}: Stage runs after stage with ref_id="A" completes
+  - {"A", "B"}: Stage waits for BOTH A and B to complete (join point)
+
+
+2.3 TaskExecution
+------------------
+Factory: TaskExecution.create(name, implementing_class, stage_start=False, stage_end=False)
+
+Fields:
+  name: str                  - Human-readable task name
+  implementing_class: str    - MUST match the name used in TaskRegistry.register()
+  stage_start: bool          - MUST be True for first task in stage
+  stage_end: bool            - MUST be True for last task in stage
+  status: WorkflowStatus     - Current status
+
+CRITICAL: If a stage has only one task, set BOTH stage_start=True AND stage_end=True
+
+
+2.4 WorkflowStatus
+-------------------
+All status values:
+  NOT_STARTED     - Not yet started
+  RUNNING         - Currently executing
+  PAUSED          - Paused, can be resumed
+  SUSPENDED       - Waiting for external trigger
+  SUCCEEDED       - Completed successfully
+  FAILED_CONTINUE - Failed but pipeline continues
+  TERMINAL        - Failed, pipeline halts
+  CANCELED        - Execution was canceled
+  STOPPED         - Execution was stopped
+  SKIPPED         - Stage/task was skipped
+  REDIRECT        - Decision branch redirect
+  BUFFERED        - Buffered, waiting
+
+Properties:
+  .is_complete: bool    - Has finished executing
+  .is_halt: bool        - Blocks downstream stages
+  .is_successful: bool  - SUCCEEDED, STOPPED, or SKIPPED
+  .is_failure: bool     - TERMINAL, STOPPED, or FAILED_CONTINUE
+
+===============================================================================
+3. TASK IMPLEMENTATION
+===============================================================================
+
+3.1 Task Interface (Abstract Base Class)
+-----------------------------------------
+from stabilize.tasks.interface import Task
+
+class MyTask(Task):
+    def execute(self, stage: StageExecution) -> TaskResult:
+        # Read from stage.context (includes upstream outputs)
+        value = stage.context.get("key")
+
+        # Return TaskResult
+        return TaskResult.success(outputs={"output_key": "value"})
+
+    # Optional: Handle timeout (for RetryableTask)
+    def on_timeout(self, stage: StageExecution) -> TaskResult | None:
+        return TaskResult.terminal(error="Task timed out")
+
+    # Optional: Handle cancellation
+    def on_cancel(self, stage: StageExecution) -> TaskResult | None:
+        return TaskResult.canceled()
+
+
+3.2 TaskResult Factory Methods - CRITICAL REFERENCE
+----------------------------------------------------
+from stabilize.tasks.result import TaskResult
+
+SUCCESS - Task completed successfully, pipeline continues:
+    TaskResult.success(outputs=None, context=None)
+    Parameters:
+      outputs: dict  - Values available to downstream stages
+      context: dict  - Values stored in stage.context (stage-scoped)
+
+RUNNING - Task needs to poll again (for RetryableTask):
+    TaskResult.running(context=None)
+    Parameters:
+      context: dict  - Updated state for next poll iteration
+
+TERMINAL - Task failed, pipeline HALTS:
+    TaskResult.terminal(error, context=None)
+    Parameters:
+      error: str     - Error message (REQUIRED)
+      context: dict  - Additional context data
+    WARNING: Does NOT accept 'outputs' parameter!
+
+FAILED_CONTINUE - Task failed but pipeline continues:
+    TaskResult.failed_continue(error, outputs=None, context=None)
+    Parameters:
+      error: str     - Error message (REQUIRED)
+      outputs: dict  - Values still available downstream
+      context: dict  - Additional context data
+
+SKIPPED - Task was skipped:
+    TaskResult.skipped()
+
+CANCELED - Task was canceled:
+    TaskResult.canceled(outputs=None)
+
+STOPPED - Task was stopped:
+    TaskResult.stopped(outputs=None)
+
+
+3.3 RetryableTask - For Polling Operations
+-------------------------------------------
+from datetime import timedelta
+from stabilize.tasks.interface import RetryableTask
+
+class PollTask(RetryableTask):
+    def get_timeout(self) -> timedelta:
+        """Maximum time before task times out."""
+        return timedelta(minutes=30)
+
+    def get_backoff_period(self, stage: StageExecution, duration: timedelta) -> timedelta:
+        """Time to wait between poll attempts."""
+        return timedelta(seconds=10)
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        status = check_external_system()
+
+        if status == "complete":
+            return TaskResult.success(outputs={"status": "done"})
+        elif status == "failed":
+            return TaskResult.terminal(error="External system failed")
+        else:
+            # Keep polling - will be called again after backoff
+            return TaskResult.running(context={"last_check": time.time()})
+
+
+3.4 SkippableTask - Conditional Execution
+------------------------------------------
+from stabilize.tasks.interface import SkippableTask
+
+class ConditionalTask(SkippableTask):
+    def is_enabled(self, stage: StageExecution) -> bool:
+        """Return False to skip this task."""
+        return stage.context.get("should_run", True)
+
+    def do_execute(self, stage: StageExecution) -> TaskResult:
+        """Actual task logic (only called if is_enabled returns True)."""
+        return TaskResult.success()
+
+===============================================================================
+4. TASK REGISTRY
+===============================================================================
+
+from stabilize.tasks.registry import TaskRegistry
+
+registry = TaskRegistry()
+
+# Register a task class
+registry.register("my_task", MyTask)
+
+# Register with aliases
+registry.register("http", HTTPTask, aliases=["http_request", "web_request"])
+
+# The implementing_class in TaskExecution MUST match the registered name:
+TaskExecution.create(
+    name="Do something",
+    implementing_class="my_task",  # Must match registry.register() name
+    stage_start=True,
+    stage_end=True,
+)
+
+===============================================================================
+5. DAG PATTERNS
+===============================================================================
+
+5.1 Sequential Stages (A -> B -> C)
+------------------------------------
+stages=[
+    StageExecution(ref_id="A", ..., requisite_stage_ref_ids=set()),      # Initial
+    StageExecution(ref_id="B", ..., requisite_stage_ref_ids={"A"}),      # After A
+    StageExecution(ref_id="C", ..., requisite_stage_ref_ids={"B"}),      # After B
+]
+
+
+5.2 Parallel Stages
+--------------------
+       A
+      / \
+     B   C    <- B and C run in parallel after A
+      \ /
+       D
+
+stages=[
+    StageExecution(ref_id="A", ..., requisite_stage_ref_ids=set()),
+    StageExecution(ref_id="B", ..., requisite_stage_ref_ids={"A"}),    # Parallel
+    StageExecution(ref_id="C", ..., requisite_stage_ref_ids={"A"}),    # Parallel
+    StageExecution(ref_id="D", ..., requisite_stage_ref_ids={"B", "C"}), # Join
+]
+
+
+5.3 Complex DAG
+----------------
+     A
+    /|\
+   B C D     <- All parallel after A
+   |/ \|
+   E   F     <- E waits for B,C; F waits for C,D
+    \ /
+     G       <- G waits for E and F
+
+stages=[
+    StageExecution(ref_id="A", ..., requisite_stage_ref_ids=set()),
+    StageExecution(ref_id="B", ..., requisite_stage_ref_ids={"A"}),
+    StageExecution(ref_id="C", ..., requisite_stage_ref_ids={"A"}),
+    StageExecution(ref_id="D", ..., requisite_stage_ref_ids={"A"}),
+    StageExecution(ref_id="E", ..., requisite_stage_ref_ids={"B", "C"}),
+    StageExecution(ref_id="F", ..., requisite_stage_ref_ids={"C", "D"}),
+    StageExecution(ref_id="G", ..., requisite_stage_ref_ids={"E", "F"}),
+]
+
+===============================================================================
+6. CONTEXT AND OUTPUTS DATA FLOW
+===============================================================================
+
+stage.context  - INPUT: Parameters passed when creating the stage
+                 Also includes outputs from upstream stages (automatic lookup)
+
+stage.outputs  - OUTPUT: Values produced by tasks for downstream stages
+                 Set via TaskResult.success(outputs={...})
+
+Example flow:
+  Stage A context: {"input": "hello"}
+  Stage A task returns: TaskResult.success(outputs={"result": "processed"})
+  Stage B context: {"input": "hello", "result": "processed"}  <- Includes A's output
+
+Accessing in tasks:
+  def execute(self, stage):
+      # Read from context (includes upstream outputs)
+      upstream_result = stage.context.get("result")  # From upstream stage
+
+      # Write to outputs (available downstream)
+      return TaskResult.success(outputs={"my_output": "value"})
+
+===============================================================================
+7. COMMON MISTAKES AND HOW TO FIX THEM
+===============================================================================
+
+MISTAKE 1: Using 'outputs' parameter with TaskResult.terminal()
+---------------------------------------------------------------
+WRONG:
+    return TaskResult.terminal(error="Failed", outputs={"data": value})
+
+RIGHT:
+    return TaskResult.terminal(error="Failed", context={"data": value})
+
+terminal() only accepts: error (required), context (optional)
+
+
+MISTAKE 2: Forgetting stage_start and stage_end on tasks
+---------------------------------------------------------
+WRONG:
+    TaskExecution.create(name="X", implementing_class="y")
+
+RIGHT:
+    TaskExecution.create(name="X", implementing_class="y", stage_start=True, stage_end=True)
+
+
+MISTAKE 3: implementing_class doesn't match registered name
+------------------------------------------------------------
+WRONG:
+    registry.register("http_task", HTTPTask)
+    TaskExecution.create(..., implementing_class="HTTPTask")  # Class name, not registered name
+
+RIGHT:
+    registry.register("http_task", HTTPTask)
+    TaskExecution.create(..., implementing_class="http_task")  # Matches registered name
+
+
+MISTAKE 4: Duplicate ref_id values
+-----------------------------------
+WRONG:
+    StageExecution(ref_id="1", name="Stage A", ...)
+    StageExecution(ref_id="1", name="Stage B", ...)  # Same ref_id!
+
+RIGHT:
+    StageExecution(ref_id="1", name="Stage A", ...)
+    StageExecution(ref_id="2", name="Stage B", ...)  # Unique ref_ids
+
+
+MISTAKE 5: Missing handlers
+----------------------------
+All 7 handlers are REQUIRED for the engine to work:
+    StartWorkflowHandler, StartStageHandler, StartTaskHandler,
+    RunTaskHandler, CompleteTaskHandler, CompleteStageHandler, CompleteWorkflowHandler
+
+===============================================================================
+8. COMPLETE EXAMPLE: SEQUENTIAL PIPELINE WITH ERROR HANDLING
+===============================================================================
+
+#!/usr/bin/env python3
+from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
+from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize.queue.sqlite_queue import SqliteQueue
+from stabilize.queue.processor import QueueProcessor
+from stabilize.orchestrator import Orchestrator
+from stabilize.tasks.interface import Task
+from stabilize.tasks.result import TaskResult
+from stabilize.tasks.registry import TaskRegistry
+from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
+from stabilize.handlers.complete_stage import CompleteStageHandler
+from stabilize.handlers.complete_task import CompleteTaskHandler
+from stabilize.handlers.run_task import RunTaskHandler
+from stabilize.handlers.start_workflow import StartWorkflowHandler
+from stabilize.handlers.start_stage import StartStageHandler
+from stabilize.handlers.start_task import StartTaskHandler
+
+
+class ValidateTask(Task):
+    def execute(self, stage: StageExecution) -> TaskResult:
+        data = stage.context.get("data")
+        if not data:
+            return TaskResult.terminal(error="No data provided")
+        return TaskResult.success(outputs={"validated": True, "data": data})
+
+
+class ProcessTask(Task):
+    def execute(self, stage: StageExecution) -> TaskResult:
+        data = stage.context.get("data")
+        validated = stage.context.get("validated")
+        if not validated:
+            return TaskResult.terminal(error="Data not validated")
+        result = data.upper()
+        return TaskResult.success(outputs={"processed_data": result})
+
+
+class NotifyTask(Task):
+    def execute(self, stage: StageExecution) -> TaskResult:
+        processed = stage.context.get("processed_data")
+        # Even if notification fails, we don't want to fail the pipeline
+        try:
+            send_notification(processed)
+            return TaskResult.success(outputs={"notified": True})
+        except Exception as e:
+            # Use failed_continue to not halt the pipeline
+            return TaskResult.failed_continue(
+                error=f"Notification failed: {e}",
+                outputs={"notified": False}
+            )
+
+
+def setup_pipeline_runner(store, queue):
+    registry = TaskRegistry()
+    registry.register("validate", ValidateTask)
+    registry.register("process", ProcessTask)
+    registry.register("notify", NotifyTask)
+
+    processor = QueueProcessor(queue)
+    handlers = [
+        StartWorkflowHandler(queue, store),
+        StartStageHandler(queue, store),
+        StartTaskHandler(queue, store),
+        RunTaskHandler(queue, store, registry),
+        CompleteTaskHandler(queue, store),
+        CompleteStageHandler(queue, store),
+        CompleteWorkflowHandler(queue, store),
+    ]
+    for h in handlers:
+        processor.register_handler(h)
+
+    return processor, Orchestrator(queue)
+
+
+def main():
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    workflow = Workflow.create(
+        application="data-pipeline",
+        name="Process Data",
+        stages=[
+            StageExecution(
+                ref_id="validate",
+                type="validate",
+                name="Validate Input",
+                context={"data": "hello world"},
+                tasks=[TaskExecution.create("Validate", "validate", stage_start=True, stage_end=True)],
+            ),
+            StageExecution(
+                ref_id="process",
+                type="process",
+                name="Process Data",
+                requisite_stage_ref_ids={"validate"},
+                context={},  # Will receive 'data' from upstream
+                tasks=[TaskExecution.create("Process", "process", stage_start=True, stage_end=True)],
+            ),
+            StageExecution(
+                ref_id="notify",
+                type="notify",
+                name="Send Notification",
+                requisite_stage_ref_ids={"process"},
+                context={},
+                tasks=[TaskExecution.create("Notify", "notify", stage_start=True, stage_end=True)],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=30.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"Final status: {result.status}")
+    for stage in result.stages:
+        print(f"  {stage.name}: {stage.status} - {stage.outputs}")
+
+
+if __name__ == "__main__":
+    main()
+
+===============================================================================
+9. COMPLETE EXAMPLE: PARALLEL STAGES WITH JOIN
+===============================================================================
+
+#!/usr/bin/env python3
+from stabilize import Workflow, StageExecution, TaskExecution
+from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize.queue.sqlite_queue import SqliteQueue
+from stabilize.queue.processor import QueueProcessor
+from stabilize.orchestrator import Orchestrator
+from stabilize.tasks.interface import Task
+from stabilize.tasks.result import TaskResult
+from stabilize.tasks.registry import TaskRegistry
+from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
+from stabilize.handlers.complete_stage import CompleteStageHandler
+from stabilize.handlers.complete_task import CompleteTaskHandler
+from stabilize.handlers.run_task import RunTaskHandler
+from stabilize.handlers.start_workflow import StartWorkflowHandler
+from stabilize.handlers.start_stage import StartStageHandler
+from stabilize.handlers.start_task import StartTaskHandler
+
+
+class FetchDataTask(Task):
+    def execute(self, stage: StageExecution) -> TaskResult:
+        source = stage.context.get("source")
+        # Simulate fetching data from different sources
+        data = f"data_from_{source}"
+        return TaskResult.success(outputs={f"{source}_data": data})
+
+
+class AggregateTask(Task):
+    def execute(self, stage: StageExecution) -> TaskResult:
+        # Collect data from all upstream parallel stages
+        api_data = stage.context.get("api_data")
+        db_data = stage.context.get("db_data")
+        cache_data = stage.context.get("cache_data")
+        combined = f"{api_data} + {db_data} + {cache_data}"
+        return TaskResult.success(outputs={"combined_data": combined})
+
+
+def setup_pipeline_runner(store, queue):
+    registry = TaskRegistry()
+    registry.register("fetch", FetchDataTask)
+    registry.register("aggregate", AggregateTask)
+
+    processor = QueueProcessor(queue)
+    for h in [
+        StartWorkflowHandler(queue, store),
+        StartStageHandler(queue, store),
+        StartTaskHandler(queue, store),
+        RunTaskHandler(queue, store, registry),
+        CompleteTaskHandler(queue, store),
+        CompleteStageHandler(queue, store),
+        CompleteWorkflowHandler(queue, store),
+    ]:
+        processor.register_handler(h)
+
+    return processor, Orchestrator(queue)
+
+
+def main():
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    queue._create_table()
+    processor, orchestrator = setup_pipeline_runner(store, queue)
+
+    #        Start
+    #       /  |  \
+    #     API  DB  Cache    <- Run in parallel
+    #       \  |  /
+    #      Aggregate        <- Join point
+
+    workflow = Workflow.create(
+        application="parallel-fetch",
+        name="Parallel Data Fetch",
+        stages=[
+            StageExecution(
+                ref_id="api",
+                type="fetch",
+                name="Fetch from API",
+                context={"source": "api"},
+                tasks=[TaskExecution.create("Fetch API", "fetch", stage_start=True, stage_end=True)],
+            ),
+            StageExecution(
+                ref_id="db",
+                type="fetch",
+                name="Fetch from Database",
+                context={"source": "db"},
+                tasks=[TaskExecution.create("Fetch DB", "fetch", stage_start=True, stage_end=True)],
+            ),
+            StageExecution(
+                ref_id="cache",
+                type="fetch",
+                name="Fetch from Cache",
+                context={"source": "cache"},
+                tasks=[TaskExecution.create("Fetch Cache", "fetch", stage_start=True, stage_end=True)],
+            ),
+            StageExecution(
+                ref_id="aggregate",
+                type="aggregate",
+                name="Aggregate Results",
+                requisite_stage_ref_ids={"api", "db", "cache"},  # Wait for ALL three
+                context={},
+                tasks=[TaskExecution.create("Aggregate", "aggregate", stage_start=True, stage_end=True)],
+            ),
+        ],
+    )
+
+    store.store(workflow)
+    orchestrator.start(workflow)
+    processor.process_all(timeout=30.0)
+
+    result = store.retrieve(workflow.id)
+    print(f"Final status: {result.status}")
+    print(f"Combined data: {result.stages[-1].outputs.get('combined_data')}")
+
+
+if __name__ == "__main__":
+    main()
+
+===============================================================================
+10. COMPLETE IMPORTS REFERENCE
+===============================================================================
+
+# Core models
+from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
+
+# Persistence
+from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize.persistence.store import WorkflowStore
+
+# Queue
+from stabilize.queue.sqlite_queue import SqliteQueue
+from stabilize.queue.queue import Queue
+from stabilize.queue.processor import QueueProcessor
+
+# Orchestration
+from stabilize.orchestrator import Orchestrator
+
+# Tasks
+from stabilize.tasks.interface import Task, RetryableTask, SkippableTask
+from stabilize.tasks.result import TaskResult
+from stabilize.tasks.registry import TaskRegistry
+
+# Handlers (all 7 required)
+from stabilize.handlers.start_workflow import StartWorkflowHandler
+from stabilize.handlers.start_stage import StartStageHandler
+from stabilize.handlers.start_task import StartTaskHandler
+from stabilize.handlers.run_task import RunTaskHandler
+from stabilize.handlers.complete_task import CompleteTaskHandler
+from stabilize.handlers.complete_stage import CompleteStageHandler
+from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
+
+===============================================================================
+END OF REFERENCE
+===============================================================================
+'''
 
 # Migration tracking table
 MIGRATION_TABLE = "stabilize_migrations"
@@ -170,6 +904,11 @@ def mg_up(db_url: str | None = None) -> None:
         sys.exit(1)
 
 
+def prompt() -> None:
+    """Output comprehensive documentation for RAG systems and coding agents."""
+    print(PROMPT_TEXT)
+
+
 def mg_status(db_url: str | None = None) -> None:
     """Show migration status."""
     try:
@@ -245,12 +984,20 @@ def main() -> None:
         help="Database URL (postgres://user:pass@host:port/dbname)",
     )
 
+    # prompt command
+    subparsers.add_parser(
+        "prompt",
+        help="Output comprehensive RAG context for pipeline code generation",
+    )
+
     args = parser.parse_args()
 
     if args.command == "mg-up":
         mg_up(args.db_url)
     elif args.command == "mg-status":
         mg_status(args.db_url)
+    elif args.command == "prompt":
+        prompt()
     else:
         parser.print_help()
         sys.exit(1)
