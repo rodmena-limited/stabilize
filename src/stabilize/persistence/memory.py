@@ -11,9 +11,9 @@ import threading
 import time
 from collections.abc import Iterator
 
-from stabilize.models.workflow import PausedDetails, Workflow
 from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus
+from stabilize.models.workflow import PausedDetails, Workflow
 from stabilize.persistence.store import (
     WorkflowCriteria,
     WorkflowNotFoundError,

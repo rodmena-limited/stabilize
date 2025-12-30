@@ -7,11 +7,11 @@ from stabilize.persistence.factory import (
 )
 from stabilize.persistence.memory import InMemoryWorkflowStore
 from stabilize.persistence.postgres import PostgresWorkflowStore
+from stabilize.persistence.sqlite import SqliteWorkflowStore
 from stabilize.persistence.store import (
     WorkflowNotFoundError,
     WorkflowStore,
 )
-from stabilize.persistence.sqlite import SqliteWorkflowStore
 
 __all__ = [
     # Abstract interface

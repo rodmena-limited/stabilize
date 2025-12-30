@@ -11,8 +11,8 @@ from testcontainers.postgres import PostgresContainer  # type: ignore[import-unt
 from stabilize.models.stage import StageExecution
 from stabilize.persistence.connection import ConnectionManager, SingletonMeta
 from stabilize.persistence.postgres import PostgresWorkflowStore
-from stabilize.persistence.store import WorkflowStore
 from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize.persistence.store import WorkflowStore
 from stabilize.queue.queue import PostgresQueue, Queue
 from stabilize.queue.sqlite_queue import SqliteQueue
 from stabilize.tasks.interface import Task
@@ -171,15 +171,15 @@ def setup_stabilize(
     queue: Queue,
 ) -> tuple[Any, Any]:
     """Set up a complete pipeline runner with all handlers."""
-    from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
     from stabilize.handlers.complete_stage import CompleteStageHandler
     from stabilize.handlers.complete_task import CompleteTaskHandler
+    from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
     from stabilize.handlers.run_task import RunTaskHandler
-    from stabilize.handlers.start_workflow import StartWorkflowHandler
     from stabilize.handlers.start_stage import StartStageHandler
     from stabilize.handlers.start_task import StartTaskHandler
-    from stabilize.queue.processor import QueueProcessor
+    from stabilize.handlers.start_workflow import StartWorkflowHandler
     from stabilize.orchestrator import Orchestrator
+    from stabilize.queue.processor import QueueProcessor
     from stabilize.tasks.registry import TaskRegistry
 
     task_registry = TaskRegistry()

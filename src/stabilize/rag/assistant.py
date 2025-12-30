@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -12,18 +13,45 @@ from .cache import CachedEmbedding, EmbeddingCache
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
+# Load .env file if present (ragit does this too, but ensure it's loaded early)
+try:
+    from dotenv import load_dotenv
+
+    _env_path = Path.cwd() / ".env"
+    if _env_path.exists():
+        load_dotenv(_env_path)
+except ImportError:
+    pass  # dotenv not required if env vars are set directly
+
 
 class StabilizeRAG:
     """RAG assistant for generating Stabilize pipelines.
 
     Uses ragit for embeddings and LLM generation, with custom caching layer
     to persist embeddings in database.
+
+    Configuration:
+        - LLM generation uses ollama.com cloud (requires OLLAMA_API_KEY)
+        - Embeddings use local Ollama (ollama.com doesn't support embeddings)
+
+    Environment Variables:
+        OLLAMA_API_KEY: Required API key for ollama.com cloud
+        OLLAMA_BASE_URL: Override LLM URL (default: https://ollama.com)
+        OLLAMA_EMBEDDING_URL: Override embedding URL (default: http://localhost:11434)
     """
 
+    # Default URLs
+    DEFAULT_LLM_URL = "https://ollama.com"
+    DEFAULT_EMBEDDING_URL = "http://localhost:11434"
+
+    # Default models
     DEFAULT_EMBEDDING_MODEL = "nomic-embed-text:latest"
-    DEFAULT_LLM_MODEL = "llama3.1:70b"
+    DEFAULT_LLM_MODEL = "qwen3-vl:235b"
+
+    # Chunking defaults
     DEFAULT_CHUNK_SIZE = 512
-    DEFAULT_CHUNK_OVERLAP = 50
+    DEFAULT_CHUNK_OVERLAP = 100  # Increased overlap for better context continuity
+    DEFAULT_TOP_K = 10  # Retrieve more context chunks for better accuracy
 
     def __init__(
         self,
@@ -45,22 +73,40 @@ class StabilizeRAG:
         self._embedding_matrix: NDArray[np.float64] | None = None
 
     def _get_provider(self):  # type: ignore[no-untyped-def]
-        """Get or create OllamaProvider."""
+        """Get or create OllamaProvider with cloud LLM and local embeddings."""
         if self._provider is None:
             try:
                 from ragit import OllamaProvider
             except ImportError as e:
-                raise ImportError(
-                    "RAG support requires: pip install stabilize[rag]"
-                ) from e
-            self._provider = OllamaProvider()
+                raise ImportError("RAG support requires: pip install stabilize[rag]") from e
+
+            # Get configuration from environment or use defaults
+            llm_url = os.environ.get("OLLAMA_BASE_URL", self.DEFAULT_LLM_URL)
+            embedding_url = os.environ.get("OLLAMA_EMBEDDING_URL", self.DEFAULT_EMBEDDING_URL)
+            api_key = os.environ.get("OLLAMA_API_KEY")
+
+            # Validate API key if using cloud
+            if "ollama.com" in llm_url and not api_key:
+                raise RuntimeError(
+                    "OLLAMA_API_KEY environment variable is required for ollama.com.\n"
+                    "Set it in your .env file or export it:\n"
+                    "  export OLLAMA_API_KEY=your_api_key"
+                )
+
+            self._provider = OllamaProvider(
+                base_url=llm_url,
+                embedding_url=embedding_url,
+                api_key=api_key,
+            )
         return self._provider
 
-    def init(self, force: bool = False) -> int:
-        """Initialize embeddings from PROMPT_TEXT + examples/.
+    def init(self, force: bool = False, additional_paths: list[str] | None = None) -> int:
+        """Initialize embeddings from PROMPT_TEXT + examples/ + additional context.
 
         Args:
             force: If True, regenerate even if cache exists.
+            additional_paths: Optional list of file/directory paths to include as
+                additional training context.
 
         Returns:
             Number of embeddings cached.
@@ -70,7 +116,7 @@ class StabilizeRAG:
             return 0
 
         # Load documents
-        documents = self._load_documents()
+        documents = self._load_documents(additional_paths)
         if not documents:
             raise RuntimeError("No documents found to index")
 
@@ -106,21 +152,22 @@ class StabilizeRAG:
 
         return len(cached)
 
-    def generate(self, prompt: str, top_k: int = 5, temperature: float = 0.3) -> str:
+    def generate(self, prompt: str, top_k: int | None = None, temperature: float = 0.3) -> str:
         """Generate pipeline code from natural language prompt.
 
         Args:
             prompt: Natural language description of desired pipeline.
-            top_k: Number of context chunks to retrieve.
+            top_k: Number of context chunks to retrieve (default: 10).
             temperature: LLM temperature for generation.
 
         Returns:
             Generated Python code.
         """
+        if top_k is None:
+            top_k = self.DEFAULT_TOP_K
+
         if not self.cache.is_initialized(self.embedding_model):
-            raise RuntimeError(
-                "Run 'stabilize rag init' first to initialize embeddings"
-            )
+            raise RuntimeError("Run 'stabilize rag init' first to initialize embeddings")
 
         # Load cached embeddings
         self._load_cache()
@@ -131,9 +178,94 @@ class StabilizeRAG:
         # Generate code
         system_prompt = """You are a Stabilize workflow engine expert.
 Generate ONLY valid Python code that creates a working Stabilize pipeline.
-The code must be complete, runnable, and use the exact patterns from the context.
-Do NOT include markdown formatting, explanations, or code fences.
-Output ONLY the Python code."""
+
+CRITICAL: Follow these EXACT patterns - do not invent your own API calls.
+
+=== IMPORTS (copy exactly) ===
+from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
+from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize.queue.sqlite_queue import SqliteQueue
+from stabilize.queue.processor import QueueProcessor
+from stabilize.orchestrator import Orchestrator
+from stabilize.tasks.interface import Task
+from stabilize.tasks.result import TaskResult
+from stabilize.tasks.registry import TaskRegistry
+from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
+from stabilize.handlers.complete_stage import CompleteStageHandler
+from stabilize.handlers.complete_task import CompleteTaskHandler
+from stabilize.handlers.run_task import RunTaskHandler
+from stabilize.handlers.start_workflow import StartWorkflowHandler
+from stabilize.handlers.start_stage import StartStageHandler
+from stabilize.handlers.start_task import StartTaskHandler
+
+=== TASK PATTERN (execute takes stage, not context) ===
+class MyTask(Task):
+    def execute(self, stage: StageExecution) -> TaskResult:
+        value = stage.context.get("key")  # Read from stage.context
+        return TaskResult.success(outputs={"result": value})  # Use factory methods
+
+=== TASKRESULT FACTORY METHODS ===
+TaskResult.success(outputs={"key": "value"})  # Success with outputs
+TaskResult.terminal(error="Error message")     # Failure, halts pipeline
+
+=== WORKFLOWSTATUS ENUM VALUES (use exactly) ===
+WorkflowStatus.NOT_STARTED  # Initial state
+WorkflowStatus.RUNNING      # Currently executing
+WorkflowStatus.SUCCEEDED    # Completed successfully (NOT "COMPLETED")
+WorkflowStatus.TERMINAL     # Failed/halted
+
+=== SETUP PATTERN ===
+store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+queue._create_table()
+
+registry = TaskRegistry()
+registry.register("my_task", MyTask)
+
+processor = QueueProcessor(queue)
+handlers = [
+    StartWorkflowHandler(queue, store),
+    StartStageHandler(queue, store),
+    StartTaskHandler(queue, store),
+    RunTaskHandler(queue, store, registry),
+    CompleteTaskHandler(queue, store),
+    CompleteStageHandler(queue, store),
+    CompleteWorkflowHandler(queue, store),
+]
+for h in handlers:
+    processor.register_handler(h)
+
+orchestrator = Orchestrator(queue)  # Only takes queue!
+
+=== WORKFLOW PATTERN ===
+workflow = Workflow.create(
+    application="my-app",
+    name="My Pipeline",
+    stages=[
+        StageExecution(
+            ref_id="1",
+            type="my_task",
+            name="My Stage",
+            context={"key": "value"},
+            tasks=[
+                TaskExecution.create(
+                    name="Run Task",
+                    implementing_class="my_task",  # Must match registry.register()
+                    stage_start=True,  # REQUIRED for first task
+                    stage_end=True,    # REQUIRED for last task
+                ),
+            ],
+        ),
+    ],
+)
+
+=== EXECUTION ===
+store.store(workflow)
+orchestrator.start(workflow)
+processor.process_all(timeout=30.0)
+result = store.retrieve(workflow.id)
+
+Output ONLY valid Python code. No markdown, no explanations."""
 
         provider = self._get_provider()
         response = provider.generate(
@@ -160,8 +292,16 @@ Remember: Output ONLY valid Python code, no markdown, no explanations.""",
 
         return code.strip()
 
-    def _load_documents(self) -> list[dict[str, str]]:
-        """Load PROMPT_TEXT + bundled examples/*.py as documents."""
+    def _load_documents(self, additional_paths: list[str] | None = None) -> list[dict[str, str]]:
+        """Load PROMPT_TEXT + bundled examples/*.py + additional context as documents.
+
+        Args:
+            additional_paths: Optional list of file/directory paths to include as
+                additional training context.
+
+        Returns:
+            List of documents with 'id' and 'content' keys.
+        """
         from stabilize.cli import PROMPT_TEXT
 
         docs = [{"id": "prompt_reference", "content": PROMPT_TEXT}]
@@ -191,18 +331,39 @@ Remember: Output ONLY valid Python code, no markdown, no explanations.""",
                 content = py_file.read_text()
                 docs.append({"id": doc_id, "content": content})
 
+        # Load additional context from user-provided paths
+        if additional_paths:
+            for path_str in additional_paths:
+                path = Path(path_str)
+                if path.is_file():
+                    # Single file
+                    try:
+                        content = path.read_text()
+                        docs.append({"id": f"additional:{path.name}", "content": content})
+                    except Exception as e:
+                        print(f"Warning: Could not read {path}: {e}")
+                elif path.is_dir():
+                    # Directory - load all .py files recursively
+                    for py_file in path.rglob("*.py"):
+                        if py_file.name == "__init__.py":
+                            continue
+                        try:
+                            content = py_file.read_text()
+                            rel_path = py_file.relative_to(path)
+                            docs.append({"id": f"additional:{rel_path}", "content": content})
+                        except Exception as e:
+                            print(f"Warning: Could not read {py_file}: {e}")
+                else:
+                    print(f"Warning: Path does not exist: {path}")
+
         return docs
 
-    def _chunk_documents(
-        self, documents: list[dict[str, str]]
-    ) -> list[dict[str, str | int]]:
+    def _chunk_documents(self, documents: list[dict[str, str]]) -> list[dict[str, str | int]]:
         """Split documents into overlapping chunks."""
         try:
             from ragit import chunk_text
         except ImportError as e:
-            raise ImportError(
-                "RAG support requires: pip install stabilize[rag]"
-            ) from e
+            raise ImportError("RAG support requires: pip install stabilize[rag]") from e
 
         all_chunks = []
         for doc in documents:
@@ -230,9 +391,7 @@ Remember: Output ONLY valid Python code, no markdown, no explanations.""",
 
         self._cached_embeddings = self.cache.load(self.embedding_model)
         if not self._cached_embeddings:
-            raise RuntimeError(
-                f"No embeddings found for model {self.embedding_model}"
-            )
+            raise RuntimeError(f"No embeddings found for model {self.embedding_model}")
 
         # Build normalized embedding matrix for fast similarity search
         embeddings = [e.embedding for e in self._cached_embeddings]
@@ -274,8 +433,6 @@ Remember: Output ONLY valid Python code, no markdown, no explanations.""",
         for idx in top_indices:
             emb = self._cached_embeddings[idx]
             score = similarities[idx]
-            context_parts.append(
-                f"--- {emb.doc_id} (relevance: {score:.3f}) ---\n{emb.content}"
-            )
+            context_parts.append(f"--- {emb.doc_id} (relevance: {score:.3f}) ---\n{emb.content}")
 
         return "\n\n".join(context_parts)

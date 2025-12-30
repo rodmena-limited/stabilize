@@ -179,9 +179,7 @@ class PostgresEmbeddingCache(EmbeddingCache):
         try:
             import psycopg
         except ImportError as e:
-            raise ImportError(
-                "PostgreSQL support requires: pip install stabilize[postgres]"
-            ) from e
+            raise ImportError("PostgreSQL support requires: pip install stabilize[postgres]") from e
 
         if self._conn is None or self._conn.closed:
             self._conn = psycopg.connect(self.connection_string)
@@ -208,12 +206,6 @@ class PostgresEmbeddingCache(EmbeddingCache):
                     INSERT INTO rag_embeddings
                     (doc_id, content, embedding, embedding_model, chunk_index)
                     VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT (doc_id) DO UPDATE SET
-                        content = EXCLUDED.content,
-                        embedding = EXCLUDED.embedding,
-                        embedding_model = EXCLUDED.embedding_model,
-                        chunk_index = EXCLUDED.chunk_index,
-                        updated_at = NOW()
                     """,
                     (
                         emb.doc_id,

@@ -1,11 +1,10 @@
 """Golden Standard Pipeline Test - Parameterized for both backends."""
 
-
 from stabilize.context.stage_context import StageContext
-from stabilize.models.workflow import Workflow
 from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.task import TaskExecution
+from stabilize.models.workflow import Workflow
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue.queue import Queue
 from stabilize.tasks.interface import Task

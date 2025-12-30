@@ -9,8 +9,8 @@ from stabilize.dag.topological import (
     get_execution_layers,
     topological_sort,
 )
-from stabilize.models.workflow import Workflow
 from stabilize.models.stage import StageExecution
+from stabilize.models.workflow import Workflow
 
 
 def create_test_execution(*stages: StageExecution) -> Workflow:

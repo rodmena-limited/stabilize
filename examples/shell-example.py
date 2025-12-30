@@ -18,24 +18,23 @@ from typing import Any
 # Configure logging before importing stabilize modules
 logging.basicConfig(level=logging.ERROR)  # Suppress all but errors
 
-from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
-from stabilize.persistence.sqlite import SqliteWorkflowStore
-from stabilize.queue.sqlite_queue import SqliteQueue
-from stabilize.queue.processor import QueueProcessor
-from stabilize.queue.queue import Queue
-from stabilize.persistence.store import WorkflowStore
-from stabilize.orchestrator import Orchestrator
-from stabilize.tasks.interface import Task
-from stabilize.tasks.result import TaskResult
-from stabilize.tasks.registry import TaskRegistry
-from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
+from stabilize import StageExecution, TaskExecution, Workflow, WorkflowStatus
 from stabilize.handlers.complete_stage import CompleteStageHandler
 from stabilize.handlers.complete_task import CompleteTaskHandler
+from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
 from stabilize.handlers.run_task import RunTaskHandler
-from stabilize.handlers.start_workflow import StartWorkflowHandler
 from stabilize.handlers.start_stage import StartStageHandler
 from stabilize.handlers.start_task import StartTaskHandler
-
+from stabilize.handlers.start_workflow import StartWorkflowHandler
+from stabilize.orchestrator import Orchestrator
+from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize.persistence.store import WorkflowStore
+from stabilize.queue.processor import QueueProcessor
+from stabilize.queue.queue import Queue
+from stabilize.queue.sqlite_queue import SqliteQueue
+from stabilize.tasks.interface import Task
+from stabilize.tasks.registry import TaskRegistry
+from stabilize.tasks.result import TaskResult
 
 # =============================================================================
 # Custom Task: ShellTask
@@ -81,9 +80,7 @@ class ShellTask(Task):
                 print(f"  [ShellTask] Failed with exit code {result.returncode}")
                 # Use failed_continue to allow workflow to proceed
                 if stage.context.get("continue_on_failure"):
-                    return TaskResult.failed_continue(
-                        error=f"Exit code {result.returncode}", outputs=outputs
-                    )
+                    return TaskResult.failed_continue(error=f"Exit code {result.returncode}", outputs=outputs)
                 return TaskResult.terminal(
                     error=f"Command failed with exit code {result.returncode}",
                     context=outputs,
@@ -99,9 +96,7 @@ class ShellTask(Task):
 # =============================================================================
 
 
-def setup_pipeline_runner(
-    store: WorkflowStore, queue: Queue
-) -> tuple[QueueProcessor, Orchestrator]:
+def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with ShellTask registered."""
     # Create task registry and register our ShellTask
     task_registry = TaskRegistry()
@@ -177,7 +172,7 @@ def example_simple():
     # Check result
     result = store.retrieve(workflow.id)
     print(f"\nWorkflow Status: {result.status}")
-    print(f"Stage Output (first 200 chars):")
+    print("Stage Output (first 200 chars):")
     stdout = result.stages[0].outputs.get("stdout", "")
     print(stdout[:200] + "..." if len(stdout) > 200 else stdout)
 

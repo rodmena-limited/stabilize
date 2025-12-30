@@ -24,24 +24,23 @@ from typing import Any
 
 logging.basicConfig(level=logging.ERROR)
 
-from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
-from stabilize.persistence.sqlite import SqliteWorkflowStore
-from stabilize.queue.sqlite_queue import SqliteQueue
-from stabilize.queue.processor import QueueProcessor
-from stabilize.queue.queue import Queue
-from stabilize.persistence.store import WorkflowStore
-from stabilize.orchestrator import Orchestrator
-from stabilize.tasks.interface import Task
-from stabilize.tasks.result import TaskResult
-from stabilize.tasks.registry import TaskRegistry
-from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
+from stabilize import StageExecution, TaskExecution, Workflow, WorkflowStatus
 from stabilize.handlers.complete_stage import CompleteStageHandler
 from stabilize.handlers.complete_task import CompleteTaskHandler
+from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
 from stabilize.handlers.run_task import RunTaskHandler
-from stabilize.handlers.start_workflow import StartWorkflowHandler
 from stabilize.handlers.start_stage import StartStageHandler
 from stabilize.handlers.start_task import StartTaskHandler
-
+from stabilize.handlers.start_workflow import StartWorkflowHandler
+from stabilize.orchestrator import Orchestrator
+from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize.persistence.store import WorkflowStore
+from stabilize.queue.processor import QueueProcessor
+from stabilize.queue.queue import Queue
+from stabilize.queue.sqlite_queue import SqliteQueue
+from stabilize.tasks.interface import Task
+from stabilize.tasks.registry import TaskRegistry
+from stabilize.tasks.result import TaskResult
 
 # =============================================================================
 # Custom Task: OllamaTask
@@ -96,9 +95,7 @@ class OllamaTask(Task):
             health_url = f"{host}/api/tags"
             urllib.request.urlopen(health_url, timeout=5)
         except (urllib.error.URLError, TimeoutError):
-            return TaskResult.terminal(
-                error=f"Ollama not available at {host}. Ensure Ollama is running."
-            )
+            return TaskResult.terminal(error=f"Ollama not available at {host}. Ensure Ollama is running.")
 
         # Build request payload
         payload: dict[str, Any] = {
@@ -164,17 +161,13 @@ class OllamaTask(Task):
 
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8") if e.fp else ""
-            return TaskResult.terminal(
-                error=f"Ollama API error ({e.code}): {error_body}"
-            )
+            return TaskResult.terminal(error=f"Ollama API error ({e.code}): {error_body}")
 
         except urllib.error.URLError as e:
             return TaskResult.terminal(error=f"Connection error: {e.reason}")
 
         except TimeoutError:
-            return TaskResult.terminal(
-                error=f"Request timed out after {timeout}s"
-            )
+            return TaskResult.terminal(error=f"Request timed out after {timeout}s")
 
         except json.JSONDecodeError as e:
             return TaskResult.terminal(error=f"Invalid JSON response: {e}")
@@ -185,9 +178,7 @@ class OllamaTask(Task):
 # =============================================================================
 
 
-def setup_pipeline_runner(
-    store: WorkflowStore, queue: Queue
-) -> tuple[QueueProcessor, Orchestrator]:
+def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with OllamaTask registered."""
     task_registry = TaskRegistry()
     task_registry.register("ollama", OllamaTask)

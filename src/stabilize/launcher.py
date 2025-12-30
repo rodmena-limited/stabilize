@@ -9,16 +9,16 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from stabilize.models.workflow import (
-    Workflow,
-    Trigger,
-)
 from stabilize.models.stage import StageExecution
+from stabilize.models.workflow import (
+    Trigger,
+    Workflow,
+)
 from stabilize.stages.builder import StageDefinitionBuilderFactory
 
 if TYPE_CHECKING:
-    from stabilize.persistence.store import WorkflowStore
     from stabilize.orchestrator import Orchestrator
+    from stabilize.persistence.store import WorkflowStore
     from stabilize.tasks.registry import TaskRegistry
 
 logger = logging.getLogger(__name__)

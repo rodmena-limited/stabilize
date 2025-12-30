@@ -1,17 +1,16 @@
 """Message queue system for pipeline execution."""
 
 from stabilize.queue.messages import (
-    CancelWorkflow,
     CancelStage,
-    CompleteWorkflow,
+    CancelWorkflow,
     CompleteStage,
     CompleteTask,
+    CompleteWorkflow,
     ContinueParentStage,
-    WorkflowLevel,
-    InvalidWorkflowId,
     InvalidStageId,
     InvalidTaskId,
     InvalidTaskType,
+    InvalidWorkflowId,
     Message,
     PauseTask,
     RestartStage,
@@ -19,10 +18,11 @@ from stabilize.queue.messages import (
     RunTask,
     SkipStage,
     StageLevel,
-    StartWorkflow,
     StartStage,
     StartTask,
+    StartWorkflow,
     TaskLevel,
+    WorkflowLevel,
 )
 from stabilize.queue.queue import InMemoryQueue, PostgresQueue, Queue
 from stabilize.queue.sqlite_queue import SqliteQueue

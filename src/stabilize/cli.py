@@ -909,8 +909,12 @@ def prompt() -> None:
     print(PROMPT_TEXT)
 
 
-def rag_init(db_url: str | None = None, force: bool = False) -> None:
-    """Initialize RAG embeddings from examples and documentation."""
+def rag_init(
+    db_url: str | None = None,
+    force: bool = False,
+    additional_context: list[str] | None = None,
+) -> None:
+    """Initialize RAG embeddings from examples, documentation, and additional context."""
     try:
         from stabilize.rag import StabilizeRAG, get_cache
     except ImportError:
@@ -921,11 +925,24 @@ def rag_init(db_url: str | None = None, force: bool = False) -> None:
     rag = StabilizeRAG(cache)
 
     print("Initializing embeddings...")
-    count = rag.init(force=force)
+    count = rag.init(force=force, additional_paths=additional_context)
     if count > 0:
         print(f"Cached {count} embeddings")
     else:
         print("Embeddings already initialized (use --force to regenerate)")
+
+
+def rag_clear(db_url: str | None = None) -> None:
+    """Clear all cached embeddings."""
+    try:
+        from stabilize.rag import get_cache
+    except ImportError:
+        print("Error: RAG support requires: pip install stabilize[rag]")
+        sys.exit(1)
+
+    cache = get_cache(db_url)
+    cache.clear()
+    print("Embedding cache cleared")
 
 
 def rag_generate(
@@ -956,7 +973,19 @@ def rag_generate(
 
     if execute:
         print("\n--- Executing generated code ---\n")
-        exec(code, {"__name__": "__main__"})
+        try:
+            exec(code, {"__name__": "__main__"})
+        except ImportError as e:
+            print("\n--- Execution failed: Import error ---")
+            print(f"Error: {e}")
+            print("\nThe generated code has incorrect imports.")
+            print("Review the imports above and compare with examples/shell-example.py")
+            sys.exit(1)
+        except Exception as e:
+            print("\n--- Execution failed ---")
+            print(f"Error: {type(e).__name__}: {e}")
+            print("\nThe generated code may need manual adjustments.")
+            sys.exit(1)
 
 
 def mg_status(db_url: str | None = None) -> None:
@@ -980,12 +1009,15 @@ def mg_status(db_url: str | None = None) -> None:
         with psycopg.connect(conninfo) as conn:
             with conn.cursor() as cur:
                 # Check if tracking table exists
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT EXISTS (
                         SELECT FROM information_schema.tables
                         WHERE table_name = %s
                     )
-                """, (MIGRATION_TABLE,))
+                """,
+                    (MIGRATION_TABLE,),
+                )
                 table_exists = cur.fetchone()[0]
 
                 applied = {}
@@ -1061,6 +1093,12 @@ def main() -> None:
         action="store_true",
         help="Force regeneration even if cache exists",
     )
+    init_parser.add_argument(
+        "--additional-context",
+        action="append",
+        metavar="PATH",
+        help="Additional file or directory to include in training context (can be specified multiple times)",
+    )
 
     # rag generate
     gen_parser = rag_subparsers.add_parser(
@@ -1084,8 +1122,8 @@ def main() -> None:
     gen_parser.add_argument(
         "--top-k",
         type=int,
-        default=5,
-        help="Number of context chunks to retrieve (default: 5)",
+        default=10,
+        help="Number of context chunks to retrieve (default: 10)",
     )
     gen_parser.add_argument(
         "--temperature",
@@ -1096,7 +1134,17 @@ def main() -> None:
     gen_parser.add_argument(
         "--llm-model",
         default=None,
-        help="LLM model for generation (default: llama3.1:70b)",
+        help="LLM model for generation (default: qwen3-vl:235b)",
+    )
+
+    # rag clear
+    clear_parser = rag_subparsers.add_parser(
+        "clear",
+        help="Clear all cached embeddings",
+    )
+    clear_parser.add_argument(
+        "--db-url",
+        help="Database URL for caching",
     )
 
     args = parser.parse_args()
@@ -1109,7 +1157,7 @@ def main() -> None:
         prompt()
     elif args.command == "rag":
         if args.rag_command == "init":
-            rag_init(args.db_url, args.force)
+            rag_init(args.db_url, args.force, args.additional_context)
         elif args.rag_command == "generate":
             rag_generate(
                 args.prompt,
@@ -1119,6 +1167,8 @@ def main() -> None:
                 args.temperature,
                 args.llm_model,
             )
+        elif args.rag_command == "clear":
+            rag_clear(args.db_url)
         else:
             rag_parser.print_help()
             sys.exit(1)

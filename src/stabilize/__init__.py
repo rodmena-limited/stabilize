@@ -11,10 +11,10 @@ workflows with full support for:
 
 __version__ = "0.9.0"
 
-from stabilize.models.workflow import Workflow
 from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.task import TaskExecution
+from stabilize.models.workflow import Workflow
 from stabilize.tasks.interface import RetryableTask, Task
 from stabilize.tasks.result import TaskResult
 

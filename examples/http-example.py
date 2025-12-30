@@ -24,24 +24,23 @@ from typing import Any
 
 logging.basicConfig(level=logging.ERROR)
 
-from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
-from stabilize.persistence.sqlite import SqliteWorkflowStore
-from stabilize.queue.sqlite_queue import SqliteQueue
-from stabilize.queue.processor import QueueProcessor
-from stabilize.queue.queue import Queue
-from stabilize.persistence.store import WorkflowStore
-from stabilize.orchestrator import Orchestrator
-from stabilize.tasks.interface import Task
-from stabilize.tasks.result import TaskResult
-from stabilize.tasks.registry import TaskRegistry
-from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
+from stabilize import StageExecution, TaskExecution, Workflow
 from stabilize.handlers.complete_stage import CompleteStageHandler
 from stabilize.handlers.complete_task import CompleteTaskHandler
+from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
 from stabilize.handlers.run_task import RunTaskHandler
-from stabilize.handlers.start_workflow import StartWorkflowHandler
 from stabilize.handlers.start_stage import StartStageHandler
 from stabilize.handlers.start_task import StartTaskHandler
-
+from stabilize.handlers.start_workflow import StartWorkflowHandler
+from stabilize.orchestrator import Orchestrator
+from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize.persistence.store import WorkflowStore
+from stabilize.queue.processor import QueueProcessor
+from stabilize.queue.queue import Queue
+from stabilize.queue.sqlite_queue import SqliteQueue
+from stabilize.tasks.interface import Task
+from stabilize.tasks.registry import TaskRegistry
+from stabilize.tasks.result import TaskResult
 
 # =============================================================================
 # Custom Task: HTTPTask
@@ -86,9 +85,7 @@ class HTTPTask(Task):
             return TaskResult.terminal(error="No 'url' specified in context")
 
         if method not in self.SUPPORTED_METHODS:
-            return TaskResult.terminal(
-                error=f"Unsupported method '{method}'. Supported: {self.SUPPORTED_METHODS}"
-            )
+            return TaskResult.terminal(error=f"Unsupported method '{method}'. Supported: {self.SUPPORTED_METHODS}")
 
         # Handle JSON body
         if json_body is not None:
@@ -158,9 +155,7 @@ class HTTPTask(Task):
 # =============================================================================
 
 
-def setup_pipeline_runner(
-    store: WorkflowStore, queue: Queue
-) -> tuple[QueueProcessor, Orchestrator]:
+def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with HTTPTask registered."""
     task_registry = TaskRegistry()
     task_registry.register("http", HTTPTask)

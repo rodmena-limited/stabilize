@@ -19,8 +19,8 @@ from stabilize.queue.messages import (
 )
 
 if TYPE_CHECKING:
-    from stabilize.models.workflow import Workflow
     from stabilize.models.stage import StageExecution
+    from stabilize.models.workflow import Workflow
 
 logger = logging.getLogger(__name__)
 

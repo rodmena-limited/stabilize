@@ -13,15 +13,15 @@ import time
 from collections.abc import Iterator
 from typing import Any
 
-from stabilize.models.workflow import (
-    WorkflowType,
-    PausedDetails,
-    Workflow,
-    Trigger,
-)
 from stabilize.models.stage import StageExecution, SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.task import TaskExecution
+from stabilize.models.workflow import (
+    PausedDetails,
+    Trigger,
+    Workflow,
+    WorkflowType,
+)
 from stabilize.persistence.store import (
     WorkflowCriteria,
     WorkflowNotFoundError,

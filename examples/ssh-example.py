@@ -22,24 +22,23 @@ from typing import Any
 
 logging.basicConfig(level=logging.ERROR)
 
-from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
-from stabilize.persistence.sqlite import SqliteWorkflowStore
-from stabilize.queue.sqlite_queue import SqliteQueue
-from stabilize.queue.processor import QueueProcessor
-from stabilize.queue.queue import Queue
-from stabilize.persistence.store import WorkflowStore
-from stabilize.orchestrator import Orchestrator
-from stabilize.tasks.interface import Task
-from stabilize.tasks.result import TaskResult
-from stabilize.tasks.registry import TaskRegistry
-from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
+from stabilize import StageExecution, TaskExecution, Workflow, WorkflowStatus
 from stabilize.handlers.complete_stage import CompleteStageHandler
 from stabilize.handlers.complete_task import CompleteTaskHandler
+from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
 from stabilize.handlers.run_task import RunTaskHandler
-from stabilize.handlers.start_workflow import StartWorkflowHandler
 from stabilize.handlers.start_stage import StartStageHandler
 from stabilize.handlers.start_task import StartTaskHandler
-
+from stabilize.handlers.start_workflow import StartWorkflowHandler
+from stabilize.orchestrator import Orchestrator
+from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize.persistence.store import WorkflowStore
+from stabilize.queue.processor import QueueProcessor
+from stabilize.queue.queue import Queue
+from stabilize.queue.sqlite_queue import SqliteQueue
+from stabilize.tasks.interface import Task
+from stabilize.tasks.registry import TaskRegistry
+from stabilize.tasks.result import TaskResult
 
 # =============================================================================
 # Custom Task: SSHTask
@@ -97,9 +96,7 @@ class SSHTask(Task):
                 timeout=5,
             )
         except (FileNotFoundError, subprocess.TimeoutExpired):
-            return TaskResult.terminal(
-                error="SSH client not available. Ensure ssh is installed."
-            )
+            return TaskResult.terminal(error="SSH client not available. Ensure ssh is installed.")
 
         # Build SSH command
         ssh_cmd = ["ssh"]
@@ -185,9 +182,7 @@ class SSHTask(Task):
 # =============================================================================
 
 
-def setup_pipeline_runner(
-    store: WorkflowStore, queue: Queue
-) -> tuple[QueueProcessor, Orchestrator]:
+def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with SSHTask registered."""
     task_registry = TaskRegistry()
     task_registry.register("ssh", SSHTask)

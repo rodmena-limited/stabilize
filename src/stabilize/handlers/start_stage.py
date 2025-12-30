@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
-    CompleteWorkflow,
     CompleteStage,
+    CompleteWorkflow,
     SkipStage,
     StartStage,
     StartTask,

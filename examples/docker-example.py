@@ -15,31 +15,29 @@ Run with:
     python examples/docker-example.py
 """
 
-import json
 import logging
 import subprocess
 from typing import Any
 
 logging.basicConfig(level=logging.ERROR)
 
-from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
-from stabilize.persistence.sqlite import SqliteWorkflowStore
-from stabilize.queue.sqlite_queue import SqliteQueue
-from stabilize.queue.processor import QueueProcessor
-from stabilize.queue.queue import Queue
-from stabilize.persistence.store import WorkflowStore
-from stabilize.orchestrator import Orchestrator
-from stabilize.tasks.interface import Task
-from stabilize.tasks.result import TaskResult
-from stabilize.tasks.registry import TaskRegistry
-from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
+from stabilize import StageExecution, TaskExecution, Workflow, WorkflowStatus
 from stabilize.handlers.complete_stage import CompleteStageHandler
 from stabilize.handlers.complete_task import CompleteTaskHandler
+from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
 from stabilize.handlers.run_task import RunTaskHandler
-from stabilize.handlers.start_workflow import StartWorkflowHandler
 from stabilize.handlers.start_stage import StartStageHandler
 from stabilize.handlers.start_task import StartTaskHandler
-
+from stabilize.handlers.start_workflow import StartWorkflowHandler
+from stabilize.orchestrator import Orchestrator
+from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize.persistence.store import WorkflowStore
+from stabilize.queue.processor import QueueProcessor
+from stabilize.queue.queue import Queue
+from stabilize.queue.sqlite_queue import SqliteQueue
+from stabilize.tasks.interface import Task
+from stabilize.tasks.registry import TaskRegistry
+from stabilize.tasks.result import TaskResult
 
 # =============================================================================
 # Custom Task: DockerTask
@@ -82,9 +80,7 @@ class DockerTask(Task):
         timeout = stage.context.get("timeout", 300)
 
         if action not in self.SUPPORTED_ACTIONS:
-            return TaskResult.terminal(
-                error=f"Unsupported action '{action}'. Supported: {self.SUPPORTED_ACTIONS}"
-            )
+            return TaskResult.terminal(error=f"Unsupported action '{action}'. Supported: {self.SUPPORTED_ACTIONS}")
 
         # Check Docker availability
         try:
@@ -95,9 +91,7 @@ class DockerTask(Task):
                 check=True,
             )
         except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-            return TaskResult.terminal(
-                error="Docker is not available. Ensure Docker is installed and running."
-            )
+            return TaskResult.terminal(error="Docker is not available. Ensure Docker is installed and running.")
 
         # Build command based on action
         try:
@@ -132,7 +126,7 @@ class DockerTask(Task):
                         break
 
             if result.returncode == 0:
-                print(f"  [DockerTask] Success")
+                print("  [DockerTask] Success")
                 return TaskResult.success(outputs=outputs)
             else:
                 print(f"  [DockerTask] Failed with exit code {result.returncode}")
@@ -318,9 +312,7 @@ class DockerTask(Task):
 # =============================================================================
 
 
-def setup_pipeline_runner(
-    store: WorkflowStore, queue: Queue
-) -> tuple[QueueProcessor, Orchestrator]:
+def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with DockerTask registered."""
     task_registry = TaskRegistry()
     task_registry.register("docker", DockerTask)

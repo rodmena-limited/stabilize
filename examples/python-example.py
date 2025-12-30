@@ -25,24 +25,23 @@ from typing import Any
 
 logging.basicConfig(level=logging.ERROR)
 
-from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
-from stabilize.persistence.sqlite import SqliteWorkflowStore
-from stabilize.queue.sqlite_queue import SqliteQueue
-from stabilize.queue.processor import QueueProcessor
-from stabilize.queue.queue import Queue
-from stabilize.persistence.store import WorkflowStore
-from stabilize.orchestrator import Orchestrator
-from stabilize.tasks.interface import Task
-from stabilize.tasks.result import TaskResult
-from stabilize.tasks.registry import TaskRegistry
-from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
+from stabilize import StageExecution, TaskExecution, Workflow
 from stabilize.handlers.complete_stage import CompleteStageHandler
 from stabilize.handlers.complete_task import CompleteTaskHandler
+from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
 from stabilize.handlers.run_task import RunTaskHandler
-from stabilize.handlers.start_workflow import StartWorkflowHandler
 from stabilize.handlers.start_stage import StartStageHandler
 from stabilize.handlers.start_task import StartTaskHandler
-
+from stabilize.handlers.start_workflow import StartWorkflowHandler
+from stabilize.orchestrator import Orchestrator
+from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize.persistence.store import WorkflowStore
+from stabilize.queue.processor import QueueProcessor
+from stabilize.queue.queue import Queue
+from stabilize.queue.sqlite_queue import SqliteQueue
+from stabilize.tasks.interface import Task
+from stabilize.tasks.registry import TaskRegistry
+from stabilize.tasks.result import TaskResult
 
 # =============================================================================
 # Custom Task: PythonTask
@@ -74,7 +73,7 @@ class PythonTask(Task):
     """
 
     # Wrapper template that handles INPUT/RESULT
-    WRAPPER_TEMPLATE = '''
+    WRAPPER_TEMPLATE = """
 import json
 import sys
 
@@ -89,7 +88,7 @@ if 'RESULT' in dir():
     print("__RESULT_START__")
     print(json.dumps(RESULT))
     print("__RESULT_END__")
-'''
+"""
 
     def execute(self, stage: StageExecution) -> TaskResult:
         script = stage.context.get("script")
@@ -100,14 +99,10 @@ if 'RESULT' in dir():
         timeout = stage.context.get("timeout", 60)
 
         if not script and not script_file:
-            return TaskResult.terminal(
-                error="Either 'script' or 'script_file' must be specified"
-            )
+            return TaskResult.terminal(error="Either 'script' or 'script_file' must be specified")
 
         if script and script_file:
-            return TaskResult.terminal(
-                error="Cannot specify both 'script' and 'script_file'"
-            )
+            return TaskResult.terminal(error="Cannot specify both 'script' and 'script_file'")
 
         # Handle script file
         if script_file:
@@ -125,9 +120,7 @@ if 'RESULT' in dir():
         )
 
         # Write to temp file and execute
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as tmp:
             tmp.write(wrapped_script)
             tmp.flush()
             tmp_path = tmp.name
@@ -158,8 +151,8 @@ if 'RESULT' in dir():
 
                 # Clean stdout
                 stdout = (
-                    stdout[:stdout.index("__RESULT_START__")] +
-                    stdout[stdout.index("__RESULT_END__") + len("__RESULT_END__\n"):]
+                    stdout[: stdout.index("__RESULT_START__")]
+                    + stdout[stdout.index("__RESULT_END__") + len("__RESULT_END__\n") :]
                 ).strip()
 
             outputs = {
@@ -191,9 +184,7 @@ if 'RESULT' in dir():
 # =============================================================================
 
 
-def setup_pipeline_runner(
-    store: WorkflowStore, queue: Queue
-) -> tuple[QueueProcessor, Orchestrator]:
+def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with PythonTask registered."""
     task_registry = TaskRegistry()
     task_registry.register("python", PythonTask)

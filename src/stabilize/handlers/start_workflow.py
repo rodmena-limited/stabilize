@@ -15,8 +15,8 @@ from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
     CancelWorkflow,
-    StartWorkflow,
     StartStage,
+    StartWorkflow,
 )
 
 if TYPE_CHECKING:

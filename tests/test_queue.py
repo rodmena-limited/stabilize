@@ -3,7 +3,7 @@
 from datetime import timedelta
 
 from stabilize.models.status import WorkflowStatus
-from stabilize.queue.messages import CompleteTask, StartWorkflow, StartStage
+from stabilize.queue.messages import CompleteTask, StartStage, StartWorkflow
 from stabilize.queue.queue import Queue
 
 
