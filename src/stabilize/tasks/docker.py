@@ -199,3 +199,56 @@ class DockerTask(Task):
             return cmd
         else:
             raise ValueError(f"Unknown action: {action}")
+
+    def _build_run_command(self, context: dict[str, Any]) -> list[str]:
+        """Build docker run command."""
+        image = context.get("image")
+        if not image:
+            raise ValueError("'image' is required for run action")
+
+        cmd = ["docker", "run"]
+
+        # Container name
+        if context.get("name"):
+            cmd.extend(["--name", context["name"]])
+
+        # Remove after exit
+        if context.get("remove", True):
+            cmd.append("--rm")
+
+        # Detach mode
+        if context.get("detach"):
+            cmd.append("-d")
+
+        # Volumes
+        for vol in context.get("volumes", []):
+            cmd.extend(["-v", vol])
+
+        # Ports
+        for port in context.get("ports", []):
+            cmd.extend(["-p", port])
+
+        # Environment variables
+        for key, value in context.get("environment", {}).items():
+            cmd.extend(["-e", f"{key}={value}"])
+
+        # Working directory
+        if context.get("workdir"):
+            cmd.extend(["-w", context["workdir"]])
+
+        # Network
+        if context.get("network"):
+            cmd.extend(["--network", context["network"]])
+
+        # Image
+        cmd.append(image)
+
+        # Command
+        container_cmd = context.get("command")
+        if container_cmd:
+            if isinstance(container_cmd, str):
+                cmd.extend(container_cmd.split())
+            else:
+                cmd.extend(container_cmd)
+
+        return cmd
