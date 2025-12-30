@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypedDict
 
 import numpy as np
 
@@ -12,6 +12,14 @@ from .cache import CachedEmbedding, EmbeddingCache
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+
+
+class ChunkDict(TypedDict):
+    """Type for document chunk dictionary."""
+
+    doc_id: str
+    content: str
+    chunk_index: int
 
 # Load .env file if present (ragit does this too, but ensure it's loaded early)
 try:
@@ -72,11 +80,11 @@ class StabilizeRAG:
         self._cached_embeddings: list[CachedEmbedding] | None = None
         self._embedding_matrix: NDArray[np.float64] | None = None
 
-    def _get_provider(self):  # type: ignore[no-untyped-def]
+    def _get_provider(self) -> Any:
         """Get or create OllamaProvider with cloud LLM and local embeddings."""
         if self._provider is None:
             try:
-                from ragit import OllamaProvider
+                from ragit import OllamaProvider  # type: ignore[import-untyped]
             except ImportError as e:
                 raise ImportError("RAG support requires: pip install stabilize[rag]") from e
 
@@ -282,7 +290,7 @@ Remember: Output ONLY valid Python code, no markdown, no explanations.""",
         )
 
         # Clean up response (remove any markdown if present)
-        code = response.text.strip()
+        code: str = response.text.strip()
         if code.startswith("```python"):
             code = code[9:]
         if code.startswith("```"):
@@ -358,14 +366,14 @@ Remember: Output ONLY valid Python code, no markdown, no explanations.""",
 
         return docs
 
-    def _chunk_documents(self, documents: list[dict[str, str]]) -> list[dict[str, str | int]]:
+    def _chunk_documents(self, documents: list[dict[str, str]]) -> list[ChunkDict]:
         """Split documents into overlapping chunks."""
         try:
             from ragit import chunk_text
         except ImportError as e:
             raise ImportError("RAG support requires: pip install stabilize[rag]") from e
 
-        all_chunks = []
+        all_chunks: list[ChunkDict] = []
         for doc in documents:
             chunks = chunk_text(
                 doc["content"],
@@ -375,11 +383,11 @@ Remember: Output ONLY valid Python code, no markdown, no explanations.""",
             )
             for i, chunk in enumerate(chunks):
                 all_chunks.append(
-                    {
-                        "doc_id": doc["id"],
-                        "content": chunk.content,
-                        "chunk_index": i,
-                    }
+                    ChunkDict(
+                        doc_id=doc["id"],
+                        content=chunk.content,
+                        chunk_index=i,
+                    )
                 )
 
         return all_chunks

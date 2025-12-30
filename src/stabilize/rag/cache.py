@@ -8,10 +8,10 @@ import sqlite3
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    pass
+    import psycopg
 
 
 @dataclass
@@ -154,7 +154,8 @@ class SqliteEmbeddingCache(EmbeddingCache):
                 "SELECT COUNT(*) FROM rag_embeddings WHERE embedding_model = ?",
                 (embedding_model,),
             )
-            count = cursor.fetchone()[0]
+            row = cursor.fetchone()
+            count: int = row[0] if row else 0
             return count > 0
 
     def clear(self) -> None:
@@ -172,17 +173,17 @@ class PostgresEmbeddingCache(EmbeddingCache):
 
     def __init__(self, connection_string: str):
         self.connection_string = connection_string
-        self._conn = None
+        self._conn: psycopg.Connection[tuple[Any, ...]] | None = None
 
-    def _get_connection(self):  # type: ignore[no-untyped-def]
+    def _get_connection(self) -> psycopg.Connection[tuple[Any, ...]]:
         """Get a database connection."""
         try:
-            import psycopg
+            import psycopg as psycopg_module
         except ImportError as e:
             raise ImportError("PostgreSQL support requires: pip install stabilize[postgres]") from e
 
         if self._conn is None or self._conn.closed:
-            self._conn = psycopg.connect(self.connection_string)
+            self._conn = psycopg_module.connect(self.connection_string)
         return self._conn
 
     def store(self, embeddings: list[CachedEmbedding]) -> None:
@@ -254,7 +255,8 @@ class PostgresEmbeddingCache(EmbeddingCache):
                 "SELECT COUNT(*) FROM rag_embeddings WHERE embedding_model = %s",
                 (embedding_model,),
             )
-            count = cur.fetchone()[0]
+            row = cur.fetchone()
+            count: int = row[0] if row else 0
             return count > 0
 
     def clear(self) -> None:

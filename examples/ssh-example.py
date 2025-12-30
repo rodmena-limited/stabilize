@@ -211,7 +211,7 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
 # =============================================================================
 
 
-def example_simple_command():
+def example_simple_command() -> None:
     """Execute a simple command on a remote host."""
     print("\n" + "=" * 60)
     print("Example 1: Simple Remote Command")
@@ -266,7 +266,7 @@ def example_simple_command():
 # =============================================================================
 
 
-def example_sequential_deployment():
+def example_sequential_deployment() -> None:
     """Sequential deployment: check -> deploy -> verify."""
     print("\n" + "=" * 60)
     print("Example 2: Sequential Deployment Steps")

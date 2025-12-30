@@ -762,11 +762,12 @@ def load_config() -> dict[str, Any]:
     mg_yaml = Path("mg.yaml")
     if mg_yaml.exists():
         try:
-            import yaml
+            import yaml  # type: ignore[import-untyped]
 
             with open(mg_yaml) as f:
                 config = yaml.safe_load(f)
-                return config.get("database", {})
+                db_config: dict[str, Any] = config.get("database", {}) if config else {}
+                return db_config
         except ImportError:
             print("Warning: PyYAML not installed, cannot read mg.yaml")
             print("Set MG_DATABASE_URL environment variable instead")
@@ -1018,7 +1019,8 @@ def mg_status(db_url: str | None = None) -> None:
                 """,
                     (MIGRATION_TABLE,),
                 )
-                table_exists = cur.fetchone()[0]
+                row = cur.fetchone()
+                table_exists = row[0] if row else False
 
                 applied = {}
                 if table_exists:
