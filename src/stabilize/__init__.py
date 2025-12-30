@@ -9,7 +9,7 @@ workflows with full support for:
 - Pluggable task system
 """
 
-__version__ = "0.1.0"
+__version__ = "0.9.0"
 
 from stabilize.models.workflow import Workflow
 from stabilize.models.stage import StageExecution

@@ -4,6 +4,18 @@ Highway Workflow Engine - Stabilize execution layer.
 
 A lightweight Python workflow execution engine with DAG-based stage orchestration.
 
+## Requirements
+
+- Python 3.11+
+- SQLite (included) or PostgreSQL 12+
+
+## Installation
+
+```bash
+pip install stabilize            # SQLite support only
+pip install stabilize[postgres]  # PostgreSQL support
+```
+
 ## Features
 
 - Message-driven DAG execution engine
@@ -12,12 +24,6 @@ A lightweight Python workflow execution engine with DAG-based stage orchestratio
 - PostgreSQL and SQLite persistence
 - Pluggable task system
 - Retry and timeout support
-
-## Installation
-
-```bash
-pip install -e .
-```
 
 ## Quick Start
 
@@ -108,22 +114,64 @@ workflow = Workflow.create(
 )
 ```
 
+## Database Setup
+
+### SQLite
+
+No setup required. Schema is created automatically.
+
+### PostgreSQL
+
+Apply migrations using the CLI:
+
+```bash
+# Using mg.yaml in current directory
+stabilize mg-up
+
+# Using database URL
+stabilize mg-up --db-url postgres://user:pass@host:5432/dbname
+
+# Using environment variable
+MG_DATABASE_URL=postgres://user:pass@host:5432/dbname stabilize mg-up
+
+# Check migration status
+stabilize mg-status
+```
+
+Example mg.yaml:
+
+```yaml
+database:
+  host: localhost
+  port: 5432
+  user: postgres
+  password: postgres
+  dbname: stabilize
+```
+
+## CLI Reference
+
+```
+stabilize mg-up [--db-url URL]      Apply pending PostgreSQL migrations
+stabilize mg-status [--db-url URL]  Show migration status
+```
+
 ## Naming Alignment with highway_dsl
 
 | highway_dsl | stabilize |
 |-------------|-----------|
-| `Workflow` | `Workflow` |
-| `TaskOperator` | `Task` interface |
-| `RetryPolicy` | `RetryableTask` |
-| `TimeoutPolicy` | `OverridableTimeoutRetryableTask` |
+| Workflow | Workflow |
+| TaskOperator | Task interface |
+| RetryPolicy | RetryableTask |
+| TimeoutPolicy | OverridableTimeoutRetryableTask |
 
 ## Running Tests
 
 ```bash
-# Run all tests (SQLite and PostgreSQL)
+# All tests (requires Docker for PostgreSQL)
 pytest tests/ -v
 
-# Run only SQLite tests (faster, no Docker needed)
+# SQLite tests only (no Docker)
 pytest tests/ -v -k sqlite
 ```
 
