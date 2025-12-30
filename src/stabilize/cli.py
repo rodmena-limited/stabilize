@@ -909,6 +909,56 @@ def prompt() -> None:
     print(PROMPT_TEXT)
 
 
+def rag_init(db_url: str | None = None, force: bool = False) -> None:
+    """Initialize RAG embeddings from examples and documentation."""
+    try:
+        from stabilize.rag import StabilizeRAG, get_cache
+    except ImportError:
+        print("Error: RAG support requires: pip install stabilize[rag]")
+        sys.exit(1)
+
+    cache = get_cache(db_url)
+    rag = StabilizeRAG(cache)
+
+    print("Initializing embeddings...")
+    count = rag.init(force=force)
+    if count > 0:
+        print(f"Cached {count} embeddings")
+    else:
+        print("Embeddings already initialized (use --force to regenerate)")
+
+
+def rag_generate(
+    prompt_text: str,
+    db_url: str | None = None,
+    execute: bool = False,
+    top_k: int = 5,
+    temperature: float = 0.3,
+    llm_model: str | None = None,
+) -> None:
+    """Generate pipeline code from natural language prompt."""
+    try:
+        from stabilize.rag import StabilizeRAG, get_cache
+    except ImportError:
+        print("Error: RAG support requires: pip install stabilize[rag]")
+        sys.exit(1)
+
+    cache = get_cache(db_url)
+    rag = StabilizeRAG(cache, llm_model=llm_model)
+
+    try:
+        code = rag.generate(prompt_text, top_k=top_k, temperature=temperature)
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+    print(code)
+
+    if execute:
+        print("\n--- Executing generated code ---\n")
+        exec(code, {"__name__": "__main__"})
+
+
 def mg_status(db_url: str | None = None) -> None:
     """Show migration status."""
     try:
@@ -990,6 +1040,65 @@ def main() -> None:
         help="Output comprehensive RAG context for pipeline code generation",
     )
 
+    # rag command (with subcommands)
+    rag_parser = subparsers.add_parser(
+        "rag",
+        help="RAG-powered pipeline generation",
+    )
+    rag_subparsers = rag_parser.add_subparsers(dest="rag_command")
+
+    # rag init
+    init_parser = rag_subparsers.add_parser(
+        "init",
+        help="Initialize embeddings cache from examples and documentation",
+    )
+    init_parser.add_argument(
+        "--db-url",
+        help="Database URL for caching (postgres://... or sqlite path)",
+    )
+    init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force regeneration even if cache exists",
+    )
+
+    # rag generate
+    gen_parser = rag_subparsers.add_parser(
+        "generate",
+        help="Generate pipeline code from natural language prompt",
+    )
+    gen_parser.add_argument(
+        "prompt",
+        help="Natural language description of the desired pipeline",
+    )
+    gen_parser.add_argument(
+        "--db-url",
+        help="Database URL for caching",
+    )
+    gen_parser.add_argument(
+        "-x",
+        "--execute",
+        action="store_true",
+        help="Execute the generated code after displaying it",
+    )
+    gen_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=5,
+        help="Number of context chunks to retrieve (default: 5)",
+    )
+    gen_parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.3,
+        help="LLM temperature for generation (default: 0.3)",
+    )
+    gen_parser.add_argument(
+        "--llm-model",
+        default=None,
+        help="LLM model for generation (default: llama3.1:70b)",
+    )
+
     args = parser.parse_args()
 
     if args.command == "mg-up":
@@ -998,6 +1107,21 @@ def main() -> None:
         mg_status(args.db_url)
     elif args.command == "prompt":
         prompt()
+    elif args.command == "rag":
+        if args.rag_command == "init":
+            rag_init(args.db_url, args.force)
+        elif args.rag_command == "generate":
+            rag_generate(
+                args.prompt,
+                args.db_url,
+                args.execute,
+                args.top_k,
+                args.temperature,
+                args.llm_model,
+            )
+        else:
+            rag_parser.print_help()
+            sys.exit(1)
     else:
         parser.print_help()
         sys.exit(1)
