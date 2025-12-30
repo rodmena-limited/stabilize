@@ -294,3 +294,60 @@ class TestSchemaValidatorObject:
         assert validator.validate({"a": 1, "b": 2}) == []
         errors = validator.validate({"a": 1})
         assert len(errors) == 1
+
+    def test_max_properties(self) -> None:
+        """Test maximum properties validation."""
+        validator = SchemaValidator(
+            {
+                "type": "object",
+                "maxProperties": 2,
+            }
+        )
+        assert validator.validate({"a": 1, "b": 2}) == []
+        errors = validator.validate({"a": 1, "b": 2, "c": 3})
+        assert len(errors) == 1
+
+class TestSchemaValidatorEnum:
+    """Tests for enum validation."""
+
+    def test_enum_valid(self) -> None:
+        """Test valid enum value."""
+        validator = SchemaValidator({"enum": ["red", "green", "blue"]})
+        assert validator.validate("red") == []
+
+    def test_enum_invalid(self) -> None:
+        """Test invalid enum value."""
+        validator = SchemaValidator({"enum": ["red", "green", "blue"]})
+        errors = validator.validate("yellow")
+        assert len(errors) == 1
+        assert "one of" in errors[0].message
+
+class TestSchemaValidatorConst:
+    """Tests for const validation."""
+
+    def test_const_match(self) -> None:
+        """Test matching const value."""
+        validator = SchemaValidator({"const": "fixed"})
+        assert validator.validate("fixed") == []
+
+    def test_const_no_match(self) -> None:
+        """Test non-matching const value."""
+        validator = SchemaValidator({"const": "fixed"})
+        errors = validator.validate("different")
+        assert len(errors) == 1
+        assert "exactly" in errors[0].message
+
+class TestValidateContext:
+    """Tests for validate_context function."""
+
+    def test_valid_context(self) -> None:
+        """Test validating a valid context."""
+        schema = {
+            "type": "object",
+            "required": ["command"],
+            "properties": {
+                "command": {"type": "string", "minLength": 1},
+            },
+        }
+        errors = validate_context({"command": "ls -la"}, schema)
+        assert errors == []
