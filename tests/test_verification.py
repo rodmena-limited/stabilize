@@ -110,3 +110,43 @@ class TestOutputVerifier:
         result = verifier.verify(stage)
         assert result.is_failed
         assert "Type errors" in result.message
+
+    def test_combined_checks(self) -> None:
+        """Test combined required keys and type checks."""
+        verifier = OutputVerifier(
+            required_keys=["url"],
+            type_checks={"count": int},
+        )
+        stage = StageExecution(
+            ref_id="test",
+            outputs={"url": "http://example.com", "count": 10},
+        )
+        result = verifier.verify(stage)
+        assert result.is_ok
+
+class TestCallableVerifier:
+    """Tests for CallableVerifier class."""
+
+    def test_callable_verifier_ok(self) -> None:
+        """Test callable verifier with passing function."""
+
+        def check(stage: StageExecution) -> VerifyResult:
+            if stage.outputs.get("ready"):
+                return VerifyResult.ok()
+            return VerifyResult.retry("Not ready")
+
+        verifier = CallableVerifier(check)
+        stage = StageExecution(ref_id="test", outputs={"ready": True})
+        result = verifier.verify(stage)
+        assert result.is_ok
+
+    def test_callable_verifier_retry(self) -> None:
+        """Test callable verifier with retry result."""
+
+        def check(stage: StageExecution) -> VerifyResult:
+            return VerifyResult.retry("Still waiting")
+
+        verifier = CallableVerifier(check)
+        stage = StageExecution(ref_id="test")
+        result = verifier.verify(stage)
+        assert result.is_retry
