@@ -130,7 +130,7 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
 # =============================================================================
 
 
-def example_simple():
+def example_simple() -> None:
     """Run a single shell command."""
     print("\n" + "=" * 60)
     print("Example 1: Simple Single Command")
@@ -182,7 +182,7 @@ def example_simple():
 # =============================================================================
 
 
-def example_sequential():
+def example_sequential() -> None:
     """Run multiple commands in sequence."""
     print("\n" + "=" * 60)
     print("Example 2: Sequential Commands")
@@ -281,7 +281,7 @@ def example_sequential():
 # =============================================================================
 
 
-def example_parallel():
+def example_parallel() -> None:
     """Run commands in parallel branches."""
     print("\n" + "=" * 60)
     print("Example 3: Parallel Commands")

@@ -90,7 +90,8 @@ class SqliteQueue(Queue):
     def _create_table(self) -> None:
         """Create the queue table if it doesn't exist."""
         conn = self._get_connection()
-        conn.execute(f"""
+        conn.execute(
+            f"""
             CREATE TABLE IF NOT EXISTS {self.table_name} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 message_id TEXT NOT NULL UNIQUE,
@@ -103,15 +104,20 @@ class SqliteQueue(Queue):
                 version INTEGER DEFAULT 0,
                 created_at TEXT DEFAULT (datetime('now'))
             )
-        """)
-        conn.execute(f"""
+        """
+        )
+        conn.execute(
+            f"""
             CREATE INDEX IF NOT EXISTS idx_{self.table_name}_deliver
             ON {self.table_name}(deliver_at)
-        """)
-        conn.execute(f"""
+        """
+        )
+        conn.execute(
+            f"""
             CREATE INDEX IF NOT EXISTS idx_{self.table_name}_locked
             ON {self.table_name}(locked_until)
-        """)
+        """
+        )
         conn.commit()
 
     def _serialize_message(self, message: Message) -> str:

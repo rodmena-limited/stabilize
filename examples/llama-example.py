@@ -207,7 +207,7 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
 # =============================================================================
 
 
-def example_simple_generation():
+def example_simple_generation() -> None:
     """Generate text with a simple prompt."""
     print("\n" + "=" * 60)
     print("Example 1: Simple Text Generation")
@@ -264,7 +264,7 @@ def example_simple_generation():
 # =============================================================================
 
 
-def example_with_system_prompt():
+def example_with_system_prompt() -> None:
     """Generate text with a system prompt for role/context."""
     print("\n" + "=" * 60)
     print("Example 2: Text with System Prompt")
@@ -320,7 +320,7 @@ def example_with_system_prompt():
 # =============================================================================
 
 
-def example_json_output():
+def example_json_output() -> None:
     """Generate structured JSON output."""
     print("\n" + "=" * 60)
     print("Example 3: JSON Structured Output")
@@ -386,7 +386,7 @@ def example_json_output():
 # =============================================================================
 
 
-def example_processing_pipeline():
+def example_processing_pipeline() -> None:
     """Chain LLM calls: summarize -> translate -> format."""
     print("\n" + "=" * 60)
     print("Example 4: Processing Pipeline")
@@ -496,7 +496,7 @@ def example_processing_pipeline():
 # =============================================================================
 
 
-def example_parallel_generation():
+def example_parallel_generation() -> None:
     """Generate multiple variations in parallel."""
     print("\n" + "=" * 60)
     print("Example 5: Parallel Generation")

@@ -111,6 +111,8 @@ if 'RESULT' in dir():
                 return TaskResult.terminal(error=f"Script file not found: {script_file}")
             script = script_path.read_text()
 
+        # At this point, script is guaranteed to be a string (validated above)
+        assert script is not None
         print(f"  [PythonTask] Executing script ({len(script)} chars)")
 
         # Create wrapped script
@@ -213,7 +215,7 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
 # =============================================================================
 
 
-def example_simple_calculation():
+def example_simple_calculation() -> None:
     """Run a simple inline Python calculation."""
     print("\n" + "=" * 60)
     print("Example 1: Simple Calculation")
@@ -277,7 +279,7 @@ print(f"Fibonacci({n}) = {fib(n)}")
 # =============================================================================
 
 
-def example_data_pipeline():
+def example_data_pipeline() -> None:
     """Sequential data processing: generate -> transform -> validate."""
     print("\n" + "=" * 60)
     print("Example 2: Data Processing Pipeline")
@@ -423,7 +425,7 @@ print(f"Total value: {summary['total_value']}")
 # =============================================================================
 
 
-def example_parallel_processing():
+def example_parallel_processing() -> None:
     """Process data in parallel branches."""
     print("\n" + "=" * 60)
     print("Example 3: Parallel Processing")
@@ -601,7 +603,7 @@ print("Combined results from all branches")
 # =============================================================================
 
 
-def example_error_handling():
+def example_error_handling() -> None:
     """Demonstrate error handling in Python scripts."""
     print("\n" + "=" * 60)
     print("Example 4: Error Handling")

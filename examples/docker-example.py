@@ -73,7 +73,17 @@ class DockerTask(Task):
         image_id: Image ID (for build)
     """
 
-    SUPPORTED_ACTIONS = {"run", "exec", "build", "pull", "ps", "images", "logs", "stop", "rm"}
+    SUPPORTED_ACTIONS = {
+        "run",
+        "exec",
+        "build",
+        "pull",
+        "ps",
+        "images",
+        "logs",
+        "stop",
+        "rm",
+    }
 
     def execute(self, stage: StageExecution) -> TaskResult:
         action = stage.context.get("action", "run")
@@ -90,7 +100,11 @@ class DockerTask(Task):
                 timeout=10,
                 check=True,
             )
-        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        except (
+            subprocess.CalledProcessError,
+            FileNotFoundError,
+            subprocess.TimeoutExpired,
+        ):
             return TaskResult.terminal(error="Docker is not available. Ensure Docker is installed and running.")
 
         # Build command based on action
@@ -341,7 +355,7 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
 # =============================================================================
 
 
-def example_simple_run():
+def example_simple_run() -> None:
     """Run a simple container command."""
     print("\n" + "=" * 60)
     print("Example 1: Simple Container Run")
@@ -391,7 +405,7 @@ def example_simple_run():
 # =============================================================================
 
 
-def example_pull_and_run():
+def example_pull_and_run() -> None:
     """Pull an image then run a container."""
     print("\n" + "=" * 60)
     print("Example 2: Pull and Run")
@@ -461,7 +475,7 @@ def example_pull_and_run():
 # =============================================================================
 
 
-def example_with_environment():
+def example_with_environment() -> None:
     """Run container with environment variables and volumes."""
     print("\n" + "=" * 60)
     print("Example 3: Container with Environment")
@@ -516,7 +530,7 @@ def example_with_environment():
 # =============================================================================
 
 
-def example_parallel_containers():
+def example_parallel_containers() -> None:
     """Run multiple containers in parallel."""
     print("\n" + "=" * 60)
     print("Example 4: Parallel Containers")
@@ -654,7 +668,7 @@ def example_parallel_containers():
 # =============================================================================
 
 
-def example_list_containers():
+def example_list_containers() -> None:
     """List Docker containers and images."""
     print("\n" + "=" * 60)
     print("Example 5: List Containers and Images")

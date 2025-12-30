@@ -184,7 +184,7 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
 # =============================================================================
 
 
-def example_simple_get():
+def example_simple_get() -> None:
     """Make a simple GET request to a public API."""
     print("\n" + "=" * 60)
     print("Example 1: Simple GET Request")
@@ -234,7 +234,7 @@ def example_simple_get():
 # =============================================================================
 
 
-def example_post_json():
+def example_post_json() -> None:
     """Make a POST request with JSON payload."""
     print("\n" + "=" * 60)
     print("Example 2: POST with JSON Body")
@@ -296,7 +296,7 @@ def example_post_json():
 # =============================================================================
 
 
-def example_sequential_api():
+def example_sequential_api() -> None:
     """Sequential API calls: GET -> POST -> GET to verify."""
     print("\n" + "=" * 60)
     print("Example 3: Sequential API Workflow")
@@ -388,7 +388,7 @@ def example_sequential_api():
 # =============================================================================
 
 
-def example_parallel_requests():
+def example_parallel_requests() -> None:
     """Make parallel requests to multiple endpoints."""
     print("\n" + "=" * 60)
     print("Example 4: Parallel Requests")
@@ -520,7 +520,7 @@ def example_parallel_requests():
 # =============================================================================
 
 
-def example_all_methods():
+def example_all_methods() -> None:
     """Demonstrate all supported HTTP methods."""
     print("\n" + "=" * 60)
     print("Example 5: All HTTP Methods")

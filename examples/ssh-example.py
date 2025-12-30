@@ -398,7 +398,7 @@ def example_sequential_deployment() -> None:
 # =============================================================================
 
 
-def example_parallel_health_check():
+def example_parallel_health_check() -> None:
     """Check multiple servers in parallel."""
     print("\n" + "=" * 60)
     print("Example 3: Parallel Health Checks")
@@ -505,7 +505,7 @@ def example_parallel_health_check():
         status_mark = "[OK]" if stage.status == WorkflowStatus.SUCCEEDED else "[FAIL]"
         host = stage.outputs.get("host", "N/A")
         stdout = stage.outputs.get("stdout", "")
-        status_line = [l for l in stdout.split("\n") if "Status:" in l or "complete" in l.lower()]
+        status_line = [line for line in stdout.split("\n") if "Status:" in line or "complete" in line.lower()]
         status = status_line[0] if status_line else "N/A"
         print(f"  {status_mark} {stage.name} ({host}): {status[:40]}")
 
@@ -515,7 +515,7 @@ def example_parallel_health_check():
 # =============================================================================
 
 
-def example_multi_command():
+def example_multi_command() -> None:
     """Execute a multi-command script on remote host."""
     print("\n" + "=" * 60)
     print("Example 4: Multi-Command Script")

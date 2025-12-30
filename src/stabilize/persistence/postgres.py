@@ -245,7 +245,7 @@ class PostgresWorkflowStore(WorkflowStore):
                         "is_canceled": execution.is_canceled,
                         "canceled_by": execution.canceled_by,
                         "cancellation_reason": execution.cancellation_reason,
-                        "paused": json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None,
+                        "paused": (json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None),
                     },
                 )
             conn.commit()
@@ -422,7 +422,7 @@ class PostgresWorkflowStore(WorkflowStore):
                     {
                         "id": execution_id,
                         "status": WorkflowStatus.RUNNING.name,
-                        "paused": json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None,
+                        "paused": (json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None),
                     },
                 )
             conn.commit()
@@ -480,7 +480,7 @@ class PostgresWorkflowStore(WorkflowStore):
                 "outputs": json.dumps(stage.outputs),
                 "requisite_stage_ref_ids": list(stage.requisite_stage_ref_ids),
                 "parent_stage_id": stage.parent_stage_id,
-                "synthetic_stage_owner": stage.synthetic_stage_owner.value if stage.synthetic_stage_owner else None,
+                "synthetic_stage_owner": (stage.synthetic_stage_owner.value if stage.synthetic_stage_owner else None),
                 "start_time": stage.start_time,
                 "end_time": stage.end_time,
                 "start_time_expiry": stage.start_time_expiry,
@@ -542,7 +542,7 @@ class PostgresWorkflowStore(WorkflowStore):
             "is_canceled": execution.is_canceled,
             "canceled_by": execution.canceled_by,
             "cancellation_reason": execution.cancellation_reason,
-            "paused": json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None,
+            "paused": (json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None),
             "pipeline_config_id": execution.pipeline_config_id,
             "is_limit_concurrent": execution.is_limit_concurrent,
             "max_concurrent_executions": execution.max_concurrent_executions,

@@ -845,20 +845,26 @@ def mg_up(db_url: str | None = None) -> None:
         config = load_config()
 
     # Connect to database
-    conninfo = f"host={config['host']} port={config.get('port', 5432)} user={config.get('user', 'postgres')} password={config.get('password', '')} dbname={config['dbname']}"
+    conninfo = (
+        f"host={config['host']} port={config.get('port', 5432)} "
+        f"user={config.get('user', 'postgres')} password={config.get('password', '')} "
+        f"dbname={config['dbname']}"
+    )
 
     try:
         with psycopg.connect(conninfo) as conn:
             with conn.cursor() as cur:
                 # Ensure migration tracking table exists
-                cur.execute(f"""
+                cur.execute(
+                    f"""
                     CREATE TABLE IF NOT EXISTS {MIGRATION_TABLE} (
                         id SERIAL PRIMARY KEY,
                         name VARCHAR(255) NOT NULL UNIQUE,
                         checksum VARCHAR(32) NOT NULL,
                         applied_at TIMESTAMP DEFAULT NOW()
                     )
-                """)
+                """
+                )
                 conn.commit()
 
                 # Get applied migrations
@@ -1004,7 +1010,11 @@ def mg_status(db_url: str | None = None) -> None:
     else:
         config = load_config()
 
-    conninfo = f"host={config['host']} port={config.get('port', 5432)} user={config.get('user', 'postgres')} password={config.get('password', '')} dbname={config['dbname']}"
+    conninfo = (
+        f"host={config['host']} port={config.get('port', 5432)} "
+        f"user={config.get('user', 'postgres')} password={config.get('password', '')} "
+        f"dbname={config['dbname']}"
+    )
 
     try:
         with psycopg.connect(conninfo) as conn:

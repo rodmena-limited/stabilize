@@ -153,7 +153,11 @@ class StageExecution:
 
         Returns True if any upstream stage has TERMINAL, STOPPED, or CANCELED status.
         """
-        halt_statuses = {WorkflowStatus.TERMINAL, WorkflowStatus.STOPPED, WorkflowStatus.CANCELED}
+        halt_statuses = {
+            WorkflowStatus.TERMINAL,
+            WorkflowStatus.STOPPED,
+            WorkflowStatus.CANCELED,
+        }
         for upstream in self.upstream_stages():
             if upstream.status in halt_statuses:
                 return True

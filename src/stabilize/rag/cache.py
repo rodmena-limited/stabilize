@@ -73,7 +73,8 @@ class SqliteEmbeddingCache(EmbeddingCache):
     def _init_schema(self) -> None:
         """Initialize the database schema."""
         with self._get_connection() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS rag_embeddings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     doc_id TEXT NOT NULL,
@@ -84,11 +85,14 @@ class SqliteEmbeddingCache(EmbeddingCache):
                     created_at TEXT DEFAULT (datetime('now')),
                     UNIQUE(doc_id, chunk_index, embedding_model)
                 )
-            """)
-            conn.execute("""
+            """
+            )
+            conn.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_rag_embeddings_model
                 ON rag_embeddings(embedding_model)
-            """)
+            """
+            )
             conn.commit()
 
     def store(self, embeddings: list[CachedEmbedding]) -> None:

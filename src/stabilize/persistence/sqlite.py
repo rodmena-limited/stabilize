@@ -278,7 +278,7 @@ class SqliteWorkflowStore(WorkflowStore):
                 "is_canceled": 1 if execution.is_canceled else 0,
                 "canceled_by": execution.canceled_by,
                 "cancellation_reason": execution.cancellation_reason,
-                "paused": json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None,
+                "paused": (json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None),
             },
         )
         conn.commit()
@@ -451,7 +451,7 @@ class SqliteWorkflowStore(WorkflowStore):
             {
                 "id": execution_id,
                 "status": WorkflowStatus.RUNNING.name,
-                "paused": json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None,
+                "paused": (json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None),
             },
         )
         conn.commit()
@@ -508,7 +508,7 @@ class SqliteWorkflowStore(WorkflowStore):
                 "outputs": json.dumps(stage.outputs),
                 "requisite_stage_ref_ids": json.dumps(list(stage.requisite_stage_ref_ids)),
                 "parent_stage_id": stage.parent_stage_id,
-                "synthetic_stage_owner": stage.synthetic_stage_owner.value if stage.synthetic_stage_owner else None,
+                "synthetic_stage_owner": (stage.synthetic_stage_owner.value if stage.synthetic_stage_owner else None),
                 "start_time": stage.start_time,
                 "end_time": stage.end_time,
                 "start_time_expiry": stage.start_time_expiry,
@@ -565,7 +565,7 @@ class SqliteWorkflowStore(WorkflowStore):
             "is_canceled": 1 if execution.is_canceled else 0,
             "canceled_by": execution.canceled_by,
             "cancellation_reason": execution.cancellation_reason,
-            "paused": json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None,
+            "paused": (json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None),
             "pipeline_config_id": execution.pipeline_config_id,
             "is_limit_concurrent": 1 if execution.is_limit_concurrent else 0,
             "max_concurrent_executions": execution.max_concurrent_executions,

@@ -21,6 +21,7 @@ class ChunkDict(TypedDict):
     content: str
     chunk_index: int
 
+
 # Load .env file if present (ragit does this too, but ensure it's loaded early)
 try:
     from dotenv import load_dotenv
