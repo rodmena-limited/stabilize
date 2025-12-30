@@ -70,6 +70,14 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+ignore = [
+    "N804",  # First argument of a class method should be named `cls` - we use `mcs` for metaclasses
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Examples use logging.basicConfig before imports intentionally to suppress noise
+# Also have hyphenated filenames which are not valid module names (not meant to be imported)
+"examples/*" = ["E402", "N999", "E501"]
 
 [tool.mypy]
 python_version = "3.11"
