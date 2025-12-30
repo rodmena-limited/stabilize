@@ -86,7 +86,7 @@ class ShellTask(Task):
                     )
                 return TaskResult.terminal(
                     error=f"Command failed with exit code {result.returncode}",
-                    outputs=outputs,
+                    context=outputs,
                 )
 
         except subprocess.TimeoutExpired:
