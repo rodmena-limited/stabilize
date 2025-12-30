@@ -121,3 +121,37 @@ class TestCondition:
         assert d["message"] == "Done"
         assert "lastTransitionTime" in d
         assert "observedGeneration" in d
+
+    def test_from_dict(self) -> None:
+        """Test deserialization from dictionary."""
+        data = {
+            "type": "Ready",
+            "status": True,
+            "reason": "TasksSucceeded",
+            "message": "All good",
+            "lastTransitionTime": "2024-01-15T10:30:00",
+            "observedGeneration": 3,
+        }
+        condition = Condition.from_dict(data)
+        assert condition.type == ConditionType.READY
+        assert condition.status is True
+        assert condition.reason == ConditionReason.TASKS_SUCCEEDED
+        assert condition.observed_generation == 3
+
+    def test_observed_generation_increments(self) -> None:
+        """Test that observed generation increments on update."""
+        original = Condition.ready(True, ConditionReason.TASKS_SUCCEEDED)
+        assert original.observed_generation == 0
+
+        updated = original.update(status=False)
+        assert updated.observed_generation == 1
+
+class TestConditionSet:
+    """Tests for ConditionSet class."""
+
+    def test_empty_set(self) -> None:
+        """Test empty condition set."""
+        conditions = ConditionSet()
+        assert len(conditions) == 0
+        assert not conditions.is_ready
+        assert not conditions.is_progressing
