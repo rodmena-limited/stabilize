@@ -1,4 +1,7 @@
+"""Tests for the verification system."""
+
 from datetime import UTC, datetime
+
 from stabilize.models.stage import StageExecution
 from stabilize.verification import (
     CallableVerifier,
@@ -7,6 +10,7 @@ from stabilize.verification import (
     VerifyResult,
     VerifyStatus,
 )
+
 
 class TestVerifyResult:
     """Tests for VerifyResult class."""
@@ -64,6 +68,7 @@ class TestVerifyResult:
         result = VerifyResult.ok()
         after = datetime.now(UTC)
         assert before <= result.timestamp <= after
+
 
 class TestOutputVerifier:
     """Tests for OutputVerifier class."""
@@ -124,6 +129,7 @@ class TestOutputVerifier:
         result = verifier.verify(stage)
         assert result.is_ok
 
+
 class TestCallableVerifier:
     """Tests for CallableVerifier class."""
 
@@ -150,3 +156,37 @@ class TestCallableVerifier:
         stage = StageExecution(ref_id="test")
         result = verifier.verify(stage)
         assert result.is_retry
+
+    def test_custom_retry_settings(self) -> None:
+        """Test custom retry settings."""
+
+        def check(stage: StageExecution) -> VerifyResult:
+            return VerifyResult.ok()
+
+        verifier = CallableVerifier(check, max_retries=5, retry_delay=2.0)
+        assert verifier.max_retries == 5
+        assert verifier.retry_delay_seconds == 2.0
+
+
+class TestVerifierBaseClass:
+    """Tests for Verifier base class defaults."""
+
+    def test_default_max_retries(self) -> None:
+        """Test default max retries value."""
+
+        class SimpleVerifier(Verifier):
+            def verify(self, stage: StageExecution) -> VerifyResult:
+                return VerifyResult.ok()
+
+        verifier = SimpleVerifier()
+        assert verifier.max_retries == 3
+
+    def test_default_retry_delay(self) -> None:
+        """Test default retry delay value."""
+
+        class SimpleVerifier(Verifier):
+            def verify(self, stage: StageExecution) -> VerifyResult:
+                return VerifyResult.ok()
+
+        verifier = SimpleVerifier()
+        assert verifier.retry_delay_seconds == 1.0
