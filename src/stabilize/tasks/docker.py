@@ -1,10 +1,28 @@
+"""
+DockerTask for executing Docker commands.
+
+This module provides a production-ready DockerTask with:
+- Container lifecycle management (run, exec, stop, rm)
+- Image management (build, pull, images)
+- Volume and network support
+- Environment variable injection
+- Detached mode support
+"""
+
 from __future__ import annotations
+
 import logging
 import subprocess
 from typing import TYPE_CHECKING, Any
+
 from stabilize.tasks.interface import Task
 from stabilize.tasks.result import TaskResult
+
+if TYPE_CHECKING:
+    from stabilize.models.stage import StageExecution
+
 logger = logging.getLogger(__name__)
+
 
 class DockerTask(Task):
     """
@@ -82,7 +100,20 @@ class DockerTask(Task):
             "context": "./docker",
         }
     """
-    SUPPORTED_ACTIONS = frozenset({'run', 'exec', 'build', 'pull', 'ps', 'images', 'logs', 'stop', 'rm'})
+
+    SUPPORTED_ACTIONS = frozenset(
+        {
+            "run",
+            "exec",
+            "build",
+            "pull",
+            "ps",
+            "images",
+            "logs",
+            "stop",
+            "rm",
+        }
+    )
 
     def execute(self, stage: StageExecution) -> TaskResult:
         """Execute Docker command."""
@@ -285,5 +316,32 @@ class DockerTask(Task):
             cmd.extend(command.split())
         else:
             cmd.extend(command)
+
+        return cmd
+
+    def _build_build_command(self, context: dict[str, Any]) -> list[str]:
+        """Build docker build command."""
+        cmd = ["docker", "build"]
+
+        # Tag
+        tag = context.get("tag") or context.get("image")
+        if tag:
+            cmd.extend(["-t", tag])
+
+        # Dockerfile
+        if context.get("dockerfile"):
+            cmd.extend(["-f", context["dockerfile"]])
+
+        # Build args
+        for key, value in context.get("build_args", {}).items():
+            cmd.extend(["--build-arg", f"{key}={value}"])
+
+        # No cache
+        if context.get("no_cache"):
+            cmd.append("--no-cache")
+
+        # Context path
+        build_context = context.get("context", ".")
+        cmd.append(build_context)
 
         return cmd
