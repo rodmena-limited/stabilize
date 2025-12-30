@@ -1,3 +1,5 @@
+"""Tests for the configuration validation module."""
+
 from stabilize.config_validation import (
     SHELL_TASK_SCHEMA,
     WAIT_TASK_SCHEMA,
@@ -7,6 +9,7 @@ from stabilize.config_validation import (
     validate_context,
     validate_outputs,
 )
+
 
 class TestValidationError:
     """Tests for ValidationError class."""
@@ -33,6 +36,7 @@ class TestValidationError:
         assert error.message == "must be positive"
         assert error.value == -1
         assert error.constraint == "minimum"
+
 
 class TestSchemaValidatorTypes:
     """Tests for type validation."""
@@ -103,6 +107,7 @@ class TestSchemaValidatorTypes:
         errors = validator.validate(3.14)
         assert len(errors) == 1
 
+
 class TestSchemaValidatorString:
     """Tests for string validation."""
 
@@ -129,6 +134,7 @@ class TestSchemaValidatorString:
         errors = validator.validate("12-345")
         assert len(errors) == 1
         assert "pattern" in errors[0].message
+
 
 class TestSchemaValidatorNumber:
     """Tests for number validation."""
@@ -174,6 +180,7 @@ class TestSchemaValidatorNumber:
         assert len(errors) == 1
         assert "multiple" in errors[0].message
 
+
 class TestSchemaValidatorArray:
     """Tests for array validation."""
 
@@ -213,6 +220,7 @@ class TestSchemaValidatorArray:
         errors = validator.validate([1, -1, 3])
         assert len(errors) == 1
         assert "[1]" in errors[0].path
+
 
 class TestSchemaValidatorObject:
     """Tests for object validation."""
@@ -307,6 +315,7 @@ class TestSchemaValidatorObject:
         errors = validator.validate({"a": 1, "b": 2, "c": 3})
         assert len(errors) == 1
 
+
 class TestSchemaValidatorEnum:
     """Tests for enum validation."""
 
@@ -322,6 +331,7 @@ class TestSchemaValidatorEnum:
         assert len(errors) == 1
         assert "one of" in errors[0].message
 
+
 class TestSchemaValidatorConst:
     """Tests for const validation."""
 
@@ -336,6 +346,7 @@ class TestSchemaValidatorConst:
         errors = validator.validate("different")
         assert len(errors) == 1
         assert "exactly" in errors[0].message
+
 
 class TestValidateContext:
     """Tests for validate_context function."""
@@ -364,6 +375,7 @@ class TestValidateContext:
         errors = validate_context({}, schema)
         assert len(errors) == 1
 
+
 class TestValidateOutputs:
     """Tests for validate_outputs function."""
 
@@ -380,6 +392,7 @@ class TestValidateOutputs:
         errors = validate_outputs({"stdout": "hello", "returncode": 0}, schema)
         assert errors == []
 
+
 class TestIsValid:
     """Tests for is_valid function."""
 
@@ -390,6 +403,7 @@ class TestIsValid:
     def test_is_valid_false(self) -> None:
         """Test is_valid returns False for invalid data."""
         assert not is_valid("hello", {"type": "integer"})
+
 
 class TestBuiltInSchemas:
     """Tests for built-in schemas."""
@@ -410,3 +424,56 @@ class TestBuiltInSchemas:
         errors = validate_context(context, SHELL_TASK_SCHEMA)
         assert len(errors) == 1
         assert "command" in errors[0].path
+
+    def test_wait_task_schema_valid(self) -> None:
+        """Test WAIT_TASK_SCHEMA with valid data."""
+        context = {"waitTime": 30}
+        errors = validate_context(context, WAIT_TASK_SCHEMA)
+        assert errors == []
+
+    def test_wait_task_schema_invalid(self) -> None:
+        """Test WAIT_TASK_SCHEMA with invalid data."""
+        context = {"waitTime": -5}
+        errors = validate_context(context, WAIT_TASK_SCHEMA)
+        assert len(errors) == 1
+
+
+class TestNestedValidation:
+    """Tests for nested structure validation."""
+
+    def test_nested_object(self) -> None:
+        """Test validation of nested objects."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "required": ["host"],
+                    "properties": {
+                        "host": {"type": "string"},
+                        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+                    },
+                },
+            },
+        }
+        assert validate_context({"config": {"host": "localhost", "port": 8080}}, schema) == []
+        errors = validate_context({"config": {"port": 8080}}, schema)
+        assert len(errors) == 1
+        assert "config.host" in errors[0].path
+
+    def test_array_of_objects(self) -> None:
+        """Test validation of array of objects."""
+        schema = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string"},
+                },
+            },
+        }
+        assert validate_context([{"name": "item1"}, {"name": "item2"}], schema) == []
+        errors = validate_context([{"name": "item1"}, {}], schema)
+        assert len(errors) == 1
+        assert "[1].name" in errors[0].path
