@@ -252,3 +252,38 @@ class DockerTask(Task):
                 cmd.extend(container_cmd)
 
         return cmd
+
+    def _build_exec_command(self, context: dict[str, Any]) -> list[str]:
+        """Build docker exec command."""
+        name = context.get("name")
+        command = context.get("command")
+
+        if not name:
+            raise ValueError("'name' is required for exec action")
+        if not command:
+            raise ValueError("'command' is required for exec action")
+
+        cmd = ["docker", "exec"]
+
+        # Interactive/TTY
+        if context.get("interactive"):
+            cmd.append("-i")
+        if context.get("tty"):
+            cmd.append("-t")
+
+        # Working directory
+        if context.get("workdir"):
+            cmd.extend(["-w", context["workdir"]])
+
+        # Environment variables
+        for key, value in context.get("environment", {}).items():
+            cmd.extend(["-e", f"{key}={value}"])
+
+        cmd.append(name)
+
+        if isinstance(command, str):
+            cmd.extend(command.split())
+        else:
+            cmd.extend(command)
+
+        return cmd
