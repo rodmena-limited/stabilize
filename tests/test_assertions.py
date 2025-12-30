@@ -1,4 +1,7 @@
+"""Tests for the assertion helpers module."""
+
 import pytest
+
 from stabilize.assertions import (
     ConfigError,
     ContextError,
@@ -25,6 +28,7 @@ from stabilize.assertions import (
 from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.workflow import Workflow
+
 
 class TestExceptionHierarchy:
     """Tests for the exception hierarchy."""
@@ -80,6 +84,7 @@ class TestExceptionHierarchy:
         assert isinstance(error, StabilizeExpectedError)
         assert error.stage_ref_id == "stage-1"
 
+
 class TestAssertTrue:
     """Tests for assert_true function."""
 
@@ -92,6 +97,7 @@ class TestAssertTrue:
         with pytest.raises(PreconditionError) as exc_info:
             assert_true(False, "Condition failed")
         assert "Condition failed" in str(exc_info.value)
+
 
 class TestAssertContext:
     """Tests for context assertion functions."""
@@ -144,6 +150,7 @@ class TestAssertContext:
             assert_context_in(stage, "env", ["dev", "staging", "prod"])
         assert "test" in str(exc_info.value)
 
+
 class TestAssertOutput:
     """Tests for output assertion functions."""
 
@@ -172,6 +179,7 @@ class TestAssertOutput:
         with pytest.raises(OutputError) as exc_info:
             assert_output_type(stage, "count", int)
         assert "int" in str(exc_info.value)
+
 
 class TestAssertStageReady:
     """Tests for stage readiness assertions."""
@@ -270,6 +278,7 @@ class TestAssertStageReady:
         with pytest.raises(StageNotReadyError):
             assert_no_upstream_failures(downstream)
 
+
 class TestAssertConfig:
     """Tests for configuration assertion."""
 
@@ -283,6 +292,7 @@ class TestAssertConfig:
             assert_config(False, "Invalid config", field="timeout")
         assert exc_info.value.field == "timeout"
 
+
 class TestAssertVerified:
     """Tests for verification assertion."""
 
@@ -295,6 +305,7 @@ class TestAssertVerified:
         with pytest.raises(VerificationError) as exc_info:
             assert_verified(False, "Check failed", details={"code": 500})
         assert exc_info.value.details == {"code": 500}
+
 
 class TestAssertNotNone:
     """Tests for assert_not_none function."""
@@ -317,6 +328,7 @@ class TestAssertNotNone:
         assert assert_not_none([], "msg") == []
         assert assert_not_none(False, "msg") is False
 
+
 class TestAssertNonEmpty:
     """Tests for assert_non_empty function."""
 
@@ -334,3 +346,18 @@ class TestAssertNonEmpty:
         """Test passes with non-empty list."""
         result = assert_non_empty([1, 2, 3], "List required")
         assert result == [1, 2, 3]
+
+    def test_fails_empty_list(self) -> None:
+        """Test fails with empty list."""
+        with pytest.raises(PreconditionError):
+            assert_non_empty([], "List required")
+
+    def test_passes_non_empty_dict(self) -> None:
+        """Test passes with non-empty dict."""
+        result = assert_non_empty({"key": "value"}, "Dict required")
+        assert result == {"key": "value"}
+
+    def test_fails_empty_dict(self) -> None:
+        """Test fails with empty dict."""
+        with pytest.raises(PreconditionError):
+            assert_non_empty({}, "Dict required")
