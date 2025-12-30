@@ -129,3 +129,66 @@ class TestSchemaValidatorString:
         errors = validator.validate("12-345")
         assert len(errors) == 1
         assert "pattern" in errors[0].message
+
+class TestSchemaValidatorNumber:
+    """Tests for number validation."""
+
+    def test_minimum(self) -> None:
+        """Test minimum value validation."""
+        validator = SchemaValidator({"type": "integer", "minimum": 0})
+        assert validator.validate(0) == []
+        assert validator.validate(10) == []
+        errors = validator.validate(-1)
+        assert len(errors) == 1
+        assert ">=" in errors[0].message
+
+    def test_maximum(self) -> None:
+        """Test maximum value validation."""
+        validator = SchemaValidator({"type": "integer", "maximum": 100})
+        assert validator.validate(100) == []
+        errors = validator.validate(101)
+        assert len(errors) == 1
+        assert "<=" in errors[0].message
+
+    def test_exclusive_minimum(self) -> None:
+        """Test exclusive minimum validation."""
+        validator = SchemaValidator({"type": "integer", "exclusiveMinimum": 0})
+        assert validator.validate(1) == []
+        errors = validator.validate(0)
+        assert len(errors) == 1
+        assert ">" in errors[0].message
+
+    def test_exclusive_maximum(self) -> None:
+        """Test exclusive maximum validation."""
+        validator = SchemaValidator({"type": "integer", "exclusiveMaximum": 100})
+        assert validator.validate(99) == []
+        errors = validator.validate(100)
+        assert len(errors) == 1
+        assert "<" in errors[0].message
+
+    def test_multiple_of(self) -> None:
+        """Test multiple of validation."""
+        validator = SchemaValidator({"type": "integer", "multipleOf": 5})
+        assert validator.validate(10) == []
+        errors = validator.validate(7)
+        assert len(errors) == 1
+        assert "multiple" in errors[0].message
+
+class TestSchemaValidatorArray:
+    """Tests for array validation."""
+
+    def test_min_items(self) -> None:
+        """Test minimum items validation."""
+        validator = SchemaValidator({"type": "array", "minItems": 2})
+        assert validator.validate([1, 2]) == []
+        errors = validator.validate([1])
+        assert len(errors) == 1
+        assert "at least" in errors[0].message
+
+    def test_max_items(self) -> None:
+        """Test maximum items validation."""
+        validator = SchemaValidator({"type": "array", "maxItems": 3})
+        assert validator.validate([1, 2, 3]) == []
+        errors = validator.validate([1, 2, 3, 4])
+        assert len(errors) == 1
+        assert "at most" in errors[0].message
