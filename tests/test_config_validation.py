@@ -351,3 +351,62 @@ class TestValidateContext:
         }
         errors = validate_context({"command": "ls -la"}, schema)
         assert errors == []
+
+    def test_invalid_context(self) -> None:
+        """Test validating an invalid context."""
+        schema = {
+            "type": "object",
+            "required": ["command"],
+            "properties": {
+                "command": {"type": "string", "minLength": 1},
+            },
+        }
+        errors = validate_context({}, schema)
+        assert len(errors) == 1
+
+class TestValidateOutputs:
+    """Tests for validate_outputs function."""
+
+    def test_valid_outputs(self) -> None:
+        """Test validating valid outputs."""
+        schema = {
+            "type": "object",
+            "required": ["stdout", "returncode"],
+            "properties": {
+                "stdout": {"type": "string"},
+                "returncode": {"type": "integer"},
+            },
+        }
+        errors = validate_outputs({"stdout": "hello", "returncode": 0}, schema)
+        assert errors == []
+
+class TestIsValid:
+    """Tests for is_valid function."""
+
+    def test_is_valid_true(self) -> None:
+        """Test is_valid returns True for valid data."""
+        assert is_valid(42, {"type": "integer"})
+
+    def test_is_valid_false(self) -> None:
+        """Test is_valid returns False for invalid data."""
+        assert not is_valid("hello", {"type": "integer"})
+
+class TestBuiltInSchemas:
+    """Tests for built-in schemas."""
+
+    def test_shell_task_schema_valid(self) -> None:
+        """Test SHELL_TASK_SCHEMA with valid data."""
+        context = {
+            "command": "echo hello",
+            "timeout": 60,
+            "cwd": "/home",
+        }
+        errors = validate_context(context, SHELL_TASK_SCHEMA)
+        assert errors == []
+
+    def test_shell_task_schema_missing_command(self) -> None:
+        """Test SHELL_TASK_SCHEMA with missing command."""
+        context = {"timeout": 60}
+        errors = validate_context(context, SHELL_TASK_SCHEMA)
+        assert len(errors) == 1
+        assert "command" in errors[0].path
