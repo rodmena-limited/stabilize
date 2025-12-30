@@ -73,3 +73,51 @@ class TestCondition:
         )
         assert condition.type == ConditionType.READY
         assert condition.reason == ConditionReason.TASKS_SUCCEEDED
+
+    def test_custom_string_type(self) -> None:
+        """Test that custom string types are preserved."""
+        condition = Condition(
+            type="CustomType",
+            status=True,
+            reason="CustomReason",
+        )
+        assert condition.type == "CustomType"
+        assert condition.reason == "CustomReason"
+
+    def test_update_status_changes_timestamp(self) -> None:
+        """Test that updating status changes the transition time."""
+        original = Condition.ready(True, ConditionReason.TASKS_SUCCEEDED)
+        original_time = original.last_transition_time
+
+        # Small delay to ensure different timestamp
+        import time
+
+        time.sleep(0.01)
+
+        updated = original.update(status=False)
+        assert updated.status is False
+        assert updated.last_transition_time > original_time
+
+    def test_update_same_status_preserves_timestamp(self) -> None:
+        """Test that updating without status change preserves timestamp."""
+        original = Condition.ready(True, ConditionReason.TASKS_SUCCEEDED)
+        original_time = original.last_transition_time
+
+        updated = original.update(message="New message")
+        assert updated.message == "New message"
+        assert updated.last_transition_time == original_time
+
+    def test_to_dict(self) -> None:
+        """Test serialization to dictionary."""
+        condition = Condition.ready(
+            status=True,
+            reason=ConditionReason.TASKS_SUCCEEDED,
+            message="Done",
+        )
+        d = condition.to_dict()
+        assert d["type"] == "Ready"
+        assert d["status"] is True
+        assert d["reason"] == "TasksSucceeded"
+        assert d["message"] == "Done"
+        assert "lastTransitionTime" in d
+        assert "observedGeneration" in d
