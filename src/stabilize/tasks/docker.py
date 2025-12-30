@@ -151,3 +151,51 @@ class DockerTask(Task):
             if continue_on_failure:
                 return TaskResult.failed_continue(error=error_msg)
             return TaskResult.terminal(error=error_msg)
+
+    def _build_command(self, action: str, context: dict[str, Any]) -> list[str]:
+        """Build Docker command based on action and context."""
+        if action == "run":
+            return self._build_run_command(context)
+        elif action == "exec":
+            return self._build_exec_command(context)
+        elif action == "build":
+            return self._build_build_command(context)
+        elif action == "pull":
+            image = context.get("image")
+            if not image:
+                raise ValueError("'image' is required for pull action")
+            return ["docker", "pull", image]
+        elif action == "ps":
+            cmd = ["docker", "ps"]
+            if context.get("all"):
+                cmd.append("-a")
+            return cmd
+        elif action == "images":
+            return ["docker", "images"]
+        elif action == "logs":
+            name = context.get("name")
+            if not name:
+                raise ValueError("'name' is required for logs action")
+            cmd = ["docker", "logs"]
+            if context.get("follow"):
+                cmd.append("-f")
+            if context.get("tail"):
+                cmd.extend(["--tail", str(context["tail"])])
+            cmd.append(name)
+            return cmd
+        elif action == "stop":
+            name = context.get("name")
+            if not name:
+                raise ValueError("'name' is required for stop action")
+            return ["docker", "stop", name]
+        elif action == "rm":
+            name = context.get("name")
+            if not name:
+                raise ValueError("'name' is required for rm action")
+            cmd = ["docker", "rm"]
+            if context.get("force"):
+                cmd.append("-f")
+            cmd.append(name)
+            return cmd
+        else:
+            raise ValueError(f"Unknown action: {action}")
