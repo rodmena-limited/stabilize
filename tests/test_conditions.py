@@ -1,9 +1,12 @@
+"""Tests for the structured conditions system."""
+
 from stabilize.conditions import (
     Condition,
     ConditionReason,
     ConditionSet,
     ConditionType,
 )
+
 
 class TestCondition:
     """Tests for Condition class."""
@@ -146,6 +149,7 @@ class TestCondition:
         updated = original.update(status=False)
         assert updated.observed_generation == 1
 
+
 class TestConditionSet:
     """Tests for ConditionSet class."""
 
@@ -253,3 +257,44 @@ class TestConditionSet:
 
         conditions.set(Condition.ready(True, ConditionReason.TASKS_SUCCEEDED))
         assert ConditionType.READY in conditions
+
+    def test_iteration(self) -> None:
+        """Test iterating over conditions."""
+        conditions = ConditionSet()
+        conditions.set(Condition.ready(True, ConditionReason.TASKS_SUCCEEDED))
+        conditions.set(Condition.progressing(False, ConditionReason.STAGE_COMPLETED))
+
+        types = [c.type for c in conditions]
+        assert ConditionType.READY in types
+        assert ConditionType.PROGRESSING in types
+
+    def test_to_list(self) -> None:
+        """Test serialization to list."""
+        conditions = ConditionSet()
+        conditions.set(Condition.ready(True, ConditionReason.TASKS_SUCCEEDED))
+        conditions.set(Condition.progressing(False, ConditionReason.STAGE_COMPLETED))
+
+        lst = conditions.to_list()
+        assert len(lst) == 2
+        assert all(isinstance(item, dict) for item in lst)
+
+    def test_from_list(self) -> None:
+        """Test deserialization from list."""
+        data = [
+            {"type": "Ready", "status": True, "reason": "TasksSucceeded", "message": ""},
+            {"type": "Progressing", "status": False, "reason": "StageCompleted", "message": ""},
+        ]
+        conditions = ConditionSet.from_list(data)
+        assert len(conditions) == 2
+        assert conditions.is_ready
+        assert not conditions.is_progressing
+
+    def test_init_with_conditions(self) -> None:
+        """Test initialization with existing conditions."""
+        initial = [
+            Condition.ready(True, ConditionReason.TASKS_SUCCEEDED),
+            Condition.progressing(False, ConditionReason.STAGE_COMPLETED),
+        ]
+        conditions = ConditionSet(initial)
+        assert len(conditions) == 2
+        assert conditions.is_ready
