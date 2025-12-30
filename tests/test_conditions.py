@@ -155,3 +155,37 @@ class TestConditionSet:
         assert len(conditions) == 0
         assert not conditions.is_ready
         assert not conditions.is_progressing
+
+    def test_set_condition(self) -> None:
+        """Test setting a condition."""
+        conditions = ConditionSet()
+        conditions.set(Condition.ready(True, ConditionReason.TASKS_SUCCEEDED))
+        assert len(conditions) == 1
+        assert conditions.is_ready
+
+    def test_get_condition(self) -> None:
+        """Test getting a condition by type."""
+        conditions = ConditionSet()
+        ready = Condition.ready(True, ConditionReason.TASKS_SUCCEEDED, "Done")
+        conditions.set(ready)
+
+        retrieved = conditions.get(ConditionType.READY)
+        assert retrieved is not None
+        assert retrieved.message == "Done"
+
+    def test_get_missing_condition(self) -> None:
+        """Test getting a condition that doesn't exist."""
+        conditions = ConditionSet()
+        assert conditions.get(ConditionType.READY) is None
+
+    def test_update_existing_condition(self) -> None:
+        """Test that setting a condition of same type updates it."""
+        conditions = ConditionSet()
+        conditions.set(Condition.ready(True, ConditionReason.TASKS_SUCCEEDED, "First"))
+        conditions.set(Condition.ready(False, ConditionReason.IN_PROGRESS, "Second"))
+
+        assert len(conditions) == 1
+        ready = conditions.get(ConditionType.READY)
+        assert ready is not None
+        assert ready.message == "Second"
+        assert ready.status is False
