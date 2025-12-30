@@ -36,3 +36,34 @@ class TestVerifyResult:
         assert not result.is_ok
         assert not result.is_failed
         assert not result.is_terminal
+
+    def test_failed_result(self) -> None:
+        """Test creating a failed result."""
+        result = VerifyResult.failed("Something went wrong", {"error_code": 500})
+        assert result.status == VerifyStatus.FAILED
+        assert result.message == "Something went wrong"
+        assert result.details == {"error_code": 500}
+        assert result.is_failed
+        assert not result.is_ok
+        assert not result.is_retry
+        assert result.is_terminal
+
+    def test_skipped_result(self) -> None:
+        """Test creating a skipped result."""
+        result = VerifyResult.skipped("Not applicable")
+        assert result.status == VerifyStatus.SKIPPED
+        assert result.message == "Not applicable"
+        assert result.is_terminal
+        assert not result.is_ok
+        assert not result.is_retry
+        assert not result.is_failed
+
+    def test_timestamp_set(self) -> None:
+        """Test that timestamp is set on creation."""
+        before = datetime.now(UTC)
+        result = VerifyResult.ok()
+        after = datetime.now(UTC)
+        assert before <= result.timestamp <= after
+
+class TestOutputVerifier:
+    """Tests for OutputVerifier class."""
