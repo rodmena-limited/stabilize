@@ -163,7 +163,12 @@ pip install stabilize[rag]  # Installs ragit dependency
 ```
 
 You also need:
-- **Local Ollama** for embeddings: `ollama pull nomic-embed-text`
+- **Local Ollama** (required for embeddings - ollama.com doesn't support embeddings API):
+  ```bash
+  # Install from https://ollama.com/download, then:
+  ollama serve                    # Start the server
+  ollama pull nomic-embed-text    # Download embedding model
+  ```
 - **Ollama API key** for LLM generation (uses ollama.com cloud)
 
 ### Setup

@@ -140,7 +140,19 @@ class StabilizeRAG:
         provider = self._get_provider()
         texts = [chunk["content"] for chunk in chunks]
 
-        responses = provider.embed_batch(texts, self.embedding_model)
+        try:
+            responses = provider.embed_batch(texts, self.embedding_model)
+        except ConnectionError as e:
+            embedding_url = os.environ.get("OLLAMA_EMBEDDING_URL", self.DEFAULT_EMBEDDING_URL)
+            raise RuntimeError(
+                f"Cannot connect to Ollama for embeddings at {embedding_url}\n\n"
+                "Embeddings require a local Ollama instance (ollama.com doesn't support embeddings).\n\n"
+                "To fix this:\n"
+                "  1. Install Ollama: https://ollama.com/download\n"
+                "  2. Start Ollama: ollama serve\n"
+                "  3. Pull embedding model: ollama pull nomic-embed-text\n\n"
+                "Or set OLLAMA_EMBEDDING_URL to point to your Ollama instance."
+            ) from e
 
         # Build cached embeddings
         cached = []
