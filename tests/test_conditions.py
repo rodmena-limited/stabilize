@@ -189,3 +189,38 @@ class TestConditionSet:
         assert ready is not None
         assert ready.message == "Second"
         assert ready.status is False
+
+    def test_remove_condition(self) -> None:
+        """Test removing a condition."""
+        conditions = ConditionSet()
+        conditions.set(Condition.ready(True, ConditionReason.TASKS_SUCCEEDED))
+        conditions.remove(ConditionType.READY)
+        assert len(conditions) == 0
+
+    def test_all_conditions(self) -> None:
+        """Test getting all conditions."""
+        conditions = ConditionSet()
+        conditions.set(Condition.ready(True, ConditionReason.TASKS_SUCCEEDED))
+        conditions.set(Condition.progressing(False, ConditionReason.STAGE_COMPLETED))
+
+        all_conds = conditions.all()
+        assert len(all_conds) == 2
+
+    def test_clear_conditions(self) -> None:
+        """Test clearing all conditions."""
+        conditions = ConditionSet()
+        conditions.set(Condition.ready(True, ConditionReason.TASKS_SUCCEEDED))
+        conditions.set(Condition.progressing(False, ConditionReason.STAGE_COMPLETED))
+        conditions.clear()
+        assert len(conditions) == 0
+
+    def test_is_ready_property(self) -> None:
+        """Test is_ready property."""
+        conditions = ConditionSet()
+        assert not conditions.is_ready
+
+        conditions.set(Condition.ready(False, ConditionReason.IN_PROGRESS))
+        assert not conditions.is_ready
+
+        conditions.set(Condition.ready(True, ConditionReason.TASKS_SUCCEEDED))
+        assert conditions.is_ready
