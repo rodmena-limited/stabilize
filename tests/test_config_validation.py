@@ -192,3 +192,105 @@ class TestSchemaValidatorArray:
         errors = validator.validate([1, 2, 3, 4])
         assert len(errors) == 1
         assert "at most" in errors[0].message
+
+    def test_unique_items(self) -> None:
+        """Test unique items validation."""
+        validator = SchemaValidator({"type": "array", "uniqueItems": True})
+        assert validator.validate([1, 2, 3]) == []
+        errors = validator.validate([1, 2, 1])
+        assert len(errors) == 1
+        assert "unique" in errors[0].message
+
+    def test_items_schema(self) -> None:
+        """Test items schema validation."""
+        validator = SchemaValidator(
+            {
+                "type": "array",
+                "items": {"type": "integer", "minimum": 0},
+            }
+        )
+        assert validator.validate([1, 2, 3]) == []
+        errors = validator.validate([1, -1, 3])
+        assert len(errors) == 1
+        assert "[1]" in errors[0].path
+
+class TestSchemaValidatorObject:
+    """Tests for object validation."""
+
+    def test_required_present(self) -> None:
+        """Test required field validation - present."""
+        validator = SchemaValidator(
+            {
+                "type": "object",
+                "required": ["name", "age"],
+            }
+        )
+        assert validator.validate({"name": "John", "age": 30}) == []
+
+    def test_required_missing(self) -> None:
+        """Test required field validation - missing."""
+        validator = SchemaValidator(
+            {
+                "type": "object",
+                "required": ["name", "age"],
+            }
+        )
+        errors = validator.validate({"name": "John"})
+        assert len(errors) == 1
+        assert "age" in errors[0].path
+        assert "required" in errors[0].message
+
+    def test_properties(self) -> None:
+        """Test property schema validation."""
+        validator = SchemaValidator(
+            {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "age": {"type": "integer", "minimum": 0},
+                },
+            }
+        )
+        assert validator.validate({"name": "John", "age": 30}) == []
+        errors = validator.validate({"name": "John", "age": -1})
+        assert len(errors) == 1
+        assert "age" in errors[0].path
+
+    def test_additional_properties_false(self) -> None:
+        """Test additionalProperties: false."""
+        validator = SchemaValidator(
+            {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "additionalProperties": False,
+            }
+        )
+        assert validator.validate({"name": "John"}) == []
+        errors = validator.validate({"name": "John", "extra": "field"})
+        assert len(errors) == 1
+        assert "extra" in errors[0].path
+
+    def test_additional_properties_schema(self) -> None:
+        """Test additionalProperties with schema."""
+        validator = SchemaValidator(
+            {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "additionalProperties": {"type": "integer"},
+            }
+        )
+        assert validator.validate({"name": "John", "age": 30}) == []
+        errors = validator.validate({"name": "John", "age": "thirty"})
+        assert len(errors) == 1
+
+    def test_min_properties(self) -> None:
+        """Test minimum properties validation."""
+        validator = SchemaValidator(
+            {
+                "type": "object",
+                "minProperties": 2,
+            }
+        )
+        assert validator.validate({"a": 1, "b": 2}) == []
+        errors = validator.validate({"a": 1})
+        assert len(errors) == 1
