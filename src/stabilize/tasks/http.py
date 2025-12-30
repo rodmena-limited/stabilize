@@ -121,3 +121,186 @@ class HTTPTask(Task):
         }
     """
     SUPPORTED_METHODS = frozenset({'GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'})
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        """Execute HTTP request."""
+        context = stage.context
+        continue_on_failure = context.get("continue_on_failure", False)
+        secrets = context.get("secrets", [])
+
+        # Extract and validate URL
+        url = context.get("url")
+        if not url:
+            return TaskResult.terminal(error="No 'url' specified in context")
+
+        # Substitute placeholders in URL
+        url = self._substitute_placeholders(url, context, secrets)
+
+        # Validate method
+        method = context.get("method", "GET").upper()
+        if method not in self.SUPPORTED_METHODS:
+            return TaskResult.terminal(
+                error=f"Unsupported method '{method}'. Supported: {sorted(self.SUPPORTED_METHODS)}"
+            )
+
+        # Build request
+        try:
+            request, body_bytes = self._build_request(method, url, context, secrets)
+        except ValueError as e:
+            return TaskResult.terminal(error=str(e))
+        except FileNotFoundError as e:
+            return TaskResult.terminal(error=f"File not found: {e}")
+
+        # Build SSL context
+        ssl_context = self._build_ssl_context(context)
+
+        # Retry configuration
+        retries = context.get("retries", 0)
+        retry_delay = context.get("retry_delay", 1.0)
+        retry_on_status = context.get("retry_on_status", DEFAULT_RETRY_ON_STATUS)
+        timeout = context.get("timeout", DEFAULT_TIMEOUT)
+
+        # Logging (mask secrets)
+        log_url = self._mask_secrets(url, context, secrets)
+        logger.debug("HTTPTask %s %s", method, log_url)
+
+        # Execute with retries
+        start_time = time.time()
+        last_error: Exception | None = None
+        last_response: HTTPResponse | HTTPError | None = None
+
+        for attempt in range(retries + 1):
+            try:
+                response = urlopen(
+                    request,
+                    data=body_bytes,
+                    timeout=timeout,
+                    context=ssl_context,
+                )
+
+                # Check if we should retry based on status
+                if response.status in retry_on_status and attempt < retries:
+                    logger.debug("HTTPTask got %s, retrying (%d/%d)", response.status, attempt + 1, retries)
+                    time.sleep(retry_delay)
+                    continue
+
+                last_response = response
+                break
+
+            except HTTPError as e:
+                last_error = e
+                if e.code in retry_on_status and attempt < retries:
+                    logger.debug("HTTPTask got HTTP %s, retrying (%d/%d)", e.code, attempt + 1, retries)
+                    time.sleep(retry_delay)
+                    continue
+                # Store response for output extraction
+                last_response = e
+                break
+
+            except URLError as e:
+                last_error = e
+                if attempt < retries:
+                    logger.debug("HTTPTask URL error: %s, retrying (%d/%d)", e.reason, attempt + 1, retries)
+                    time.sleep(retry_delay)
+                    continue
+                break
+
+            except TimeoutError as e:
+                last_error = e
+                if attempt < retries:
+                    logger.debug("HTTPTask timeout, retrying (%d/%d)", attempt + 1, retries)
+                    time.sleep(retry_delay)
+                    continue
+                break
+
+            except OSError as e:
+                last_error = e
+                if attempt < retries:
+                    logger.debug("HTTPTask OS error: %s, retrying (%d/%d)", e, attempt + 1, retries)
+                    time.sleep(retry_delay)
+                    continue
+                break
+
+        elapsed_ms = int((time.time() - start_time) * 1000)
+
+        # Handle connection/timeout errors
+        if last_response is None and last_error is not None:
+            error_msg = self._format_error(last_error)
+            if continue_on_failure:
+                return TaskResult.failed_continue(
+                    error=error_msg,
+                    outputs={"elapsed_ms": elapsed_ms, "url": url},
+                )
+            return TaskResult.terminal(
+                error=error_msg,
+                context={"elapsed_ms": elapsed_ms, "url": url},
+            )
+
+        # Process response
+        return self._process_response(
+            response=last_response,
+            context=context,
+            url=url,
+            elapsed_ms=elapsed_ms,
+            continue_on_failure=continue_on_failure,
+        )
+
+    def _build_request(
+        self,
+        method: str,
+        url: str,
+        context: dict[str, Any],
+        secrets: list[str],
+    ) -> tuple[Request, bytes | None]:
+        """Build urllib Request object."""
+        headers: dict[str, str] = {}
+        body_bytes: bytes | None = None
+
+        # Custom headers
+        custom_headers = context.get("headers", {})
+        for key, value in custom_headers.items():
+            headers[key] = self._substitute_placeholders(str(value), context, secrets)
+
+        # Authentication
+        if context.get("auth"):
+            auth = context["auth"]
+            if isinstance(auth, (list, tuple)) and len(auth) == 2:
+                credentials = f"{auth[0]}:{auth[1]}"
+                encoded = base64.b64encode(credentials.encode()).decode()
+                headers["Authorization"] = f"Basic {encoded}"
+
+        if context.get("bearer_token"):
+            token = self._substitute_placeholders(context["bearer_token"], context, secrets)
+            headers["Authorization"] = f"Bearer {token}"
+
+        # Request body
+        if context.get("upload_file"):
+            # Multipart file upload
+            body_bytes, content_type = self._build_multipart(context)
+            headers["Content-Type"] = content_type
+
+        elif context.get("json") is not None:
+            # JSON body
+            json_body = context["json"]
+            body_bytes = json.dumps(json_body).encode("utf-8")
+            headers.setdefault("Content-Type", "application/json")
+
+        elif context.get("form"):
+            # Form-encoded body
+            form_data = context["form"]
+            body_bytes = urlencode(form_data).encode("utf-8")
+            headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
+
+        elif context.get("body") is not None:
+            # Raw body
+            body = context["body"]
+            if isinstance(body, str):
+                body = self._substitute_placeholders(body, context, secrets)
+                body_bytes = body.encode("utf-8")
+            else:
+                body_bytes = body
+
+        # Create request
+        request = Request(url, method=method, headers=headers)
+
+        return request, body_bytes
