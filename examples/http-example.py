@@ -2,10 +2,12 @@
 """
 HTTP Example - Demonstrates making HTTP requests with Stabilize.
 
-This example shows how to:
-1. Create a custom Task that makes HTTP requests
-2. Support all HTTP methods (GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH)
-3. Build workflows with API interactions
+This example shows how to use the built-in HTTPTask for:
+1. Simple GET requests
+2. POST with JSON bodies
+3. Sequential API workflows
+4. Parallel requests
+5. All HTTP methods (GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH)
 
 Requirements:
     None (uses urllib from standard library)
@@ -16,10 +18,6 @@ Run with:
 
 import json
 import logging
-import ssl
-import time
-import urllib.error
-import urllib.request
 from typing import Any
 
 logging.basicConfig(level=logging.ERROR)
@@ -38,117 +36,8 @@ from stabilize.persistence.store import WorkflowStore
 from stabilize.queue.processor import QueueProcessor
 from stabilize.queue.queue import Queue
 from stabilize.queue.sqlite_queue import SqliteQueue
-from stabilize.tasks.interface import Task
+from stabilize.tasks.http import HTTPTask  # Use built-in HTTPTask
 from stabilize.tasks.registry import TaskRegistry
-from stabilize.tasks.result import TaskResult
-
-# =============================================================================
-# Custom Task: HTTPTask
-# =============================================================================
-
-
-class HTTPTask(Task):
-    """
-    Make HTTP requests.
-
-    Context Parameters:
-        url: Request URL (required)
-        method: HTTP method - GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH (default: GET)
-        headers: Request headers as dict (optional)
-        body: Request body as string (optional)
-        json_body: Request body as dict, auto-serialized to JSON (optional)
-        timeout: Request timeout in seconds (default: 30)
-        verify_ssl: Verify SSL certificates (default: True)
-        expected_status: Expected status code, fails if mismatch (optional)
-
-    Outputs:
-        status_code: HTTP status code
-        headers: Response headers as dict
-        body: Response body as string
-        elapsed_ms: Request duration in milliseconds
-        url: Final URL (after redirects)
-    """
-
-    SUPPORTED_METHODS = {"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH"}
-
-    def execute(self, stage: StageExecution) -> TaskResult:
-        url = stage.context.get("url")
-        method = stage.context.get("method", "GET").upper()
-        headers = stage.context.get("headers", {})
-        body = stage.context.get("body")
-        json_body = stage.context.get("json_body")
-        timeout = stage.context.get("timeout", 30)
-        verify_ssl = stage.context.get("verify_ssl", True)
-        expected_status = stage.context.get("expected_status")
-
-        if not url:
-            return TaskResult.terminal(error="No 'url' specified in context")
-
-        if method not in self.SUPPORTED_METHODS:
-            return TaskResult.terminal(error=f"Unsupported method '{method}'. Supported: {self.SUPPORTED_METHODS}")
-
-        # Handle JSON body
-        if json_body is not None:
-            body = json.dumps(json_body)
-            headers.setdefault("Content-Type", "application/json")
-
-        # Encode body if present
-        data = body.encode("utf-8") if body else None
-
-        # Build request
-        request = urllib.request.Request(url, data=data, headers=headers, method=method)
-
-        # SSL context
-        ssl_context = None
-        if not verify_ssl:
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-
-        print(f"  [HTTPTask] {method} {url}")
-
-        try:
-            start_time = time.time()
-            with urllib.request.urlopen(request, timeout=timeout, context=ssl_context) as response:
-                elapsed_ms = int((time.time() - start_time) * 1000)
-
-                response_body = response.read().decode("utf-8")
-                response_headers = dict(response.headers)
-                status_code = response.status
-                final_url = response.url
-
-        except urllib.error.HTTPError as e:
-            elapsed_ms = int((time.time() - start_time) * 1000)
-            response_body = e.read().decode("utf-8") if e.fp else ""
-            response_headers = dict(e.headers) if e.headers else {}
-            status_code = e.code
-            final_url = url
-
-        except urllib.error.URLError as e:
-            return TaskResult.terminal(error=f"URL error: {e.reason}")
-
-        except TimeoutError:
-            return TaskResult.terminal(error=f"Request timed out after {timeout}s")
-
-        outputs = {
-            "status_code": status_code,
-            "headers": response_headers,
-            "body": response_body,
-            "elapsed_ms": elapsed_ms,
-            "url": final_url,
-        }
-
-        # Check expected status
-        if expected_status is not None and status_code != expected_status:
-            print(f"  [HTTPTask] Failed: expected {expected_status}, got {status_code}")
-            return TaskResult.terminal(
-                error=f"Expected status {expected_status}, got {status_code}",
-                context=outputs,
-            )
-
-        print(f"  [HTTPTask] {status_code} in {elapsed_ms}ms")
-        return TaskResult.success(outputs=outputs)
-
 
 # =============================================================================
 # Helper: Setup pipeline infrastructure
@@ -256,7 +145,7 @@ def example_post_json() -> None:
                 context={
                     "url": "https://httpbin.org/post",
                     "method": "POST",
-                    "json_body": {
+                    "json": {
                         "name": "Stabilize",
                         "version": "0.9.0",
                         "features": ["DAG", "parallel", "retry"],
@@ -337,7 +226,7 @@ def example_sequential_api() -> None:
                 context={
                     "url": "https://httpbin.org/post",
                     "method": "POST",
-                    "json_body": {"step": 2, "data": "from step 1"},
+                    "json": {"step": 2, "data": "from step 1"},
                     "headers": {"X-Request-ID": "step-2"},
                 },
                 tasks=[
@@ -547,7 +436,7 @@ def example_all_methods() -> None:
         ref_id = str(i)
         context: dict[str, Any] = {"url": url, "method": method}
         if body:
-            context["json_body"] = body
+            context["json"] = body
 
         stage = StageExecution(
             ref_id=ref_id,

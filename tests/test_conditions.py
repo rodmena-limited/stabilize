@@ -1,6 +1,5 @@
 """Tests for the structured conditions system."""
 
-
 from stabilize.conditions import (
     Condition,
     ConditionReason,

@@ -2,10 +2,10 @@
 """
 SSH Example - Demonstrates executing remote commands via SSH with Stabilize.
 
-This example shows how to:
-1. Create a custom Task that executes commands over SSH
-2. Run commands on remote servers
-3. Build deployment and administration workflows
+This example shows how to use the built-in SSHTask for:
+1. Running commands on remote servers
+2. Building deployment and administration workflows
+3. Parallel health checks across multiple hosts
 
 Requirements:
     SSH client installed (ssh command available)
@@ -16,8 +16,6 @@ Run with:
 """
 
 import logging
-import os
-import subprocess
 from typing import Any
 
 logging.basicConfig(level=logging.ERROR)
@@ -36,146 +34,8 @@ from stabilize.persistence.store import WorkflowStore
 from stabilize.queue.processor import QueueProcessor
 from stabilize.queue.queue import Queue
 from stabilize.queue.sqlite_queue import SqliteQueue
-from stabilize.tasks.interface import Task
 from stabilize.tasks.registry import TaskRegistry
-from stabilize.tasks.result import TaskResult
-
-# =============================================================================
-# Custom Task: SSHTask
-# =============================================================================
-
-
-class SSHTask(Task):
-    """
-    Execute commands on remote hosts via SSH.
-
-    Context Parameters:
-        host: Remote hostname or IP address (required)
-        user: SSH username (default: current user)
-        command: Command to execute on remote host (required)
-        port: SSH port (default: 22)
-        key_file: Path to private key file (optional)
-        timeout: Command timeout in seconds (default: 60)
-        strict_host_key: Strict host key checking (default: False)
-        connect_timeout: SSH connection timeout (default: 10)
-
-    Outputs:
-        stdout: Command standard output
-        stderr: Command standard error
-        exit_code: Remote command exit code
-        host: Target host
-        user: SSH user
-
-    Notes:
-        - Uses ssh CLI command via subprocess
-        - Key-based authentication recommended
-        - For password auth, use ssh-agent or sshpass (not recommended)
-    """
-
-    def execute(self, stage: StageExecution) -> TaskResult:
-        host = stage.context.get("host")
-        user = stage.context.get("user", os.environ.get("USER", "farshid"))
-        command = stage.context.get("command")
-        port = stage.context.get("port", 22)
-        key_file = stage.context.get("key_file")
-        timeout = stage.context.get("timeout", 60)
-        strict_host_key = stage.context.get("strict_host_key", False)
-        connect_timeout = stage.context.get("connect_timeout", 10)
-
-        if not host:
-            return TaskResult.terminal(error="No 'host' specified in context")
-
-        if not command:
-            return TaskResult.terminal(error="No 'command' specified in context")
-
-        # Check SSH availability
-        try:
-            subprocess.run(
-                ["ssh", "-V"],
-                capture_output=True,
-                timeout=5,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return TaskResult.terminal(error="SSH client not available. Ensure ssh is installed.")
-
-        # Build SSH command
-        ssh_cmd = ["ssh"]
-
-        # Port
-        if port != 22:
-            ssh_cmd.extend(["-p", str(port)])
-
-        # Key file
-        if key_file:
-            ssh_cmd.extend(["-i", key_file])
-
-        # Connection timeout
-        ssh_cmd.extend(["-o", f"ConnectTimeout={connect_timeout}"])
-
-        # Host key checking
-        if not strict_host_key:
-            ssh_cmd.extend(["-o", "StrictHostKeyChecking=no"])
-            ssh_cmd.extend(["-o", "UserKnownHostsFile=/dev/null"])
-
-        # Disable pseudo-terminal allocation for non-interactive commands
-        ssh_cmd.append("-T")
-
-        # Batch mode (no password prompts)
-        ssh_cmd.extend(["-o", "BatchMode=yes"])
-
-        # Target
-        target = f"{user}@{host}"
-        ssh_cmd.append(target)
-
-        # Command
-        ssh_cmd.append(command)
-
-        print(f"  [SSHTask] {user}@{host}: {command}")
-
-        try:
-            result = subprocess.run(
-                ssh_cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-
-            outputs = {
-                "stdout": result.stdout.strip(),
-                "stderr": result.stderr.strip(),
-                "exit_code": result.returncode,
-                "host": host,
-                "user": user,
-            }
-
-            if result.returncode == 0:
-                print(f"  [SSHTask] Success on {host}")
-                return TaskResult.success(outputs=outputs)
-            elif result.returncode == 255:
-                # SSH connection error
-                print(f"  [SSHTask] Connection failed to {host}")
-                return TaskResult.terminal(
-                    error=f"SSH connection failed to {host}: {result.stderr}",
-                    context=outputs,
-                )
-            else:
-                print(f"  [SSHTask] Command failed on {host} with exit code {result.returncode}")
-                if stage.context.get("continue_on_failure"):
-                    return TaskResult.failed_continue(
-                        error=f"Remote command failed with exit code {result.returncode}",
-                        outputs=outputs,
-                    )
-                return TaskResult.terminal(
-                    error=f"Remote command failed with exit code {result.returncode}",
-                    context=outputs,
-                )
-
-        except subprocess.TimeoutExpired:
-            return TaskResult.terminal(
-                error=f"SSH command timed out after {timeout}s",
-                context={"host": host, "user": user},
-            )
-
+from stabilize.tasks.ssh import SSHTask  # Use built-in SSHTask
 
 # =============================================================================
 # Helper: Setup pipeline infrastructure

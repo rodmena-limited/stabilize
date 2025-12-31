@@ -13,6 +13,7 @@ ensuring outputs are valid before dependent stages consume them.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
@@ -312,6 +313,4 @@ class CallableVerifier(Verifier):
 
 
 # Type alias for verifier function
-from collections.abc import Callable
-
 VerifierFunc = Callable[["StageExecution"], VerifyResult]
