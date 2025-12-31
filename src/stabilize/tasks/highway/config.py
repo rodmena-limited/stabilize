@@ -32,17 +32,11 @@ class HighwayConfig:
         )
     )
 
-    api_key: str = field(
-        default_factory=lambda: os.environ.get("HIGHWAY_API_KEY", "")
-    )
+    api_key: str = field(default_factory=lambda: os.environ.get("HIGHWAY_API_KEY", ""))
 
-    poll_interval: timedelta = field(
-        default_factory=lambda: timedelta(seconds=5)
-    )
+    poll_interval: timedelta = field(default_factory=lambda: timedelta(seconds=5))
 
-    timeout: timedelta = field(
-        default_factory=lambda: timedelta(minutes=30)
-    )
+    timeout: timedelta = field(default_factory=lambda: timedelta(minutes=30))
 
     @classmethod
     def from_stage_context(cls, context: dict[str, Any]) -> HighwayConfig:
@@ -69,14 +63,10 @@ class HighwayConfig:
             config.api_key = context["highway_api_key"]
 
         if "highway_poll_interval_seconds" in context:
-            config.poll_interval = timedelta(
-                seconds=context["highway_poll_interval_seconds"]
-            )
+            config.poll_interval = timedelta(seconds=context["highway_poll_interval_seconds"])
 
         if "highway_timeout_seconds" in context:
-            config.timeout = timedelta(
-                seconds=context["highway_timeout_seconds"]
-            )
+            config.timeout = timedelta(seconds=context["highway_timeout_seconds"])
 
         return config
 
@@ -89,15 +79,9 @@ class HighwayConfig:
         errors = []
 
         if not self.api_key:
-            errors.append(
-                "HIGHWAY_API_KEY not configured. "
-                "Set environment variable or stage context."
-            )
+            errors.append("HIGHWAY_API_KEY not configured. Set environment variable or stage context.")
 
         if not self.api_endpoint:
-            errors.append(
-                "HIGHWAY_API_ENDPOINT not configured. "
-                "Set environment variable or stage context."
-            )
+            errors.append("HIGHWAY_API_ENDPOINT not configured. Set environment variable or stage context.")
 
         return errors

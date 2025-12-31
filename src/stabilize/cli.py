@@ -527,51 +527,13 @@ Accessing in tasks:
       return TaskResult.success(outputs={"my_output": "value"})
 
 IMPORTANT - Shell Tasks with Upstream Outputs:
-  For shell commands that need upstream output, substitute context values INTO the command.
-  USE THIS EXACT ShellTask IMPLEMENTATION for any shell/command workflows:
+  Use the BUILT-IN ShellTask which automatically substitutes {key} placeholders:
 
-import subprocess
+  from stabilize.tasks.shell import ShellTask
+  registry.register("shell", ShellTask)
 
-class ShellTask(Task):
-    """Shell task that substitutes {key} placeholders with context values."""
-
-    def execute(self, stage: StageExecution) -> TaskResult:
-        command = stage.context.get("command")
-        if not command:
-            return TaskResult.terminal(error="No command specified")
-
-        # CRITICAL: Substitute {key} placeholders with context values (includes upstream outputs)
-        for key, value in stage.context.items():
-            if key != "command" and isinstance(value, str):
-                command = command.replace("{" + key + "}", value)
-
-        try:
-            result = subprocess.run(command, shell=True, capture_output=True, text=True)
-            outputs = {"stdout": result.stdout.strip(), "stderr": result.stderr.strip(), "returncode": result.returncode}
-            if result.returncode != 0:
-                return TaskResult.terminal(error=f"Command failed: {result.stderr}", context=outputs)
-            return TaskResult.success(outputs=outputs)
-        except Exception as e:
-            return TaskResult.terminal(error=str(e))
-
-  # Usage - Stage 2 uses {stdout} from Stage 1:
-  stages=[
-      StageExecution(
-          ref_id="1",
-          type="shell",
-          name="Get Data",
-          context={"command": "git status"},
-          tasks=[TaskExecution.create("Run", "shell", stage_start=True, stage_end=True)],
-      ),
-      StageExecution(
-          ref_id="2",
-          type="shell",
-          name="Save Data",
-          requisite_stage_ref_ids={"1"},  # REQUIRED - waits for stage 1
-          context={"command": "echo '{stdout}' > /tmp/output.txt"},  # {stdout} replaced with stage 1 output
-          tasks=[TaskExecution.create("Save", "shell", stage_start=True, stage_end=True)],
-      ),
-  ]
+  The built-in ShellTask handles: cwd, env, stdin, timeout, expected_codes, secrets, binary mode.
+  See section 1.1 for full parameter documentation.
 
 ===============================================================================
 7. COMMON MISTAKES AND HOW TO FIX THEM
@@ -648,24 +610,17 @@ RIGHT - Use {key} placeholders that ShellTask substitutes:
     context={"command": "echo '{stdout}' > file.txt"}  # {stdout} replaced by task
 
 
-MISTAKE 8: ShellTask without placeholder substitution
-------------------------------------------------------
-WRONG - This ShellTask does NOT substitute {stdout} with upstream output:
+MISTAKE 8: Defining your own ShellTask instead of using built-in
+-----------------------------------------------------------------
+WRONG - Defining custom ShellTask that may lack features:
     class ShellTask(Task):
         def execute(self, stage):
             command = stage.context.get("command")
-            result = subprocess.run(command, shell=True, ...)  # {stdout} stays literal!
+            result = subprocess.run(command, shell=True, ...)
 
-RIGHT - ShellTask MUST substitute {key} placeholders before running:
-    class ShellTask(Task):
-        def execute(self, stage: StageExecution) -> TaskResult:
-            command = stage.context.get("command")
-            # REQUIRED: Replace {key} with actual context values
-            for key, value in stage.context.items():
-                if key != "command" and isinstance(value, str):
-                    command = command.replace("{" + key + "}", value)
-            result = subprocess.run(command, shell=True, capture_output=True, text=True)
-            return TaskResult.success(outputs={"stdout": result.stdout.strip()})
+RIGHT - Use the built-in ShellTask which handles everything:
+    from stabilize.tasks.shell import ShellTask
+    registry.register("shell", ShellTask)
 
 ===============================================================================
 8. COMPLETE EXAMPLE: SEQUENTIAL PIPELINE WITH ERROR HANDLING

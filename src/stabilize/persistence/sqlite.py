@@ -366,7 +366,7 @@ class SqliteWorkflowStore(WorkflowStore):
     def retrieve_stage(self, stage_id: str) -> StageExecution:
         """Retrieve a single stage by ID."""
         conn = self._get_connection()
-        
+
         # Get stage
         result = conn.execute(
             "SELECT * FROM stage_executions WHERE id = :id",
@@ -412,7 +412,7 @@ class SqliteWorkflowStore(WorkflowStore):
     ) -> list[StageExecution]:
         """Get upstream stages."""
         conn = self._get_connection()
-        
+
         # First find the requisite ref ids of the target stage
         result = conn.execute(
             """
@@ -428,13 +428,13 @@ class SqliteWorkflowStore(WorkflowStore):
         requisites = json.loads(row["requisite_stage_ref_ids"] or "[]")
         if not requisites:
             return []
-            
+
         # Build query for ref_ids
         placeholders = ", ".join(f":ref_{i}" for i in range(len(requisites)))
         params = {"execution_id": execution_id}
         for i, ref in enumerate(requisites):
             params[f"ref_{i}"] = ref
-            
+
         result = conn.execute(
             f"""
             SELECT * FROM stage_executions
@@ -448,7 +448,7 @@ class SqliteWorkflowStore(WorkflowStore):
         for stage_row in result.fetchall():
             stage = self._row_to_stage(stage_row)
             stages.append(stage)
-        
+
         return stages
 
     def get_downstream_stages(
@@ -458,12 +458,12 @@ class SqliteWorkflowStore(WorkflowStore):
     ) -> list[StageExecution]:
         """Get downstream stages."""
         conn = self._get_connection()
-        
+
         # Use LIKE for JSON array membership test as it's portable and safe enough here
         # (Assuming standard formatting of ["a", "b"])
         # Alternatively, we could use json_each if available, but fallback to LIKE is safer for older sqlite
         # For this codebase (Python 3.11), json_each is available.
-        
+
         try:
             query = """
                 SELECT stage_executions.* FROM stage_executions, json_each(stage_executions.requisite_stage_ref_ids) 
@@ -472,25 +472,22 @@ class SqliteWorkflowStore(WorkflowStore):
             """
             result = conn.execute(query, {"execution_id": execution_id, "ref_id": stage_ref_id})
         except sqlite3.OperationalError:
-             # Fallback if json_each is not enabled (unlikely in 3.11 but safe)
-             # "ref_id" inside ["..."]
-             # Match "%"ref_id"%"
-             json_ref_id = json.dumps(stage_ref_id)
-             query = """
+            # Fallback if json_each is not enabled (unlikely in 3.11 but safe)
+            # "ref_id" inside ["..."]
+            # Match "%"ref_id"%"
+            json_ref_id = json.dumps(stage_ref_id)
+            query = """
                 SELECT * FROM stage_executions
                 WHERE execution_id = :execution_id
                 AND requisite_stage_ref_ids LIKE :pattern
              """
-             result = conn.execute(query, {
-                 "execution_id": execution_id, 
-                 "pattern": f'%{json_ref_id}%'
-             })
-             
+            result = conn.execute(query, {"execution_id": execution_id, "pattern": f"%{json_ref_id}%"})
+
         stages = []
         for stage_row in result.fetchall():
             stage = self._row_to_stage(stage_row)
             stages.append(stage)
-        
+
         return stages
 
     def get_synthetic_stages(
@@ -513,7 +510,7 @@ class SqliteWorkflowStore(WorkflowStore):
         for stage_row in result.fetchall():
             stage = self._row_to_stage(stage_row)
             stages.append(stage)
-        
+
         return stages
 
     def get_merged_ancestor_outputs(
@@ -557,7 +554,7 @@ class SqliteWorkflowStore(WorkflowStore):
             node = nodes.get(current)
             if not node:
                 continue
-            
+
             for req in node["requisites"]:
                 if req not in visited:
                     visited.add(req)
@@ -566,17 +563,17 @@ class SqliteWorkflowStore(WorkflowStore):
 
         # Topological sort of ancestors
         sorted_ancestors = []
-        
+
         # Calculate in-degrees within the subgraph of ancestors
         in_degree = {aid: 0 for aid in ancestors}
         graph = {aid: [] for aid in ancestors}
-        
+
         for aid in ancestors:
             for req in nodes[aid]["requisites"]:
                 if req in ancestors:
                     graph[req].append(aid)
                     in_degree[aid] += 1
-        
+
         # Kahn's algorithm
         queue = [aid for aid in ancestors if in_degree[aid] == 0]
         while queue:
@@ -586,7 +583,7 @@ class SqliteWorkflowStore(WorkflowStore):
                 in_degree[v] -= 1
                 if in_degree[v] == 0:
                     queue.append(v)
-                    
+
         # Merge outputs
         merged_result: dict[str, Any] = {}
         for aid in sorted_ancestors:
@@ -600,7 +597,7 @@ class SqliteWorkflowStore(WorkflowStore):
                             existing.append(item)
                 else:
                     merged_result[key] = value
-                    
+
         return merged_result
 
     def retrieve_by_pipeline_config_id(

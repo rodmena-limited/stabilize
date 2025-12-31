@@ -159,9 +159,7 @@ PARALLEL_URL_FETCHER_WORKFLOW = {
             "dependencies": ["wait_for_branches"],
             "trigger_rule": "all_success",
             "function": "tools.shell.run",
-            "args": [
-                "echo 'All URLs fetched successfully'"
-            ],
+            "args": ["echo 'All URLs fetched successfully'"],
             "kwargs": {},
             "result_key": "final_message",
         },
@@ -201,9 +199,7 @@ SIMPLE_HTTP_WORKFLOW = {
 # =============================================================================
 
 
-def setup_pipeline_runner(
-    store: WorkflowStore, queue: Queue
-) -> tuple[QueueProcessor, Orchestrator]:
+def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with HighwayTask registered."""
     task_registry = TaskRegistry()
     task_registry.register("highway", HighwayTask)

@@ -506,7 +506,7 @@ class PostgresWorkflowStore(WorkflowStore):
             node = nodes.get(current)
             if not node:
                 continue
-            
+
             for req in node["requisites"]:
                 if req not in visited:
                     visited.add(req)
@@ -516,17 +516,17 @@ class PostgresWorkflowStore(WorkflowStore):
         # Topological sort of ancestors
         # We only care about sorting 'ancestors' subset
         sorted_ancestors = []
-        
+
         # Calculate in-degrees within the subgraph of ancestors
         in_degree = {aid: 0 for aid in ancestors}
         graph = {aid: [] for aid in ancestors}
-        
+
         for aid in ancestors:
             for req in nodes[aid]["requisites"]:
                 if req in ancestors:
                     graph[req].append(aid)
                     in_degree[aid] += 1
-        
+
         # Kahn's algorithm
         queue = [aid for aid in ancestors if in_degree[aid] == 0]
         while queue:
@@ -536,7 +536,7 @@ class PostgresWorkflowStore(WorkflowStore):
                 in_degree[v] -= 1
                 if in_degree[v] == 0:
                     queue.append(v)
-                    
+
         # Merge outputs
         result: dict[str, Any] = {}
         for aid in sorted_ancestors:
@@ -550,7 +550,7 @@ class PostgresWorkflowStore(WorkflowStore):
                             existing.append(item)
                 else:
                     result[key] = value
-                    
+
         return result
 
     def retrieve_by_pipeline_config_id(

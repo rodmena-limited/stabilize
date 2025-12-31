@@ -31,19 +31,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Keys that should not be substituted as placeholders
-RESERVED_KEYS = frozenset({
-    "command",
-    "timeout",
-    "cwd",
-    "env",
-    "shell",
-    "stdin",
-    "max_output_size",
-    "expected_codes",
-    "secrets",
-    "binary",
-    "continue_on_failure",
-})
+RESERVED_KEYS = frozenset(
+    {
+        "command",
+        "timeout",
+        "cwd",
+        "env",
+        "shell",
+        "stdin",
+        "max_output_size",
+        "expected_codes",
+        "secrets",
+        "binary",
+        "continue_on_failure",
+    }
+)
 
 
 class ShellTask(Task):
@@ -210,10 +212,7 @@ class ShellTask(Task):
             if result.returncode in expected_codes:
                 return TaskResult.success(outputs=outputs)
             else:
-                error_msg = (
-                    f"Command exited with code {result.returncode} "
-                    f"(expected: {expected_codes})"
-                )
+                error_msg = f"Command exited with code {result.returncode} (expected: {expected_codes})"
                 if stderr:
                     error_msg += f": {outputs['stderr'][:200]}"
 
@@ -223,20 +222,16 @@ class ShellTask(Task):
 
         except subprocess.TimeoutExpired as e:
             # Collect any partial output
-            outputs: dict[str, Any] = {"returncode": -1, "truncated": False}
+            timeout_outputs: dict[str, Any] = {"returncode": -1, "truncated": False}
             if e.stdout:
-                outputs["stdout"] = (
-                    e.stdout[:max_output_size] if len(e.stdout) > max_output_size else e.stdout
-                )
+                timeout_outputs["stdout"] = e.stdout[:max_output_size] if len(e.stdout) > max_output_size else e.stdout
             if e.stderr:
-                outputs["stderr"] = (
-                    e.stderr[:max_output_size] if len(e.stderr) > max_output_size else e.stderr
-                )
+                timeout_outputs["stderr"] = e.stderr[:max_output_size] if len(e.stderr) > max_output_size else e.stderr
 
             error_msg = f"Command timed out after {timeout}s"
             if continue_on_failure:
-                return TaskResult.failed_continue(error=error_msg, outputs=outputs)
-            return TaskResult.terminal(error=error_msg, context=outputs)
+                return TaskResult.failed_continue(error=error_msg, outputs=timeout_outputs)
+            return TaskResult.terminal(error=error_msg, context=timeout_outputs)
 
         except FileNotFoundError as e:
             return TaskResult.terminal(error=f"Command or shell not found: {e}")

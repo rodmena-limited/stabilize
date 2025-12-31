@@ -34,7 +34,6 @@ from stabilize.queue.sqlite_queue import SqliteQueue
 from stabilize.tasks.registry import TaskRegistry
 from stabilize.tasks.shell import ShellTask  # Use built-in enterprise-ready ShellTask
 
-
 # =============================================================================
 # Helper: Setup pipeline infrastructure
 # =============================================================================

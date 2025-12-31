@@ -1,6 +1,6 @@
 [project]
 name = "stabilize"
-version = "0.9.4"
+version = "0.9.5"
 description = "Highway Workflow Engine - Stabilize execution layer"
 readme = "README.md"
 requires-python = ">=3.11"

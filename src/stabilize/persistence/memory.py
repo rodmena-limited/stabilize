@@ -179,10 +179,7 @@ class InMemoryWorkflowStore(WorkflowStore):
 
             execution = self._executions[execution_id]
 
-            return [
-                copy.deepcopy(s) for s in execution.stages 
-                if s.parent_stage_id == parent_stage_id
-            ]
+            return [copy.deepcopy(s) for s in execution.stages if s.parent_stage_id == parent_stage_id]
 
     def get_merged_ancestor_outputs(
         self,
@@ -193,27 +190,27 @@ class InMemoryWorkflowStore(WorkflowStore):
         with self._lock:
             if execution_id not in self._executions:
                 return {}
-            
+
             execution = self._executions[execution_id]
-            
+
             # Use Workflow.get_context logic but filtered for this stage
             # Or reuse the graph logic from other stores
-            
-            # Since we have the full execution in memory here, we can use 
+
+            # Since we have the full execution in memory here, we can use
             # topological sort on the full graph and just filter ancestors
             from stabilize.dag.topological import topological_sort
-            
+
             # Build ancestor set
             target_stage = next((s for s in execution.stages if s.ref_id == stage_ref_id), None)
             if not target_stage:
                 return {}
-                
+
             ancestors = set()
             queue = [target_stage]
             visited = {target_stage.id}
-            
+
             stage_map = {s.ref_id: s for s in execution.stages}
-            
+
             while queue:
                 current = queue.pop(0)
                 for req_ref in current.requisite_stage_ref_ids:
@@ -223,10 +220,10 @@ class InMemoryWorkflowStore(WorkflowStore):
                             visited.add(req_stage.id)
                             ancestors.add(req_stage.id)
                             queue.append(req_stage)
-                            
+
             # Sort full list and filter
             sorted_stages = topological_sort(execution.stages)
-            
+
             result: dict[str, Any] = {}
             for stage in sorted_stages:
                 if stage.id in ancestors:
@@ -238,7 +235,7 @@ class InMemoryWorkflowStore(WorkflowStore):
                                     existing.append(item)
                         else:
                             result[key] = value
-                            
+
             return result
 
     def retrieve_by_pipeline_config_id(

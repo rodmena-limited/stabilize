@@ -191,10 +191,7 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         """
         # Hydrate context with ancestor outputs
         # This ensures tasks have access to upstream data even with partial loading
-        ancestor_outputs = self.repository.get_merged_ancestor_outputs(
-            stage.execution.id,
-            stage.ref_id
-        )
+        ancestor_outputs = self.repository.get_merged_ancestor_outputs(stage.execution.id, stage.ref_id)
 
         merged = ancestor_outputs
         for key, value in stage.context.items():
