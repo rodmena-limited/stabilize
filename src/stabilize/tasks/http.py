@@ -1,4 +1,22 @@
+"""
+HTTPTask for making HTTP requests using Python stdlib.
+
+This module provides a production-ready HTTPTask with:
+- All HTTP methods (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS)
+- JSON and form-encoded request bodies
+- File upload (multipart/form-data)
+- File download (streaming)
+- Custom headers and authentication (Basic, Bearer)
+- Retry logic with configurable backoff
+- SSL/TLS configuration (verification, client certs)
+- Placeholder substitution in URL, headers, and body
+- Secret masking in logs
+
+Zero external dependencies - uses only Python stdlib.
+"""
+
 from __future__ import annotations
+
 import base64
 import json
 import logging
@@ -11,13 +29,23 @@ from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
 from stabilize.tasks.interface import Task
 from stabilize.tasks.result import TaskResult
+
+if TYPE_CHECKING:
+    from http.client import HTTPResponse
+
+    from stabilize.models.stage import StageExecution
+
 logger = logging.getLogger(__name__)
+
+# Default settings
 DEFAULT_TIMEOUT = 30
 DEFAULT_MAX_RESPONSE_SIZE = 10 * 1024 * 1024  # 10MB
 DEFAULT_RETRY_ON_STATUS = [502, 503, 504]
 CHUNK_SIZE = 8192
+
 
 class HTTPTask(Task):
     """
@@ -120,7 +148,8 @@ class HTTPTask(Task):
             "retry_delay": 2.0,
         }
     """
-    SUPPORTED_METHODS = frozenset({'GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'})
+
+    SUPPORTED_METHODS = frozenset({"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"})
 
     def execute(self, stage: StageExecution) -> TaskResult:
         """Execute HTTP request."""
@@ -535,3 +564,29 @@ class HTTPTask(Task):
             return match.group(0)  # Keep original if not found
 
         return re.sub(r"\{(\w+)\}", replacer, text)
+
+    def _mask_secrets(
+        self,
+        text: str,
+        context: dict[str, Any],
+        secrets: list[str],
+    ) -> str:
+        """Mask secret values in text for logging."""
+        masked = text
+        for key in secrets:
+            if key in context:
+                value = str(context[key])
+                if value:
+                    masked = masked.replace(value, "***")
+        return masked
+
+    def _format_error(self, error: Exception) -> str:
+        """Format exception as error message."""
+        if isinstance(error, URLError):
+            return f"URL error: {error.reason}"
+        elif isinstance(error, TimeoutError):
+            return "Request timed out"
+        elif isinstance(error, OSError):
+            return f"Connection error: {error}"
+        else:
+            return str(error)
