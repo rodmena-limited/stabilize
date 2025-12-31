@@ -1,4 +1,7 @@
+"""Tests for HTTPTask."""
+
 from __future__ import annotations
+
 import base64
 import json
 import os
@@ -7,31 +10,16 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, ClassVar
 from unittest.mock import MagicMock
+
 import pytest
+
 from stabilize import HTTPTask, WorkflowStatus
 
-def http_server():
-    """Start a test HTTP server."""
-    server = HTTPServer(("127.0.0.1", 0), MockHTTPHandler)
-    port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever)
-    thread.daemon = True
-    thread.start()
-    yield f"http://127.0.0.1:{port}"
-    server.shutdown()
-
-def task() -> HTTPTask:
-    """Create HTTPTask instance."""
-    return HTTPTask()
-
-def stage(http_server: str) -> MagicMock:
-    """Create mock stage with context."""
-    mock = MagicMock()
-    mock.context = {"url": http_server}
-    return mock
 
 class MockHTTPHandler(BaseHTTPRequestHandler):
     """Mock HTTP server handler for tests."""
+
+    # Class-level storage for request inspection
     last_request: ClassVar[dict[str, Any]] = {}
     response_override: ClassVar[dict[str, Any] | None] = None
 
@@ -189,6 +177,33 @@ class MockHTTPHandler(BaseHTTPRequestHandler):
         self.send_header("Allow", "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS")
         self.end_headers()
 
+
+@pytest.fixture(scope="module")
+def http_server():
+    """Start a test HTTP server."""
+    server = HTTPServer(("127.0.0.1", 0), MockHTTPHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever)
+    thread.daemon = True
+    thread.start()
+    yield f"http://127.0.0.1:{port}"
+    server.shutdown()
+
+
+@pytest.fixture
+def task() -> HTTPTask:
+    """Create HTTPTask instance."""
+    return HTTPTask()
+
+
+@pytest.fixture
+def stage(http_server: str) -> MagicMock:
+    """Create mock stage with context."""
+    mock = MagicMock()
+    mock.context = {"url": http_server}
+    return mock
+
+
 class TestBasicRequests:
     """Test basic HTTP methods."""
 
@@ -319,6 +334,7 @@ class TestBasicRequests:
         assert result.status == WorkflowStatus.SUCCEEDED
         assert "Allow" in result.outputs["headers"]
 
+
 class TestAuthentication:
     """Test authentication methods."""
 
@@ -350,6 +366,7 @@ class TestAuthentication:
         assert result.status == WorkflowStatus.SUCCEEDED
         assert result.outputs["body"] == "Bearer my-secret-token"
 
+
 class TestCustomHeaders:
     """Test custom headers."""
 
@@ -369,6 +386,7 @@ class TestCustomHeaders:
         headers = result.outputs["body_json"]
         assert headers.get("X-Custom-Header") == "custom-value"
         assert headers.get("X-Another-Header") == "another-value"
+
 
 class TestFileOperations:
     """Test file upload and download."""
@@ -439,6 +457,7 @@ class TestFileOperations:
                 assert f.read() == "OK"
         finally:
             os.unlink(temp_path)
+
 
 class TestErrorHandling:
     """Test error handling."""
@@ -511,6 +530,7 @@ class TestErrorHandling:
         assert result.status == WorkflowStatus.TERMINAL
         assert "file not found" in result.context.get("error", "").lower()
 
+
 class TestExpectedStatus:
     """Test expected status validation."""
 
@@ -543,6 +563,7 @@ class TestExpectedStatus:
         assert result.status == WorkflowStatus.TERMINAL
         assert "unexpected status" in result.context.get("error", "").lower()
 
+
 class TestRetries:
     """Test retry logic."""
 
@@ -558,3 +579,102 @@ class TestRetries:
         # Still fails after retries
         assert result.status == WorkflowStatus.TERMINAL
         assert result.context["status_code"] == 503
+
+
+class TestPlaceholderSubstitution:
+    """Test placeholder substitution."""
+
+    def test_url_placeholder(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test placeholder in URL."""
+        stage.context = {
+            "url": f"{http_server}/param/{{value}}",
+            "value": "test123",
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["body"] == "param=test123"
+
+    def test_body_placeholder(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test placeholder in body."""
+        stage.context = {
+            "url": f"{http_server}/echo",
+            "method": "POST",
+            "body": "Hello, {name}!",
+            "name": "World",
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["body"] == "Hello, World!"
+
+    def test_bearer_token_placeholder(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test placeholder in bearer token."""
+        stage.context = {
+            "url": f"{http_server}/auth/bearer",
+            "bearer_token": "{api_key}",
+            "api_key": "secret-key-123",
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["body"] == "Bearer secret-key-123"
+
+
+class TestResponseSizeLimits:
+    """Test response size limits."""
+
+    def test_max_response_size(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test max response size limit."""
+        stage.context = {
+            "url": f"{http_server}/large",
+            "max_response_size": 1000,  # 1KB limit
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.TERMINAL
+        assert "max size" in result.context.get("error", "").lower()
+
+
+class TestSSLConfiguration:
+    """Test SSL/TLS configuration."""
+
+    def test_verify_ssl_disabled(self, task: HTTPTask, stage: MagicMock) -> None:
+        """Test that verify_ssl=False doesn't crash."""
+        # This won't actually test against HTTPS without a real server,
+        # but ensures the SSL context is built correctly
+        stage.context = {
+            "url": "http://127.0.0.1:59999",
+            "verify_ssl": False,
+            "timeout": 1,
+        }
+        result = task.execute(stage)
+        # Connection will fail, but SSL context should be created
+        assert result.status == WorkflowStatus.TERMINAL
+
+
+class TestContentTypeGuessing:
+    """Test content type guessing."""
+
+    def test_content_type_guessing(self, task: HTTPTask) -> None:
+        """Test file content type guessing."""
+        assert task._guess_content_type("test.txt") == "text/plain"
+        assert task._guess_content_type("test.json") == "application/json"
+        assert task._guess_content_type("test.pdf") == "application/pdf"
+        assert task._guess_content_type("test.png") == "image/png"
+        assert task._guess_content_type("test.jpg") == "image/jpeg"
+        assert task._guess_content_type("test.unknown") == "application/octet-stream"
+
+
+class TestRedirects:
+    """Test redirect handling."""
+
+    def test_redirect_followed(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test that redirects are followed."""
+        stage.context = {"url": f"{http_server}/redirect"}
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["body"] == "Redirected!"
+        # Final URL should be the redirected location
+        assert "/redirected" in result.outputs["url"]
