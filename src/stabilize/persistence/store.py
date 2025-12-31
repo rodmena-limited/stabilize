@@ -71,6 +71,22 @@ class WorkflowStore(ABC):
         pass
 
     @abstractmethod
+    def retrieve_execution_summary(self, execution_id: str) -> Workflow:
+        """
+        Retrieve execution metadata without stages.
+
+        Args:
+            execution_id: The execution ID
+
+        Returns:
+            The execution with empty stages list
+
+        Raises:
+            WorkflowNotFoundError: If not found
+        """
+        pass
+
+    @abstractmethod
     def update_status(self, execution: Workflow) -> None:
         """
         Update the status of an execution.
@@ -124,6 +140,100 @@ class WorkflowStore(ABC):
         Args:
             execution: The execution
             stage_id: The stage ID to remove
+        """
+        pass
+
+    @abstractmethod
+    def retrieve_stage(self, stage_id: str) -> StageExecution:
+        """
+        Retrieve a single stage by ID.
+
+        The returned stage will have a partial parent execution attached
+        (containing metadata but no other stages).
+
+        Args:
+            stage_id: The stage ID
+
+        Returns:
+            The stage execution
+
+        Raises:
+            ValueError: If stage not found
+        """
+        pass
+
+    @abstractmethod
+    def get_upstream_stages(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+    ) -> list[StageExecution]:
+        """
+        Get upstream stages for a given stage.
+
+        Args:
+            execution_id: The execution ID
+            stage_ref_id: The reference ID of the stage
+
+        Returns:
+            List of upstream stages
+        """
+        pass
+
+    @abstractmethod
+    def get_downstream_stages(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+    ) -> list[StageExecution]:
+        """
+        Get downstream stages for a given stage.
+
+        Args:
+            execution_id: The execution ID
+            stage_ref_id: The reference ID of the stage
+
+        Returns:
+            List of downstream stages
+        """
+        pass
+
+    @abstractmethod
+    def get_synthetic_stages(
+        self,
+        execution_id: str,
+        parent_stage_id: str,
+    ) -> list[StageExecution]:
+        """
+        Get synthetic stages for a given parent stage.
+
+        Args:
+            execution_id: The execution ID
+            parent_stage_id: The parent stage ID
+
+        Returns:
+            List of synthetic stages
+        """
+        pass
+
+    @abstractmethod
+    def get_merged_ancestor_outputs(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+    ) -> dict[str, Any]:
+        """
+        Get merged outputs from all ancestor stages.
+
+        Traverses the DAG upstream, collects outputs, and merges them
+        according to topological order (latest wins).
+
+        Args:
+            execution_id: The execution ID
+            stage_ref_id: The reference ID of the stage
+
+        Returns:
+            Merged dictionary of outputs
         """
         pass
 

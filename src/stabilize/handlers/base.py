@@ -114,22 +114,21 @@ class StabilizeHandler(MessageHandler[M], ABC):
             message: Message containing stage ID
             block: Function to call with the stage
         """
-
-        def on_execution(execution: Workflow) -> None:
-            try:
-                stage = execution.stage_by_id(message.stage_id)
-                block(stage)
-            except ValueError:
-                logger.error("Stage not found: %s", message.stage_id)
-                self.queue.push(
-                    InvalidStageId(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=message.stage_id,
-                    )
+        try:
+            stage = self.repository.retrieve_stage(message.stage_id)
+            block(stage)
+        except ValueError:
+            logger.error("Stage not found: %s", message.stage_id)
+            self.queue.push(
+                InvalidStageId(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
                 )
-
-        self.with_execution(message, on_execution)
+            )
+        except Exception as e:
+            logger.error("Failed to retrieve stage %s: %s", message.stage_id, e)
+            # Should we retry or fail? For now, log error.
 
     def with_task(
         self,
@@ -185,7 +184,7 @@ class StabilizeHandler(MessageHandler[M], ABC):
         4. If no downstream and not synthetic, complete execution
         """
         execution = stage.execution
-        downstream_stages = stage.downstream_stages()
+        downstream_stages = self.repository.get_downstream_stages(execution.id, stage.ref_id)
         phase = stage.synthetic_stage_owner
 
         if downstream_stages:
@@ -200,16 +199,17 @@ class StabilizeHandler(MessageHandler[M], ABC):
                 )
         elif phase is not None:
             # Synthetic stage - notify parent
-            parent = stage.parent()
-            self.queue.ensure(
-                ContinueParentStage(
-                    execution_type=execution.type.value,
-                    execution_id=execution.id,
-                    stage_id=parent.id,
-                    phase=phase,
-                ),
-                timedelta(seconds=0),
-            )
+            parent_id = stage.parent_stage_id
+            if parent_id:
+                self.queue.ensure(
+                    ContinueParentStage(
+                        execution_type=execution.type.value,
+                        execution_id=execution.id,
+                        stage_id=parent_id,
+                        phase=phase,
+                    ),
+                    timedelta(seconds=0),
+                )
         else:
             # Top-level stage with no downstream - complete execution
             self.queue.push(

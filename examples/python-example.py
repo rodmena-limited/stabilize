@@ -78,7 +78,11 @@ import json
 import sys
 
 # Input data
-INPUT = {inputs}
+try:
+    INPUT = json.loads('''{inputs}''')
+except json.JSONDecodeError:
+    # Fallback for simple cases or empty
+    INPUT = {{}}
 
 # User script
 {script}
@@ -94,7 +98,17 @@ if 'RESULT' in dir():
         script = stage.context.get("script")
         script_file = stage.context.get("script_file")
         args = stage.context.get("args", [])
-        inputs = stage.context.get("inputs", {})
+        
+        # Merge inputs with stage context (which contains upstream outputs)
+        # 1. Start with stage context (excludes script, args, etc to keep it clean?)
+        # 2. Update with explicit inputs
+        base_context = {
+            k: v for k, v in stage.context.items() 
+            if k not in ("script", "script_file", "args", "inputs", "python_path", "timeout")
+        }
+        explicit_inputs = stage.context.get("inputs", {})
+        inputs = {**base_context, **explicit_inputs}
+        
         python_path = stage.context.get("python_path", sys.executable)
         timeout = stage.context.get("timeout", 60)
 
@@ -169,6 +183,8 @@ if 'RESULT' in dir():
                 return TaskResult.success(outputs=outputs)
             else:
                 print(f"  [PythonTask] Failed with exit code {exit_code}")
+                if stderr:
+                    print(f"  [PythonTask] Stderr: {stderr}")
                 return TaskResult.terminal(
                     error=f"Script exited with code {exit_code}",
                     context=outputs,
@@ -329,7 +345,7 @@ print(f"Generated {len(data)} records")
                 requisite_stage_ref_ids={"1"},
                 context={
                     "script": """
-data = INPUT['data']
+data = INPUT.get('data') or INPUT.get('result')
 
 # Transform: double values, uppercase names
 transformed = [
@@ -363,7 +379,7 @@ print(f"Transformed {len(transformed)} records")
                 requisite_stage_ref_ids={"2"},
                 context={
                     "script": """
-data = INPUT['data']
+data = INPUT.get('data') or INPUT.get('result')
 
 # Validation
 errors = []
@@ -376,8 +392,8 @@ for item in data:
 # Summary
 summary = {
     'total_records': len(data),
-    'high_count': sum(1 for d in data if d['category'] == 'HIGH'),
-    'low_count': sum(1 for d in data if d['category'] == 'LOW'),
+    'high_count': sum(1 for d in data if d.get('category') == 'HIGH'),
+    'low_count': sum(1 for d in data if d.get('category') == 'LOW'),
     'total_value': sum(d['value'] for d in data),
     'avg_value': sum(d['value'] for d in data) / len(data) if data else 0,
     'errors': errors,
@@ -477,7 +493,7 @@ print(f"Generated {len(numbers)} numbers")
                 requisite_stage_ref_ids={"generate"},
                 context={
                     "script": """
-numbers = INPUT['numbers']
+numbers = INPUT.get('numbers') or INPUT.get('result')
 RESULT = {
     'count': len(numbers),
     'sum': sum(numbers),
@@ -506,7 +522,7 @@ print(f"Stats: min={RESULT['min']}, max={RESULT['max']}, avg={RESULT['avg']:.2f}
                 requisite_stage_ref_ids={"generate"},
                 context={
                     "script": """
-numbers = INPUT['numbers']
+numbers = INPUT.get('numbers') or INPUT.get('result')
 sorted_nums = sorted(numbers)
 RESULT = {
     'sorted': sorted_nums,
@@ -533,7 +549,7 @@ print(f"Sorted {len(sorted_nums)} numbers, median={RESULT['median']}")
                 requisite_stage_ref_ids={"generate"},
                 context={
                     "script": """
-numbers = INPUT['numbers']
+numbers = INPUT.get('numbers') or INPUT.get('result')
 threshold = 500
 above = [n for n in numbers if n > threshold]
 below = [n for n in numbers if n <= threshold]

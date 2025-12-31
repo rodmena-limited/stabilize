@@ -54,8 +54,24 @@ class StartStageHandler(StabilizeHandler[StartStage]):
 
         def on_stage(stage: StageExecution) -> None:
             try:
-                # Check if upstream stages have failed
-                if stage.any_upstream_stages_failed():
+                # Get upstream stages from repository
+                upstream_stages = self.repository.get_upstream_stages(stage.execution.id, stage.ref_id)
+
+                # Check if any upstream stages failed
+                # We check for terminal statuses in direct dependencies
+                halt_statuses = {
+                    WorkflowStatus.TERMINAL,
+                    WorkflowStatus.STOPPED,
+                    WorkflowStatus.CANCELED,
+                }
+
+                upstream_failed = False
+                for upstream in upstream_stages:
+                    if upstream.status in halt_statuses:
+                        upstream_failed = True
+                        break
+
+                if upstream_failed:
                     logger.warning(
                         "Upstream stage failed for %s (%s), completing execution",
                         stage.name,
@@ -70,7 +86,18 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                     return
 
                 # Check if all upstream stages are complete
-                if stage.all_upstream_stages_complete():
+                # CONTINUABLE_STATUSES = {SUCCEEDED, FAILED_CONTINUE, SKIPPED}
+                # We can't import CONTINUABLE_STATUSES easily inside here without circular imports potentially,
+                # but it is available in models.status
+                from stabilize.models.status import CONTINUABLE_STATUSES
+
+                all_complete = True
+                for upstream in upstream_stages:
+                    if upstream.status not in CONTINUABLE_STATUSES:
+                        all_complete = False
+                        break
+
+                if all_complete:
                     self._start_if_ready(stage, message)
                 else:
                     # Upstream not complete - re-queue
@@ -162,6 +189,26 @@ class StartStageHandler(StabilizeHandler[StartStage]):
 
         For now, we assume tasks are already defined on the stage.
         """
+        # Hydrate context with ancestor outputs
+        # This ensures tasks have access to upstream data even with partial loading
+        ancestor_outputs = self.repository.get_merged_ancestor_outputs(
+            stage.execution.id,
+            stage.ref_id
+        )
+
+        merged = ancestor_outputs
+        for key, value in stage.context.items():
+            if key in merged and isinstance(merged[key], list) and isinstance(value, list):
+                # Concatenate lists, avoiding duplicates
+                existing = merged[key]
+                for item in value:
+                    if item not in existing:
+                        existing.append(item)
+            else:
+                merged[key] = value
+
+        stage.context = merged
+
         # Mark first and last tasks
         if stage.tasks:
             stage.tasks[0].stage_start = True
@@ -186,8 +233,19 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         3. After stages (if any)
         4. Complete stage
         """
+        from stabilize.models.stage import SyntheticStageOwner
+
+        # Fetch synthetic stages
+        synthetic_stages = self.repository.get_synthetic_stages(stage.execution.id, stage.id)
+
         # Check for before stages
-        before_stages = stage.first_before_stages()
+        # We need initial before stages (those with no dependencies)
+        before_stages = [
+            s
+            for s in synthetic_stages
+            if s.synthetic_stage_owner == SyntheticStageOwner.STAGE_BEFORE and s.is_initial()
+        ]
+
         if before_stages:
             for before in before_stages:
                 self.queue.push(
@@ -213,7 +271,10 @@ class StartStageHandler(StabilizeHandler[StartStage]):
             return
 
         # No tasks - check for after stages
-        after_stages = stage.first_after_stages()
+        after_stages = [
+            s for s in synthetic_stages if s.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER and s.is_initial()
+        ]
+
         if after_stages:
             for after in after_stages:
                 self.queue.push(

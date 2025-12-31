@@ -46,6 +46,17 @@ class InMemoryWorkflowStore(WorkflowStore):
             # Return a deep copy to prevent external modifications
             return copy.deepcopy(self._executions[execution_id])
 
+    def retrieve_execution_summary(self, execution_id: str) -> Workflow:
+        """Retrieve execution metadata without stages."""
+        with self._lock:
+            if execution_id not in self._executions:
+                raise WorkflowNotFoundError(execution_id)
+
+            # Deep copy but clear stages
+            execution = copy.deepcopy(self._executions[execution_id])
+            execution.stages = []
+            return execution
+
     def update_status(self, execution: Workflow) -> None:
         """Update execution status."""
         with self._lock:
@@ -105,6 +116,130 @@ class InMemoryWorkflowStore(WorkflowStore):
 
             stored = self._executions[execution.id]
             stored.stages = [s for s in stored.stages if s.id != stage_id]
+
+    def retrieve_stage(self, stage_id: str) -> StageExecution:
+        """Retrieve a single stage by ID."""
+        with self._lock:
+            for execution in self._executions.values():
+                for stage in execution.stages:
+                    if stage.id == stage_id:
+                        # Return deep copy with lightweight execution
+                        stage_copy = copy.deepcopy(stage)
+
+                        exec_copy = copy.deepcopy(execution)
+                        exec_copy.stages = [stage_copy]  # Only include this stage
+                        stage_copy._execution = exec_copy
+
+                        return stage_copy
+
+            raise ValueError(f"Stage {stage_id} not found")
+
+    def get_upstream_stages(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+    ) -> list[StageExecution]:
+        """Get upstream stages."""
+        with self._lock:
+            if execution_id not in self._executions:
+                return []
+
+            execution = self._executions[execution_id]
+
+            # Find target stage to get requisites
+            target_stage = next((s for s in execution.stages if s.ref_id == stage_ref_id), None)
+            if not target_stage:
+                return []
+
+            return [copy.deepcopy(s) for s in execution.stages if s.ref_id in target_stage.requisite_stage_ref_ids]
+
+    def get_downstream_stages(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+    ) -> list[StageExecution]:
+        """Get downstream stages."""
+        with self._lock:
+            if execution_id not in self._executions:
+                return []
+
+            execution = self._executions[execution_id]
+
+            return [copy.deepcopy(s) for s in execution.stages if stage_ref_id in s.requisite_stage_ref_ids]
+
+    def get_synthetic_stages(
+        self,
+        execution_id: str,
+        parent_stage_id: str,
+    ) -> list[StageExecution]:
+        """Get synthetic stages."""
+        with self._lock:
+            if execution_id not in self._executions:
+                return []
+
+            execution = self._executions[execution_id]
+
+            return [
+                copy.deepcopy(s) for s in execution.stages 
+                if s.parent_stage_id == parent_stage_id
+            ]
+
+    def get_merged_ancestor_outputs(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+    ) -> dict[str, Any]:
+        """Get merged outputs from all ancestor stages."""
+        with self._lock:
+            if execution_id not in self._executions:
+                return {}
+            
+            execution = self._executions[execution_id]
+            
+            # Use Workflow.get_context logic but filtered for this stage
+            # Or reuse the graph logic from other stores
+            
+            # Since we have the full execution in memory here, we can use 
+            # topological sort on the full graph and just filter ancestors
+            from stabilize.dag.topological import topological_sort
+            
+            # Build ancestor set
+            target_stage = next((s for s in execution.stages if s.ref_id == stage_ref_id), None)
+            if not target_stage:
+                return {}
+                
+            ancestors = set()
+            queue = [target_stage]
+            visited = {target_stage.id}
+            
+            stage_map = {s.ref_id: s for s in execution.stages}
+            
+            while queue:
+                current = queue.pop(0)
+                for req_ref in current.requisite_stage_ref_ids:
+                    if req_ref in stage_map:
+                        req_stage = stage_map[req_ref]
+                        if req_stage.id not in visited:
+                            visited.add(req_stage.id)
+                            ancestors.add(req_stage.id)
+                            queue.append(req_stage)
+                            
+            # Sort full list and filter
+            sorted_stages = topological_sort(execution.stages)
+            
+            result: dict[str, Any] = {}
+            for stage in sorted_stages:
+                if stage.id in ancestors:
+                    for key, value in stage.outputs.items():
+                        if key in result and isinstance(result[key], list) and isinstance(value, list):
+                            existing = result[key]
+                            for item in value:
+                                if item not in existing:
+                                    existing.append(item)
+                        else:
+                            result[key] = value
+                            
+            return result
 
     def retrieve_by_pipeline_config_id(
         self,

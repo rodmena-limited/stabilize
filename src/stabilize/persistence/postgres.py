@@ -221,6 +221,20 @@ class PostgresWorkflowStore(WorkflowStore):
                 execution.stages = stages
                 return execution
 
+    def retrieve_execution_summary(self, execution_id: str) -> Workflow:
+        """Retrieve execution metadata without stages."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM pipeline_executions WHERE id = %(id)s",
+                    {"id": execution_id},
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise WorkflowNotFoundError(execution_id)
+
+                return self._row_to_execution(cast(dict[str, Any], row))
+
     def update_status(self, execution: Workflow) -> None:
         """Update execution status."""
         with self._pool.connection() as conn:
@@ -318,6 +332,226 @@ class PostgresWorkflowStore(WorkflowStore):
                     {"id": stage_id},
                 )
             conn.commit()
+
+    def retrieve_stage(self, stage_id: str) -> StageExecution:
+        """Retrieve a single stage by ID."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                # Get stage
+                cur.execute(
+                    "SELECT * FROM stage_executions WHERE id = %(id)s",
+                    {"id": stage_id},
+                )
+                stage_row = cur.fetchone()
+                if not stage_row:
+                    raise ValueError(f"Stage {stage_id} not found")
+
+                stage = self._row_to_stage(cast(dict[str, Any], stage_row))
+
+                # Get execution summary for context
+                # We do this in a separate transaction effectively, but here we reuse connection
+                cur.execute(
+                    "SELECT * FROM pipeline_executions WHERE id = %(id)s",
+                    {"id": stage_row["execution_id"]},
+                )
+                exec_row = cur.fetchone()
+                if exec_row:
+                    execution = self._row_to_execution(cast(dict[str, Any], exec_row))
+                    stage._execution = execution
+                    # Add stage to execution's stage list so it can be found
+                    execution.stages = [stage]
+
+                # Get tasks
+                cur.execute(
+                    """
+                    SELECT * FROM task_executions
+                    WHERE stage_id = %(stage_id)s
+                    """,
+                    {"stage_id": stage.id},
+                )
+                for task_row in cur.fetchall():
+                    task = self._row_to_task(cast(dict[str, Any], task_row))
+                    task._stage = stage
+                    stage.tasks.append(task)
+
+                return stage
+
+    def get_upstream_stages(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+    ) -> list[StageExecution]:
+        """Get upstream stages."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                # First find the requisite ref ids of the target stage
+                cur.execute(
+                    """
+                    SELECT requisite_stage_ref_ids FROM stage_executions
+                    WHERE execution_id = %(execution_id)s AND ref_id = %(ref_id)s
+                    """,
+                    {"execution_id": execution_id, "ref_id": stage_ref_id},
+                )
+                row = cur.fetchone()
+                if not row or not row["requisite_stage_ref_ids"]:
+                    return []
+
+                requisites = tuple(row["requisite_stage_ref_ids"])
+
+                # Now fetch those stages
+                cur.execute(
+                    """
+                    SELECT * FROM stage_executions
+                    WHERE execution_id = %(execution_id)s
+                    AND ref_id IN %(requisites)s
+                    """,
+                    {"execution_id": execution_id, "requisites": requisites},
+                )
+
+                stages = []
+                for stage_row in cur.fetchall():
+                    stage = self._row_to_stage(cast(dict[str, Any], stage_row))
+                    stages.append(stage)
+
+                return stages
+
+    def get_downstream_stages(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+    ) -> list[StageExecution]:
+        """Get downstream stages."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                # Find stages that have stage_ref_id in their requisites
+                cur.execute(
+                    """
+                    SELECT * FROM stage_executions
+                    WHERE execution_id = %(execution_id)s
+                    AND %(ref_id)s = ANY(requisite_stage_ref_ids)
+                    """,
+                    {"execution_id": execution_id, "ref_id": stage_ref_id},
+                )
+
+                stages = []
+                for stage_row in cur.fetchall():
+                    stage = self._row_to_stage(cast(dict[str, Any], stage_row))
+                    # We don't populate tasks or full execution here for performance
+                    # But we need execution ID
+                    stages.append(stage)
+
+                return stages
+
+    def get_synthetic_stages(
+        self,
+        execution_id: str,
+        parent_stage_id: str,
+    ) -> list[StageExecution]:
+        """Get synthetic stages."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT * FROM stage_executions
+                    WHERE execution_id = %(execution_id)s
+                    AND parent_stage_id = %(parent_id)s
+                    """,
+                    {"execution_id": execution_id, "parent_id": parent_stage_id},
+                )
+
+                stages = []
+                for stage_row in cur.fetchall():
+                    stage = self._row_to_stage(cast(dict[str, Any], stage_row))
+                    stages.append(stage)
+
+                return stages
+
+    def get_merged_ancestor_outputs(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+    ) -> dict[str, Any]:
+        """Get merged outputs from all ancestor stages."""
+        # Fetch lightweight graph (ref_id, requisites, outputs)
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT ref_id, requisite_stage_ref_ids, outputs
+                    FROM stage_executions
+                    WHERE execution_id = %(execution_id)s
+                    """,
+                    {"execution_id": execution_id},
+                )
+                rows = cur.fetchall()
+
+        # Build graph in memory
+        nodes = {}
+        for row in rows:
+            nodes[row["ref_id"]] = {
+                "requisites": set(row["requisite_stage_ref_ids"] or []),
+                "outputs": row["outputs"] if isinstance(row["outputs"], dict) else json.loads(row["outputs"] or "{}"),
+            }
+
+        if stage_ref_id not in nodes:
+            return {}
+
+        # Find ancestors via BFS
+        ancestors = set()
+        queue = [stage_ref_id]
+        visited = {stage_ref_id}
+
+        while queue:
+            current = queue.pop(0)
+            node = nodes.get(current)
+            if not node:
+                continue
+            
+            for req in node["requisites"]:
+                if req not in visited:
+                    visited.add(req)
+                    ancestors.add(req)
+                    queue.append(req)
+
+        # Topological sort of ancestors
+        # We only care about sorting 'ancestors' subset
+        sorted_ancestors = []
+        
+        # Calculate in-degrees within the subgraph of ancestors
+        in_degree = {aid: 0 for aid in ancestors}
+        graph = {aid: [] for aid in ancestors}
+        
+        for aid in ancestors:
+            for req in nodes[aid]["requisites"]:
+                if req in ancestors:
+                    graph[req].append(aid)
+                    in_degree[aid] += 1
+        
+        # Kahn's algorithm
+        queue = [aid for aid in ancestors if in_degree[aid] == 0]
+        while queue:
+            u = queue.pop(0)
+            sorted_ancestors.append(u)
+            for v in graph[u]:
+                in_degree[v] -= 1
+                if in_degree[v] == 0:
+                    queue.append(v)
+                    
+        # Merge outputs
+        result: dict[str, Any] = {}
+        for aid in sorted_ancestors:
+            outputs = nodes[aid]["outputs"]
+            for key, value in outputs.items():
+                if key in result and isinstance(result[key], list) and isinstance(value, list):
+                    # Concatenate lists
+                    existing = result[key]
+                    for item in value:
+                        if item not in existing:
+                            existing.append(item)
+                else:
+                    result[key] = value
+                    
+        return result
 
     def retrieve_by_pipeline_config_id(
         self,
