@@ -3,31 +3,31 @@
 import pytest
 
 from stabilize.assertions import (
-    StabilizeError,
-    StabilizeFatalError,
-    StabilizeExpectedError,
-    PreconditionError,
+    ConfigError,
     ContextError,
     OutputError,
-    ConfigError,
-    VerificationError,
+    PreconditionError,
+    StabilizeError,
+    StabilizeExpectedError,
+    StabilizeFatalError,
     StageNotReadyError,
-    assert_true,
+    VerificationError,
+    assert_config,
     assert_context,
-    assert_context_type,
     assert_context_in,
+    assert_context_type,
+    assert_no_upstream_failures,
+    assert_non_empty,
+    assert_not_none,
     assert_output,
     assert_output_type,
     assert_stage_ready,
-    assert_no_upstream_failures,
-    assert_config,
+    assert_true,
     assert_verified,
-    assert_not_none,
-    assert_non_empty,
 )
 from stabilize.models.stage import StageExecution
-from stabilize.models.workflow import Workflow
 from stabilize.models.status import WorkflowStatus
+from stabilize.models.workflow import Workflow
 
 
 class TestExceptionHierarchy:

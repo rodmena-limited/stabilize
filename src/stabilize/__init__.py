@@ -15,6 +15,47 @@ workflows with full support for:
 
 __version__ = "0.10.0"
 
+# Assertion helpers
+from stabilize.assertions import (
+    ConfigError,
+    ContextError,
+    OutputError,
+    PreconditionError,
+    StabilizeError,
+    StabilizeExpectedError,
+    StabilizeFatalError,
+    StageNotReadyError,
+    VerificationError,
+    assert_config,
+    assert_context,
+    assert_context_in,
+    assert_context_type,
+    assert_no_upstream_failures,
+    assert_non_empty,
+    assert_not_none,
+    assert_output,
+    assert_output_type,
+    assert_stage_ready,
+    assert_true,
+    assert_verified,
+)
+
+# Structured conditions
+from stabilize.conditions import (
+    Condition,
+    ConditionReason,
+    ConditionSet,
+    ConditionType,
+)
+
+# Configuration validation
+from stabilize.config_validation import (
+    SchemaValidator,
+    ValidationError,
+    is_valid,
+    validate_context,
+    validate_outputs,
+)
 from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.task import TaskExecution
@@ -24,53 +65,11 @@ from stabilize.tasks.result import TaskResult
 
 # Verification system
 from stabilize.verification import (
+    CallableVerifier,
+    OutputVerifier,
     Verifier,
     VerifyResult,
     VerifyStatus,
-    OutputVerifier,
-    CallableVerifier,
-)
-
-# Structured conditions
-from stabilize.conditions import (
-    Condition,
-    ConditionSet,
-    ConditionType,
-    ConditionReason,
-)
-
-# Assertion helpers
-from stabilize.assertions import (
-    StabilizeError,
-    StabilizeFatalError,
-    StabilizeExpectedError,
-    PreconditionError,
-    ContextError,
-    OutputError,
-    ConfigError,
-    VerificationError,
-    StageNotReadyError,
-    assert_true,
-    assert_context,
-    assert_context_type,
-    assert_context_in,
-    assert_output,
-    assert_output_type,
-    assert_stage_ready,
-    assert_no_upstream_failures,
-    assert_config,
-    assert_verified,
-    assert_not_none,
-    assert_non_empty,
-)
-
-# Configuration validation
-from stabilize.config_validation import (
-    ValidationError,
-    SchemaValidator,
-    validate_context,
-    validate_outputs,
-    is_valid,
 )
 
 __all__ = [

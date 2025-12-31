@@ -1,16 +1,15 @@
 """Tests for the verification system."""
 
-import pytest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+from stabilize.models.stage import StageExecution
 from stabilize.verification import (
+    CallableVerifier,
+    OutputVerifier,
+    Verifier,
     VerifyResult,
     VerifyStatus,
-    Verifier,
-    OutputVerifier,
-    CallableVerifier,
 )
-from stabilize.models.stage import StageExecution
 
 
 class TestVerifyResult:
@@ -65,9 +64,9 @@ class TestVerifyResult:
 
     def test_timestamp_set(self) -> None:
         """Test that timestamp is set on creation."""
-        before = datetime.now(timezone.utc)
+        before = datetime.now(UTC)
         result = VerifyResult.ok()
-        after = datetime.now(timezone.utc)
+        after = datetime.now(UTC)
         assert before <= result.timestamp <= after
 
 
@@ -136,6 +135,7 @@ class TestCallableVerifier:
 
     def test_callable_verifier_ok(self) -> None:
         """Test callable verifier with passing function."""
+
         def check(stage: StageExecution) -> VerifyResult:
             if stage.outputs.get("ready"):
                 return VerifyResult.ok()
@@ -148,6 +148,7 @@ class TestCallableVerifier:
 
     def test_callable_verifier_retry(self) -> None:
         """Test callable verifier with retry result."""
+
         def check(stage: StageExecution) -> VerifyResult:
             return VerifyResult.retry("Still waiting")
 
@@ -158,6 +159,7 @@ class TestCallableVerifier:
 
     def test_custom_retry_settings(self) -> None:
         """Test custom retry settings."""
+
         def check(stage: StageExecution) -> VerifyResult:
             return VerifyResult.ok()
 
@@ -171,6 +173,7 @@ class TestVerifierBaseClass:
 
     def test_default_max_retries(self) -> None:
         """Test default max retries value."""
+
         class SimpleVerifier(Verifier):
             def verify(self, stage: StageExecution) -> VerifyResult:
                 return VerifyResult.ok()
@@ -180,6 +183,7 @@ class TestVerifierBaseClass:
 
     def test_default_retry_delay(self) -> None:
         """Test default retry delay value."""
+
         class SimpleVerifier(Verifier):
             def verify(self, stage: StageExecution) -> VerifyResult:
                 return VerifyResult.ok()

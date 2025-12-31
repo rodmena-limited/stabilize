@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -53,7 +53,7 @@ class VerifyResult:
     status: VerifyStatus
     message: str = ""
     details: dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     # ========== Factory Methods ==========
 
@@ -250,9 +250,7 @@ class OutputVerifier(Verifier):
             if key in stage.outputs:
                 actual = stage.outputs[key]
                 if not isinstance(actual, expected_type):
-                    type_errors.append(
-                        f"{key}: expected {expected_type.__name__}, got {type(actual).__name__}"
-                    )
+                    type_errors.append(f"{key}: expected {expected_type.__name__}, got {type(actual).__name__}")
 
         if missing:
             return VerifyResult.failed(
@@ -283,7 +281,7 @@ class CallableVerifier(Verifier):
 
     def __init__(
         self,
-        func: "Callable[[StageExecution], VerifyResult]",
+        func: Callable[[StageExecution], VerifyResult],
         max_retries: int = 3,
         retry_delay: float = 1.0,
     ) -> None:
@@ -295,7 +293,7 @@ class CallableVerifier(Verifier):
             max_retries: Maximum retry count
             retry_delay: Delay between retries in seconds
         """
-        from collections.abc import Callable
+
         self._func = func
         self._max_retries = max_retries
         self._retry_delay = retry_delay
@@ -315,4 +313,5 @@ class CallableVerifier(Verifier):
 
 # Type alias for verifier function
 from collections.abc import Callable
+
 VerifierFunc = Callable[["StageExecution"], VerifyResult]

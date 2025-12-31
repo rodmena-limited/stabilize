@@ -1,13 +1,11 @@
 """Tests for the structured conditions system."""
 
-import pytest
-from datetime import datetime, timedelta
 
 from stabilize.conditions import (
     Condition,
+    ConditionReason,
     ConditionSet,
     ConditionType,
-    ConditionReason,
 )
 
 
@@ -97,6 +95,7 @@ class TestCondition:
 
         # Small delay to ensure different timestamp
         import time
+
         time.sleep(0.01)
 
         updated = original.update(status=False)

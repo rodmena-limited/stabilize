@@ -156,42 +156,50 @@ class SchemaValidator:
                         valid = True
                         break
                 if not valid:
-                    errors.append(ValidationError(
-                        path,
-                        f"must be one of types: {', '.join(expected_type)}",
-                        value,
-                        "type",
-                    ))
+                    errors.append(
+                        ValidationError(
+                            path,
+                            f"must be one of types: {', '.join(expected_type)}",
+                            value,
+                            "type",
+                        )
+                    )
                     return errors
             else:
                 if not self._check_type(value, expected_type):
-                    errors.append(ValidationError(
-                        path,
-                        f"must be {expected_type}, got {type(value).__name__}",
-                        value,
-                        "type",
-                    ))
+                    errors.append(
+                        ValidationError(
+                            path,
+                            f"must be {expected_type}, got {type(value).__name__}",
+                            value,
+                            "type",
+                        )
+                    )
                     return errors
 
         # Enum validation
         if "enum" in schema:
             if value not in schema["enum"]:
-                errors.append(ValidationError(
-                    path,
-                    f"must be one of: {schema['enum']}",
-                    value,
-                    "enum",
-                ))
+                errors.append(
+                    ValidationError(
+                        path,
+                        f"must be one of: {schema['enum']}",
+                        value,
+                        "enum",
+                    )
+                )
 
         # Const validation
         if "const" in schema:
             if value != schema["const"]:
-                errors.append(ValidationError(
-                    path,
-                    f"must be exactly {schema['const']!r}",
-                    value,
-                    "const",
-                ))
+                errors.append(
+                    ValidationError(
+                        path,
+                        f"must be exactly {schema['const']!r}",
+                        value,
+                        "const",
+                    )
+                )
 
         # String validations
         if isinstance(value, str):
@@ -231,30 +239,37 @@ class SchemaValidator:
         errors: list[ValidationError] = []
 
         if "minLength" in schema and len(value) < schema["minLength"]:
-            errors.append(ValidationError(
-                path,
-                f"must have minimum length {schema['minLength']}",
-                value,
-                "minLength",
-            ))
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must have minimum length {schema['minLength']}",
+                    value,
+                    "minLength",
+                )
+            )
 
         if "maxLength" in schema and len(value) > schema["maxLength"]:
-            errors.append(ValidationError(
-                path,
-                f"must have maximum length {schema['maxLength']}",
-                value,
-                "maxLength",
-            ))
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must have maximum length {schema['maxLength']}",
+                    value,
+                    "maxLength",
+                )
+            )
 
         if "pattern" in schema:
             import re
+
             if not re.match(schema["pattern"], value):
-                errors.append(ValidationError(
-                    path,
-                    f"must match pattern {schema['pattern']}",
-                    value,
-                    "pattern",
-                ))
+                errors.append(
+                    ValidationError(
+                        path,
+                        f"must match pattern {schema['pattern']}",
+                        value,
+                        "pattern",
+                    )
+                )
 
         return errors
 
@@ -268,44 +283,54 @@ class SchemaValidator:
         errors: list[ValidationError] = []
 
         if "minimum" in schema and value < schema["minimum"]:
-            errors.append(ValidationError(
-                path,
-                f"must be >= {schema['minimum']}",
-                value,
-                "minimum",
-            ))
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must be >= {schema['minimum']}",
+                    value,
+                    "minimum",
+                )
+            )
 
         if "maximum" in schema and value > schema["maximum"]:
-            errors.append(ValidationError(
-                path,
-                f"must be <= {schema['maximum']}",
-                value,
-                "maximum",
-            ))
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must be <= {schema['maximum']}",
+                    value,
+                    "maximum",
+                )
+            )
 
         if "exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"]:
-            errors.append(ValidationError(
-                path,
-                f"must be > {schema['exclusiveMinimum']}",
-                value,
-                "exclusiveMinimum",
-            ))
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must be > {schema['exclusiveMinimum']}",
+                    value,
+                    "exclusiveMinimum",
+                )
+            )
 
         if "exclusiveMaximum" in schema and value >= schema["exclusiveMaximum"]:
-            errors.append(ValidationError(
-                path,
-                f"must be < {schema['exclusiveMaximum']}",
-                value,
-                "exclusiveMaximum",
-            ))
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must be < {schema['exclusiveMaximum']}",
+                    value,
+                    "exclusiveMaximum",
+                )
+            )
 
         if "multipleOf" in schema and value % schema["multipleOf"] != 0:
-            errors.append(ValidationError(
-                path,
-                f"must be multiple of {schema['multipleOf']}",
-                value,
-                "multipleOf",
-            ))
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must be multiple of {schema['multipleOf']}",
+                    value,
+                    "multipleOf",
+                )
+            )
 
         return errors
 
@@ -319,31 +344,37 @@ class SchemaValidator:
         errors: list[ValidationError] = []
 
         if "minItems" in schema and len(value) < schema["minItems"]:
-            errors.append(ValidationError(
-                path,
-                f"must have at least {schema['minItems']} items",
-                value,
-                "minItems",
-            ))
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must have at least {schema['minItems']} items",
+                    value,
+                    "minItems",
+                )
+            )
 
         if "maxItems" in schema and len(value) > schema["maxItems"]:
-            errors.append(ValidationError(
-                path,
-                f"must have at most {schema['maxItems']} items",
-                value,
-                "maxItems",
-            ))
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must have at most {schema['maxItems']} items",
+                    value,
+                    "maxItems",
+                )
+            )
 
         if "uniqueItems" in schema and schema["uniqueItems"]:
             # Check for duplicates (works for hashable items)
             try:
                 if len(value) != len(set(value)):
-                    errors.append(ValidationError(
-                        path,
-                        "must have unique items",
-                        value,
-                        "uniqueItems",
-                    ))
+                    errors.append(
+                        ValidationError(
+                            path,
+                            "must have unique items",
+                            value,
+                            "uniqueItems",
+                        )
+                    )
             except TypeError:
                 pass  # Non-hashable items, skip check
 
@@ -370,11 +401,13 @@ class SchemaValidator:
             for field in schema["required"]:
                 if field not in value:
                     field_path = f"{path}.{field}" if path else field
-                    errors.append(ValidationError(
-                        field_path,
-                        "is required",
-                        constraint="required",
-                    ))
+                    errors.append(
+                        ValidationError(
+                            field_path,
+                            "is required",
+                            constraint="required",
+                        )
+                    )
 
         # Properties
         properties = schema.get("properties", {})
@@ -391,11 +424,13 @@ class SchemaValidator:
             if extra:
                 for field in extra:
                     field_path = f"{path}.{field}" if path else field
-                    errors.append(ValidationError(
-                        field_path,
-                        "is not an allowed property",
-                        constraint="additionalProperties",
-                    ))
+                    errors.append(
+                        ValidationError(
+                            field_path,
+                            "is not an allowed property",
+                            constraint="additionalProperties",
+                        )
+                    )
         elif isinstance(additional, dict):
             # Validate additional properties against schema
             allowed = set(properties.keys())
@@ -406,18 +441,22 @@ class SchemaValidator:
 
         # Min/max properties
         if "minProperties" in schema and len(value) < schema["minProperties"]:
-            errors.append(ValidationError(
-                path,
-                f"must have at least {schema['minProperties']} properties",
-                constraint="minProperties",
-            ))
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must have at least {schema['minProperties']} properties",
+                    constraint="minProperties",
+                )
+            )
 
         if "maxProperties" in schema and len(value) > schema["maxProperties"]:
-            errors.append(ValidationError(
-                path,
-                f"must have at most {schema['maxProperties']} properties",
-                constraint="maxProperties",
-            ))
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must have at most {schema['maxProperties']} properties",
+                    constraint="maxProperties",
+                )
+            )
 
         return errors
 

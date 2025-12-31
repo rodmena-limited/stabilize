@@ -18,7 +18,7 @@ Example:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -92,7 +92,7 @@ class Condition:
     status: bool
     reason: ConditionReason | str
     message: str = ""
-    last_transition_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_transition_time: datetime = field(default_factory=lambda: datetime.now(UTC))
     observed_generation: int = 0
 
     def __post_init__(self) -> None:
@@ -212,8 +212,7 @@ class Condition:
 
         # Only update transition time if status changed
         transition_time = (
-            datetime.now(timezone.utc) if status is not None and status != self.status
-            else self.last_transition_time
+            datetime.now(UTC) if status is not None and status != self.status else self.last_transition_time
         )
 
         return Condition(
@@ -243,7 +242,7 @@ class Condition:
         if isinstance(transition_time, str):
             transition_time = datetime.fromisoformat(transition_time)
         elif transition_time is None:
-            transition_time = datetime.now(timezone.utc)
+            transition_time = datetime.now(UTC)
 
         return cls(
             type=data["type"],
