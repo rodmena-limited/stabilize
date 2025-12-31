@@ -129,3 +129,15 @@ class VerboseShellTask(ShellTask):
 
 class CancelStageHandler(StabilizeHandler):
     """Handler for CancelStage messages - marks stages as canceled."""
+
+    def message_type(self) -> type[CancelStage]:
+        return CancelStage  # type: ignore[no-any-return]
+
+    def handle(self, message: CancelStage) -> None:
+        """Mark the stage as canceled."""
+
+        def on_stage(stage: StageExecution) -> None:
+            stage.status = WorkflowStatus.CANCELED
+            self.repository.store_stage(stage)
+
+        self.with_stage(message, on_stage)
