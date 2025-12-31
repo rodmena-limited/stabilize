@@ -906,6 +906,288 @@ from stabilize.handlers.complete_task import CompleteTaskHandler
 from stabilize.handlers.complete_stage import CompleteStageHandler
 from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
 
+# Verification System (NEW)
+from stabilize.verification import (
+    VerifyResult, VerifyStatus, Verifier, OutputVerifier, CallableVerifier,
+)
+
+# Structured Conditions (NEW)
+from stabilize.conditions import (
+    Condition, ConditionSet, ConditionType, ConditionReason,
+)
+
+# Assertion Helpers (NEW)
+from stabilize.assertions import (
+    assert_context, assert_context_type, assert_context_in,
+    assert_output, assert_output_type,
+    assert_config, assert_verified, assert_true,
+    assert_stage_ready, assert_not_none, assert_non_empty,
+    ContextError, OutputError, ConfigError, VerificationError,
+    PreconditionError, StageNotReadyError,
+)
+
+# Configuration Validation (NEW)
+from stabilize.config_validation import (
+    validate_context, validate_outputs, is_valid,
+    SchemaValidator, ValidationError,
+    SHELL_TASK_SCHEMA, WAIT_TASK_SCHEMA,
+)
+
+===============================================================================
+11. VERIFICATION SYSTEM (NEW)
+===============================================================================
+
+The verification system validates stage outputs after task completion,
+before downstream stages start. This ensures data integrity in pipelines.
+
+11.1 VerifyResult - Verification Result Type
+---------------------------------------------
+from stabilize.verification import VerifyResult, VerifyStatus
+
+# Create results using factory methods:
+VerifyResult.ok(message="All checks passed")           # Verification passed
+VerifyResult.retry(message="Still waiting", details={}) # Will retry
+VerifyResult.failed(message="Check failed", details={}) # Terminal failure
+VerifyResult.skipped(message="Not applicable")          # Skipped
+
+# Check result status:
+result.is_ok        # True if verification passed
+result.is_retry     # True if should retry
+result.is_failed    # True if terminal failure
+result.is_terminal  # True if OK, FAILED, or SKIPPED (won't retry)
+
+11.2 OutputVerifier - Check Required Outputs
+--------------------------------------------
+from stabilize.verification import OutputVerifier
+
+# Verify that specific outputs exist with correct types
+verifier = OutputVerifier(
+    required_keys=["url", "status_code"],
+    type_checks={"status_code": int},
+)
+
+class MyTask(Task):
+    def execute(self, stage: StageExecution) -> TaskResult:
+        # ... task logic ...
+        result = verifier.verify(stage)
+        if not result.is_ok:
+            return TaskResult.terminal(result.message)
+        return TaskResult.success(outputs={"url": url, "status_code": 200})
+
+11.3 Custom Verifier
+---------------------
+from stabilize.verification import Verifier, VerifyResult
+
+class URLVerifier(Verifier):
+    def verify(self, stage: StageExecution) -> VerifyResult:
+        url = stage.outputs.get("url")
+        if not url:
+            return VerifyResult.failed("No URL in outputs")
+
+        # Check if URL is reachable
+        try:
+            response = requests.head(url, timeout=5)
+            if response.ok:
+                return VerifyResult.ok(f"URL {url} is reachable")
+            return VerifyResult.retry(f"URL returned {response.status_code}")
+        except Exception as e:
+            return VerifyResult.retry(f"URL check failed: {e}")
+
+    @property
+    def max_retries(self) -> int:
+        return 5  # Override default of 3
+
+    @property
+    def retry_delay_seconds(self) -> float:
+        return 2.0  # Override default of 1.0
+
+===============================================================================
+12. STRUCTURED CONDITIONS (NEW)
+===============================================================================
+
+Conditions provide detailed status information with reasons and timestamps,
+inspired by Kubernetes conditions.
+
+12.1 Condition - Status with Context
+------------------------------------
+from stabilize.conditions import Condition, ConditionType, ConditionReason
+
+# Create conditions using factory methods:
+Condition.ready(status=True, reason=ConditionReason.TASKS_SUCCEEDED, message="Done")
+Condition.progressing(status=True, reason=ConditionReason.IN_PROGRESS)
+Condition.verified(status=True, reason=ConditionReason.VERIFICATION_PASSED)
+Condition.failed(reason=ConditionReason.TASK_FAILED, message="Task timed out")
+Condition.config_valid(status=True)
+
+# Update a condition (immutable - returns new instance)
+updated = condition.update(status=False, reason=ConditionReason.IN_PROGRESS)
+
+# Serialize for storage
+data = condition.to_dict()  # {"type": "Ready", "status": true, ...}
+condition = Condition.from_dict(data)
+
+12.2 ConditionSet - Manage Multiple Conditions
+----------------------------------------------
+from stabilize.conditions import ConditionSet
+
+conditions = ConditionSet()
+
+# Set/update conditions
+conditions.set(Condition.ready(True, ConditionReason.TASKS_SUCCEEDED))
+conditions.set(Condition.progressing(False, ConditionReason.STAGE_COMPLETED))
+
+# Quick status checks
+conditions.is_ready       # True if Ready condition is True
+conditions.is_progressing # True if Progressing condition is True
+conditions.is_verified    # True if Verified condition is True
+conditions.has_failed     # True if Failed condition exists
+conditions.is_config_valid # True if ConfigValid is True (default: True)
+
+# Get specific condition
+ready = conditions.get(ConditionType.READY)
+if ready:
+    print(f"Ready: {ready.status}, Reason: {ready.reason}")
+
+# Serialize
+data_list = conditions.to_list()
+conditions = ConditionSet.from_list(data_list)
+
+===============================================================================
+13. ASSERTION HELPERS (NEW)
+===============================================================================
+
+Assertion helpers provide clean error handling with descriptive exceptions.
+
+13.1 Context Assertions
+-----------------------
+from stabilize.assertions import (
+    assert_context, assert_context_type, assert_context_in,
+    ContextError,
+)
+
+class MyTask(Task):
+    def execute(self, stage: StageExecution) -> TaskResult:
+        # Assert key exists and get value (raises ContextError if missing)
+        api_key = assert_context(stage, "api_key", "API key is required")
+
+        # Assert key exists with specific type
+        timeout = assert_context_type(stage, "timeout", int, "Timeout must be int")
+
+        # Assert value is in allowed list
+        env = assert_context_in(stage, "env", ["dev", "staging", "prod"])
+
+        # ... rest of task logic
+        return TaskResult.success()
+
+13.2 Output Assertions
+----------------------
+from stabilize.assertions import assert_output, assert_output_type, OutputError
+
+# Assert output exists
+result = assert_output(stage, "deployment_id")
+
+# Assert output with type
+count = assert_output_type(stage, "item_count", int)
+
+13.3 Configuration & Verification Assertions
+--------------------------------------------
+from stabilize.assertions import assert_config, assert_verified, ConfigError
+
+# Assert configuration is valid
+assert_config(timeout > 0, "Timeout must be positive", field="timeout")
+
+# Assert verification condition
+assert_verified(response.ok, "API check failed", details={"status": response.status_code})
+
+13.4 Stage Readiness Assertions
+-------------------------------
+from stabilize.assertions import assert_stage_ready, assert_no_upstream_failures
+
+# Assert all upstream stages complete
+assert_stage_ready(stage, "Cannot start: upstream incomplete")
+
+# Assert no upstream failures
+assert_no_upstream_failures(stage)
+
+13.5 General Assertions
+-----------------------
+from stabilize.assertions import assert_true, assert_not_none, assert_non_empty
+
+assert_true(condition, "Condition not met")
+user = assert_not_none(get_user(id), f"User {id} not found")
+items = assert_non_empty(stage.context.get("items", []), "Items required")
+
+13.6 Exception Hierarchy
+------------------------
+StabilizeError (base)
+├── StabilizeFatalError (unrecoverable - halts pipeline)
+│   ├── ContextError (missing/invalid context)
+│   └── ConfigError (invalid configuration)
+└── StabilizeExpectedError (may allow retry)
+    ├── PreconditionError (general precondition)
+    ├── OutputError (missing/invalid output)
+    ├── VerificationError (verification failed)
+    └── StageNotReadyError (upstream incomplete)
+
+===============================================================================
+14. CONFIGURATION VALIDATION (NEW)
+===============================================================================
+
+JSON Schema-based validation for stage contexts and configurations.
+
+14.1 Validate Context
+---------------------
+from stabilize.config_validation import validate_context, ValidationError
+
+DEPLOY_SCHEMA = {
+    "type": "object",
+    "required": ["cluster", "image"],
+    "properties": {
+        "cluster": {"type": "string", "minLength": 1},
+        "image": {"type": "string", "pattern": r"^[a-z0-9./-]+:[a-z0-9.-]+$"},
+        "replicas": {"type": "integer", "minimum": 1, "default": 1},
+        "timeout": {"type": "integer", "minimum": 0},
+    },
+}
+
+class DeployTask(Task):
+    def execute(self, stage: StageExecution) -> TaskResult:
+        errors = validate_context(stage.context, DEPLOY_SCHEMA)
+        if errors:
+            return TaskResult.terminal(f"Invalid config: {errors[0]}")
+
+        # Config is valid, proceed
+        cluster = stage.context["cluster"]
+        image = stage.context["image"]
+        # ...
+
+14.2 Built-in Schemas
+---------------------
+from stabilize.config_validation import SHELL_TASK_SCHEMA, WAIT_TASK_SCHEMA
+
+# SHELL_TASK_SCHEMA validates: command (required), timeout, cwd, env, etc.
+# WAIT_TASK_SCHEMA validates: waitTime (required, >= 0)
+
+14.3 Quick Validation Check
+---------------------------
+from stabilize.config_validation import is_valid
+
+if not is_valid(stage.context, DEPLOY_SCHEMA):
+    return TaskResult.terminal("Invalid configuration")
+
+14.4 Supported Validations
+--------------------------
+Type:         "type": "string" | "integer" | "number" | "boolean" | "array" | "object" | "null"
+Union:        "type": ["string", "integer"]
+Required:     "required": ["field1", "field2"]
+Enum:         "enum": ["value1", "value2"]
+Const:        "const": "fixed_value"
+
+String:       "minLength", "maxLength", "pattern"
+Number:       "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"
+Array:        "minItems", "maxItems", "uniqueItems", "items" (schema for array elements)
+Object:       "properties", "additionalProperties", "minProperties", "maxProperties"
+
 ===============================================================================
 END OF REFERENCE
 ===============================================================================
