@@ -94,3 +94,11 @@ class VersionValidatorTask(Task):
 
 class SkipTask(Task):
     """A task that immediately succeeds - used for skipped stages."""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        reason = stage.context.get("reason", "Skipped by user request")
+        print(f"  [Skip] {reason}")
+        return TaskResult.success(outputs={"skipped": True, "reason": reason})
+
+class VerboseShellTask(ShellTask):
+    """ShellTask that prints progress before and after execution."""
