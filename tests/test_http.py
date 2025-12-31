@@ -20,6 +20,16 @@ def http_server():
     yield f"http://127.0.0.1:{port}"
     server.shutdown()
 
+def task() -> HTTPTask:
+    """Create HTTPTask instance."""
+    return HTTPTask()
+
+def stage(http_server: str) -> MagicMock:
+    """Create mock stage with context."""
+    mock = MagicMock()
+    mock.context = {"url": http_server}
+    return mock
+
 class MockHTTPHandler(BaseHTTPRequestHandler):
     """Mock HTTP server handler for tests."""
     last_request: ClassVar[dict[str, Any]] = {}
@@ -178,3 +188,122 @@ class MockHTTPHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Allow", "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS")
         self.end_headers()
+
+class TestBasicRequests:
+    """Test basic HTTP methods."""
+
+    def test_get_request(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test simple GET request."""
+        stage.context = {"url": http_server}
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["status_code"] == 200
+        assert result.outputs["body"] == "OK"
+        assert "elapsed_ms" in result.outputs
+
+    def test_get_json_response(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test GET with JSON response."""
+        stage.context = {
+            "url": f"{http_server}/json",
+            "parse_json": True,
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["status_code"] == 200
+        assert result.outputs["body_json"] == {"message": "hello", "count": 42}
+        assert "application/json" in result.outputs["content_type"]
+
+    def test_post_request(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test POST request."""
+        stage.context = {
+            "url": f"{http_server}/echo",
+            "method": "POST",
+            "body": "test data",
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["status_code"] == 200
+        assert result.outputs["body"] == "test data"
+
+    def test_post_json(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test POST with JSON body."""
+        stage.context = {
+            "url": f"{http_server}/json",
+            "method": "POST",
+            "json": {"name": "test", "value": 123},
+            "parse_json": True,
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["status_code"] == 200
+        assert result.outputs["body_json"]["received"] == {"name": "test", "value": 123}
+        assert MockHTTPHandler.last_request["headers"].get("Content-Type") == "application/json"
+
+    def test_post_form(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test POST with form-encoded body."""
+        stage.context = {
+            "url": f"{http_server}/form",
+            "method": "POST",
+            "form": {"field1": "value1", "field2": "value2"},
+            "parse_json": True,
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        body_json = result.outputs["body_json"]
+        assert "application/x-www-form-urlencoded" in body_json["content_type"]
+        assert "field1=value1" in body_json["body"]
+        assert "field2=value2" in body_json["body"]
+
+    def test_put_request(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test PUT request."""
+        stage.context = {
+            "url": http_server,
+            "method": "PUT",
+            "body": "update data",
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["body"] == "Updated"
+        assert MockHTTPHandler.last_request["method"] == "PUT"
+
+    def test_delete_request(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test DELETE request."""
+        stage.context = {
+            "url": http_server,
+            "method": "DELETE",
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["status_code"] == 204
+
+    def test_patch_request(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test PATCH request."""
+        stage.context = {
+            "url": http_server,
+            "method": "PATCH",
+            "body": "patch data",
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["body"] == "Patched"
+
+    def test_head_request(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test HEAD request."""
+        stage.context = {
+            "url": http_server,
+            "method": "HEAD",
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["status_code"] == 200
+        assert result.outputs["headers"]["X-Custom-Header"] == "test-value"
+        assert result.outputs["body"] == ""  # HEAD has no body
