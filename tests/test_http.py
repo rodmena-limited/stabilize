@@ -307,3 +307,146 @@ class TestBasicRequests:
         assert result.outputs["status_code"] == 200
         assert result.outputs["headers"]["X-Custom-Header"] == "test-value"
         assert result.outputs["body"] == ""  # HEAD has no body
+
+    def test_options_request(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test OPTIONS request."""
+        stage.context = {
+            "url": http_server,
+            "method": "OPTIONS",
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert "Allow" in result.outputs["headers"]
+
+class TestAuthentication:
+    """Test authentication methods."""
+
+    def test_basic_auth(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test Basic authentication."""
+        stage.context = {
+            "url": f"{http_server}/auth/basic",
+            "auth": ["user", "password"],
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["body"] == "Authorized"
+
+        # Verify Authorization header
+        auth_header = MockHTTPHandler.last_request["headers"].get("Authorization", "")
+        assert auth_header.startswith("Basic ")
+        decoded = base64.b64decode(auth_header.split(" ")[1]).decode()
+        assert decoded == "user:password"
+
+    def test_bearer_token(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test Bearer token authentication."""
+        stage.context = {
+            "url": f"{http_server}/auth/bearer",
+            "bearer_token": "my-secret-token",
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        assert result.outputs["body"] == "Bearer my-secret-token"
+
+class TestCustomHeaders:
+    """Test custom headers."""
+
+    def test_custom_headers(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test sending custom headers."""
+        stage.context = {
+            "url": f"{http_server}/headers",
+            "headers": {
+                "X-Custom-Header": "custom-value",
+                "X-Another-Header": "another-value",
+            },
+            "parse_json": True,
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.SUCCEEDED
+        headers = result.outputs["body_json"]
+        assert headers.get("X-Custom-Header") == "custom-value"
+        assert headers.get("X-Another-Header") == "another-value"
+
+class TestFileOperations:
+    """Test file upload and download."""
+
+    def test_file_upload(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test file upload with multipart/form-data."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test file content")
+            temp_path = f.name
+
+        try:
+            stage.context = {
+                "url": f"{http_server}/upload",
+                "method": "POST",
+                "upload_file": temp_path,
+                "upload_field": "document",
+                "parse_json": True,
+            }
+            result = task.execute(stage)
+
+            assert result.status == WorkflowStatus.SUCCEEDED
+            body = result.outputs["body_json"]
+            assert "multipart/form-data" in body["content_type"]
+            # The body includes multipart structure - verify content length is reasonable
+            assert body["body_length"] > len("test file content")
+        finally:
+            os.unlink(temp_path)
+
+    def test_file_upload_with_form_fields(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test file upload with additional form fields."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("upload content")
+            temp_path = f.name
+
+        try:
+            stage.context = {
+                "url": f"{http_server}/upload",
+                "method": "POST",
+                "upload_file": temp_path,
+                "upload_form": {"description": "Test upload"},
+                "parse_json": True,
+            }
+            result = task.execute(stage)
+
+            assert result.status == WorkflowStatus.SUCCEEDED
+            # Both file and form field should be in multipart body
+            body = result.outputs["body_json"]
+            assert body["body_length"] > len("upload content")
+        finally:
+            os.unlink(temp_path)
+
+    def test_file_download(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test downloading to file."""
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            temp_path = f.name
+
+        try:
+            stage.context = {
+                "url": http_server,
+                "download_to": temp_path,
+            }
+            result = task.execute(stage)
+
+            assert result.status == WorkflowStatus.SUCCEEDED
+            assert result.outputs["body"] == temp_path
+
+            with open(temp_path) as f:
+                assert f.read() == "OK"
+        finally:
+            os.unlink(temp_path)
+
+class TestErrorHandling:
+    """Test error handling."""
+
+    def test_404_error(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test handling 404 error."""
+        stage.context = {"url": f"{http_server}/error/404"}
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.TERMINAL
+        assert result.context["status_code"] == 404
