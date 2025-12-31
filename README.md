@@ -91,6 +91,48 @@ print(f"Status: {result.status}")  # WorkflowStatus.SUCCEEDED
 print(f"Output: {result.stages[0].outputs}")  # {'greeting': 'Hello, Stabilize!'}
 ```
 
+## Built-in Tasks
+
+Stabilize includes ready-to-use tasks for common operations:
+
+### ShellTask - Execute Shell Commands
+
+```python
+from stabilize.tasks.shell import ShellTask
+
+registry.register("shell", ShellTask)
+
+# Use in stage context
+context = {
+    "command": "npm install && npm test",
+    "cwd": "/app",
+    "timeout": 300,
+    "env": {"NODE_ENV": "test"},
+}
+```
+
+### HTTPTask - HTTP/API Requests
+
+```python
+from stabilize.tasks.http import HTTPTask
+
+registry.register("http", HTTPTask)
+
+# GET with JSON parsing
+context = {"url": "https://api.example.com/data", "parse_json": True}
+
+# POST with JSON body
+context = {"url": "https://api.example.com/users", "method": "POST", "json": {"name": "John"}}
+
+# With authentication
+context = {"url": "https://api.example.com/private", "bearer_token": "token"}
+
+# File upload
+context = {"url": "https://api.example.com/upload", "method": "POST", "upload_file": "/path/to/file.pdf"}
+```
+
+See `examples/` directory for complete examples.
+
 ## Parallel Stages
 
 Stages with shared dependencies run in parallel:

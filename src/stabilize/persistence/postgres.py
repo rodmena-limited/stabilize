@@ -352,7 +352,7 @@ class PostgresWorkflowStore(WorkflowStore):
                 # We do this in a separate transaction effectively, but here we reuse connection
                 cur.execute(
                     "SELECT * FROM pipeline_executions WHERE id = %(id)s",
-                    {"id": stage_row["execution_id"]},
+                    {"id": stage_row["execution_id"]},  # type: ignore[call-overload]
                 )
                 exec_row = cur.fetchone()
                 if exec_row:
@@ -393,10 +393,10 @@ class PostgresWorkflowStore(WorkflowStore):
                     {"execution_id": execution_id, "ref_id": stage_ref_id},
                 )
                 row = cur.fetchone()
-                if not row or not row["requisite_stage_ref_ids"]:
+                if not row or not row["requisite_stage_ref_ids"]:  # type: ignore[call-overload]
                     return []
 
-                requisites = list(row["requisite_stage_ref_ids"])
+                requisites = list(row["requisite_stage_ref_ids"])  # type: ignore[call-overload]
 
                 # Now fetch those stages
                 cur.execute(
@@ -486,11 +486,14 @@ class PostgresWorkflowStore(WorkflowStore):
                 rows = cur.fetchall()
 
         # Build graph in memory
-        nodes = {}
+        nodes: dict[str, dict[str, Any]] = {}
         for row in rows:
-            nodes[row["ref_id"]] = {
-                "requisites": set(row["requisite_stage_ref_ids"] or []),
-                "outputs": row["outputs"] if isinstance(row["outputs"], dict) else json.loads(row["outputs"] or "{}"),
+            ref_id = row["ref_id"]  # type: ignore[call-overload]
+            requisites = row["requisite_stage_ref_ids"]  # type: ignore[call-overload]
+            outputs_raw = row["outputs"]  # type: ignore[call-overload]
+            nodes[ref_id] = {
+                "requisites": set(requisites or []),
+                "outputs": outputs_raw if isinstance(outputs_raw, dict) else json.loads(outputs_raw or "{}"),
             }
 
         if stage_ref_id not in nodes:
@@ -519,7 +522,7 @@ class PostgresWorkflowStore(WorkflowStore):
 
         # Calculate in-degrees within the subgraph of ancestors
         in_degree = {aid: 0 for aid in ancestors}
-        graph = {aid: [] for aid in ancestors}
+        graph: dict[str, list[str]] = {aid: [] for aid in ancestors}
 
         for aid in ancestors:
             for req in nodes[aid]["requisites"]:
@@ -540,7 +543,7 @@ class PostgresWorkflowStore(WorkflowStore):
         # Merge outputs
         result: dict[str, Any] = {}
         for aid in sorted_ancestors:
-            outputs = nodes[aid]["outputs"]
+            outputs: dict[str, Any] = nodes[aid]["outputs"]
             for key, value in outputs.items():
                 if key in result and isinstance(result[key], list) and isinstance(value, list):
                     # Concatenate lists

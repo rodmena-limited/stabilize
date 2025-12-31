@@ -202,6 +202,74 @@ context={"command": "curl -H 'Auth: {token}' api.com", "token": "secret", "secre
 context={"command": "grep pattern file.txt", "expected_codes": [0, 1]}
 
 ===============================================================================
+1.2 HTTP PIPELINE TEMPLATE - USE FOR ANY HTTP/API WORKFLOWS
+===============================================================================
+For HTTP requests, IMPORT the built-in HTTPTask (do NOT define your own):
+
+from stabilize.tasks.http import HTTPTask
+
+registry = TaskRegistry()
+registry.register("http", HTTPTask)
+
+HTTPTask Context Parameters:
+  url (str)             - Request URL (required)
+  method (str)          - GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS (default: GET)
+
+  Request Body (mutually exclusive):
+    body (str|bytes)    - Raw request body
+    json (dict)         - JSON body (auto-serialized, sets Content-Type)
+    form (dict)         - Form-encoded body (application/x-www-form-urlencoded)
+
+  Headers & Auth:
+    headers (dict)      - Custom request headers
+    auth (list)         - Basic auth as [username, password]
+    bearer_token (str)  - Bearer token for Authorization header
+
+  File Upload:
+    upload_file (str)   - Path to file to upload (multipart/form-data)
+    upload_field (str)  - Form field name (default: "file")
+    upload_form (dict)  - Additional form fields with upload
+
+  File Download:
+    download_to (str)   - Path to save response body
+
+  Timeouts & Retries:
+    timeout (int)       - Request timeout in seconds (default: 30)
+    retries (int)       - Number of retries (default: 0)
+    retry_delay (float) - Delay between retries (default: 1.0)
+    retry_on_status (list) - Status codes to retry (default: [502, 503, 504])
+
+  Response Handling:
+    expected_status (int|list) - Expected status code(s)
+    parse_json (bool)   - Auto-parse JSON response (default: False)
+    max_response_size (int) - Max bytes (default: 10MB)
+
+  Other:
+    verify_ssl (bool)   - Verify SSL certs (default: True)
+    continue_on_failure - Return failed_continue instead of terminal
+
+HTTPTask Outputs:
+  status_code, headers, body, body_json (if parse_json), elapsed_ms, url, content_type, content_length
+
+# Example: Simple GET with JSON parsing
+context={"url": "https://api.example.com/users", "parse_json": True}
+
+# Example: POST with JSON body
+context={"url": "https://api.example.com/users", "method": "POST", "json": {"name": "John"}}
+
+# Example: With Bearer token authentication
+context={"url": "https://api.example.com/private", "bearer_token": "my-token"}
+
+# Example: File upload
+context={"url": "https://api.example.com/upload", "method": "POST", "upload_file": "/path/to/file.pdf"}
+
+# Example: Download file
+context={"url": "https://example.com/report.pdf", "download_to": "/tmp/report.pdf"}
+
+# Example: With retries for unreliable endpoints
+context={"url": "https://api.example.com/data", "retries": 3, "retry_delay": 2.0}
+
+===============================================================================
 2. CORE CLASSES API
 ===============================================================================
 

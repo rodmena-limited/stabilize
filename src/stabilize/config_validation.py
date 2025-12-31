@@ -227,7 +227,7 @@ class SchemaValidator:
         expected = self.TYPE_MAP.get(type_name)
         if expected is None:
             return True  # Unknown type, allow
-        return isinstance(value, expected)
+        return isinstance(value, expected)  # type: ignore[arg-type]
 
     def _validate_string(
         self,

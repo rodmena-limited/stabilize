@@ -196,7 +196,7 @@ class HTTPTask(Task):
         # Execute with retries
         start_time = time.time()
         last_error: Exception | None = None
-        last_response: HTTPResponse | None = None
+        last_response: HTTPResponse | HTTPError | None = None
 
         for attempt in range(retries + 1):
             try:
@@ -438,6 +438,7 @@ class HTTPTask(Task):
             return TaskResult.terminal(error="No response received")
 
         # Extract status and headers
+        response_obj: HTTPResponse | HTTPError
         if isinstance(response, HTTPError):
             status_code = response.code
             response_headers = dict(response.headers)
@@ -555,10 +556,11 @@ class HTTPTask(Task):
     ) -> str:
         """Replace {key} placeholders with context values."""
 
-        def replacer(match: re.Match) -> str:
+        def replacer(match: re.Match[str]) -> str:
             key = match.group(1)
             if key in context:
-                return str(context[key])
+                value: str = str(context[key])
+                return value
             return match.group(0)  # Keep original if not found
 
         return re.sub(r"\{(\w+)\}", replacer, text)

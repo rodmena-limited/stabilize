@@ -242,7 +242,7 @@ def example_simple_highway() -> None:
         return
 
     api_endpoint = os.environ.get("HIGHWAY_API_ENDPOINT", "https://highway.solutions")
-    print("Using Highway API: %s" % api_endpoint)
+    print(f"Using Highway API: {api_endpoint}")
 
     store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
     queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
@@ -289,14 +289,14 @@ def example_simple_highway() -> None:
     processor.process_all(timeout=120.0)
 
     result = store.retrieve(workflow.id)
-    print("\nStabilize Workflow Status: %s" % result.status)
+    print(f"\nStabilize Workflow Status: {result.status}")
 
     if result.stages[0].outputs:
         outputs = result.stages[0].outputs
-        print("Highway Run ID: %s" % outputs.get("highway_run_id"))
-        print("Highway Status: %s" % outputs.get("highway_status"))
+        print("Highway Run ID: {}".format(outputs.get("highway_run_id")))
+        print("Highway Status: {}".format(outputs.get("highway_status")))
         if outputs.get("highway_result"):
-            print("Highway Result: %s" % json.dumps(outputs.get("highway_result"), indent=2)[:500])
+            print("Highway Result: {}".format(json.dumps(outputs.get("highway_result"), indent=2)[:500]))
     else:
         print("No outputs received (check Highway logs)")
 
@@ -320,7 +320,7 @@ def example_parallel_fetcher() -> None:
         return
 
     api_endpoint = os.environ.get("HIGHWAY_API_ENDPOINT", "https://highway.solutions")
-    print("Using Highway API: %s" % api_endpoint)
+    print(f"Using Highway API: {api_endpoint}")
     print("\nThis workflow will:")
     print("  1. Fork into 3 parallel branches")
     print("  2. Each branch fetches a different URL")
@@ -367,14 +367,14 @@ def example_parallel_fetcher() -> None:
     processor.process_all(timeout=180.0)
 
     result = store.retrieve(workflow.id)
-    print("\nStabilize Workflow Status: %s" % result.status)
+    print(f"\nStabilize Workflow Status: {result.status}")
 
     if result.stages[0].outputs:
         outputs = result.stages[0].outputs
-        print("Highway Run ID: %s" % outputs.get("highway_run_id"))
-        print("Highway Status: %s" % outputs.get("highway_status"))
+        print("Highway Run ID: {}".format(outputs.get("highway_run_id")))
+        print("Highway Status: {}".format(outputs.get("highway_status")))
         if outputs.get("highway_result"):
-            print("Highway Result Preview: %s..." % str(outputs.get("highway_result"))[:200])
+            print("Highway Result Preview: {}...".format(str(outputs.get("highway_result"))[:200]))
     else:
         print("No outputs received (check Highway logs)")
 

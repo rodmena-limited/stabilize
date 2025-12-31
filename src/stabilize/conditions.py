@@ -17,6 +17,7 @@ Example:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
@@ -346,5 +347,5 @@ class ConditionSet:
     def __contains__(self, condition_type: ConditionType | str) -> bool:
         return condition_type in self._conditions
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Condition]:
         return iter(self._conditions.values())

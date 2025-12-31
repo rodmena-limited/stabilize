@@ -17,9 +17,6 @@ Run with:
 
 import json
 import logging
-import time
-import urllib.error
-import urllib.request
 from typing import Any
 
 logging.basicConfig(level=logging.ERROR)
@@ -38,6 +35,7 @@ from stabilize.persistence.store import WorkflowStore
 from stabilize.queue.processor import QueueProcessor
 from stabilize.queue.queue import Queue
 from stabilize.queue.sqlite_queue import SqliteQueue
+from stabilize.tasks.http import HTTPTask
 from stabilize.tasks.interface import Task
 from stabilize.tasks.registry import TaskRegistry
 from stabilize.tasks.result import TaskResult
@@ -50,6 +48,8 @@ from stabilize.tasks.result import TaskResult
 class OllamaTask(Task):
     """
     Generate text using Ollama local LLM.
+
+    Uses HTTPTask internally for all HTTP operations.
 
     Context Parameters:
         prompt: The prompt to send to the model (required)
@@ -77,6 +77,21 @@ class OllamaTask(Task):
     DEFAULT_HOST = "http://localhost:11434"
     DEFAULT_MODEL = "deepseek-v3.1:671b-cloud"
 
+    def __init__(self) -> None:
+        self._http_task = HTTPTask()
+
+    def _make_http_request(self, stage: StageExecution, context: dict[str, Any]) -> TaskResult:
+        """Execute HTTP request using HTTPTask with a temporary stage."""
+        # Create a temporary stage with the HTTP context
+        temp_stage = StageExecution(
+            ref_id=stage.ref_id,
+            type="http",
+            name=f"{stage.name} (HTTP)",
+            context=context,
+            tasks=[],
+        )
+        return self._http_task.execute(temp_stage)
+
     def execute(self, stage: StageExecution) -> TaskResult:
         prompt = stage.context.get("prompt")
         model = stage.context.get("model", self.DEFAULT_MODEL)
@@ -90,11 +105,18 @@ class OllamaTask(Task):
         if not prompt:
             return TaskResult.terminal(error="No 'prompt' specified in context")
 
-        # Check Ollama availability
-        try:
-            health_url = f"{host}/api/tags"
-            urllib.request.urlopen(health_url, timeout=5)
-        except (urllib.error.URLError, TimeoutError):
+        # Check Ollama availability using HTTPTask
+        health_result = self._make_http_request(
+            stage,
+            {
+                "url": f"{host}/api/tags",
+                "method": "GET",
+                "timeout": 5,
+                "continue_on_failure": True,
+            },
+        )
+
+        if health_result.is_terminal or health_result.is_failed:
             return TaskResult.terminal(error=f"Ollama not available at {host}. Ensure Ollama is running.")
 
         # Build request payload
@@ -116,61 +138,55 @@ class OllamaTask(Task):
         if response_format == "json":
             payload["format"] = "json"
 
-        # Make request
-        url = f"{host}/api/generate"
-        data = json.dumps(payload).encode("utf-8")
-        request = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-
         print(f"  [OllamaTask] Generating with {model}...")
 
-        try:
-            start_time = time.time()
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                result = json.loads(response.read().decode("utf-8"))
+        # Make generation request using HTTPTask
+        gen_result = self._make_http_request(
+            stage,
+            {
+                "url": f"{host}/api/generate",
+                "method": "POST",
+                "json": payload,
+                "timeout": timeout,
+                "parse_json": True,
+            },
+        )
 
-            elapsed_ms = int((time.time() - start_time) * 1000)
+        if gen_result.is_terminal:
+            return TaskResult.terminal(error=f"Ollama API error: {gen_result.error}")
 
-            generated_text = result.get("response", "")
-            total_duration = result.get("total_duration", 0) // 1_000_000  # ns to ms
-            prompt_eval_count = result.get("prompt_eval_count", 0)
-            eval_count = result.get("eval_count", 0)
+        if gen_result.is_failed:
+            error_body = gen_result.outputs.get("body", "Unknown error")
+            status = gen_result.outputs.get("status_code", "?")
+            return TaskResult.terminal(error=f"Ollama API error ({status}): {error_body}")
 
-            outputs = {
-                "response": generated_text,
-                "model": model,
-                "total_duration_ms": total_duration or elapsed_ms,
-                "prompt_eval_count": prompt_eval_count,
-                "eval_count": eval_count,
-            }
+        # Parse response from HTTPTask outputs
+        result = gen_result.outputs.get("body_json", {})
+        elapsed_ms = gen_result.outputs.get("elapsed_ms", 0)
 
-            # Try to parse JSON if format was json
-            if response_format == "json":
-                try:
-                    outputs["json"] = json.loads(generated_text)
-                except json.JSONDecodeError:
-                    outputs["json"] = None
-                    outputs["json_error"] = "Failed to parse JSON response"
+        generated_text = result.get("response", "")
+        total_duration = result.get("total_duration", 0) // 1_000_000  # ns to ms
+        prompt_eval_count = result.get("prompt_eval_count", 0)
+        eval_count = result.get("eval_count", 0)
 
-            print(f"  [OllamaTask] Generated {eval_count} tokens in {total_duration}ms")
-            return TaskResult.success(outputs=outputs)
+        outputs = {
+            "response": generated_text,
+            "model": model,
+            "total_duration_ms": total_duration or elapsed_ms,
+            "prompt_eval_count": prompt_eval_count,
+            "eval_count": eval_count,
+        }
 
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8") if e.fp else ""
-            return TaskResult.terminal(error=f"Ollama API error ({e.code}): {error_body}")
+        # Try to parse JSON if format was json
+        if response_format == "json":
+            try:
+                outputs["json"] = json.loads(generated_text)
+            except json.JSONDecodeError:
+                outputs["json"] = None
+                outputs["json_error"] = "Failed to parse JSON response"
 
-        except urllib.error.URLError as e:
-            return TaskResult.terminal(error=f"Connection error: {e.reason}")
-
-        except TimeoutError:
-            return TaskResult.terminal(error=f"Request timed out after {timeout}s")
-
-        except json.JSONDecodeError as e:
-            return TaskResult.terminal(error=f"Invalid JSON response: {e}")
+        print(f"  [OllamaTask] Generated {eval_count} tokens in {total_duration}ms")
+        return TaskResult.success(outputs=outputs)
 
 
 # =============================================================================

@@ -566,7 +566,7 @@ class SqliteWorkflowStore(WorkflowStore):
 
         # Calculate in-degrees within the subgraph of ancestors
         in_degree = {aid: 0 for aid in ancestors}
-        graph = {aid: [] for aid in ancestors}
+        graph: dict[str, list[str]] = {aid: [] for aid in ancestors}
 
         for aid in ancestors:
             for req in nodes[aid]["requisites"]:
