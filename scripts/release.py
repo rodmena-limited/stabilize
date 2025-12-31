@@ -43,3 +43,54 @@ class VersionValidatorTask(Task):
         pyproject_version: Version from pyproject.toml
         init_version: Version from __init__.py
     """
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        pyproject_path = stage.context.get("pyproject_path", str(PYPROJECT_PATH))
+        init_path = stage.context.get("init_path", str(INIT_PATH))
+
+        # Read pyproject.toml version
+        try:
+            pyproject_content = Path(pyproject_path).read_text()
+            pyproject_match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject_content, re.MULTILINE)
+            if not pyproject_match:
+                return TaskResult.terminal(error=f"Could not find version in {pyproject_path}")
+            pyproject_version = pyproject_match.group(1)
+        except FileNotFoundError:
+            return TaskResult.terminal(error=f"pyproject.toml not found at {pyproject_path}")
+        except Exception as e:
+            return TaskResult.terminal(error=f"Error reading pyproject.toml: {e}")
+
+        # Read __init__.py version
+        try:
+            init_content = Path(init_path).read_text()
+            init_match = re.search(r'^__version__\s*=\s*"([^"]+)"', init_content, re.MULTILINE)
+            if not init_match:
+                return TaskResult.terminal(error=f"Could not find __version__ in {init_path}")
+            init_version = init_match.group(1)
+        except FileNotFoundError:
+            return TaskResult.terminal(error=f"__init__.py not found at {init_path}")
+        except Exception as e:
+            return TaskResult.terminal(error=f"Error reading __init__.py: {e}")
+
+        # Compare versions
+        if pyproject_version != init_version:
+            return TaskResult.terminal(
+                error=(
+                    f"Version mismatch!\n"
+                    f"  pyproject.toml: {pyproject_version}\n"
+                    f"  __init__.py:    {init_version}\n"
+                    f"Please sync versions before releasing."
+                )
+            )
+
+        print(f"  [VersionValidator] Version validated: {pyproject_version}")
+        return TaskResult.success(
+            outputs={
+                "version": pyproject_version,
+                "pyproject_version": pyproject_version,
+                "init_version": init_version,
+            }
+        )
+
+class SkipTask(Task):
+    """A task that immediately succeeds - used for skipped stages."""
