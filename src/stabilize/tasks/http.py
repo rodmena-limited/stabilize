@@ -510,3 +510,28 @@ class HTTPTask(Task):
             if continue_on_failure:
                 return TaskResult.failed_continue(error=error_msg, outputs=outputs)
             return TaskResult.terminal(error=error_msg, context=outputs)
+
+    def _get_charset(self, content_type: str) -> str:
+        """Extract charset from Content-Type header."""
+        if "charset=" in content_type:
+            match = re.search(r"charset=([^\s;]+)", content_type)
+            if match:
+                return match.group(1).strip("\"'")
+        return "utf-8"
+
+    def _substitute_placeholders(
+        self,
+        text: str,
+        context: dict[str, Any],
+        secrets: list[str],
+    ) -> str:
+        """Replace {key} placeholders with context values."""
+
+        def replacer(match: re.Match[str]) -> str:
+            key = match.group(1)
+            if key in context:
+                value: str = str(context[key])
+                return value
+            return match.group(0)  # Keep original if not found
+
+        return re.sub(r"\{(\w+)\}", replacer, text)
