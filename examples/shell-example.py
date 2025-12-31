@@ -2,17 +2,16 @@
 """
 Shell Command Example - Demonstrates running shell commands with Stabilize.
 
-This example shows how to:
-1. Create a custom Task that runs shell commands
-2. Build a workflow with multiple stages
-3. Execute the workflow and see the results
+This example shows how to use the built-in ShellTask for:
+1. Single commands
+2. Sequential pipelines with output passing
+3. Parallel command execution
 
 Run with:
     python examples/shell-example.py
 """
 
 import logging
-import subprocess
 from typing import Any
 
 # Configure logging before importing stabilize modules
@@ -32,63 +31,8 @@ from stabilize.persistence.store import WorkflowStore
 from stabilize.queue.processor import QueueProcessor
 from stabilize.queue.queue import Queue
 from stabilize.queue.sqlite_queue import SqliteQueue
-from stabilize.tasks.interface import Task
 from stabilize.tasks.registry import TaskRegistry
-from stabilize.tasks.result import TaskResult
-
-# =============================================================================
-# Custom Task: ShellTask
-# =============================================================================
-
-
-class ShellTask(Task):
-    """
-    Execute shell commands.
-
-    Reads 'command' from stage.context and executes it.
-    Outputs: stdout, stderr, exit_code
-    """
-
-    def execute(self, stage: StageExecution) -> TaskResult:
-        command = stage.context.get("command")
-        timeout = stage.context.get("timeout", 60)
-
-        if not command:
-            return TaskResult.terminal(error="No 'command' specified in context")
-
-        print(f"  [ShellTask] Running: {command}")
-
-        try:
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-
-            outputs = {
-                "stdout": result.stdout.strip(),
-                "stderr": result.stderr.strip(),
-                "exit_code": result.returncode,
-            }
-
-            if result.returncode == 0:
-                print(f"  [ShellTask] Success! Output: {result.stdout.strip()[:100]}")
-                return TaskResult.success(outputs=outputs)
-            else:
-                print(f"  [ShellTask] Failed with exit code {result.returncode}")
-                # Use failed_continue to allow workflow to proceed
-                if stage.context.get("continue_on_failure"):
-                    return TaskResult.failed_continue(error=f"Exit code {result.returncode}", outputs=outputs)
-                return TaskResult.terminal(
-                    error=f"Command failed with exit code {result.returncode}",
-                    context=outputs,
-                )
-
-        except subprocess.TimeoutExpired:
-            print(f"  [ShellTask] Timed out after {timeout}s")
-            return TaskResult.terminal(error=f"Command timed out after {timeout}s")
+from stabilize.tasks.shell import ShellTask  # Use built-in enterprise-ready ShellTask
 
 
 # =============================================================================

@@ -161,25 +161,45 @@ from stabilize.tasks.shell import ShellTask
 registry = TaskRegistry()
 registry.register("shell", ShellTask)
 
-# The built-in ShellTask automatically substitutes {key} placeholders with upstream outputs.
-# Example stages that pass stdout from stage 1 to stage 2:
+ShellTask Context Parameters:
+  command (str)         - The shell command to execute (required)
+  timeout (int)         - Timeout in seconds (default: 60)
+  cwd (str)             - Working directory
+  env (dict)            - Additional environment variables
+  shell (bool|str)      - True for default shell, or path like "/bin/bash"
+  stdin (str)           - Input to send to command stdin
+  max_output_size (int) - Max bytes for output (default: 10MB)
+  expected_codes (list) - Exit codes treated as success (default: [0])
+  secrets (list)        - Context keys to mask in logs
+  binary (bool)         - Capture output as bytes (default: False)
+  continue_on_failure   - Return failed_continue instead of terminal
+
+ShellTask Outputs:
+  stdout, stderr, returncode, truncated (bool), stdout_b64 (if binary)
+
+# Example: Pipeline with upstream output substitution
 stages=[
     StageExecution(
-        ref_id="1",
-        type="shell",
-        name="Get Data",
+        ref_id="1", type="shell", name="Get Data",
         context={"command": "git status"},
         tasks=[TaskExecution.create("Run", "shell", stage_start=True, stage_end=True)],
     ),
     StageExecution(
-        ref_id="2",
-        type="shell",
-        name="Save Data",
-        requisite_stage_ref_ids={"1"},  # REQUIRED - waits for stage 1
+        ref_id="2", type="shell", name="Save Data",
+        requisite_stage_ref_ids={"1"},
         context={"command": "echo '{stdout}' > /tmp/output.txt"},  # {stdout} auto-replaced
         tasks=[TaskExecution.create("Save", "shell", stage_start=True, stage_end=True)],
     ),
 ]
+
+# Example: With environment and working directory
+context={"command": "npm install", "cwd": "/app", "env": {"NODE_ENV": "production"}}
+
+# Example: With secrets masking
+context={"command": "curl -H 'Auth: {token}' api.com", "token": "secret", "secrets": ["token"]}
+
+# Example: Allow grep's exit code 1 (no match found)
+context={"command": "grep pattern file.txt", "expected_codes": [0, 1]}
 
 ===============================================================================
 2. CORE CLASSES API
