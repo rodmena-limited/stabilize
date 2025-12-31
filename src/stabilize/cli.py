@@ -278,6 +278,21 @@ CANCELED - Task was canceled:
 STOPPED - Task was stopped:
     TaskResult.stopped(outputs=None)
 
+REDIRECT - Indicates decision branch redirect:
+    TaskResult.redirect(context=None)
+    Parameters:
+      context: dict  - Context for the redirect
+
+Builder Pattern (for complex results):
+    TaskResult.builder(status).context({...}).outputs({...}).build()
+
+    Methods:
+      .context(dict)           - Set the full context
+      .outputs(dict)           - Set the full outputs
+      .add_context(key, value) - Add a single context value
+      .add_output(key, value)  - Add a single output value
+      .build()                 - Build and return the TaskResult
+
 
 3.3 RetryableTask - For Polling Operations
 -------------------------------------------
@@ -317,6 +332,42 @@ class ConditionalTask(SkippableTask):
     def do_execute(self, stage: StageExecution) -> TaskResult:
         """Actual task logic (only called if is_enabled returns True)."""
         return TaskResult.success()
+
+
+3.5 Additional Built-in Tasks
+------------------------------
+from stabilize.tasks.interface import CallableTask, NoOpTask, WaitTask
+
+OverridableTimeoutRetryableTask:
+    A RetryableTask that allows the stage to override timeout via 'stageTimeoutMs'
+    context value. Useful when timeout should be configurable per-stage.
+
+CallableTask:
+    Wraps a callable function as a task without creating a class.
+
+    def my_task(stage: StageExecution) -> TaskResult:
+        return TaskResult.success(outputs={"result": "done"})
+
+    task = CallableTask(my_task)
+    registry.register("my_task", task)
+
+NoOpTask:
+    A task that does nothing and returns success immediately.
+    Useful for testing, placeholder stages, or synchronization points.
+
+    registry.register("noop", NoOpTask)
+
+WaitTask:
+    Built-in RetryableTask that waits for a specified duration.
+    Reads 'waitTime' (seconds) from stage.context.
+
+    StageExecution(
+        ref_id="wait",
+        type="wait",
+        name="Wait 30 seconds",
+        context={"waitTime": 30},
+        tasks=[TaskExecution.create("Wait", "wait", stage_start=True, stage_end=True)],
+    )
 
 ===============================================================================
 4. TASK REGISTRY
@@ -412,6 +463,40 @@ Accessing in tasks:
       # Write to outputs (available downstream)
       return TaskResult.success(outputs={"my_output": "value"})
 
+IMPORTANT - Shell Tasks with Upstream Outputs:
+  For shell commands that need upstream output, substitute context values INTO the command:
+
+  class ShellTask(Task):
+      def execute(self, stage: StageExecution) -> TaskResult:
+          command = stage.context.get("command")
+
+          # Substitute any {key} placeholders with context values (including upstream outputs)
+          for key, value in stage.context.items():
+              if isinstance(value, str):
+                  command = command.replace(f"{{{key}}}", value)
+
+          result = subprocess.run(command, shell=True, capture_output=True, text=True)
+          return TaskResult.success(outputs={"stdout": result.stdout, "stderr": result.stderr})
+
+  # Usage - Stage 2 uses {stdout} from Stage 1:
+  stages=[
+      StageExecution(
+          ref_id="1",
+          type="shell",
+          name="Get Data",
+          context={"command": "git status"},
+          tasks=[TaskExecution.create("Run", "shell", stage_start=True, stage_end=True)],
+      ),
+      StageExecution(
+          ref_id="2",
+          type="shell",
+          name="Save Data",
+          requisite_stage_ref_ids={"1"},  # REQUIRED - waits for stage 1
+          context={"command": "echo '{stdout}' > /tmp/output.txt"},  # {stdout} replaced with stage 1 output
+          tasks=[TaskExecution.create("Save", "shell", stage_start=True, stage_end=True)],
+      ),
+  ]
+
 ===============================================================================
 7. COMMON MISTAKES AND HOW TO FIX THEM
 ===============================================================================
@@ -463,6 +548,28 @@ MISTAKE 5: Missing handlers
 All 7 handlers are REQUIRED for the engine to work:
     StartWorkflowHandler, StartStageHandler, StartTaskHandler,
     RunTaskHandler, CompleteTaskHandler, CompleteStageHandler, CompleteWorkflowHandler
+
+
+MISTAKE 6: Forgetting requisite_stage_ref_ids for sequential stages
+--------------------------------------------------------------------
+WRONG - Stages may run in parallel, stage 2 won't have stage 1 outputs:
+    StageExecution(ref_id="1", context={"command": "git status"}, ...),
+    StageExecution(ref_id="2", context={"command": "echo {stdout}"}, ...),  # No dependency!
+
+RIGHT - Stage 2 waits for stage 1 and receives its outputs:
+    StageExecution(ref_id="1", context={"command": "git status"}, ...),
+    StageExecution(ref_id="2", requisite_stage_ref_ids={"1"}, context={"command": "echo {stdout}"}, ...),
+
+Without requisite_stage_ref_ids, stages run in parallel and upstream outputs are NOT available.
+
+
+MISTAKE 7: Using $variable instead of {variable} for upstream outputs
+----------------------------------------------------------------------
+WRONG - Shell variable syntax doesn't work:
+    context={"command": "echo $stdout > file.txt"}  # $stdout is shell variable, not context
+
+RIGHT - Use {key} placeholders that ShellTask substitutes:
+    context={"command": "echo '{stdout}' > file.txt"}  # {stdout} replaced by task
 
 ===============================================================================
 8. COMPLETE EXAMPLE: SEQUENTIAL PIPELINE WITH ERROR HANDLING
@@ -730,8 +837,12 @@ from stabilize.queue.processor import QueueProcessor
 from stabilize.orchestrator import Orchestrator
 
 # Tasks
-from stabilize.tasks.interface import Task, RetryableTask, SkippableTask
-from stabilize.tasks.result import TaskResult
+from stabilize.tasks.interface import (
+    Task, RetryableTask, SkippableTask,
+    OverridableTimeoutRetryableTask,
+    CallableTask, NoOpTask, WaitTask,
+)
+from stabilize.tasks.result import TaskResult, TaskResultBuilder
 from stabilize.tasks.registry import TaskRegistry
 
 # Handlers (all 7 required)
