@@ -158,7 +158,16 @@ class HighwayTask(RetryableTask):
         stage_id = stage.id if hasattr(stage, "id") else "unknown"
         idempotency_key = f"stabilize-{exec_id}-{stage_id}"
 
-        inputs = stage.context.get("highway_inputs", {})
+        inputs = dict(stage.context.get("highway_inputs", {}))
+
+        # Support dynamic input mappings from context paths
+        # e.g., {"_artifact_id": "body_json.artifact_id"} maps context body_json.artifact_id to input _artifact_id
+        input_mappings = stage.context.get("highway_input_mappings", {})
+        for input_key, context_path in input_mappings.items():
+            value = self._resolve_context_path(stage.context, context_path)
+            if value is not None:
+                inputs[input_key] = value
+                logger.debug("Mapped context path %s to input %s = %s", context_path, input_key, value)
 
         payload = {
             "workflow_definition": workflow_def,
@@ -388,3 +397,32 @@ class HighwayTask(RetryableTask):
         except Exception as e:
             logger.exception("Unexpected error polling Highway")
             return TaskResult.terminal(error=f"Unexpected poll error: {e}")
+
+    def _resolve_context_path(
+        self,
+        context: dict[str, Any],
+        path: str,
+    ) -> Any:
+        """Resolve a dotted path in context.
+
+        Examples:
+            _resolve_context_path({"a": {"b": 1}}, "a.b") -> 1
+            _resolve_context_path({"body_json": {"artifact_id": "x"}}, "body_json.artifact_id") -> "x"
+
+        Args:
+            context: The context dictionary
+            path: Dotted path like "body_json.artifact_id"
+
+        Returns:
+            The resolved value, or None if not found
+        """
+        parts = path.split(".")
+        value = context
+
+        for part in parts:
+            if isinstance(value, dict) and part in value:
+                value = value[part]
+            else:
+                return None
+
+        return value
