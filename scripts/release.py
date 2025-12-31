@@ -102,3 +102,30 @@ class SkipTask(Task):
 
 class VerboseShellTask(ShellTask):
     """ShellTask that prints progress before and after execution."""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        command = stage.context.get("command", "")
+        stage_name = stage.name
+
+        # Print what we're about to do
+        print(f"  [{stage_name}] Running: {command[:60]}{'...' if len(command) > 60 else ''}")
+        sys.stdout.flush()
+
+        # Run the actual command
+        result = super().execute(stage)
+
+        # Print result based on status
+        failed_statuses = {WorkflowStatus.TERMINAL, WorkflowStatus.FAILED_CONTINUE}
+        if result.status in failed_statuses:
+            print(f"  [{stage_name}] FAILED")
+            if result.context and "error" in result.context:
+                error_preview = str(result.context["error"])[:200]
+                print(f"  [{stage_name}] Error: {error_preview}")
+        else:
+            print(f"  [{stage_name}] Done")
+
+        sys.stdout.flush()
+        return result
+
+class CancelStageHandler(StabilizeHandler):
+    """Handler for CancelStage messages - marks stages as canceled."""
