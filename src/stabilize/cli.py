@@ -29,12 +29,12 @@ of Stages (nodes in the DAG) containing Tasks (atomic work units). Stages can
 run sequentially or in parallel based on their dependencies.
 
 CRITICAL RULE FOR SHELL WORKFLOWS:
-When generating shell/command workflows that pass output between stages, you MUST
-include this substitution loop in ShellTask.execute() to replace {key} placeholders:
-    for key, value in stage.context.items():
-        if key != "command" and isinstance(value, str):
-            command = command.replace("{" + key + "}", value)
-Without this, {stdout} will be passed literally instead of the actual output!
+For shell/command workflows, import the BUILT-IN ShellTask:
+    from stabilize.tasks.shell import ShellTask
+    registry.register("shell", ShellTask)
+
+DO NOT define your own ShellTask class - use the built-in one! It automatically
+substitutes {key} placeholders with upstream outputs (e.g., {stdout} becomes actual output).
 
 ===============================================================================
 1. COMPLETE WORKING EXAMPLE - COPY THIS AS YOUR STARTING TEMPLATE
@@ -60,11 +60,16 @@ from stabilize.handlers.run_task import RunTaskHandler
 from stabilize.handlers.start_workflow import StartWorkflowHandler
 from stabilize.handlers.start_stage import StartStageHandler
 from stabilize.handlers.start_task import StartTaskHandler
+# For shell commands, use the built-in ShellTask:
+from stabilize.tasks.shell import ShellTask
 
 
-# Step 1: Define your custom Task
+# Step 1: For shell workflows, use the built-in ShellTask (do NOT define your own)
+# The built-in ShellTask automatically substitutes {key} with upstream outputs.
+# Only define custom Task classes for non-shell workflows:
+
 class MyTask(Task):
-    """Custom task implementation."""
+    """Custom task implementation (for non-shell workflows)."""
 
     def execute(self, stage: StageExecution) -> TaskResult:
         # Read inputs from stage.context
@@ -149,37 +154,32 @@ if __name__ == "__main__":
 ===============================================================================
 1.1 SHELL PIPELINE TEMPLATE - USE FOR ANY SHELL/COMMAND WORKFLOWS
 ===============================================================================
-FOR SHELL COMMANDS: Copy this ShellTask EXACTLY. It substitutes {key} placeholders.
+For shell commands, IMPORT the built-in ShellTask (do NOT define your own):
 
-import subprocess
+from stabilize.tasks.shell import ShellTask
 
-class ShellTask(Task):
-    """Execute shell commands with {key} placeholder substitution for upstream outputs."""
-    def execute(self, stage: StageExecution) -> TaskResult:
-        command = stage.context.get("command")
-        if not command:
-            return TaskResult.terminal(error="No command")
-        # CRITICAL: Replace {key} placeholders with context values (includes upstream outputs)
-        for key, value in stage.context.items():
-            if key != "command" and isinstance(value, str):
-                command = command.replace("{" + key + "}", value)
-        try:
-            result = subprocess.run(command, shell=True, capture_output=True, text=True)
-            if result.returncode != 0:
-                return TaskResult.terminal(error=result.stderr)
-            return TaskResult.success(outputs={"stdout": result.stdout.strip(), "stderr": result.stderr})
-        except Exception as e:
-            return TaskResult.terminal(error=str(e))
+registry = TaskRegistry()
+registry.register("shell", ShellTask)
 
-# Register: registry.register("shell", ShellTask)
-# Usage with {stdout} from upstream:
-StageExecution(
-    ref_id="2",
-    type="shell",
-    requisite_stage_ref_ids={"1"},  # REQUIRED for sequential dependency
-    context={"command": "echo '{stdout}' > /tmp/out.txt"},  # {stdout} replaced with stage 1 output
-    ...
-)
+# The built-in ShellTask automatically substitutes {key} placeholders with upstream outputs.
+# Example stages that pass stdout from stage 1 to stage 2:
+stages=[
+    StageExecution(
+        ref_id="1",
+        type="shell",
+        name="Get Data",
+        context={"command": "git status"},
+        tasks=[TaskExecution.create("Run", "shell", stage_start=True, stage_end=True)],
+    ),
+    StageExecution(
+        ref_id="2",
+        type="shell",
+        name="Save Data",
+        requisite_stage_ref_ids={"1"},  # REQUIRED - waits for stage 1
+        context={"command": "echo '{stdout}' > /tmp/output.txt"},  # {stdout} auto-replaced
+        tasks=[TaskExecution.create("Save", "shell", stage_start=True, stage_end=True)],
+    ),
+]
 
 ===============================================================================
 2. CORE CLASSES API
@@ -920,6 +920,7 @@ from stabilize.tasks.interface import (
 )
 from stabilize.tasks.result import TaskResult, TaskResultBuilder
 from stabilize.tasks.registry import TaskRegistry
+from stabilize.tasks.shell import ShellTask  # Built-in shell task with {key} substitution
 
 # Handlers (all 7 required)
 from stabilize.handlers.start_workflow import StartWorkflowHandler
