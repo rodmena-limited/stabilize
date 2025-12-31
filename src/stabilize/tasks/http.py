@@ -365,3 +365,148 @@ class HTTPTask(Task):
             ".csv": "text/csv",
         }
         return content_types.get(ext, "application/octet-stream")
+
+    def _build_ssl_context(self, context: dict[str, Any]) -> ssl.SSLContext | None:
+        """Build SSL context for HTTPS requests."""
+        verify_ssl = context.get("verify_ssl", True)
+        ca_cert = context.get("ca_cert")
+        client_cert = context.get("client_cert")
+        client_key = context.get("client_key")
+
+        # No SSL customization needed
+        if verify_ssl and not ca_cert and not client_cert:
+            return None
+
+        # Create context
+        if verify_ssl:
+            ssl_context = ssl.create_default_context()
+            if ca_cert:
+                ssl_context.load_verify_locations(ca_cert)
+        else:
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+
+        # Client certificate (mTLS)
+        if client_cert:
+            ssl_context.load_cert_chain(
+                certfile=client_cert,
+                keyfile=client_key,
+            )
+
+        return ssl_context
+
+    def _process_response(
+        self,
+        response: HTTPResponse | HTTPError | None,
+        context: dict[str, Any],
+        url: str,
+        elapsed_ms: int,
+        continue_on_failure: bool,
+    ) -> TaskResult:
+        """Process HTTP response and build TaskResult."""
+        if response is None:
+            return TaskResult.terminal(error="No response received")
+
+        # Extract status and headers
+        response_obj: HTTPResponse | HTTPError
+        if isinstance(response, HTTPError):
+            status_code = response.code
+            response_headers = dict(response.headers)
+            response_obj = response
+        else:
+            status_code = response.status
+            response_headers = dict(response.headers)
+            response_obj = response
+
+        content_type = response_headers.get("Content-Type", "")
+        content_length = int(response_headers.get("Content-Length", 0))
+
+        # Get final URL (after redirects)
+        final_url = response_obj.geturl() if hasattr(response_obj, "geturl") else url
+
+        # Download to file or read body
+        download_to = context.get("download_to")
+        max_size = context.get("max_response_size", DEFAULT_MAX_RESPONSE_SIZE)
+        parse_json = context.get("parse_json", False)
+
+        body: str = ""
+        body_json: dict | list | None = None
+
+        try:
+            if download_to:
+                # Stream to file
+                bytes_written = 0
+                with open(download_to, "wb") as f:
+                    while chunk := response_obj.read(CHUNK_SIZE):
+                        bytes_written += len(chunk)
+                        if bytes_written > max_size:
+                            raise ValueError(f"Response exceeds max size ({max_size} bytes)")
+                        f.write(chunk)
+                body = download_to
+                content_length = bytes_written
+            else:
+                # Read body
+                body_bytes = response_obj.read(max_size + 1)
+                if len(body_bytes) > max_size:
+                    raise ValueError(f"Response exceeds max size ({max_size} bytes)")
+
+                # Decode body
+                charset = self._get_charset(content_type)
+                body = body_bytes.decode(charset, errors="replace")
+                content_length = len(body_bytes)
+
+                # Parse JSON if requested
+                if parse_json:
+                    try:
+                        body_json = json.loads(body)
+                    except json.JSONDecodeError:
+                        pass  # Leave body_json as None
+
+        except ValueError as e:
+            if continue_on_failure:
+                return TaskResult.failed_continue(
+                    error=str(e),
+                    outputs={"status_code": status_code, "url": final_url},
+                )
+            return TaskResult.terminal(error=str(e))
+
+        # Build outputs
+        outputs: dict[str, Any] = {
+            "status_code": status_code,
+            "headers": response_headers,
+            "body": body,
+            "elapsed_ms": elapsed_ms,
+            "url": final_url,
+            "content_type": content_type,
+            "content_length": content_length,
+        }
+
+        if body_json is not None:
+            outputs["body_json"] = body_json
+
+        # Check expected status
+        expected_status = context.get("expected_status")
+        if expected_status is not None:
+            if isinstance(expected_status, int):
+                expected_status = [expected_status]
+
+            if status_code not in expected_status:
+                error_msg = f"Unexpected status {status_code}, expected {expected_status}"
+                if continue_on_failure:
+                    return TaskResult.failed_continue(error=error_msg, outputs=outputs)
+                return TaskResult.terminal(error=error_msg, context=outputs)
+            else:
+                # Status is in expected list - this is success
+                logger.debug("HTTPTask success (expected status %s)", status_code)
+                return TaskResult.success(outputs=outputs)
+
+        # Success for 2xx, failure otherwise
+        if 200 <= status_code < 300:
+            logger.debug("HTTPTask success: %s", status_code)
+            return TaskResult.success(outputs=outputs)
+        else:
+            error_msg = f"HTTP {status_code}"
+            if continue_on_failure:
+                return TaskResult.failed_continue(error=error_msg, outputs=outputs)
+            return TaskResult.terminal(error=error_msg, context=outputs)
