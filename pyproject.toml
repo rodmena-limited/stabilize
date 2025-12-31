@@ -1,6 +1,6 @@
 [project]
 name = "stabilize"
-version = "0.9.5"
+version = "0.9.6"
 description = "Highway Workflow Engine - Stabilize execution layer"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -87,7 +87,6 @@ disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-asyncio_mode = "auto"
 filterwarnings = [
     "ignore::DeprecationWarning:testcontainers.*:",
     "ignore::DeprecationWarning:psycopg_pool.*:",

@@ -10,6 +10,7 @@ import copy
 import threading
 import time
 from collections.abc import Iterator
+from typing import Any
 
 from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus

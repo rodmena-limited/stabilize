@@ -154,10 +154,9 @@ class HighwayTask(RetryableTask):
 
         # CRITICAL: Deterministic Idempotency Key
         # Format: stabilize-{execution_id}-{stage_id}
-        idempotency_key = "stabilize-%s-%s" % (
-            stage.execution.id if hasattr(stage, "execution") else "unknown",
-            stage.id if hasattr(stage, "id") else "unknown",
-        )
+        exec_id = stage.execution.id if hasattr(stage, "execution") else "unknown"
+        stage_id = stage.id if hasattr(stage, "id") else "unknown"
+        idempotency_key = f"stabilize-{exec_id}-{stage_id}"
 
         inputs = stage.context.get("highway_inputs", {})
 
@@ -166,14 +165,14 @@ class HighwayTask(RetryableTask):
             "inputs": inputs,
         }
 
-        url = "%s/api/v1/workflows" % config.api_endpoint.rstrip("/")
+        url = f"{config.api_endpoint.rstrip('/')}/api/v1/workflows"
 
         try:
             req = urllib.request.Request(
                 url,
                 data=json.dumps(payload).encode("utf-8"),
                 headers={
-                    "Authorization": "Bearer %s" % config.api_key,
+                    "Authorization": f"Bearer {config.api_key}",
                     "Content-Type": "application/json",
                     "X-Idempotency-Key": idempotency_key,
                 },
@@ -225,12 +224,12 @@ class HighwayTask(RetryableTask):
                     e.code,
                     error_body,
                 )
-                return TaskResult.terminal(error="Highway authentication failed: %s" % error_body)
+                return TaskResult.terminal(error=f"Highway authentication failed: {error_body}")
 
             # 404: Endpoint not found - terminal
             if e.code == 404:
                 logger.error("Highway endpoint not found: %s", url)
-                return TaskResult.terminal(error="Highway endpoint not found: %s" % url)
+                return TaskResult.terminal(error=f"Highway endpoint not found: {url}")
 
             # 409: Conflict (duplicate idempotency key with different payload)
             if e.code == 409:
@@ -247,7 +246,7 @@ class HighwayTask(RetryableTask):
                         return TaskResult.running(context={"highway_run_id": existing_run_id})
                 except Exception:
                     pass
-                return TaskResult.terminal(error="Highway idempotency conflict: %s" % error_body)
+                return TaskResult.terminal(error=f"Highway idempotency conflict: {error_body}")
 
             # 5xx: Server error - retry (return running)
             if e.code >= 500:
@@ -264,7 +263,7 @@ class HighwayTask(RetryableTask):
                 e.code,
                 error_body,
             )
-            return TaskResult.terminal(error="Highway error %s: %s" % (e.code, error_body))
+            return TaskResult.terminal(error=f"Highway error {e.code}: {error_body}")
 
         except urllib.error.URLError as e:
             # Network error - retry
@@ -276,7 +275,7 @@ class HighwayTask(RetryableTask):
 
         except Exception as e:
             logger.exception("Unexpected error submitting to Highway")
-            return TaskResult.terminal(error="Unexpected error: %s" % str(e))
+            return TaskResult.terminal(error=f"Unexpected error: {e}")
 
     def _poll_workflow(
         self,
@@ -297,16 +296,13 @@ class HighwayTask(RetryableTask):
         Returns:
             TaskResult based on Highway status
         """
-        url = "%s/api/v1/workflows/%s" % (
-            config.api_endpoint.rstrip("/"),
-            run_id,
-        )
+        url = f"{config.api_endpoint.rstrip('/')}/api/v1/workflows/{run_id}"
 
         try:
             req = urllib.request.Request(
                 url,
                 headers={
-                    "Authorization": "Bearer %s" % config.api_key,
+                    "Authorization": f"Bearer {config.api_key}",
                 },
                 method="GET",
             )
@@ -342,7 +338,7 @@ class HighwayTask(RetryableTask):
 
             if state in ("failed", "cancelled"):
                 return TaskResult.terminal(
-                    error="Highway workflow %s: %s" % (state, error_message or "No error message")
+                    error=f"Highway workflow {state}: {error_message or 'No error message'}"
                 )
 
             # Still running - Glass Box: expose current_step for UI
@@ -365,11 +361,11 @@ class HighwayTask(RetryableTask):
 
             # 401/403: Auth error - terminal
             if e.code in (401, 403):
-                return TaskResult.terminal(error="Highway authentication failed: %s" % error_body)
+                return TaskResult.terminal(error=f"Highway authentication failed: {error_body}")
 
             # 404: Run not found - terminal
             if e.code == 404:
-                return TaskResult.terminal(error="Highway workflow run not found: %s" % run_id)
+                return TaskResult.terminal(error=f"Highway workflow run not found: {run_id}")
 
             # 5xx: Server error - retry
             if e.code >= 500:
@@ -381,7 +377,7 @@ class HighwayTask(RetryableTask):
                 return TaskResult.running(context={"highway_run_id": run_id})
 
             # Other errors - terminal
-            return TaskResult.terminal(error="Highway poll error %s: %s" % (e.code, error_body))
+            return TaskResult.terminal(error=f"Highway poll error {e.code}: {error_body}")
 
         except urllib.error.URLError as e:
             # Network error - retry
@@ -393,4 +389,4 @@ class HighwayTask(RetryableTask):
 
         except Exception as e:
             logger.exception("Unexpected error polling Highway")
-            return TaskResult.terminal(error="Unexpected poll error: %s" % str(e))
+            return TaskResult.terminal(error=f"Unexpected poll error: {e}")

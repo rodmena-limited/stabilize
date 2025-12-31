@@ -396,14 +396,14 @@ class PostgresWorkflowStore(WorkflowStore):
                 if not row or not row["requisite_stage_ref_ids"]:
                     return []
 
-                requisites = tuple(row["requisite_stage_ref_ids"])
+                requisites = list(row["requisite_stage_ref_ids"])
 
                 # Now fetch those stages
                 cur.execute(
                     """
                     SELECT * FROM stage_executions
                     WHERE execution_id = %(execution_id)s
-                    AND ref_id IN %(requisites)s
+                    AND ref_id = ANY(%(requisites)s)
                     """,
                     {"execution_id": execution_id, "requisites": requisites},
                 )

@@ -466,8 +466,8 @@ class SqliteWorkflowStore(WorkflowStore):
 
         try:
             query = """
-                SELECT stage_executions.* FROM stage_executions, json_each(stage_executions.requisite_stage_ref_ids) 
-                WHERE execution_id = :execution_id 
+                SELECT stage_executions.* FROM stage_executions, json_each(stage_executions.requisite_stage_ref_ids)
+                WHERE execution_id = :execution_id
                 AND json_each.value = :ref_id
             """
             result = conn.execute(query, {"execution_id": execution_id, "ref_id": stage_ref_id})
