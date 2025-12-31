@@ -56,12 +56,37 @@ from stabilize.config_validation import (
     validate_context,
     validate_outputs,
 )
+
+# Handlers
+from stabilize.handlers import (
+    CompleteStageHandler,
+    CompleteTaskHandler,
+    CompleteWorkflowHandler,
+    RunTaskHandler,
+    StabilizeHandler,
+    StartStageHandler,
+    StartTaskHandler,
+    StartWorkflowHandler,
+)
+
+# Core models
 from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.task import TaskExecution
 from stabilize.models.workflow import Workflow
+
+# Infrastructure
+from stabilize.orchestrator import Orchestrator
+from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize.queue.processor import QueueProcessor
+from stabilize.queue.sqlite_queue import SqliteQueue
+
+# Tasks
+from stabilize.tasks.http import HTTPTask
 from stabilize.tasks.interface import RetryableTask, Task
+from stabilize.tasks.registry import TaskRegistry
 from stabilize.tasks.result import TaskResult
+from stabilize.tasks.shell import ShellTask
 
 # Verification system
 from stabilize.verification import (
@@ -78,9 +103,27 @@ __all__ = [
     "Workflow",
     "StageExecution",
     "TaskExecution",
-    "TaskResult",
+    # Infrastructure
+    "Orchestrator",
+    "QueueProcessor",
+    "SqliteQueue",
+    "SqliteWorkflowStore",
+    # Handlers
+    "StabilizeHandler",
+    "StartWorkflowHandler",
+    "StartStageHandler",
+    "StartTaskHandler",
+    "RunTaskHandler",
+    "CompleteTaskHandler",
+    "CompleteStageHandler",
+    "CompleteWorkflowHandler",
+    # Tasks
     "Task",
     "RetryableTask",
+    "TaskResult",
+    "TaskRegistry",
+    "ShellTask",
+    "HTTPTask",
     # Verification
     "Verifier",
     "VerifyResult",

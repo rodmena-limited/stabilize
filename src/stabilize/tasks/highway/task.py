@@ -346,7 +346,14 @@ class HighwayTask(RetryableTask):
                 )
 
             if state in ("failed", "cancelled"):
-                return TaskResult.terminal(error=f"Highway workflow {state}: {error_message or 'No error message'}")
+                return TaskResult.terminal(
+                    error="Highway workflow %s: %s" % (state, error_message or "No error message"),
+                    context={
+                        "highway_run_id": run_id,
+                        "highway_status": state,
+                        "highway_result": result,
+                    },
+                )
 
             # Still running - Glass Box: expose current_step for UI
             context_updates: dict[str, Any] = {
