@@ -450,3 +450,111 @@ class TestErrorHandling:
 
         assert result.status == WorkflowStatus.TERMINAL
         assert result.context["status_code"] == 404
+
+    def test_500_error(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test handling 500 error."""
+        stage.context = {"url": f"{http_server}/error/500"}
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.TERMINAL
+        assert result.context["status_code"] == 500
+
+    def test_continue_on_failure(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test continue_on_failure option."""
+        stage.context = {
+            "url": f"{http_server}/error/404",
+            "continue_on_failure": True,
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.FAILED_CONTINUE
+        assert result.outputs["status_code"] == 404
+
+    def test_missing_url(self, task: HTTPTask, stage: MagicMock) -> None:
+        """Test error when URL is missing."""
+        stage.context = {}
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.TERMINAL
+        assert "url" in result.context.get("error", "").lower()
+
+    def test_invalid_method(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test error for invalid HTTP method."""
+        stage.context = {
+            "url": http_server,
+            "method": "INVALID",
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.TERMINAL
+        assert "unsupported method" in result.context.get("error", "").lower()
+
+    def test_connection_error(self, task: HTTPTask, stage: MagicMock) -> None:
+        """Test handling connection errors."""
+        stage.context = {
+            "url": "http://127.0.0.1:59999",  # Port likely not listening
+            "timeout": 1,
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.TERMINAL
+
+    def test_file_not_found_upload(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test error when upload file doesn't exist."""
+        stage.context = {
+            "url": f"{http_server}/upload",
+            "method": "POST",
+            "upload_file": "/nonexistent/file.txt",
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.TERMINAL
+        assert "file not found" in result.context.get("error", "").lower()
+
+class TestExpectedStatus:
+    """Test expected status validation."""
+
+    def test_expected_status_single(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test single expected status."""
+        stage.context = {
+            "url": http_server,
+            "expected_status": 200,
+        }
+        result = task.execute(stage)
+        assert result.status == WorkflowStatus.SUCCEEDED
+
+    def test_expected_status_list(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test list of expected statuses."""
+        stage.context = {
+            "url": f"{http_server}/error/404",
+            "expected_status": [404, 410],
+        }
+        result = task.execute(stage)
+        assert result.status == WorkflowStatus.SUCCEEDED  # 404 is expected
+
+    def test_unexpected_status_fails(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test failure on unexpected status."""
+        stage.context = {
+            "url": http_server,
+            "expected_status": 201,  # We'll get 200
+        }
+        result = task.execute(stage)
+
+        assert result.status == WorkflowStatus.TERMINAL
+        assert "unexpected status" in result.context.get("error", "").lower()
+
+class TestRetries:
+    """Test retry logic."""
+
+    def test_retry_on_503(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+        """Test retry on 503 status (will fail after retries)."""
+        stage.context = {
+            "url": f"{http_server}/error/503",
+            "retries": 2,
+            "retry_delay": 0.1,
+        }
+        result = task.execute(stage)
+
+        # Still fails after retries
+        assert result.status == WorkflowStatus.TERMINAL
+        assert result.context["status_code"] == 503
