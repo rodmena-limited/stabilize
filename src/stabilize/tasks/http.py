@@ -304,3 +304,64 @@ class HTTPTask(Task):
         request = Request(url, method=method, headers=headers)
 
         return request, body_bytes
+
+    def _build_multipart(self, context: dict[str, Any]) -> tuple[bytes, str]:
+        """Build multipart/form-data body for file upload."""
+        boundary = uuid.uuid4().hex
+        body_parts: list[bytes] = []
+
+        # Add form fields
+        form_fields = context.get("upload_form", {})
+        for name, value in form_fields.items():
+            body_parts.append(f"--{boundary}\r\n".encode())
+            body_parts.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
+            body_parts.append(f"{value}\r\n".encode())
+
+        # Add file
+        upload_file = context["upload_file"]
+        field_name = context.get("upload_field", "file")
+        filename = context.get("upload_filename") or os.path.basename(upload_file)
+
+        with open(upload_file, "rb") as f:
+            file_content = f.read()
+
+        # Detect content type
+        content_type = self._guess_content_type(filename)
+
+        body_parts.append(f"--{boundary}\r\n".encode())
+        body_parts.append(f'Content-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\n'.encode())
+        body_parts.append(f"Content-Type: {content_type}\r\n\r\n".encode())
+        body_parts.append(file_content)
+        body_parts.append(b"\r\n")
+
+        # Final boundary
+        body_parts.append(f"--{boundary}--\r\n".encode())
+
+        body = b"".join(body_parts)
+        return body, f"multipart/form-data; boundary={boundary}"
+
+    def _guess_content_type(self, filename: str) -> str:
+        """Guess content type from filename extension."""
+        ext = os.path.splitext(filename)[1].lower()
+        content_types = {
+            ".txt": "text/plain",
+            ".html": "text/html",
+            ".htm": "text/html",
+            ".css": "text/css",
+            ".js": "application/javascript",
+            ".json": "application/json",
+            ".xml": "application/xml",
+            ".pdf": "application/pdf",
+            ".zip": "application/zip",
+            ".gz": "application/gzip",
+            ".tar": "application/x-tar",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".gif": "image/gif",
+            ".svg": "image/svg+xml",
+            ".mp3": "audio/mpeg",
+            ".mp4": "video/mp4",
+            ".csv": "text/csv",
+        }
+        return content_types.get(ext, "application/octet-stream")
