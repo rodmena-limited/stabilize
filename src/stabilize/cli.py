@@ -28,6 +28,14 @@ Stabilize is a Python DAG-based workflow orchestration engine. Workflows consist
 of Stages (nodes in the DAG) containing Tasks (atomic work units). Stages can
 run sequentially or in parallel based on their dependencies.
 
+CRITICAL RULE FOR SHELL WORKFLOWS:
+When generating shell/command workflows that pass output between stages, you MUST
+include this substitution loop in ShellTask.execute() to replace {key} placeholders:
+    for key, value in stage.context.items():
+        if key != "command" and isinstance(value, str):
+            command = command.replace("{" + key + "}", value)
+Without this, {stdout} will be passed literally instead of the actual output!
+
 ===============================================================================
 1. COMPLETE WORKING EXAMPLE - COPY THIS AS YOUR STARTING TEMPLATE
 ===============================================================================
@@ -137,6 +145,41 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+===============================================================================
+1.1 SHELL PIPELINE TEMPLATE - USE FOR ANY SHELL/COMMAND WORKFLOWS
+===============================================================================
+FOR SHELL COMMANDS: Copy this ShellTask EXACTLY. It substitutes {key} placeholders.
+
+import subprocess
+
+class ShellTask(Task):
+    """Execute shell commands with {key} placeholder substitution for upstream outputs."""
+    def execute(self, stage: StageExecution) -> TaskResult:
+        command = stage.context.get("command")
+        if not command:
+            return TaskResult.terminal(error="No command")
+        # CRITICAL: Replace {key} placeholders with context values (includes upstream outputs)
+        for key, value in stage.context.items():
+            if key != "command" and isinstance(value, str):
+                command = command.replace("{" + key + "}", value)
+        try:
+            result = subprocess.run(command, shell=True, capture_output=True, text=True)
+            if result.returncode != 0:
+                return TaskResult.terminal(error=result.stderr)
+            return TaskResult.success(outputs={"stdout": result.stdout.strip(), "stderr": result.stderr})
+        except Exception as e:
+            return TaskResult.terminal(error=str(e))
+
+# Register: registry.register("shell", ShellTask)
+# Usage with {stdout} from upstream:
+StageExecution(
+    ref_id="2",
+    type="shell",
+    requisite_stage_ref_ids={"1"},  # REQUIRED for sequential dependency
+    context={"command": "echo '{stdout}' > /tmp/out.txt"},  # {stdout} replaced with stage 1 output
+    ...
+)
 
 ===============================================================================
 2. CORE CLASSES API
@@ -464,19 +507,32 @@ Accessing in tasks:
       return TaskResult.success(outputs={"my_output": "value"})
 
 IMPORTANT - Shell Tasks with Upstream Outputs:
-  For shell commands that need upstream output, substitute context values INTO the command:
+  For shell commands that need upstream output, substitute context values INTO the command.
+  USE THIS EXACT ShellTask IMPLEMENTATION for any shell/command workflows:
 
-  class ShellTask(Task):
-      def execute(self, stage: StageExecution) -> TaskResult:
-          command = stage.context.get("command")
+import subprocess
 
-          # Substitute any {key} placeholders with context values (including upstream outputs)
-          for key, value in stage.context.items():
-              if isinstance(value, str):
-                  command = command.replace(f"{{{key}}}", value)
+class ShellTask(Task):
+    """Shell task that substitutes {key} placeholders with context values."""
 
-          result = subprocess.run(command, shell=True, capture_output=True, text=True)
-          return TaskResult.success(outputs={"stdout": result.stdout, "stderr": result.stderr})
+    def execute(self, stage: StageExecution) -> TaskResult:
+        command = stage.context.get("command")
+        if not command:
+            return TaskResult.terminal(error="No command specified")
+
+        # CRITICAL: Substitute {key} placeholders with context values (includes upstream outputs)
+        for key, value in stage.context.items():
+            if key != "command" and isinstance(value, str):
+                command = command.replace("{" + key + "}", value)
+
+        try:
+            result = subprocess.run(command, shell=True, capture_output=True, text=True)
+            outputs = {"stdout": result.stdout.strip(), "stderr": result.stderr.strip(), "returncode": result.returncode}
+            if result.returncode != 0:
+                return TaskResult.terminal(error=f"Command failed: {result.stderr}", context=outputs)
+            return TaskResult.success(outputs=outputs)
+        except Exception as e:
+            return TaskResult.terminal(error=str(e))
 
   # Usage - Stage 2 uses {stdout} from Stage 1:
   stages=[
@@ -570,6 +626,26 @@ WRONG - Shell variable syntax doesn't work:
 
 RIGHT - Use {key} placeholders that ShellTask substitutes:
     context={"command": "echo '{stdout}' > file.txt"}  # {stdout} replaced by task
+
+
+MISTAKE 8: ShellTask without placeholder substitution
+------------------------------------------------------
+WRONG - This ShellTask does NOT substitute {stdout} with upstream output:
+    class ShellTask(Task):
+        def execute(self, stage):
+            command = stage.context.get("command")
+            result = subprocess.run(command, shell=True, ...)  # {stdout} stays literal!
+
+RIGHT - ShellTask MUST substitute {key} placeholders before running:
+    class ShellTask(Task):
+        def execute(self, stage: StageExecution) -> TaskResult:
+            command = stage.context.get("command")
+            # REQUIRED: Replace {key} with actual context values
+            for key, value in stage.context.items():
+                if key != "command" and isinstance(value, str):
+                    command = command.replace("{" + key + "}", value)
+            result = subprocess.run(command, shell=True, capture_output=True, text=True)
+            return TaskResult.success(outputs={"stdout": result.stdout.strip()})
 
 ===============================================================================
 8. COMPLETE EXAMPLE: SEQUENTIAL PIPELINE WITH ERROR HANDLING
