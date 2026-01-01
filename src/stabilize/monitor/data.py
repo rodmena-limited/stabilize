@@ -5,6 +5,23 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from stabilize.models.status import WorkflowStatus
 
+def format_duration(start_ms: int | None, end_ms: int | None = None) -> str:
+    """Format duration from milliseconds to human-readable string."""
+    if start_ms is None:
+        return "-"
+    end = end_ms or int(time.time() * 1000)
+    seconds = (end - start_ms) // 1000
+    if seconds < 0:
+        return "-"
+    if seconds < 60:
+        return f"{seconds}s"
+    elif seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60}s"
+    else:
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        return f"{hours}h {minutes}m"
+
 @dataclass
 class TaskView:
     """Lightweight view of a task for monitoring."""
@@ -72,3 +89,15 @@ class MonitorData:
     workflow_stats: WorkflowStats
     fetch_time: datetime
     error: str | None = None
+
+class MonitorDataFetcher:
+    """Fetches monitoring data from the database."""
+    def __init__(
+        self,
+        store: WorkflowStore,
+        queue: Queue | None = None,
+        stuck_threshold_seconds: int = 300,
+    ):
+        self.store = store
+        self.queue = queue
+        self.stuck_threshold_seconds = stuck_threshold_seconds
