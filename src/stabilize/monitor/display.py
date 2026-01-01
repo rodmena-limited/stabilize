@@ -112,3 +112,140 @@ class MonitorDisplay:
 
             except curses.error:
                 time.sleep(0.1)
+
+    def _render(self, data: MonitorData) -> None:
+        """Render the complete display."""
+        self.stdscr.clear()
+        height, width = self.stdscr.getmaxyx()
+
+        if height < 5 or width < 60:
+            self._addstr(0, 0, "Terminal too small (min 60x5)", curses.A_BOLD)
+            self.stdscr.refresh()
+            return
+
+        # Header (line 0)
+        self._render_header(width)
+
+        # Separator (line 1)
+        self._addstr(1, 0, "─" * (width - 1), curses.A_DIM)
+
+        # Content area
+        content_height = height - 4
+        content_start_y = 2
+
+        # Build line metadata for scrolling
+        lines = self._build_line_metadata(data)
+
+        # Apply scroll
+        max_scroll = max(0, len(lines) - content_height)
+
+        # Auto-scroll to bottom if enabled
+        if self._auto_scroll:
+            self.scroll_offset = max_scroll
+        else:
+            self.scroll_offset = min(self.scroll_offset, max_scroll)
+
+        visible_lines = lines[self.scroll_offset : self.scroll_offset + content_height]
+
+        # Render each visible line
+        for i, line_info in enumerate(visible_lines):
+            y = content_start_y + i
+            self._render_line(y, width, line_info)
+
+        # Footer
+        self._render_footer(data, height, width)
+        self.stdscr.refresh()
+
+    def _render_header(self, width: int) -> None:
+        """Render header line."""
+        app_info = f"App: {self.app_filter}" if self.app_filter else "All Apps"
+        left = f" STABILIZE MONITOR - {app_info}"
+        right = f"Refresh: {self.refresh_interval}s   Q to quit "
+
+        padding = width - len(left) - len(right)
+        header = left + " " * max(0, padding) + right
+
+        self._addstr(0, 0, header[: width - 1], curses.color_pair(PAIR_HEADER) | curses.A_BOLD)
+
+    def _build_line_metadata(self, data: MonitorData) -> list[dict]:
+        """Build metadata for all display lines."""
+        lines: list[dict] = []
+
+        if data.error:
+            lines.append({"type": "error", "text": f"Error: {data.error}"})
+            return lines
+
+        if not data.workflows:
+            lines.append({"type": "empty", "text": "No workflows found"})
+            return lines
+
+        for wf in data.workflows:
+            lines.append({"type": "workflow", "data": wf})
+
+            for i, stage in enumerate(wf.stages):
+                is_last_stage = i == len(wf.stages) - 1
+                lines.append({"type": "stage", "data": stage, "is_last": is_last_stage})
+
+                for j, task in enumerate(stage.tasks):
+                    is_last_task = j == len(stage.tasks) - 1
+                    lines.append(
+                        {"type": "task", "data": task, "is_last_stage": is_last_stage, "is_last_task": is_last_task}
+                    )
+
+            lines.append({"type": "blank"})
+
+        return lines
+
+    def _render_line(self, y: int, width: int, line_info: dict) -> None:
+        """Render a single line based on its type."""
+        line_type = line_info["type"]
+
+        if line_type == "error":
+            self._addstr(y, 0, line_info["text"], curses.A_BOLD)
+        elif line_type == "empty":
+            self._addstr(y, 0, line_info["text"], curses.A_DIM)
+        elif line_type == "blank":
+            pass  # Empty line
+        elif line_type == "workflow":
+            self._render_workflow_line(y, width, line_info["data"])
+        elif line_type == "stage":
+            self._render_stage_line(y, width, line_info["data"], line_info["is_last"])
+        elif line_type == "task":
+            self._render_task_line(y, width, line_info["data"], line_info["is_last_stage"], line_info["is_last_task"])
+
+    def _render_workflow_line(self, y: int, width: int, wf: WorkflowView) -> None:
+        """Render a workflow line with proper column alignment."""
+        # Calculate column positions
+        pos_progress = width - COL_PROGRESS
+        pos_duration = width - COL_DURATION
+        pos_status = width - COL_STATUS
+        pos_time = width - COL_TIME
+
+        # Prepare data
+        wf_id = wf.id[:10] + ".."
+        app = wf.application[:14] if wf.application else "-"
+        status = wf.status.name[:10]
+        duration = format_duration(wf.start_time, wf.end_time)[:7]
+
+        if wf.start_time:
+            start_dt = datetime.fromtimestamp(wf.start_time / 1000)
+            ms = wf.start_time % 1000
+            time_str = start_dt.strftime("%Y-%m-%d %H:%M:%S") + f".{ms:03d}"
+        else:
+            time_str = "-"
+
+        completed, total = wf.stage_progress
+        progress = f"{completed}/{total}" if total > 0 else "  -"
+
+        # Render left part (tree + id + app + name)
+        prefix = f"▼ {wf_id}  {app:<14}  "
+        name_max = pos_time - len(prefix) - 2
+        name = wf.name[:name_max] if wf.name else "-"
+
+        self._addstr(y, 0, prefix + name, curses.A_NORMAL)
+
+        # Render columns at fixed positions
+        self._addstr(y, pos_time, f"{time_str:>23}", curses.A_NORMAL)
+        self._addstr(y, pos_status, f"{status:>10}", self._get_status_attr(wf.status))
+        self._addstr(y, pos_duration, f"{duration:>7}", curses.A_DIM if wf.status.is_complete else curses.A_NORMAL)
+        self._addstr(y, pos_progress, f"{progress:>5}", curses.A_NORMAL)
