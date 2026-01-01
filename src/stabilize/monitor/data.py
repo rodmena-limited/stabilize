@@ -1,9 +1,100 @@
+"""Data fetching layer for the monitor command."""
+
 from __future__ import annotations
+
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+
 from stabilize.models.status import WorkflowStatus
+
+if TYPE_CHECKING:
+    from stabilize.persistence.store import WorkflowStore
+    from stabilize.queue.queue import Queue
+
+
+@dataclass
+class TaskView:
+    """Lightweight view of a task for monitoring."""
+
+    name: str
+    implementing_class: str
+    status: WorkflowStatus
+    start_time: int | None
+    end_time: int | None
+    error: str | None = None
+
+
+@dataclass
+class StageView:
+    """Lightweight view of a stage for monitoring."""
+
+    ref_id: str
+    name: str
+    status: WorkflowStatus
+    start_time: int | None
+    end_time: int | None
+    tasks: list[TaskView] = field(default_factory=list)
+
+
+@dataclass
+class WorkflowView:
+    """Lightweight view of a workflow for monitoring."""
+
+    id: str
+    application: str
+    name: str
+    status: WorkflowStatus
+    start_time: int | None
+    end_time: int | None
+    stages: list[StageView] = field(default_factory=list)
+
+    @property
+    def stage_progress(self) -> tuple[int, int]:
+        """Return (completed, total) stage counts."""
+        total = len(self.stages)
+        completed = sum(1 for s in self.stages if s.status.is_complete)
+        return completed, total
+
+    @property
+    def duration_ms(self) -> int | None:
+        """Calculate duration in milliseconds."""
+        if self.start_time is None:
+            return None
+        end = self.end_time or int(time.time() * 1000)
+        return end - self.start_time
+
+
+@dataclass
+class QueueStats:
+    """Queue statistics for monitoring."""
+
+    pending: int = 0
+    processing: int = 0
+    stuck: int = 0  # locked_until > now + threshold
+
+
+@dataclass
+class WorkflowStats:
+    """Aggregate workflow statistics."""
+
+    running: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    total: int = 0
+
+
+@dataclass
+class MonitorData:
+    """Complete data snapshot for the monitor display."""
+
+    workflows: list[WorkflowView]
+    queue_stats: QueueStats
+    workflow_stats: WorkflowStats
+    fetch_time: datetime
+    error: str | None = None
+
 
 def format_duration(start_ms: int | None, end_ms: int | None = None) -> str:
     """Format duration from milliseconds to human-readable string."""
@@ -22,76 +113,10 @@ def format_duration(start_ms: int | None, end_ms: int | None = None) -> str:
         minutes = (seconds % 3600) // 60
         return f"{hours}h {minutes}m"
 
-@dataclass
-class TaskView:
-    """Lightweight view of a task for monitoring."""
-    name: str
-    implementing_class: str
-    status: WorkflowStatus
-    start_time: int | None
-    end_time: int | None
-    error: str | None = None
-
-@dataclass
-class StageView:
-    """Lightweight view of a stage for monitoring."""
-    ref_id: str
-    name: str
-    status: WorkflowStatus
-    start_time: int | None
-    end_time: int | None
-    tasks: list[TaskView] = field(default_factory=list)
-
-@dataclass
-class WorkflowView:
-    """Lightweight view of a workflow for monitoring."""
-    id: str
-    application: str
-    name: str
-    status: WorkflowStatus
-    start_time: int | None
-    end_time: int | None
-    stages: list[StageView] = field(default_factory=list)
-
-    def stage_progress(self) -> tuple[int, int]:
-        """Return (completed, total) stage counts."""
-        total = len(self.stages)
-        completed = sum(1 for s in self.stages if s.status.is_complete)
-        return completed, total
-
-    def duration_ms(self) -> int | None:
-        """Calculate duration in milliseconds."""
-        if self.start_time is None:
-            return None
-        end = self.end_time or int(time.time() * 1000)
-        return end - self.start_time
-
-@dataclass
-class QueueStats:
-    """Queue statistics for monitoring."""
-    pending: int = 0
-    processing: int = 0
-    stuck: int = 0
-
-@dataclass
-class WorkflowStats:
-    """Aggregate workflow statistics."""
-    running: int = 0
-    succeeded: int = 0
-    failed: int = 0
-    total: int = 0
-
-@dataclass
-class MonitorData:
-    """Complete data snapshot for the monitor display."""
-    workflows: list[WorkflowView]
-    queue_stats: QueueStats
-    workflow_stats: WorkflowStats
-    fetch_time: datetime
-    error: str | None = None
 
 class MonitorDataFetcher:
     """Fetches monitoring data from the database."""
+
     def __init__(
         self,
         store: WorkflowStore,
@@ -258,3 +283,73 @@ class MonitorDataFetcher:
             end_time=wf.end_time,
             stages=stages,
         )
+
+    def _fetch_queue_stats(self) -> QueueStats:
+        """Fetch queue statistics."""
+        if self.queue is None:
+            return QueueStats()
+
+        try:
+            # Try to get queue stats from the queue object
+            if hasattr(self.queue, "_manager") and hasattr(self.queue, "connection_string"):
+                conn_mgr = self.queue._manager  # type: ignore[attr-defined]
+                conn = conn_mgr.get_sqlite_connection(self.queue.connection_string)  # type: ignore[attr-defined]
+                cursor = conn.cursor()
+
+                now = datetime.now().isoformat()
+                threshold = int(time.time()) - self.stuck_threshold_seconds
+
+                # Count pending (not locked, ready to deliver)
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) FROM queue_messages
+                    WHERE (locked_until IS NULL OR locked_until < ?)
+                    AND deliver_at <= ?
+                    """,
+                    (now, now),
+                )
+                pending = cursor.fetchone()[0]
+
+                # Count processing (locked and not expired)
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) FROM queue_messages
+                    WHERE locked_until IS NOT NULL AND locked_until > ?
+                    """,
+                    (now,),
+                )
+                processing = cursor.fetchone()[0]
+
+                # Count stuck (locked for too long)
+                stuck_threshold = datetime.fromtimestamp(threshold).isoformat()
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) FROM queue_messages
+                    WHERE locked_until IS NOT NULL
+                    AND locked_until < ?
+                    AND locked_until < ?
+                    """,
+                    (now, stuck_threshold),
+                )
+                stuck = cursor.fetchone()[0]
+
+                return QueueStats(pending=pending, processing=processing, stuck=stuck)
+
+        except Exception:
+            pass
+
+        return QueueStats()
+
+    def _calculate_workflow_stats(self, workflows: list[WorkflowView]) -> WorkflowStats:
+        """Calculate aggregate workflow statistics."""
+        stats = WorkflowStats(total=len(workflows))
+
+        for wf in workflows:
+            if wf.status == WorkflowStatus.RUNNING:
+                stats.running += 1
+            elif wf.status == WorkflowStatus.SUCCEEDED:
+                stats.succeeded += 1
+            elif wf.status.is_failure:
+                stats.failed += 1
+
+        return stats
