@@ -347,7 +347,7 @@ class HighwayTask(RetryableTask):
 
             if state in ("failed", "cancelled"):
                 return TaskResult.terminal(
-                    error="Highway workflow %s: %s" % (state, error_message or "No error message"),
+                    error=f"Highway workflow {state}: {error_message or 'No error message'}",
                     context={
                         "highway_run_id": run_id,
                         "highway_status": state,

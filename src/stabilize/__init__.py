@@ -13,7 +13,7 @@ workflows with full support for:
 - Configuration validation with JSON Schema
 """
 
-__version__ = "0.10.0"
+__version__ = "0.10.1"
 
 # Assertion helpers
 from stabilize.assertions import (
@@ -82,11 +82,14 @@ from stabilize.queue.processor import QueueProcessor
 from stabilize.queue.sqlite_queue import SqliteQueue
 
 # Tasks
+from stabilize.tasks.docker import DockerTask
+from stabilize.tasks.highway import HighwayTask
 from stabilize.tasks.http import HTTPTask
 from stabilize.tasks.interface import RetryableTask, Task
 from stabilize.tasks.registry import TaskRegistry
 from stabilize.tasks.result import TaskResult
 from stabilize.tasks.shell import ShellTask
+from stabilize.tasks.ssh import SSHTask
 
 # Verification system
 from stabilize.verification import (
@@ -124,6 +127,9 @@ __all__ = [
     "TaskRegistry",
     "ShellTask",
     "HTTPTask",
+    "DockerTask",
+    "SSHTask",
+    "HighwayTask",
     # Verification
     "Verifier",
     "VerifyResult",

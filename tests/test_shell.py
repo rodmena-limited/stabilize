@@ -7,9 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from stabilize.models.stage import StageExecution
-from stabilize.models.status import WorkflowStatus
-from stabilize.tasks.shell import ShellTask
+from stabilize import ShellTask, StageExecution, WorkflowStatus
 
 
 @pytest.fixture

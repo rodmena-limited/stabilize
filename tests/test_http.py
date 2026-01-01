@@ -13,8 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from stabilize.models.status import WorkflowStatus
-from stabilize.tasks.http import HTTPTask
+from stabilize import HTTPTask, WorkflowStatus
 
 
 class MockHTTPHandler(BaseHTTPRequestHandler):

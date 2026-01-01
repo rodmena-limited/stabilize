@@ -2,17 +2,26 @@
 
 from typing import Any
 
-from stabilize.models.stage import StageExecution
-from stabilize.models.status import WorkflowStatus
-from stabilize.models.task import TaskExecution
-from stabilize.models.workflow import Workflow
-from stabilize.orchestrator import Orchestrator
+from stabilize import (
+    CompleteStageHandler,
+    CompleteTaskHandler,
+    CompleteWorkflowHandler,
+    Orchestrator,
+    QueueProcessor,
+    RunTaskHandler,
+    StageExecution,
+    StartStageHandler,
+    StartTaskHandler,
+    StartWorkflowHandler,
+    Task,
+    TaskExecution,
+    TaskRegistry,
+    TaskResult,
+    Workflow,
+    WorkflowStatus,
+)
 from stabilize.persistence.memory import InMemoryWorkflowStore
-from stabilize.queue.processor import QueueProcessor
 from stabilize.queue.queue import InMemoryQueue
-from stabilize.tasks.interface import Task
-from stabilize.tasks.registry import TaskRegistry
-from stabilize.tasks.result import TaskResult
 
 
 class SuccessTask(Task):
@@ -57,15 +66,6 @@ def setup_stabilize() -> tuple[
 
     # Create processor
     processor = QueueProcessor(queue)
-
-    # Register handlers
-    from stabilize.handlers.complete_stage import CompleteStageHandler
-    from stabilize.handlers.complete_task import CompleteTaskHandler
-    from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
-    from stabilize.handlers.run_task import RunTaskHandler
-    from stabilize.handlers.start_stage import StartStageHandler
-    from stabilize.handlers.start_task import StartTaskHandler
-    from stabilize.handlers.start_workflow import StartWorkflowHandler
 
     handlers: list[Any] = [
         StartWorkflowHandler(queue, repository),

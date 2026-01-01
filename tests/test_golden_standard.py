@@ -1,14 +1,17 @@
 """Golden Standard Pipeline Test - Parameterized for both backends."""
 
+from stabilize import (
+    StageExecution,
+    Task,
+    TaskExecution,
+    TaskRegistry,
+    TaskResult,
+    Workflow,
+    WorkflowStatus,
+)
 from stabilize.context.stage_context import StageContext
-from stabilize.models.stage import StageExecution
-from stabilize.models.status import WorkflowStatus
-from stabilize.models.task import TaskExecution
-from stabilize.models.workflow import Workflow
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue.queue import Queue
-from stabilize.tasks.interface import Task
-from stabilize.tasks.result import TaskResult
 from tests.conftest import setup_stabilize
 
 # =============================================================================
@@ -321,9 +324,6 @@ class TestGoldenStandard:
 
         # Setup with custom tasks
         processor, runner = setup_stabilize(repository, queue)
-
-        # Register golden standard tasks
-        from stabilize.tasks.registry import TaskRegistry
 
         # Get the task registry from the RunTaskHandler
         for handler in processor._handlers.values():

@@ -30,7 +30,7 @@ run sequentially or in parallel based on their dependencies.
 
 CRITICAL RULE FOR SHELL WORKFLOWS:
 For shell/command workflows, import the BUILT-IN ShellTask:
-    from stabilize.tasks.shell import ShellTask
+    from stabilize import ShellTask
     registry.register("shell", ShellTask)
 
 DO NOT define your own ShellTask class - use the built-in one! It automatically
@@ -43,25 +43,18 @@ substitutes {key} placeholders with upstream outputs (e.g., {stdout} becomes act
 #!/usr/bin/env python3
 """Minimal working Stabilize workflow example."""
 
-from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
-from stabilize.persistence.sqlite import SqliteWorkflowStore
-from stabilize.queue.sqlite_queue import SqliteQueue
-from stabilize.queue.processor import QueueProcessor
-from stabilize.queue.queue import Queue
-from stabilize.persistence.store import WorkflowStore
-from stabilize.orchestrator import Orchestrator
-from stabilize.tasks.interface import Task
-from stabilize.tasks.result import TaskResult
-from stabilize.tasks.registry import TaskRegistry
-from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
-from stabilize.handlers.complete_stage import CompleteStageHandler
-from stabilize.handlers.complete_task import CompleteTaskHandler
-from stabilize.handlers.run_task import RunTaskHandler
-from stabilize.handlers.start_workflow import StartWorkflowHandler
-from stabilize.handlers.start_stage import StartStageHandler
-from stabilize.handlers.start_task import StartTaskHandler
-# For shell commands, use the built-in ShellTask:
-from stabilize.tasks.shell import ShellTask
+from stabilize import (
+    # Core models
+    Workflow, StageExecution, TaskExecution, WorkflowStatus,
+    # Infrastructure
+    Orchestrator, QueueProcessor, SqliteQueue, SqliteWorkflowStore,
+    # Tasks
+    Task, TaskResult, TaskRegistry, ShellTask,
+    # Handlers
+    StartWorkflowHandler, StartStageHandler, StartTaskHandler,
+    RunTaskHandler, CompleteTaskHandler, CompleteStageHandler,
+    CompleteWorkflowHandler,
+)
 
 
 # Step 1: For shell workflows, use the built-in ShellTask (do NOT define your own)
@@ -156,7 +149,7 @@ if __name__ == "__main__":
 ===============================================================================
 For shell commands, IMPORT the built-in ShellTask (do NOT define your own):
 
-from stabilize.tasks.shell import ShellTask
+from stabilize import ShellTask, TaskRegistry
 
 registry = TaskRegistry()
 registry.register("shell", ShellTask)
@@ -206,7 +199,7 @@ context={"command": "grep pattern file.txt", "expected_codes": [0, 1]}
 ===============================================================================
 For HTTP requests, IMPORT the built-in HTTPTask (do NOT define your own):
 
-from stabilize.tasks.http import HTTPTask
+from stabilize import HTTPTask, TaskRegistry
 
 registry = TaskRegistry()
 registry.register("http", HTTPTask)
@@ -352,7 +345,7 @@ Properties:
 
 3.1 Task Interface (Abstract Base Class)
 -----------------------------------------
-from stabilize.tasks.interface import Task
+from stabilize import Task
 
 class MyTask(Task):
     def execute(self, stage: StageExecution) -> TaskResult:
@@ -373,7 +366,7 @@ class MyTask(Task):
 
 3.2 TaskResult Factory Methods - CRITICAL REFERENCE
 ----------------------------------------------------
-from stabilize.tasks.result import TaskResult
+from stabilize import TaskResult
 
 SUCCESS - Task completed successfully, pipeline continues:
     TaskResult.success(outputs=None, context=None)
@@ -428,7 +421,7 @@ Builder Pattern (for complex results):
 3.3 RetryableTask - For Polling Operations
 -------------------------------------------
 from datetime import timedelta
-from stabilize.tasks.interface import RetryableTask
+from stabilize import RetryableTask
 
 class PollTask(RetryableTask):
     def get_timeout(self) -> timedelta:
@@ -453,7 +446,7 @@ class PollTask(RetryableTask):
 
 3.4 SkippableTask - Conditional Execution
 ------------------------------------------
-from stabilize.tasks.interface import SkippableTask
+from stabilize.tasks.interface import SkippableTask  # Advanced, not in main exports
 
 class ConditionalTask(SkippableTask):
     def is_enabled(self, stage: StageExecution) -> bool:
@@ -504,7 +497,7 @@ WaitTask:
 4. TASK REGISTRY
 ===============================================================================
 
-from stabilize.tasks.registry import TaskRegistry
+from stabilize import TaskRegistry
 
 registry = TaskRegistry()
 
@@ -597,7 +590,7 @@ Accessing in tasks:
 IMPORTANT - Shell Tasks with Upstream Outputs:
   Use the BUILT-IN ShellTask which automatically substitutes {key} placeholders:
 
-  from stabilize.tasks.shell import ShellTask
+  from stabilize import ShellTask
   registry.register("shell", ShellTask)
 
   The built-in ShellTask handles: cwd, env, stdin, timeout, expected_codes, secrets, binary mode.
@@ -687,7 +680,7 @@ WRONG - Defining custom ShellTask that may lack features:
             result = subprocess.run(command, shell=True, ...)
 
 RIGHT - Use the built-in ShellTask which handles everything:
-    from stabilize.tasks.shell import ShellTask
+    from stabilize import ShellTask
     registry.register("shell", ShellTask)
 
 ===============================================================================
@@ -695,21 +688,14 @@ RIGHT - Use the built-in ShellTask which handles everything:
 ===============================================================================
 
 #!/usr/bin/env python3
-from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
-from stabilize.persistence.sqlite import SqliteWorkflowStore
-from stabilize.queue.sqlite_queue import SqliteQueue
-from stabilize.queue.processor import QueueProcessor
-from stabilize.orchestrator import Orchestrator
-from stabilize.tasks.interface import Task
-from stabilize.tasks.result import TaskResult
-from stabilize.tasks.registry import TaskRegistry
-from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
-from stabilize.handlers.complete_stage import CompleteStageHandler
-from stabilize.handlers.complete_task import CompleteTaskHandler
-from stabilize.handlers.run_task import RunTaskHandler
-from stabilize.handlers.start_workflow import StartWorkflowHandler
-from stabilize.handlers.start_stage import StartStageHandler
-from stabilize.handlers.start_task import StartTaskHandler
+from stabilize import (
+    Workflow, StageExecution, TaskExecution, WorkflowStatus,
+    Orchestrator, QueueProcessor, SqliteQueue, SqliteWorkflowStore,
+    Task, TaskResult, TaskRegistry,
+    StartWorkflowHandler, StartStageHandler, StartTaskHandler,
+    RunTaskHandler, CompleteTaskHandler, CompleteStageHandler,
+    CompleteWorkflowHandler,
+)
 
 
 class ValidateTask(Task):
@@ -821,21 +807,14 @@ if __name__ == "__main__":
 ===============================================================================
 
 #!/usr/bin/env python3
-from stabilize import Workflow, StageExecution, TaskExecution
-from stabilize.persistence.sqlite import SqliteWorkflowStore
-from stabilize.queue.sqlite_queue import SqliteQueue
-from stabilize.queue.processor import QueueProcessor
-from stabilize.orchestrator import Orchestrator
-from stabilize.tasks.interface import Task
-from stabilize.tasks.result import TaskResult
-from stabilize.tasks.registry import TaskRegistry
-from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
-from stabilize.handlers.complete_stage import CompleteStageHandler
-from stabilize.handlers.complete_task import CompleteTaskHandler
-from stabilize.handlers.run_task import RunTaskHandler
-from stabilize.handlers.start_workflow import StartWorkflowHandler
-from stabilize.handlers.start_stage import StartStageHandler
-from stabilize.handlers.start_task import StartTaskHandler
+from stabilize import (
+    Workflow, StageExecution, TaskExecution,
+    Orchestrator, QueueProcessor, SqliteQueue, SqliteWorkflowStore,
+    Task, TaskResult, TaskRegistry,
+    StartWorkflowHandler, StartStageHandler, StartTaskHandler,
+    RunTaskHandler, CompleteTaskHandler, CompleteStageHandler,
+    CompleteWorkflowHandler,
+)
 
 
 class FetchDataTask(Task):
@@ -940,39 +919,29 @@ if __name__ == "__main__":
 10. COMPLETE IMPORTS REFERENCE
 ===============================================================================
 
-# Core models
-from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
+# RECOMMENDED: Single consolidated import (most common classes)
+from stabilize import (
+    # Core models
+    Workflow, StageExecution, TaskExecution, WorkflowStatus,
+    # Infrastructure
+    Orchestrator, QueueProcessor, SqliteQueue, SqliteWorkflowStore,
+    # Tasks
+    Task, RetryableTask, TaskResult, TaskRegistry,
+    ShellTask, HTTPTask, DockerTask, SSHTask, HighwayTask,
+    # Handlers (all 7 required)
+    StartWorkflowHandler, StartStageHandler, StartTaskHandler,
+    RunTaskHandler, CompleteTaskHandler, CompleteStageHandler,
+    CompleteWorkflowHandler,
+)
 
-# Persistence
-from stabilize.persistence.sqlite import SqliteWorkflowStore
-from stabilize.persistence.store import WorkflowStore
-
-# Queue
-from stabilize.queue.sqlite_queue import SqliteQueue
-from stabilize.queue.queue import Queue
-from stabilize.queue.processor import QueueProcessor
-
-# Orchestration
-from stabilize.orchestrator import Orchestrator
-
-# Tasks
-from stabilize.tasks.interface import (
-    Task, RetryableTask, SkippableTask,
-    OverridableTimeoutRetryableTask,
+# Advanced imports (for specialized use cases)
+from stabilize.persistence.store import WorkflowStore      # Abstract base for custom stores
+from stabilize.queue.queue import Queue                    # Abstract base for custom queues
+from stabilize.tasks.interface import (                    # Advanced task types
+    SkippableTask, OverridableTimeoutRetryableTask,
     CallableTask, NoOpTask, WaitTask,
 )
-from stabilize.tasks.result import TaskResult, TaskResultBuilder
-from stabilize.tasks.registry import TaskRegistry
-from stabilize.tasks.shell import ShellTask  # Built-in shell task with {key} substitution
-
-# Handlers (all 7 required)
-from stabilize.handlers.start_workflow import StartWorkflowHandler
-from stabilize.handlers.start_stage import StartStageHandler
-from stabilize.handlers.start_task import StartTaskHandler
-from stabilize.handlers.run_task import RunTaskHandler
-from stabilize.handlers.complete_task import CompleteTaskHandler
-from stabilize.handlers.complete_stage import CompleteStageHandler
-from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
+from stabilize.tasks.result import TaskResultBuilder       # For complex result building
 
 # Verification System (NEW)
 from stabilize.verification import (
@@ -1429,6 +1398,72 @@ def prompt() -> None:
     print(PROMPT_TEXT)
 
 
+def monitor(
+    db_url: str | None,
+    app_filter: str | None,
+    refresh_interval: int,
+    status_filter: str,
+) -> None:
+    """Launch the real-time monitoring dashboard."""
+    from stabilize.monitor import run_monitor
+
+    # Create store based on db_url
+    if db_url is None:
+        # Try to load from config
+        try:
+            config = load_config()
+            db_url = (
+                f"postgres://{config.get('user', 'postgres')}:"
+                f"{config.get('password', '')}@"
+                f"{config.get('host', 'localhost')}:"
+                f"{config.get('port', 5432)}/"
+                f"{config.get('dbname', 'stabilize')}"
+            )
+        except SystemExit:
+            print("Error: No database configuration found.")
+            print("Provide --db-url or set up mg.yaml / MG_DATABASE_URL")
+            sys.exit(1)
+
+    # Determine store type from URL
+    if db_url.startswith("sqlite"):
+        from stabilize.persistence.sqlite import SqliteWorkflowStore
+        from stabilize.queue.sqlite_queue import SqliteQueue
+
+        store = SqliteWorkflowStore(db_url, create_tables=False)
+        # Try to create queue for stats
+        try:
+            queue = SqliteQueue(db_url, table_name="queue_messages")
+        except Exception:
+            queue = None
+    elif db_url.startswith("postgres"):
+        try:
+            from stabilize.persistence.postgres import PostgresWorkflowStore
+            from stabilize.queue.queue import PostgresQueue
+
+            store = PostgresWorkflowStore(db_url)
+            try:
+                queue = PostgresQueue(db_url)
+            except Exception:
+                queue = None
+        except ImportError:
+            print("Error: psycopg not installed")
+            print("Install with: pip install stabilize[postgres]")
+            sys.exit(1)
+    else:
+        print(f"Error: Unsupported database URL: {db_url}")
+        print("Use sqlite:///path or postgres://...")
+        sys.exit(1)
+
+    print(f"Connecting to {db_url[:50]}...")
+    run_monitor(
+        store=store,
+        queue=queue,
+        app_filter=app_filter,
+        refresh_interval=refresh_interval,
+        status_filter=status_filter,
+    )
+
+
 def rag_init(
     db_url: str | None = None,
     force: bool = False,
@@ -1672,6 +1707,32 @@ def main() -> None:
         help="Database URL for caching",
     )
 
+    # monitor command
+    monitor_parser = subparsers.add_parser(
+        "monitor",
+        help="Real-time workflow monitoring dashboard (htop-like)",
+    )
+    monitor_parser.add_argument(
+        "--app",
+        help="Filter by application name",
+    )
+    monitor_parser.add_argument(
+        "--db-url",
+        help="Database URL (postgres://... or sqlite:///...)",
+    )
+    monitor_parser.add_argument(
+        "--refresh",
+        type=int,
+        default=2,
+        help="Refresh interval in seconds (default: 2)",
+    )
+    monitor_parser.add_argument(
+        "--status",
+        choices=["all", "running", "failed", "recent"],
+        default="all",
+        help="Filter workflows by status (default: all)",
+    )
+
     args = parser.parse_args()
 
     if args.command == "mg-up":
@@ -1697,6 +1758,8 @@ def main() -> None:
         else:
             rag_parser.print_help()
             sys.exit(1)
+    elif args.command == "monitor":
+        monitor(args.db_url, args.app, args.refresh, args.status)
     else:
         parser.print_help()
         sys.exit(1)

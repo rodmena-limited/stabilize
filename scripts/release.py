@@ -41,24 +41,29 @@ from typing import Any
 # Add src to path for development
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from stabilize import StageExecution, TaskExecution, Workflow, WorkflowStatus
-from stabilize.handlers.base import StabilizeHandler
-from stabilize.handlers.complete_stage import CompleteStageHandler
-from stabilize.handlers.complete_task import CompleteTaskHandler
-from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
-from stabilize.handlers.run_task import RunTaskHandler
-from stabilize.handlers.start_stage import StartStageHandler
-from stabilize.handlers.start_task import StartTaskHandler
-from stabilize.handlers.start_workflow import StartWorkflowHandler
-from stabilize.orchestrator import Orchestrator
-from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize import (
+    CompleteStageHandler,
+    CompleteTaskHandler,
+    CompleteWorkflowHandler,
+    Orchestrator,
+    QueueProcessor,
+    RunTaskHandler,
+    ShellTask,
+    SqliteQueue,
+    SqliteWorkflowStore,
+    StabilizeHandler,
+    StageExecution,
+    StartStageHandler,
+    StartTaskHandler,
+    StartWorkflowHandler,
+    Task,
+    TaskExecution,
+    TaskRegistry,
+    TaskResult,
+    Workflow,
+    WorkflowStatus,
+)
 from stabilize.queue.messages import CancelStage
-from stabilize.queue.processor import QueueProcessor
-from stabilize.queue.sqlite_queue import SqliteQueue
-from stabilize.tasks.interface import Task
-from stabilize.tasks.registry import TaskRegistry
-from stabilize.tasks.result import TaskResult
-from stabilize.tasks.shell import ShellTask
 
 # =============================================================================
 # Project paths
@@ -164,7 +169,7 @@ class VerboseShellTask(ShellTask):
         if result.status in failed_statuses:
             print(f"  [{stage_name}] FAILED")
             if result.context and "error" in result.context:
-                error_preview = str(result.context['error'])[:200]
+                error_preview = str(result.context["error"])[:200]
                 print(f"  [{stage_name}] Error: {error_preview}")
         else:
             print(f"  [{stage_name}] Done")
