@@ -41,3 +41,17 @@ class WorkflowView:
         total = len(self.stages)
         completed = sum(1 for s in self.stages if s.status.is_complete)
         return completed, total
+
+    def duration_ms(self) -> int | None:
+        """Calculate duration in milliseconds."""
+        if self.start_time is None:
+            return None
+        end = self.end_time or int(time.time() * 1000)
+        return end - self.start_time
+
+@dataclass
+class QueueStats:
+    """Queue statistics for monitoring."""
+    pending: int = 0
+    processing: int = 0
+    stuck: int = 0
