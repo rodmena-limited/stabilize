@@ -167,3 +167,94 @@ class MonitorDataFetcher:
         )
 
         return workflows
+
+    def _fetch_recent_workflows(
+        self,
+        limit: int,
+        status_filter: str,
+    ) -> list:
+        """Fetch recent workflows directly from the database."""
+        from stabilize.models.workflow import Workflow
+
+        workflows: list[Workflow] = []
+
+        # Access the connection manager from the store
+        if hasattr(self.store, "_manager") and hasattr(self.store, "connection_string"):
+            conn_mgr = self.store._manager  # type: ignore[attr-defined]
+            conn = conn_mgr.get_sqlite_connection(self.store.connection_string)  # type: ignore[attr-defined]
+            try:
+                cursor = conn.cursor()
+
+                # Build query based on status filter
+                if status_filter == "running":
+                    status_clause = "WHERE status = 'RUNNING'"
+                elif status_filter == "failed":
+                    status_clause = "WHERE status IN ('TERMINAL', 'FAILED_CONTINUE', 'CANCELED')"
+                elif status_filter == "recent":
+                    status_clause = ""  # All statuses, just recent
+                else:
+                    status_clause = ""
+
+                query = f"""
+                    SELECT id FROM pipeline_executions
+                    {status_clause}
+                    ORDER BY
+                        CASE WHEN status = 'RUNNING' THEN 0 ELSE 1 END,
+                        created_at DESC
+                    LIMIT ?
+                """
+                cursor.execute(query, (limit,))
+                rows = cursor.fetchall()
+
+                for row in rows:
+                    try:
+                        wf = self.store.retrieve(row[0])
+                        workflows.append(wf)
+                    except Exception:
+                        pass
+            finally:
+                pass  # Connection is managed by the connection manager
+
+        return workflows
+
+    def _convert_workflow(self, wf: Any) -> WorkflowView:
+        """Convert a Workflow model to WorkflowView."""
+        stages = []
+        for stage in wf.stages:
+            tasks = []
+            for task in stage.tasks:
+                error = None
+                if task.task_exception_details:
+                    error = task.task_exception_details.get("message", str(task.task_exception_details))
+
+                tasks.append(
+                    TaskView(
+                        name=task.name,
+                        implementing_class=task.implementing_class,
+                        status=task.status,
+                        start_time=task.start_time,
+                        end_time=task.end_time,
+                        error=error,
+                    )
+                )
+
+            stages.append(
+                StageView(
+                    ref_id=stage.ref_id,
+                    name=stage.name,
+                    status=stage.status,
+                    start_time=stage.start_time,
+                    end_time=stage.end_time,
+                    tasks=tasks,
+                )
+            )
+
+        return WorkflowView(
+            id=wf.id,
+            application=wf.application,
+            name=wf.name,
+            status=wf.status,
+            start_time=wf.start_time,
+            end_time=wf.end_time,
+            stages=stages,
+        )
