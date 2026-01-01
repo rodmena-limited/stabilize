@@ -55,3 +55,20 @@ class QueueStats:
     pending: int = 0
     processing: int = 0
     stuck: int = 0
+
+@dataclass
+class WorkflowStats:
+    """Aggregate workflow statistics."""
+    running: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    total: int = 0
+
+@dataclass
+class MonitorData:
+    """Complete data snapshot for the monitor display."""
+    workflows: list[WorkflowView]
+    queue_stats: QueueStats
+    workflow_stats: WorkflowStats
+    fetch_time: datetime
+    error: str | None = None
