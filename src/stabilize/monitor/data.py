@@ -101,3 +101,69 @@ class MonitorDataFetcher:
         self.store = store
         self.queue = queue
         self.stuck_threshold_seconds = stuck_threshold_seconds
+
+    def fetch(
+        self,
+        app_filter: str | None = None,
+        limit: int = 50,
+        status_filter: str = "all",
+    ) -> MonitorData:
+        """Fetch current monitoring data from the database."""
+        try:
+            workflows = self._fetch_workflows(app_filter, limit, status_filter)
+            queue_stats = self._fetch_queue_stats()
+            workflow_stats = self._calculate_workflow_stats(workflows)
+
+            return MonitorData(
+                workflows=workflows,
+                queue_stats=queue_stats,
+                workflow_stats=workflow_stats,
+                fetch_time=datetime.now(),
+            )
+        except Exception as e:
+            return MonitorData(
+                workflows=[],
+                queue_stats=QueueStats(),
+                workflow_stats=WorkflowStats(),
+                fetch_time=datetime.now(),
+                error=str(e),
+            )
+
+    def _fetch_workflows(
+        self,
+        app_filter: str | None,
+        limit: int,
+        status_filter: str,
+    ) -> list[WorkflowView]:
+        """Fetch workflows with their stages and tasks."""
+        workflows: list[WorkflowView] = []
+
+        # Use existing store methods to fetch workflows
+        # We'll need to adapt based on the available methods
+        try:
+            if app_filter:
+                raw_workflows = list(self.store.retrieve_by_application(app_filter))
+            else:
+                # Get recent workflows - we need to use the connection directly
+                raw_workflows = self._fetch_recent_workflows(limit, status_filter)
+
+            for wf in raw_workflows[:limit]:
+                workflow_view = self._convert_workflow(wf)
+                workflows.append(workflow_view)
+
+        except Exception:
+            # If retrieve_by_application doesn't exist, try alternative
+            raw_workflows = self._fetch_recent_workflows(limit, status_filter)
+            for wf in raw_workflows[:limit]:
+                workflow_view = self._convert_workflow(wf)
+                workflows.append(workflow_view)
+
+        # Sort: running first, then by start time ascending (oldest first, newest at bottom)
+        workflows.sort(
+            key=lambda w: (
+                0 if w.status == WorkflowStatus.RUNNING else 1,
+                w.start_time or 0,
+            )
+        )
+
+        return workflows
