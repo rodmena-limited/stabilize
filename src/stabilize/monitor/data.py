@@ -24,3 +24,20 @@ class StageView:
     start_time: int | None
     end_time: int | None
     tasks: list[TaskView] = field(default_factory=list)
+
+@dataclass
+class WorkflowView:
+    """Lightweight view of a workflow for monitoring."""
+    id: str
+    application: str
+    name: str
+    status: WorkflowStatus
+    start_time: int | None
+    end_time: int | None
+    stages: list[StageView] = field(default_factory=list)
+
+    def stage_progress(self) -> tuple[int, int]:
+        """Return (completed, total) stage counts."""
+        total = len(self.stages)
+        completed = sum(1 for s in self.stages if s.status.is_complete)
+        return completed, total
