@@ -35,7 +35,7 @@ from __future__ import annotations
 from typing import Any
 
 
-class StabilizeBaseException(Exception):
+class StabilizeBaseException(Exception):  # noqa: N818 - intentional base exception name
     """Base exception for all Stabilize errors.
 
     This is the root of the exception hierarchy. Use this when you want

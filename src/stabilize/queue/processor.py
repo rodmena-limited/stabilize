@@ -19,10 +19,13 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.queue import Queue
+
+if TYPE_CHECKING:
+    from stabilize.persistence.store import WorkflowStore
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +70,9 @@ class QueueProcessorConfig:
     # Whether to stop on unhandled exceptions
     stop_on_error: bool = False
 
+    # Enable message deduplication for idempotency
+    enable_deduplication: bool = True
+
 
 class QueueProcessor:
     """
@@ -87,6 +93,7 @@ class QueueProcessor:
         self,
         queue: Queue,
         config: QueueProcessorConfig | None = None,
+        store: WorkflowStore | None = None,
     ) -> None:
         """
         Initialize the queue processor.
@@ -94,9 +101,11 @@ class QueueProcessor:
         Args:
             queue: The queue to process
             config: Optional configuration
+            store: Optional store for message deduplication (idempotency)
         """
         self.queue = queue
         self.config = config or QueueProcessorConfig()
+        self._store = store
         self._handlers: dict[type[Message], MessageHandler[Any]] = {}
         self._running = False
         self._executor: ThreadPoolExecutor | None = None
@@ -218,7 +227,12 @@ class QueueProcessor:
             self._executor.submit(process_and_ack)
 
     def _handle_message(self, message: Message) -> None:
-        """Handle a message with the appropriate handler."""
+        """Handle a message with the appropriate handler.
+
+        If deduplication is enabled and a store is provided, checks if the
+        message has already been processed and skips if so. Marks the message
+        as processed after successful handling.
+        """
         message_type = type(message)
         handler = self._handlers.get(message_type)
 
@@ -226,9 +240,36 @@ class QueueProcessor:
             logger.warning(f"No handler registered for {get_message_type_name(message)}")
             return
 
-        logger.debug(f"Handling {get_message_type_name(message)} (execution={getattr(message, 'execution_id', 'N/A')})")
+        # Check for duplicate message (idempotency)
+        message_id = getattr(message, "message_id", None)
+        execution_id = getattr(message, "execution_id", None)
+
+        if (
+            self.config.enable_deduplication
+            and self._store is not None
+            and message_id is not None
+        ):
+            if self._store.is_message_processed(message_id):
+                logger.info(
+                    f"Skipping duplicate message {message_id} ({get_message_type_name(message)})"
+                )
+                return
+
+        logger.debug(f"Handling {get_message_type_name(message)} (execution={execution_id or 'N/A'})")
 
         handler.handle(message)
+
+        # Mark message as processed for deduplication
+        if (
+            self.config.enable_deduplication
+            and self._store is not None
+            and message_id is not None
+        ):
+            self._store.mark_message_processed(
+                message_id=message_id,
+                handler_type=get_message_type_name(message),
+                execution_id=execution_id,
+            )
 
     def process_one(self) -> bool:
         """

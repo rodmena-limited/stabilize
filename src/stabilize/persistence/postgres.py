@@ -689,6 +689,59 @@ class PostgresWorkflowStore(WorkflowStore):
                 )
             conn.commit()
 
+    # ========== Message Deduplication ==========
+
+    def is_message_processed(self, message_id: str) -> bool:
+        """Check if a message has already been processed."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM processed_messages WHERE message_id = %(message_id)s",
+                    {"message_id": message_id},
+                )
+                return cur.fetchone() is not None
+
+    def mark_message_processed(
+        self,
+        message_id: str,
+        handler_type: str | None = None,
+        execution_id: str | None = None,
+    ) -> None:
+        """Mark a message as successfully processed."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO processed_messages (
+                        message_id, processed_at, handler_type, execution_id
+                    ) VALUES (
+                        %(message_id)s, NOW(), %(handler_type)s, %(execution_id)s
+                    )
+                    ON CONFLICT (message_id) DO NOTHING
+                    """,
+                    {
+                        "message_id": message_id,
+                        "handler_type": handler_type,
+                        "execution_id": execution_id,
+                    },
+                )
+            conn.commit()
+
+    def cleanup_old_processed_messages(self, max_age_hours: float = 24.0) -> int:
+        """Clean up old processed message records."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    DELETE FROM processed_messages
+                    WHERE processed_at < NOW() - INTERVAL '%(hours)s hours'
+                    """,
+                    {"hours": max_age_hours},
+                )
+                deleted = cur.rowcount
+            conn.commit()
+            return deleted
+
     # ========== Helper Methods ==========
 
     def _insert_stage(self, cur: Any, stage: StageExecution, execution_id: str) -> None:

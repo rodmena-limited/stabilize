@@ -72,14 +72,16 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
 
                     not_started = [s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED]
                     if not_started:
-                        for s in not_started:
-                            self.queue.push(
-                                StartStage(
-                                    execution_type=message.execution_type,
-                                    execution_id=message.execution_id,
-                                    stage_id=s.id,
+                        # Atomic: push all after stage messages together
+                        with self.repository.transaction(self.queue) as txn:
+                            for s in not_started:
+                                txn.push_message(
+                                    StartStage(
+                                        execution_type=message.execution_type,
+                                        execution_id=message.execution_id,
+                                        stage_id=s.id,
+                                    )
                                 )
-                            )
                         return
 
                     # If status is NOT_STARTED with no after stages, it's weird
@@ -92,20 +94,21 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                     has_on_failure = self._plan_on_failure_stages(stage)
                     if has_on_failure:
                         after_stages = stage.first_after_stages()
-                        for s in after_stages:
-                            self.queue.push(
-                                StartStage(
-                                    execution_type=message.execution_type,
-                                    execution_id=message.execution_id,
-                                    stage_id=s.id,
+                        # Atomic: push all on-failure stage messages together
+                        with self.repository.transaction(self.queue) as txn:
+                            for s in after_stages:
+                                txn.push_message(
+                                    StartStage(
+                                        execution_type=message.execution_type,
+                                        execution_id=message.execution_id,
+                                        stage_id=s.id,
+                                    )
                                 )
-                            )
                         return
 
                 # Update stage status
                 stage.status = status
                 stage.end_time = self.current_time_millis()
-                self.repository.store_stage(stage)
 
                 logger.info("Stage %s completed with status %s", stage.name, status)
 
@@ -116,46 +119,51 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                     and not stage.allow_sibling_stages_to_continue_on_failure
                     and stage.parent_stage_id is not None
                 ):
-                    # Propagate failure to parent
-                    self.queue.push(
-                        CompleteStage(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=stage.parent_stage_id,
-                        )
-                    )
-                elif status in {
-                    WorkflowStatus.SUCCEEDED,
-                    WorkflowStatus.FAILED_CONTINUE,
-                    WorkflowStatus.SKIPPED,
-                }:
-                    # Continue to downstream stages
-                    self.start_next(stage)
-                else:
-                    # Failure - cancel and complete execution
-                    self.queue.push(
-                        CancelStage(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=message.stage_id,
-                        )
-                    )
-                    if stage.synthetic_stage_owner is None or stage.parent_stage_id is None:
-                        self.queue.push(
-                            CompleteWorkflow(
-                                execution_type=message.execution_type,
-                                execution_id=message.execution_id,
-                            )
-                        )
-                    else:
-                        # Propagate to parent
-                        self.queue.push(
+                    # Atomic: store stage + propagate failure to parent
+                    with self.repository.transaction(self.queue) as txn:
+                        txn.store_stage(stage)
+                        txn.push_message(
                             CompleteStage(
                                 execution_type=message.execution_type,
                                 execution_id=message.execution_id,
                                 stage_id=stage.parent_stage_id,
                             )
                         )
+                elif status in {
+                    WorkflowStatus.SUCCEEDED,
+                    WorkflowStatus.FAILED_CONTINUE,
+                    WorkflowStatus.SKIPPED,
+                }:
+                    # Store stage first, then continue to downstream stages
+                    self.repository.store_stage(stage)
+                    self.start_next(stage)
+                else:
+                    # Failure - atomic: store stage + cancel + complete
+                    with self.repository.transaction(self.queue) as txn:
+                        txn.store_stage(stage)
+                        txn.push_message(
+                            CancelStage(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=message.stage_id,
+                            )
+                        )
+                        if stage.synthetic_stage_owner is None or stage.parent_stage_id is None:
+                            txn.push_message(
+                                CompleteWorkflow(
+                                    execution_type=message.execution_type,
+                                    execution_id=message.execution_id,
+                                )
+                            )
+                        else:
+                            # Propagate to parent
+                            txn.push_message(
+                                CompleteStage(
+                                    execution_type=message.execution_type,
+                                    execution_id=message.execution_id,
+                                    stage_id=stage.parent_stage_id,
+                                )
+                            )
 
             except Exception as e:
                 logger.error(
@@ -169,21 +177,23 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                 }
                 stage.status = WorkflowStatus.TERMINAL
                 stage.end_time = self.current_time_millis()
-                self.repository.store_stage(stage)
 
-                self.queue.push(
-                    CancelStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=message.stage_id,
+                # Atomic: store stage + cancel + complete workflow
+                with self.repository.transaction(self.queue) as txn:
+                    txn.store_stage(stage)
+                    txn.push_message(
+                        CancelStage(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                        )
                     )
-                )
-                self.queue.push(
-                    CompleteWorkflow(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
+                    txn.push_message(
+                        CompleteWorkflow(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                        )
                     )
-                )
 
         self.with_stage(message, on_stage)
 

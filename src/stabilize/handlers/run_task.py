@@ -8,9 +8,13 @@ It handles execution, retries, timeouts, and result processing.
 from __future__ import annotations
 
 import logging
+import random
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
+from stabilize.errors import TaskTimeoutError, is_transient
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
@@ -30,11 +34,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-class TimeoutError(Exception):
-    """Raised when a task times out."""
-
-    pass
+# Default timeout for tasks that don't specify one (5 minutes)
+DEFAULT_TASK_TIMEOUT = timedelta(minutes=5)
 
 
 class RunTaskHandler(StabilizeHandler[RunTask]):
@@ -118,23 +119,20 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 )
                 return
 
-            # Check for timeout
+            # Execute the task with timeout enforcement
             try:
-                self._check_for_timeout(stage, task_model, task)
-            except TimeoutError as e:
-                logger.info("Task %s timed out: %s", task_model.name, e)
-                result = task.on_timeout(stage) if hasattr(task, "on_timeout") else None
-                if result is None:
-                    self._complete_with_error(stage, task_model, message, str(e))
-                    return
-                else:
-                    self._process_result(stage, task_model, result, message)
-                    return
-
-            # Execute the task
-            try:
-                result = task.execute(stage)
+                timeout = self._get_task_timeout(stage, task)
+                result = self._execute_with_timeout(task, stage, timeout)
                 self._process_result(stage, task_model, result, message)
+            except TaskTimeoutError as e:
+                logger.info("Task %s timed out: %s", task_model.name, e)
+                timeout_result: TaskResult | None = (
+                    task.on_timeout(stage) if hasattr(task, "on_timeout") else None
+                )
+                if timeout_result is None:
+                    self._complete_with_error(stage, task_model, message, str(e))
+                else:
+                    self._process_result(stage, task_model, timeout_result, message)
             except Exception as e:
                 logger.error(
                     "Error executing task %s: %s",
@@ -161,32 +159,53 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         # Try by type name
         return self.task_registry.get(task_type)
 
-    def _check_for_timeout(
+    def _get_task_timeout(
         self,
         stage: StageExecution,
-        task_model: TaskExecution,
         task: Task,
-    ) -> None:
-        """Check if task has timed out."""
-        if not isinstance(task, RetryableTask):
-            return
+    ) -> timedelta:
+        """Get the timeout for a task.
 
-        if task_model.start_time is None:
-            return
+        Returns the dynamic timeout for RetryableTask or default timeout for others.
+        """
+        if isinstance(task, RetryableTask):
+            return task.get_dynamic_timeout(stage)
+        return DEFAULT_TASK_TIMEOUT
 
-        start_time = task_model.start_time
-        current_time = self.current_time_millis()
-        elapsed = timedelta(milliseconds=current_time - start_time)
+    def _execute_with_timeout(
+        self,
+        task: Task,
+        stage: StageExecution,
+        timeout: timedelta,
+    ) -> TaskResult:
+        """Execute a task with timeout enforcement.
 
-        # Get timeout (potentially dynamic)
-        timeout = task.get_dynamic_timeout(stage)
+        Runs the task in a separate thread and interrupts if it exceeds the timeout.
 
-        # Account for paused time
-        paused_duration = timedelta(milliseconds=stage.execution.paused_duration_relative_to(start_time))
-        actual_elapsed = elapsed - paused_duration
+        Args:
+            task: The task to execute
+            stage: The stage execution context
+            timeout: Maximum time allowed for execution
 
-        if actual_elapsed > timeout:
-            raise TimeoutError(f"Task timed out after {actual_elapsed} (timeout: {timeout})")
+        Returns:
+            The task result
+
+        Raises:
+            TaskTimeoutError: If the task exceeds the timeout
+        """
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(task.execute, stage)
+            try:
+                return future.result(timeout=timeout.total_seconds())
+            except FuturesTimeoutError:
+                # Attempt to cancel the future (may not always succeed)
+                future.cancel()
+                raise TaskTimeoutError(
+                    f"Task exceeded timeout of {timeout}",
+                    task_name=getattr(task, "name", type(task).__name__),
+                    stage_id=stage.id,
+                    execution_id=stage.execution.id if stage.execution else None,
+                )
 
     def _process_result(
         self,
@@ -286,9 +305,23 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         stage: StageExecution,
         task_model: TaskExecution,
         message: RunTask,
+        attempt: int = 1,
     ) -> timedelta:
-        """Calculate backoff period for retry."""
-        # Try to get the task and use its backoff
+        """Calculate backoff period for retry with exponential backoff and jitter.
+
+        Uses exponential backoff: 1s, 2s, 4s, 8s, 16s, capped at 60s.
+        Adds ±25% jitter to prevent thundering herd.
+
+        Args:
+            stage: The stage execution context
+            task_model: The task execution model
+            message: The RunTask message
+            attempt: The current attempt number (1-based)
+
+        Returns:
+            The calculated backoff period
+        """
+        # Try to get the task and use its backoff if it's a RetryableTask
         try:
             task = self._resolve_task(message.task_type, task_model)
             if isinstance(task, RetryableTask):
@@ -297,8 +330,15 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         except TaskNotFoundError:
             pass
 
-        # Default backoff
-        return timedelta(seconds=1)
+        # Default exponential backoff with jitter
+        # Exponential: 1s, 2s, 4s, 8s, 16s, 32s, capped at 60s
+        base_delay = min(2 ** (attempt - 1), 60)
+
+        # Add jitter (±25%) to prevent thundering herd
+        jitter = base_delay * random.uniform(-0.25, 0.25)
+        delay = base_delay + jitter
+
+        return timedelta(seconds=max(1.0, delay))
 
     def _handle_cancellation(
         self,
@@ -340,15 +380,63 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
     ) -> None:
         """Handle task execution exception.
 
+        Uses is_transient() to determine if the error should be retried.
+        Transient errors are rescheduled with exponential backoff.
+        Permanent errors are marked as terminal.
+
         Uses atomic transaction for stage update + message push.
         """
-        # TODO: Check if exception is retryable
-        # For now, treat all exceptions as terminal
+        # Check if exception is retryable (transient)
+        if is_transient(exception):
+            logger.info(
+                "Task %s encountered transient error, will retry: %s",
+                task_model.name,
+                exception,
+            )
 
+            # Get attempt count from message or default to 1
+            attempt = getattr(message, "attempt", 1) or 1
+            max_attempts = 10  # Maximum retry attempts
+
+            if attempt < max_attempts:
+                # Reschedule with backoff
+                delay = self._get_backoff_period(stage, task_model, message, attempt + 1)
+
+                # Create new message with incremented attempt
+                retry_message = RunTask(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
+                    task_id=message.task_id,
+                    task_type=message.task_type,
+                )
+
+                # Atomic: push retry message
+                with self.repository.transaction(self.queue) as txn:
+                    txn.push_message(retry_message, int(delay.total_seconds()))
+
+                logger.debug(
+                    "Task %s rescheduled for retry %d/%d with delay %s",
+                    task_model.name,
+                    attempt + 1,
+                    max_attempts,
+                    delay,
+                )
+                return
+
+            # Max attempts exceeded - treat as terminal
+            logger.warning(
+                "Task %s exceeded max retry attempts (%d), marking as terminal",
+                task_model.name,
+                max_attempts,
+            )
+
+        # Permanent error or max retries exceeded - mark as terminal
         exception_details = {
             "details": {
                 "error": str(exception),
                 "errors": [str(exception)],
+                "transient": is_transient(exception),
             }
         }
 

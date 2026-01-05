@@ -329,6 +329,53 @@ class WorkflowStore(ABC):
         """
         pass
 
+    # ========== Message Deduplication ==========
+
+    def is_message_processed(self, message_id: str) -> bool:
+        """
+        Check if a message has already been processed.
+
+        Used for idempotency - prevents duplicate message processing.
+
+        Args:
+            message_id: The unique message ID
+
+        Returns:
+            True if the message has been processed before
+        """
+        # Default implementation: no deduplication (always returns False)
+        return False
+
+    def mark_message_processed(
+        self,
+        message_id: str,
+        handler_type: str | None = None,
+        execution_id: str | None = None,
+    ) -> None:
+        """
+        Mark a message as successfully processed.
+
+        Args:
+            message_id: The unique message ID
+            handler_type: Optional handler type for debugging
+            execution_id: Optional execution ID for debugging
+        """
+        # Default implementation: no-op
+        pass
+
+    def cleanup_old_processed_messages(self, max_age_hours: float = 24.0) -> int:
+        """
+        Clean up old processed message records.
+
+        Args:
+            max_age_hours: Delete records older than this many hours
+
+        Returns:
+            Number of records deleted
+        """
+        # Default implementation: no cleanup
+        return 0
+
     # ========== Optional Methods ==========
 
     def is_healthy(self) -> bool:

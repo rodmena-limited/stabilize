@@ -144,3 +144,123 @@ ACTIVE_STATUSES: frozenset[WorkflowStatus] = frozenset(
         WorkflowStatus.SUSPENDED,
     }
 )
+
+
+# Valid state transitions for correctness guarantees
+# Maps current state -> set of valid target states
+VALID_TRANSITIONS: dict[WorkflowStatus, frozenset[WorkflowStatus]] = {
+    WorkflowStatus.NOT_STARTED: frozenset(
+        {
+            WorkflowStatus.RUNNING,
+            WorkflowStatus.CANCELED,
+            WorkflowStatus.SKIPPED,
+            WorkflowStatus.BUFFERED,
+        }
+    ),
+    WorkflowStatus.BUFFERED: frozenset(
+        {
+            WorkflowStatus.NOT_STARTED,
+            WorkflowStatus.RUNNING,
+            WorkflowStatus.CANCELED,
+            WorkflowStatus.SKIPPED,
+        }
+    ),
+    WorkflowStatus.RUNNING: frozenset(
+        {
+            WorkflowStatus.SUCCEEDED,
+            WorkflowStatus.FAILED_CONTINUE,
+            WorkflowStatus.TERMINAL,
+            WorkflowStatus.CANCELED,
+            WorkflowStatus.PAUSED,
+            WorkflowStatus.STOPPED,
+            WorkflowStatus.SUSPENDED,
+            WorkflowStatus.REDIRECT,
+        }
+    ),
+    WorkflowStatus.PAUSED: frozenset(
+        {
+            WorkflowStatus.RUNNING,
+            WorkflowStatus.CANCELED,
+            WorkflowStatus.STOPPED,
+        }
+    ),
+    WorkflowStatus.SUSPENDED: frozenset(
+        {
+            WorkflowStatus.RUNNING,
+            WorkflowStatus.CANCELED,
+            WorkflowStatus.STOPPED,
+        }
+    ),
+    WorkflowStatus.REDIRECT: frozenset(
+        {
+            WorkflowStatus.RUNNING,
+            WorkflowStatus.SUCCEEDED,
+            WorkflowStatus.CANCELED,
+        }
+    ),
+    # Terminal states - no transitions allowed
+    WorkflowStatus.SUCCEEDED: frozenset(),
+    WorkflowStatus.FAILED_CONTINUE: frozenset(),
+    WorkflowStatus.TERMINAL: frozenset(),
+    WorkflowStatus.CANCELED: frozenset(),
+    WorkflowStatus.STOPPED: frozenset(),
+    WorkflowStatus.SKIPPED: frozenset(),
+}
+
+
+class InvalidStateTransitionError(Exception):
+    """Raised when an invalid state transition is attempted."""
+
+    def __init__(
+        self,
+        current: WorkflowStatus,
+        target: WorkflowStatus,
+        entity_type: str = "entity",
+        entity_id: str | None = None,
+    ) -> None:
+        self.current = current
+        self.target = target
+        self.entity_type = entity_type
+        self.entity_id = entity_id
+        msg = f"Invalid state transition for {entity_type}"
+        if entity_id:
+            msg += f" {entity_id}"
+        msg += f": {current} -> {target}"
+        super().__init__(msg)
+
+
+def can_transition(current: WorkflowStatus, target: WorkflowStatus) -> bool:
+    """Check if a state transition is valid.
+
+    Args:
+        current: The current workflow status
+        target: The desired target status
+
+    Returns:
+        True if the transition is valid, False otherwise
+    """
+    # Same state is always allowed (idempotent)
+    if current == target:
+        return True
+    return target in VALID_TRANSITIONS.get(current, frozenset())
+
+
+def validate_transition(
+    current: WorkflowStatus,
+    target: WorkflowStatus,
+    entity_type: str = "entity",
+    entity_id: str | None = None,
+) -> None:
+    """Validate and raise if state transition is invalid.
+
+    Args:
+        current: The current workflow status
+        target: The desired target status
+        entity_type: Type of entity (workflow, stage, task) for error message
+        entity_id: Optional ID of the entity for error message
+
+    Raises:
+        InvalidStateTransitionError: If the transition is not valid
+    """
+    if not can_transition(current, target):
+        raise InvalidStateTransitionError(current, target, entity_type, entity_id)

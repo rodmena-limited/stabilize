@@ -39,37 +39,43 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
         return CompleteTask
 
     def handle(self, message: CompleteTask) -> None:
-        """Handle the CompleteTask message."""
+        """Handle the CompleteTask message.
+
+        Uses atomic transactions to ensure stage updates and message pushes
+        are committed together, preventing orphaned states.
+        """
 
         def on_task(stage: StageExecution, task: TaskExecution) -> None:
             # Update task status
             task.status = message.status
             task.end_time = self.current_time_millis()
 
-            # Save the stage
-            self.repository.store_stage(stage)
-
             logger.debug("Task %s completed with status %s", task.name, message.status)
 
             # Check for next task
             next_task = stage.next_task(task)
-            if next_task is not None:
-                self.queue.push(
-                    StartTask(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=message.stage_id,
-                        task_id=next_task.id,
+
+            # Atomic: store stage + push next message together
+            with self.repository.transaction(self.queue) as txn:
+                txn.store_stage(stage)
+
+                if next_task is not None:
+                    txn.push_message(
+                        StartTask(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                            task_id=next_task.id,
+                        )
                     )
-                )
-            else:
-                # No more tasks - complete stage
-                self.queue.push(
-                    CompleteStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=message.stage_id,
+                else:
+                    # No more tasks - complete stage
+                    txn.push_message(
+                        CompleteStage(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                        )
                     )
-                )
 
         self.with_task(message, on_task)

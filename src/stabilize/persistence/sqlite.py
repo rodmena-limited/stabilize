@@ -743,6 +743,52 @@ class SqliteWorkflowStore(WorkflowStore):
         )
         conn.commit()
 
+    # ========== Message Deduplication ==========
+
+    def is_message_processed(self, message_id: str) -> bool:
+        """Check if a message has already been processed."""
+        conn = self._get_connection()
+        result = conn.execute(
+            "SELECT 1 FROM processed_messages WHERE message_id = :message_id",
+            {"message_id": message_id},
+        ).fetchone()
+        return result is not None
+
+    def mark_message_processed(
+        self,
+        message_id: str,
+        handler_type: str | None = None,
+        execution_id: str | None = None,
+    ) -> None:
+        """Mark a message as successfully processed."""
+        conn = self._get_connection()
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO processed_messages (
+                message_id, processed_at, handler_type, execution_id
+            ) VALUES (
+                :message_id, datetime('now'), :handler_type, :execution_id
+            )
+            """,
+            {
+                "message_id": message_id,
+                "handler_type": handler_type,
+                "execution_id": execution_id,
+            },
+        )
+        conn.commit()
+
+    def cleanup_old_processed_messages(self, max_age_hours: float = 24.0) -> int:
+        """Clean up old processed message records."""
+        conn = self._get_connection()
+        cutoff = datetime.now() - timedelta(hours=max_age_hours)
+        cursor = conn.execute(
+            "DELETE FROM processed_messages WHERE processed_at < :cutoff",
+            {"cutoff": cutoff.isoformat()},
+        )
+        conn.commit()
+        return cursor.rowcount
+
     # ========== Helper Methods ==========
 
     def _insert_stage(self, conn: sqlite3.Connection, stage: StageExecution, execution_id: str) -> None:

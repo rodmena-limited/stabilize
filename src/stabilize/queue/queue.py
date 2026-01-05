@@ -286,7 +286,7 @@ class PostgresQueue(Queue):
         self,
         connection_string: str,
         table_name: str = "queue_messages",
-        lock_duration: timedelta = timedelta(minutes=5),
+        lock_duration: timedelta = timedelta(seconds=60),
         max_attempts: int = 10,
     ) -> None:
         """
