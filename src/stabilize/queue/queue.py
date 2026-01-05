@@ -524,3 +524,219 @@ class PostgresQueue(Queue):
             conn.commit()
 
         self._pending.clear()
+
+    # ========== Dead Letter Queue Methods ==========
+
+    def move_to_dlq(
+        self,
+        message_id: int | str,
+        error: str | None = None,
+    ) -> None:
+        """Move a message to the Dead Letter Queue.
+
+        Args:
+            message_id: The message ID (integer or string)
+            error: Error message/details explaining why it was moved
+        """
+        msg_id = int(message_id)
+        pool = self._get_pool()
+
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                # Get the message from main queue
+                cur.execute(
+                    f"""
+                    SELECT id, message_id, message_type, payload, attempts, created_at
+                    FROM {self.table_name}
+                    WHERE id = %(id)s
+                    """,
+                    {"id": msg_id},
+                )
+                row = cur.fetchone()
+
+                if not row:
+                    logger.warning(f"Message {msg_id} not found for DLQ move")
+                    return
+
+                # Insert into DLQ
+                cur.execute(
+                    f"""
+                    INSERT INTO {self.table_name}_dlq (
+                        original_id, message_id, message_type, payload,
+                        attempts, error, last_error_at, created_at
+                    ) VALUES (
+                        %(original_id)s, %(message_id)s, %(message_type)s, %(payload)s,
+                        %(attempts)s, %(error)s, NOW(), %(created_at)s
+                    )
+                    """,
+                    {
+                        "original_id": row["id"],
+                        "message_id": row["message_id"],
+                        "message_type": row["message_type"],
+                        "payload": json.dumps(row["payload"]) if isinstance(row["payload"], dict) else row["payload"],
+                        "attempts": row["attempts"],
+                        "error": error or "Max attempts exceeded",
+                        "created_at": row["created_at"],
+                    },
+                )
+
+                # Delete from main queue
+                cur.execute(
+                    f"DELETE FROM {self.table_name} WHERE id = %(id)s",
+                    {"id": msg_id},
+                )
+            conn.commit()
+
+        self._pending.pop(msg_id, None)
+        logger.warning(
+            f"Moved message to DLQ (id={msg_id}, type={row['message_type']}, "
+            f"attempts={row['attempts']}, error={error})"
+        )
+
+    def list_dlq(
+        self,
+        limit: int = 100,
+        message_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List messages in the Dead Letter Queue.
+
+        Args:
+            limit: Maximum number of messages to return
+            message_type: Optional filter by message type
+
+        Returns:
+            List of DLQ message dictionaries
+        """
+        pool = self._get_pool()
+
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                if message_type:
+                    cur.execute(
+                        f"""
+                        SELECT * FROM {self.table_name}_dlq
+                        WHERE message_type = %(message_type)s
+                        ORDER BY moved_at DESC
+                        LIMIT %(limit)s
+                        """,
+                        {"message_type": message_type, "limit": limit},
+                    )
+                else:
+                    cur.execute(
+                        f"""
+                        SELECT * FROM {self.table_name}_dlq
+                        ORDER BY moved_at DESC
+                        LIMIT %(limit)s
+                        """,
+                        {"limit": limit},
+                    )
+                rows = cur.fetchall()
+                return [dict(row) for row in rows]
+
+    def replay_dlq(self, dlq_id: int) -> bool:
+        """Replay a message from the DLQ back to the main queue.
+
+        Args:
+            dlq_id: The DLQ entry ID
+
+        Returns:
+            True if replayed successfully, False if not found
+        """
+        pool = self._get_pool()
+
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                # Get the DLQ entry
+                cur.execute(
+                    f"SELECT * FROM {self.table_name}_dlq WHERE id = %(id)s",
+                    {"id": dlq_id},
+                )
+                row = cur.fetchone()
+
+                if not row:
+                    logger.warning(f"DLQ entry {dlq_id} not found for replay")
+                    return False
+
+                # Insert back into main queue with reset attempts
+                cur.execute(
+                    f"""
+                    INSERT INTO {self.table_name} (
+                        message_id, message_type, payload, deliver_at, attempts
+                    ) VALUES (
+                        %(message_id)s, %(message_type)s, %(payload)s::jsonb, NOW(), 0
+                    )
+                    """,
+                    {
+                        "message_id": row["message_id"] + "-replay",
+                        "message_type": row["message_type"],
+                        "payload": json.dumps(row["payload"]) if isinstance(row["payload"], dict) else row["payload"],
+                    },
+                )
+
+                # Delete from DLQ
+                cur.execute(
+                    f"DELETE FROM {self.table_name}_dlq WHERE id = %(id)s",
+                    {"id": dlq_id},
+                )
+            conn.commit()
+
+        logger.info(f"Replayed DLQ entry {dlq_id} (type={row['message_type']})")
+        return True
+
+    def dlq_size(self) -> int:
+        """Get the number of messages in the Dead Letter Queue."""
+        pool = self._get_pool()
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT COUNT(*) as cnt FROM {self.table_name}_dlq")
+                row = cur.fetchone()
+                return row["cnt"] if row else 0
+
+    def clear_dlq(self) -> int:
+        """Clear all messages from the Dead Letter Queue.
+
+        Returns:
+            Number of messages cleared
+        """
+        pool = self._get_pool()
+        count = self.dlq_size()
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"DELETE FROM {self.table_name}_dlq")
+            conn.commit()
+        logger.info(f"Cleared {count} messages from DLQ")
+        return count
+
+    def check_and_move_expired(self) -> int:
+        """Check for messages exceeding max_attempts and move to DLQ.
+
+        Returns:
+            Number of messages moved to DLQ
+        """
+        pool = self._get_pool()
+
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                # Find messages that have exceeded max_attempts
+                cur.execute(
+                    f"""
+                    SELECT id, message_type, attempts
+                    FROM {self.table_name}
+                    WHERE attempts >= %(max_attempts)s
+                    """,
+                    {"max_attempts": self.max_attempts},
+                )
+                rows = cur.fetchall()
+
+        moved_count = 0
+        for row in rows:
+            self.move_to_dlq(
+                row["id"],
+                f"Exceeded max_attempts ({row['attempts']})",
+            )
+            moved_count += 1
+
+        if moved_count > 0:
+            logger.info(f"Moved {moved_count} expired messages to DLQ")
+
+        return moved_count

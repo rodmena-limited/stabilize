@@ -22,6 +22,7 @@ from stabilize import (
     CompleteTaskHandler,
     CompleteWorkflowHandler,
     Orchestrator,
+    Queue,
     QueueProcessor,
     RunTaskHandler,
     ShellTask,
@@ -34,9 +35,8 @@ from stabilize import (
     TaskExecution,
     TaskRegistry,
     Workflow,
-    WorkflowStore,
-    Queue,
     WorkflowStatus,
+    WorkflowStore,
 )
 
 # =============================================================================

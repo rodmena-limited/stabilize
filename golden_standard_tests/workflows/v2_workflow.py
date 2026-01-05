@@ -29,7 +29,6 @@ from stabilize import (
 )
 from stabilize.tasks.interface import RetryableTask
 
-
 # =============================================================================
 # File paths - created once per test run
 # =============================================================================

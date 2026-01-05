@@ -48,9 +48,6 @@ from stabilize.conditions import (
     ConditionType,
 )
 
-# Context helpers
-from stabilize.context.stage_context import StageContext
-
 # Configuration validation
 from stabilize.config_validation import (
     SchemaValidator,
@@ -58,6 +55,19 @@ from stabilize.config_validation import (
     is_valid,
     validate_context,
     validate_outputs,
+)
+
+# Context helpers
+from stabilize.context.stage_context import StageContext
+
+# Error hierarchy
+from stabilize.errors import (
+    PermanentError,
+    RecoveryError,
+    TaskError,
+    TransientError,
+    is_permanent,
+    is_transient,
 )
 
 # Handlers
@@ -70,6 +80,18 @@ from stabilize.handlers import (
     StartStageHandler,
     StartTaskHandler,
     StartWorkflowHandler,
+)
+
+# Observability (optional - graceful degradation if not installed)
+from stabilize.logging import (
+    bind_context,
+    clear_context,
+    configure_logging,
+    get_logger,
+    stage_logger,
+    task_logger,
+    unbind_context,
+    workflow_logger,
 )
 
 # Core models
@@ -87,6 +109,13 @@ from stabilize.queue.processor import QueueProcessor
 from stabilize.queue.queue import PostgresQueue, Queue
 from stabilize.queue.sqlite_queue import SqliteQueue
 
+# Recovery
+from stabilize.recovery import (
+    RecoveryResult,
+    WorkflowRecovery,
+    recover_on_startup,
+)
+
 # Tasks
 from stabilize.tasks.docker import DockerTask
 from stabilize.tasks.highway import HighwayTask
@@ -97,6 +126,17 @@ from stabilize.tasks.registry import TaskRegistry
 from stabilize.tasks.result import TaskResult
 from stabilize.tasks.shell import ShellTask
 from stabilize.tasks.ssh import SSHTask
+from stabilize.tracing import (
+    add_event,
+    configure_tracing,
+    get_tracer,
+    set_attribute,
+    trace_message_processing,
+    trace_operation,
+    trace_stage,
+    trace_task,
+    trace_workflow,
+)
 
 # Verification system
 from stabilize.verification import (
@@ -183,4 +223,33 @@ __all__ = [
     "validate_context",
     "validate_outputs",
     "is_valid",
+    # Observability
+    "configure_logging",
+    "get_logger",
+    "bind_context",
+    "unbind_context",
+    "clear_context",
+    "workflow_logger",
+    "stage_logger",
+    "task_logger",
+    "configure_tracing",
+    "get_tracer",
+    "trace_operation",
+    "trace_workflow",
+    "trace_stage",
+    "trace_task",
+    "trace_message_processing",
+    "add_event",
+    "set_attribute",
+    # Error hierarchy
+    "TransientError",
+    "PermanentError",
+    "TaskError",
+    "RecoveryError",
+    "is_transient",
+    "is_permanent",
+    # Recovery
+    "WorkflowRecovery",
+    "RecoveryResult",
+    "recover_on_startup",
 ]

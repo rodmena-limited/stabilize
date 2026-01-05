@@ -13,17 +13,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stabilize import TaskRegistry, WorkflowStatus
-from stabilize.persistence.store import WorkflowStore
-from stabilize.queue.queue import Queue
-
 from golden_standard_tests.workflows.disaster_recovery_workflow import (
     DREventEmitterTask,
     DRRetryTask,
     create_disaster_recovery_workflow,
     register_dr_tasks,
 )
-
+from stabilize import TaskRegistry, WorkflowStatus
+from stabilize.persistence.store import WorkflowStore
+from stabilize.queue.queue import Queue
 from tests.conftest import setup_stabilize
 
 

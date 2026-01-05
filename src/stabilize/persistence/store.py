@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, Any
 from stabilize.models.status import WorkflowStatus
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator as IteratorType
 
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow

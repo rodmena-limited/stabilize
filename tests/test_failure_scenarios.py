@@ -15,9 +15,6 @@ from __future__ import annotations
 
 import os
 import tempfile
-import time
-from datetime import timedelta
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -39,8 +36,7 @@ from stabilize.errors import (
 )
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import CompleteTask, StartStage
-from stabilize.recovery import WorkflowRecovery, recover_on_startup
-
+from stabilize.recovery import WorkflowRecovery
 
 # =============================================================================
 # Fixtures

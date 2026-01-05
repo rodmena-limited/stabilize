@@ -28,6 +28,7 @@ from stabilize import (
     CompleteWorkflowHandler,
     HTTPTask,
     Orchestrator,
+    Queue,
     QueueProcessor,
     RunTaskHandler,
     SqliteQueue,
@@ -40,7 +41,6 @@ from stabilize import (
     TaskRegistry,
     Workflow,
     WorkflowStore,
-    Queue,
 )
 
 # =============================================================================
