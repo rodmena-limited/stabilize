@@ -3,6 +3,11 @@ SQLite execution repository.
 
 Lightweight persistence using SQLite for development and small deployments.
 Uses singleton ConnectionManager for efficient connection sharing.
+
+Enterprise Features:
+- Atomic transactions for store + queue operations
+- Dead letter queue support
+- Thread-safe connection management via WAL mode
 """
 
 from __future__ import annotations
@@ -10,8 +15,11 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+import uuid
 from collections.abc import Iterator
-from typing import Any
+from contextlib import contextmanager
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
 from stabilize.models.stage import StageExecution, SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
@@ -23,10 +31,15 @@ from stabilize.models.workflow import (
     WorkflowType,
 )
 from stabilize.persistence.store import (
+    StoreTransaction,
     WorkflowCriteria,
     WorkflowNotFoundError,
     WorkflowStore,
 )
+
+if TYPE_CHECKING:
+    from stabilize.queue.messages import Message
+    from stabilize.queue.queue import Queue
 
 
 class SqliteWorkflowStore(WorkflowStore):
@@ -922,3 +935,266 @@ class SqliteWorkflowStore(WorkflowStore):
             return True
         except Exception:
             return False
+
+    @contextmanager
+    def transaction(self, queue: Queue | None = None) -> Iterator[AtomicTransaction]:
+        """Create atomic transaction for store + queue operations.
+
+        Use this when you need to atomically update both stage state AND
+        queue a message. This prevents orphaned workflows from crashes
+        between separate store and queue operations.
+
+        SQLite implementation writes directly to the queue_messages table
+        in the same transaction, so the queue parameter is ignored.
+
+        Args:
+            queue: Ignored (for API compatibility with base class)
+
+        Usage:
+            with store.transaction() as txn:
+                txn.store_stage(stage)
+                txn.push_message(message)
+            # Auto-commits on success, rolls back on exception
+
+        Yields:
+            AtomicTransaction with store_stage() and push_message() methods
+        """
+        conn = self._get_connection()
+        txn = AtomicTransaction(conn, self)
+        try:
+            yield txn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    def list_workflows(
+        self,
+        application: str,
+        limit: int = 100,
+    ) -> list[Workflow]:
+        """List workflows for an application.
+
+        Args:
+            application: Application name to filter by
+            limit: Maximum number of workflows to return
+
+        Returns:
+            List of Workflow objects
+        """
+        conn = self._get_connection()
+        result = conn.execute(
+            """
+            SELECT * FROM pipeline_executions
+            WHERE application = :application
+            ORDER BY created_at DESC
+            LIMIT :limit
+            """,
+            {"application": application, "limit": limit},
+        )
+
+        workflows = []
+        for row in result.fetchall():
+            workflows.append(self._row_to_execution(row))
+        return workflows
+
+
+class AtomicTransaction(StoreTransaction):
+    """Atomic transaction spanning store and queue operations.
+
+    This class ensures that stage updates and message pushes happen
+    atomically. If either operation fails, both are rolled back.
+
+    This solves the critical issue where:
+    1. store_stage() succeeds
+    2. push_message() fails (or crash)
+    3. Workflow is stuck forever (stage saved but no message to continue)
+
+    With AtomicTransaction, both operations use the same SQLite connection
+    and commit only when both succeed.
+    """
+
+    def __init__(self, conn: sqlite3.Connection, store: SqliteWorkflowStore) -> None:
+        """Initialize atomic transaction.
+
+        Args:
+            conn: SQLite connection (will not auto-commit)
+            store: Parent store for helper methods
+        """
+        self._conn = conn
+        self._store = store
+
+    def store_stage(self, stage: StageExecution) -> None:
+        """Store or update a stage within the transaction.
+
+        This performs the same operations as SqliteWorkflowStore.store_stage()
+        but does NOT commit - the commit happens when the transaction
+        context manager exits successfully.
+
+        Args:
+            stage: Stage to store/update
+        """
+        # Check if stage exists
+        result = self._conn.execute(
+            "SELECT id FROM stage_executions WHERE id = :id",
+            {"id": stage.id},
+        )
+        exists = result.fetchone() is not None
+
+        if exists:
+            # Update
+            self._conn.execute(
+                """
+                UPDATE stage_executions SET
+                    status = :status,
+                    context = :context,
+                    outputs = :outputs,
+                    start_time = :start_time,
+                    end_time = :end_time
+                WHERE id = :id
+                """,
+                {
+                    "id": stage.id,
+                    "status": stage.status.name,
+                    "context": json.dumps(stage.context),
+                    "outputs": json.dumps(stage.outputs),
+                    "start_time": stage.start_time,
+                    "end_time": stage.end_time,
+                },
+            )
+
+            # Update tasks
+            for task in stage.tasks:
+                self._upsert_task(task, stage.id)
+        else:
+            self._insert_stage(stage, stage.execution.id)
+
+    def push_message(
+        self,
+        message: Message,
+        delay: int = 0,
+    ) -> None:
+        """Push a message to the queue within the transaction.
+
+        This inserts directly into queue_messages table using the same
+        connection as store_stage(), ensuring atomicity.
+
+        Args:
+            message: Message to push
+            delay: Delay in seconds before message is deliverable
+        """
+        from enum import Enum
+
+        from stabilize.queue.messages import get_message_type_name
+
+        deliver_at = datetime.now()
+        if delay > 0:
+            deliver_at = deliver_at + timedelta(seconds=delay)
+
+        # Generate message_id if not present
+        message_id = getattr(message, "id", None) or str(uuid.uuid4())
+
+        # Get message type name using the helper function
+        message_type = get_message_type_name(message)
+
+        # Serialize message (same logic as SqliteQueue._serialize_message)
+        data = {}
+        for key, value in message.__dict__.items():
+            if key.startswith("_"):
+                continue
+            if isinstance(value, datetime):
+                data[key] = value.isoformat()
+            elif isinstance(value, Enum):
+                data[key] = value.name
+            else:
+                data[key] = value
+        payload = json.dumps(data)
+
+        self._conn.execute(
+            """
+            INSERT INTO queue_messages (
+                message_id, message_type, payload, deliver_at,
+                attempts, max_attempts, version
+            ) VALUES (
+                :message_id, :message_type, :payload, :deliver_at,
+                0, :max_attempts, 0
+            )
+            """,
+            {
+                "message_id": message_id,
+                "message_type": message_type,
+                "payload": payload,
+                "deliver_at": deliver_at.isoformat(),
+                "max_attempts": getattr(message, "max_attempts", 10),
+            },
+        )
+
+    def _insert_stage(self, stage: StageExecution, execution_id: str) -> None:
+        """Insert a stage (no commit)."""
+        self._conn.execute(
+            """
+            INSERT INTO stage_executions (
+                id, execution_id, ref_id, type, name, status, context, outputs,
+                requisite_stage_ref_ids, parent_stage_id, synthetic_stage_owner,
+                start_time, end_time, start_time_expiry, scheduled_time
+            ) VALUES (
+                :id, :execution_id, :ref_id, :type, :name, :status,
+                :context, :outputs, :requisite_stage_ref_ids,
+                :parent_stage_id, :synthetic_stage_owner, :start_time,
+                :end_time, :start_time_expiry, :scheduled_time
+            )
+            """,
+            {
+                "id": stage.id,
+                "execution_id": execution_id,
+                "ref_id": stage.ref_id,
+                "type": stage.type,
+                "name": stage.name,
+                "status": stage.status.name,
+                "context": json.dumps(stage.context),
+                "outputs": json.dumps(stage.outputs),
+                "requisite_stage_ref_ids": json.dumps(list(stage.requisite_stage_ref_ids)),
+                "parent_stage_id": stage.parent_stage_id,
+                "synthetic_stage_owner": (
+                    stage.synthetic_stage_owner.value if stage.synthetic_stage_owner else None
+                ),
+                "start_time": stage.start_time,
+                "end_time": stage.end_time,
+                "start_time_expiry": stage.start_time_expiry,
+                "scheduled_time": stage.scheduled_time,
+            },
+        )
+
+        # Insert tasks
+        for task in stage.tasks:
+            self._upsert_task(task, stage.id)
+
+    def _upsert_task(self, task: TaskExecution, stage_id: str) -> None:
+        """Insert or update a task (no commit)."""
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO task_executions (
+                id, stage_id, name, implementing_class, status,
+                start_time, end_time, stage_start, stage_end,
+                loop_start, loop_end, task_exception_details
+            ) VALUES (
+                :id, :stage_id, :name, :implementing_class, :status,
+                :start_time, :end_time, :stage_start, :stage_end,
+                :loop_start, :loop_end, :task_exception_details
+            )
+            """,
+            {
+                "id": task.id,
+                "stage_id": stage_id,
+                "name": task.name,
+                "implementing_class": task.implementing_class,
+                "status": task.status.name,
+                "start_time": task.start_time,
+                "end_time": task.end_time,
+                "stage_start": 1 if task.stage_start else 0,
+                "stage_end": 1 if task.stage_end else 0,
+                "loop_start": 1 if task.loop_start else 0,
+                "loop_end": 1 if task.loop_end else 0,
+                "task_exception_details": json.dumps(task.task_exception_details),
+            },
+        )

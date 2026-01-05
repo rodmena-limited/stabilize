@@ -3,20 +3,29 @@ WorkflowStore interface.
 
 This module defines the abstract interface for execution persistence.
 All storage backends must implement this interface.
+
+Enterprise Features:
+- Atomic transactions for store + queue operations (optional)
+- Dead letter queue integration
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from stabilize.models.status import WorkflowStatus
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator as IteratorType
+
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
+    from stabilize.queue.messages import Message
+    from stabilize.queue.queue import Queue
 
 
 class WorkflowNotFoundError(Exception):
@@ -343,3 +352,102 @@ class WorkflowStore(ABC):
             Number of executions
         """
         return sum(1 for _ in self.retrieve_by_application(application))
+
+    @contextmanager
+    def transaction(self, queue: Queue | None = None) -> Iterator[StoreTransaction]:
+        """
+        Create an atomic transaction for store + queue operations.
+
+        Use this when you need to atomically update both stage state AND
+        queue a message. This prevents orphaned workflows from crashes
+        between separate store and queue operations.
+
+        Default implementation provides a no-op transaction that just
+        delegates to the normal store methods. SQLite and PostgreSQL
+        implementations provide true atomic transactions.
+
+        Args:
+            queue: Optional queue for pushing messages. Required for
+                   backends that don't have integrated queue support.
+
+        Usage:
+            with store.transaction(queue) as txn:
+                txn.store_stage(stage)
+                txn.push_message(message)
+            # Commits on success, rolls back on exception
+
+        Yields:
+            StoreTransaction with store_stage() and push_message() methods
+        """
+        txn = NoOpTransaction(self, queue)
+        try:
+            yield txn
+            # Flush pending messages on successful exit
+            txn._flush_messages()
+        except Exception:
+            # Don't flush on exception
+            raise
+
+
+class StoreTransaction(ABC):
+    """Abstract interface for atomic store + queue transactions.
+
+    Implementations must ensure that store_stage() and push_message()
+    are committed atomically - either both succeed or both are rolled back.
+    """
+
+    @abstractmethod
+    def store_stage(self, stage: StageExecution) -> None:
+        """Store or update a stage within the transaction."""
+        pass
+
+    @abstractmethod
+    def push_message(self, message: Message, delay: int = 0) -> None:
+        """Push a message to the queue within the transaction."""
+        pass
+
+
+class NoOpTransaction(StoreTransaction):
+    """Default transaction that just delegates to normal store methods.
+
+    This is used when the storage backend doesn't support atomic transactions.
+    Operations are NOT atomic - a crash between store_stage and push_message
+    can leave workflows in an inconsistent state.
+
+    Only use this as a fallback. For production, use SqliteWorkflowStore
+    or PostgresWorkflowStore which provide true atomic transactions.
+    """
+
+    def __init__(self, store: WorkflowStore, queue: Queue | None = None) -> None:
+        self._store = store
+        self._queue = queue
+        self._pending_messages: list[tuple[Message, int]] = []
+
+    def store_stage(self, stage: StageExecution) -> None:
+        """Store stage (commits immediately in no-op mode)."""
+        self._store.store_stage(stage)
+
+    def push_message(self, message: Message, delay: int = 0) -> None:
+        """Buffer message to be pushed when transaction completes.
+
+        Messages are buffered and flushed when the context manager exits
+        successfully. If an exception occurs, messages are not pushed.
+        """
+        self._pending_messages.append((message, delay))
+
+    def _flush_messages(self) -> None:
+        """Flush pending messages to the queue.
+
+        Called by the context manager on successful exit.
+        """
+        if not self._queue:
+            return
+
+        from datetime import timedelta
+
+        for message, delay in self._pending_messages:
+            if delay > 0:
+                self._queue.push(message, timedelta(seconds=delay))
+            else:
+                self._queue.push(message)
+        self._pending_messages.clear()

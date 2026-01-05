@@ -3,6 +3,11 @@ Queue processor for handling messages.
 
 This module provides the QueueProcessor class that polls messages from
 the queue and dispatches them to appropriate handlers.
+
+Enterprise Features:
+- Thread-safe processing with locks
+- Dead Letter Queue (DLQ) cleanup for failed messages
+- Configurable retry and error handling
 """
 
 from __future__ import annotations
@@ -97,7 +102,9 @@ class QueueProcessor:
         self._executor: ThreadPoolExecutor | None = None
         self._poll_thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._processing_lock = threading.Lock()  # Lock for process_all
         self._active_count = 0
+        self._last_dlq_check = 0.0
 
     def register_handler(self, handler: MessageHandler[Any]) -> None:
         """
@@ -248,7 +255,8 @@ class QueueProcessor:
         """
         Process all messages synchronously until queue is empty.
 
-        Useful for testing.
+        Thread-safe: uses a processing lock to prevent concurrent calls.
+        Also performs periodic DLQ cleanup for expired messages.
 
         Args:
             timeout: Maximum time to wait for processing
@@ -256,19 +264,47 @@ class QueueProcessor:
         Returns:
             Number of messages processed
         """
-        count = 0
-        start = time.time()
+        # Use processing lock to prevent concurrent calls
+        # Non-blocking acquire - if another thread is processing, return immediately
+        acquired = self._processing_lock.acquire(blocking=False)
+        if not acquired:
+            logger.debug("Another thread is processing, skipping")
+            return 0
 
-        while time.time() - start < timeout:
-            if self.queue.size() == 0:
-                break
-            if self.process_one():
-                count += 1
-            else:
-                # No ready messages, wait a bit
-                time.sleep(0.01)
+        try:
+            count = 0
+            start = time.time()
 
-        return count
+            # Periodic DLQ check (every 30 seconds)
+            if time.time() - self._last_dlq_check > 30.0:
+                self._check_dlq()
+                self._last_dlq_check = time.time()
+
+            while time.time() - start < timeout:
+                if self.queue.size() == 0:
+                    break
+                if self.process_one():
+                    count += 1
+                else:
+                    # No ready messages, wait a bit
+                    time.sleep(0.01)
+
+            return count
+        finally:
+            self._processing_lock.release()
+
+    def _check_dlq(self) -> None:
+        """Check for expired messages and move them to DLQ.
+
+        Only works if the queue supports DLQ (has check_and_move_expired method).
+        """
+        if hasattr(self.queue, "check_and_move_expired"):
+            try:
+                moved = self.queue.check_and_move_expired()
+                if moved > 0:
+                    logger.info(f"Moved {moved} expired messages to DLQ")
+            except Exception as e:
+                logger.warning(f"Error checking DLQ: {e}")
 
     @property
     def is_running(self) -> bool:

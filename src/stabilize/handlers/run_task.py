@@ -195,21 +195,27 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         result: TaskResult,
         message: RunTask,
     ) -> None:
-        """Process a task result."""
+        """Process a task result.
+
+        Uses atomic transactions to ensure stage updates and message pushes
+        are committed together. This prevents orphaned workflows where the
+        stage is saved but the continuation message is lost.
+        """
         # Store outputs in stage
         if result.context:
             stage.context.update(result.context)
         if result.outputs:
             stage.outputs.update(result.outputs)
 
-        # Handle based on status
+        # Handle based on status - use atomic transactions
         if result.status == WorkflowStatus.RUNNING:
             # Task needs to be re-executed
-            self.repository.store_stage(stage)
-
-            # Calculate backoff
             delay = self._get_backoff_period(stage, task_model, message)
-            self.queue.push(message, delay)
+
+            # Atomic: store stage + push message together
+            with self.repository.transaction(self.queue) as txn:
+                txn.store_stage(stage)
+                txn.push_message(message, int(delay.total_seconds()))
 
             logger.debug(
                 "Task %s still running, re-queuing with %s delay",
@@ -224,44 +230,52 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             WorkflowStatus.FAILED_CONTINUE,
             WorkflowStatus.STOPPED,
         }:
-            self.repository.store_stage(stage)
-            self.queue.push(
-                CompleteTask(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=message.stage_id,
-                    task_id=message.task_id,
-                    status=result.status,
+            # Atomic: store stage + push CompleteTask together
+            with self.repository.transaction(self.queue) as txn:
+                txn.store_stage(stage)
+                txn.push_message(
+                    CompleteTask(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                        task_id=message.task_id,
+                        status=result.status,
+                    )
                 )
-            )
 
         elif result.status == WorkflowStatus.CANCELED:
-            self.repository.store_stage(stage)
             status = stage.failure_status(default=result.status)
-            self.queue.push(
-                CompleteTask(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=message.stage_id,
-                    task_id=message.task_id,
-                    status=status,
-                    original_status=result.status,
+
+            # Atomic: store stage + push CompleteTask together
+            with self.repository.transaction(self.queue) as txn:
+                txn.store_stage(stage)
+                txn.push_message(
+                    CompleteTask(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                        task_id=message.task_id,
+                        status=status,
+                        original_status=result.status,
+                    )
                 )
-            )
 
         elif result.status == WorkflowStatus.TERMINAL:
-            self.repository.store_stage(stage)
             status = stage.failure_status(default=result.status)
-            self.queue.push(
-                CompleteTask(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=message.stage_id,
-                    task_id=message.task_id,
-                    status=status,
-                    original_status=result.status,
+
+            # Atomic: store stage + push CompleteTask together
+            with self.repository.transaction(self.queue) as txn:
+                txn.store_stage(stage)
+                txn.push_message(
+                    CompleteTask(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                        task_id=message.task_id,
+                        status=status,
+                        original_status=result.status,
+                    )
                 )
-            )
 
         else:
             logger.warning("Unhandled task status: %s", result.status)
@@ -293,22 +307,28 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         task: Task,
         message: RunTask,
     ) -> None:
-        """Handle execution cancellation."""
+        """Handle execution cancellation.
+
+        Uses atomic transaction for stage update + message push.
+        """
         result = task.on_cancel(stage) if hasattr(task, "on_cancel") else None
         if result:
             stage.context.update(result.context)
             stage.outputs.update(result.outputs)
-            self.repository.store_stage(stage)
 
-        self.queue.push(
-            CompleteTask(
-                execution_type=message.execution_type,
-                execution_id=message.execution_id,
-                stage_id=message.stage_id,
-                task_id=message.task_id,
-                status=WorkflowStatus.CANCELED,
+        # Atomic: store stage (if modified) + push CompleteTask together
+        with self.repository.transaction(self.queue) as txn:
+            if result:
+                txn.store_stage(stage)
+            txn.push_message(
+                CompleteTask(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
+                    task_id=message.task_id,
+                    status=WorkflowStatus.CANCELED,
+                )
             )
-        )
 
     def _handle_exception(
         self,
@@ -318,7 +338,10 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         message: RunTask,
         exception: Exception,
     ) -> None:
-        """Handle task execution exception."""
+        """Handle task execution exception.
+
+        Uses atomic transaction for stage update + message push.
+        """
         # TODO: Check if exception is retryable
         # For now, treat all exceptions as terminal
 
@@ -331,19 +354,22 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
 
         stage.context["exception"] = exception_details
         task_model.task_exception_details["exception"] = exception_details
-        self.repository.store_stage(stage)
 
         status = stage.failure_status(default=WorkflowStatus.TERMINAL)
-        self.queue.push(
-            CompleteTask(
-                execution_type=message.execution_type,
-                execution_id=message.execution_id,
-                stage_id=message.stage_id,
-                task_id=message.task_id,
-                status=status,
-                original_status=WorkflowStatus.TERMINAL,
+
+        # Atomic: store stage + push CompleteTask together
+        with self.repository.transaction(self.queue) as txn:
+            txn.store_stage(stage)
+            txn.push_message(
+                CompleteTask(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
+                    task_id=message.task_id,
+                    status=status,
+                    original_status=WorkflowStatus.TERMINAL,
+                )
             )
-        )
 
     def _complete_with_error(
         self,
@@ -352,18 +378,23 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         message: RunTask,
         error: str,
     ) -> None:
-        """Complete task with an error."""
+        """Complete task with an error.
+
+        Uses atomic transaction for stage update + message push.
+        """
         stage.context["exception"] = {
             "details": {"error": error},
         }
-        self.repository.store_stage(stage)
 
-        self.queue.push(
-            CompleteTask(
-                execution_type=message.execution_type,
-                execution_id=message.execution_id,
-                stage_id=message.stage_id,
-                task_id=message.task_id,
-                status=WorkflowStatus.TERMINAL,
+        # Atomic: store stage + push CompleteTask together
+        with self.repository.transaction(self.queue) as txn:
+            txn.store_stage(stage)
+            txn.push_message(
+                CompleteTask(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
+                    task_id=message.task_id,
+                    status=WorkflowStatus.TERMINAL,
+                )
             )
-        )
