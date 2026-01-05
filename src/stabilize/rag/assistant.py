@@ -200,40 +200,41 @@ class StabilizeRAG:
         system_prompt = """You are a Stabilize workflow engine expert.
 Generate ONLY valid Python code that creates a working Stabilize pipeline.
 
-CRITICAL: Follow these EXACT patterns - do not invent your own API calls.
+CRITICAL RULES:
+1. Use SIMPLIFIED imports from stabilize (not from sub-modules)
+2. Use BUILT-IN tasks (ShellTask, PythonTask, DockerTask, HTTPTask) - do NOT define your own
+3. For PythonTask, use context with "script" key containing inline Python code
 
-=== IMPORTS (copy exactly) ===
-from stabilize import Workflow, StageExecution, TaskExecution, WorkflowStatus
-from stabilize.persistence.sqlite import SqliteWorkflowStore
-from stabilize.queue.sqlite_queue import SqliteQueue
-from stabilize.queue.processor import QueueProcessor
-from stabilize.orchestrator import Orchestrator
-from stabilize.tasks.interface import Task
-from stabilize.tasks.result import TaskResult
-from stabilize.tasks.registry import TaskRegistry
-from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
-from stabilize.handlers.complete_stage import CompleteStageHandler
-from stabilize.handlers.complete_task import CompleteTaskHandler
-from stabilize.handlers.run_task import RunTaskHandler
-from stabilize.handlers.start_workflow import StartWorkflowHandler
-from stabilize.handlers.start_stage import StartStageHandler
-from stabilize.handlers.start_task import StartTaskHandler
+=== IMPORTS (use these simplified imports) ===
+from stabilize import (
+    Workflow, StageExecution, TaskExecution, WorkflowStatus,
+    Orchestrator, QueueProcessor, SqliteQueue, SqliteWorkflowStore,
+    TaskRegistry, ShellTask, PythonTask, DockerTask, HTTPTask,
+    StartWorkflowHandler, StartStageHandler, StartTaskHandler,
+    RunTaskHandler, CompleteTaskHandler, CompleteStageHandler,
+    CompleteWorkflowHandler,
+)
 
-=== TASK PATTERN (execute takes stage, not context) ===
-class MyTask(Task):
-    def execute(self, stage: StageExecution) -> TaskResult:
-        value = stage.context.get("key")  # Read from stage.context
-        return TaskResult.success(outputs={"result": value})  # Use factory methods
+=== BUILT-IN TASKS (use these, do NOT define your own) ===
+# ShellTask: context={"command": "echo hello"}
+# PythonTask: context={"script": "RESULT = 1+1", "inputs": {...}}
+# DockerTask: context={"action": "run", "image": "alpine", "command": "echo hi"}
+# HTTPTask: context={"url": "https://api.example.com", "method": "GET"}
 
-=== TASKRESULT FACTORY METHODS ===
-TaskResult.success(outputs={"key": "value"})  # Success with outputs
-TaskResult.terminal(error="Error message")     # Failure, halts pipeline
-
-=== WORKFLOWSTATUS ENUM VALUES (use exactly) ===
-WorkflowStatus.NOT_STARTED  # Initial state
-WorkflowStatus.RUNNING      # Currently executing
-WorkflowStatus.SUCCEEDED    # Completed successfully (NOT "COMPLETED")
-WorkflowStatus.TERMINAL     # Failed/halted
+=== PYTHONTASK PATTERN (uses script/INPUT/RESULT) ===
+StageExecution(
+    ref_id="1",
+    type="python",
+    name="Calculate",
+    context={
+        "script": \"\"\"
+result = sum(INPUT["numbers"])
+RESULT = {"sum": result}
+\"\"\",
+        "inputs": {"numbers": [1, 2, 3]}
+    },
+    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+)
 
 === SETUP PATTERN ===
 store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
@@ -241,7 +242,9 @@ queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
 queue._create_table()
 
 registry = TaskRegistry()
-registry.register("my_task", MyTask)
+registry.register("shell", ShellTask)
+registry.register("python", PythonTask)
+registry.register("docker", DockerTask)
 
 processor = QueueProcessor(queue)
 handlers = [
@@ -256,29 +259,7 @@ handlers = [
 for h in handlers:
     processor.register_handler(h)
 
-orchestrator = Orchestrator(queue)  # Only takes queue!
-
-=== WORKFLOW PATTERN ===
-workflow = Workflow.create(
-    application="my-app",
-    name="My Pipeline",
-    stages=[
-        StageExecution(
-            ref_id="1",
-            type="my_task",
-            name="My Stage",
-            context={"key": "value"},
-            tasks=[
-                TaskExecution.create(
-                    name="Run Task",
-                    implementing_class="my_task",  # Must match registry.register()
-                    stage_start=True,  # REQUIRED for first task
-                    stage_end=True,    # REQUIRED for last task
-                ),
-            ],
-        ),
-    ],
-)
+orchestrator = Orchestrator(queue)
 
 === EXECUTION ===
 store.store(workflow)

@@ -14,6 +14,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from typing import Any
 
+    from stabilize.persistence.store import WorkflowStore
+    from stabilize.queue.queue import Queue
+
 
 # =============================================================================
 # RAG PROMPT - Comprehensive documentation for AI coding agents
@@ -46,10 +49,16 @@ substitutes {key} placeholders with upstream outputs (e.g., {stdout} becomes act
 from stabilize import (
     # Core models
     Workflow, StageExecution, TaskExecution, WorkflowStatus,
-    # Infrastructure
-    Orchestrator, QueueProcessor, SqliteQueue, SqliteWorkflowStore,
-    # Tasks
-    Task, TaskResult, TaskRegistry, ShellTask,
+    # Infrastructure (use SqliteWorkflowStore/SqliteQueue or Postgres variants)
+    Orchestrator, QueueProcessor,
+    Queue, SqliteQueue,                    # Queue abstract + SQLite impl
+    WorkflowStore, SqliteWorkflowStore,    # Store abstract + SQLite impl
+    # Tasks - use built-in tasks, do NOT define your own
+    Task, TaskResult, TaskRegistry,
+    ShellTask,      # For shell/command execution
+    PythonTask,     # For Python code execution (uses script/INPUT/RESULT)
+    DockerTask,     # For Docker container execution
+    HTTPTask,       # For HTTP requests
     # Handlers
     StartWorkflowHandler, StartStageHandler, StartTaskHandler,
     RunTaskHandler, CompleteTaskHandler, CompleteStageHandler,
@@ -57,29 +66,31 @@ from stabilize import (
 )
 
 
-# Step 1: For shell workflows, use the built-in ShellTask (do NOT define your own)
-# The built-in ShellTask automatically substitutes {key} with upstream outputs.
-# Only define custom Task classes for non-shell workflows:
-
-class MyTask(Task):
-    """Custom task implementation (for non-shell workflows)."""
-
-    def execute(self, stage: StageExecution) -> TaskResult:
-        # Read inputs from stage.context
-        input_value = stage.context.get("my_input", "default")
-
-        # Do your work here
-        result = f"Processed: {input_value}"
-
-        # Return success with outputs for downstream stages
-        return TaskResult.success(outputs={"result": result})
+# Step 1: USE BUILT-IN TASKS - Do NOT define your own Task classes!
+# Available built-in tasks:
+#   - ShellTask: For shell/command execution
+#   - PythonTask: For Python code execution (uses script/INPUT/RESULT)
+#   - DockerTask: For Docker container execution
+#   - HTTPTask: For HTTP API requests
+#
+# Only define custom Task classes if the built-in tasks don't meet your needs.
+# Example custom task (rarely needed):
+#
+# class MyCustomTask(Task):
+#     def execute(self, stage: StageExecution) -> TaskResult:
+#         value = stage.context.get("key")
+#         return TaskResult.success(outputs={"result": value})
 
 
 # Step 2: Setup infrastructure
 def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with task registered."""
     task_registry = TaskRegistry()
-    task_registry.register("my_task", MyTask)  # Register task with name
+    # Register built-in tasks
+    task_registry.register("shell", ShellTask)
+    task_registry.register("python", PythonTask)
+    task_registry.register("docker", DockerTask)
+    task_registry.register("http", HTTPTask)
 
     processor = QueueProcessor(queue)
 
@@ -108,20 +119,20 @@ def main():
     queue._create_table()
     processor, orchestrator = setup_pipeline_runner(store, queue)
 
-    # Create workflow with stages
+    # Create workflow with stages using built-in tasks
     workflow = Workflow.create(
         application="my-app",
         name="My Pipeline",
         stages=[
             StageExecution(
                 ref_id="1",
-                type="my_task",
+                type="shell",  # Use built-in ShellTask
                 name="First Stage",
-                context={"my_input": "hello world"},
+                context={"command": "echo 'Hello World'"},
                 tasks=[
                     TaskExecution.create(
-                        name="Run MyTask",
-                        implementing_class="my_task",  # Must match registered name
+                        name="Run Shell",
+                        implementing_class="shell",    # Must match registered name
                         stage_start=True,              # REQUIRED for first task
                         stage_end=True,                # REQUIRED for last task
                     ),
@@ -261,6 +272,156 @@ context={"url": "https://example.com/report.pdf", "download_to": "/tmp/report.pd
 
 # Example: With retries for unreliable endpoints
 context={"url": "https://api.example.com/data", "retries": 3, "retry_delay": 2.0}
+
+===============================================================================
+1.3 PYTHON PIPELINE TEMPLATE - USE FOR PYTHON CODE EXECUTION
+===============================================================================
+For Python code execution, IMPORT the built-in PythonTask (do NOT define your own):
+
+from stabilize import PythonTask, TaskRegistry
+
+registry = TaskRegistry()
+registry.register("python", PythonTask)
+
+PythonTask Context Parameters:
+  # Execution Mode (choose one):
+  script (str)          - Inline Python code to execute
+  script_file (str)     - Path to Python script file
+  module (str)          - Module path (e.g., "myapp.tasks")
+  function (str)        - Function name (required with module)
+
+  # Inputs:
+  inputs (dict)         - Input data, available as INPUT in script
+  args (list)           - Command line arguments
+
+  # Execution:
+  python_path (str)     - Python interpreter (default: current)
+  timeout (int)         - Timeout in seconds (default: 60)
+  cwd (str)             - Working directory
+  env (dict)            - Additional environment variables
+  continue_on_failure   - Return failed_continue instead of terminal
+
+PythonTask Outputs:
+  stdout, stderr, exit_code, result (value of RESULT variable if set)
+
+Script Convention:
+  - Access inputs via INPUT dict (includes upstream outputs + explicit inputs)
+  - Set return value via RESULT variable (must be JSON-serializable)
+
+# Example: Inline script with INPUT and RESULT
+stages=[
+    StageExecution(
+        ref_id="1", type="python", name="Calculate",
+        context={
+            "script": """
+numbers = INPUT["values"]
+RESULT = {"sum": sum(numbers), "avg": sum(numbers) / len(numbers)}
+""",
+            "inputs": {"values": [1, 2, 3, 4, 5]}
+        },
+        tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+    ),
+]
+
+# Example: Module + function mode (calls myapp.validators.validate(INPUT))
+context={"module": "myapp.validators", "function": "validate", "inputs": {"data": {...}}}
+
+# Example: Script file
+context={"script_file": "/path/to/script.py", "inputs": {"config": {...}}}
+
+===============================================================================
+1.4 DOCKER PIPELINE TEMPLATE - USE FOR CONTAINER EXECUTION
+===============================================================================
+For Docker container execution, IMPORT the built-in DockerTask (do NOT define your own):
+
+from stabilize import DockerTask, TaskRegistry
+
+registry = TaskRegistry()
+registry.register("docker", DockerTask)
+
+DockerTask Actions:
+  run     - Run a container (default)
+  exec    - Execute command in running container
+  build   - Build image from Dockerfile
+  pull    - Pull image from registry
+  ps      - List containers
+  images  - List images
+  logs    - Get container logs
+  stop    - Stop container
+  rm      - Remove container
+
+DockerTask Context Parameters (run action):
+  image (str)           - Docker image (required)
+  command (str|list)    - Command to run in container
+  entrypoint (str|list) - Override container entrypoint
+  name (str)            - Container name
+  user (str)            - Run as user (e.g., "1000:1000")
+  hostname (str)        - Container hostname
+
+  # Mounts & Network:
+  volumes (list)        - Volume mounts as "host:container"
+  ports (list)          - Port mappings as "host:container"
+  network (str)         - Docker network name
+  dns (list)            - Custom DNS servers
+  extra_hosts (list)    - Add host mappings as "host:ip"
+
+  # Environment:
+  environment (dict)    - Environment variables
+  workdir (str)         - Working directory
+
+  # Resources:
+  memory (str)          - Memory limit (e.g., "512m", "2g")
+  memory_swap (str)     - Memory + swap limit
+  cpus (str)            - CPU limit (e.g., "0.5", "2")
+  gpus (str)            - GPU access (e.g., "all", "device=0")
+  shm_size (str)        - Shared memory size
+
+  # Security:
+  privileged (bool)     - Privileged mode
+  cap_add (list)        - Add Linux capabilities
+  cap_drop (list)       - Drop Linux capabilities
+  security_opt (list)   - Security options
+  read_only (bool)      - Read-only root filesystem
+
+  # Other:
+  remove (bool)         - Remove after exit (default: True)
+  detach (bool)         - Run in background
+  init (bool)           - Run init inside container
+  platform (str)        - Target platform (e.g., "linux/amd64")
+  pull (str)            - Pull policy: "always", "never", "missing"
+  labels (dict)         - Container labels
+  timeout (int)         - Command timeout (default: 300)
+  continue_on_failure   - Return failed_continue instead of terminal
+
+DockerTask Outputs:
+  stdout, stderr, exit_code, container_id (if detach), image_id (if build)
+
+# Example: Simple container run
+context={"action": "run", "image": "python:3.11", "command": "python -c 'print(1+1)'"}
+
+# Example: With volumes and environment
+context={
+    "action": "run",
+    "image": "node:18",
+    "volumes": ["/app:/app"],
+    "environment": {"NODE_ENV": "production"},
+    "workdir": "/app",
+    "command": "npm test"
+}
+
+# Example: GPU container with resource limits
+context={
+    "action": "run",
+    "image": "pytorch/pytorch:latest",
+    "gpus": "all",
+    "memory": "8g",
+    "shm_size": "2g",
+    "volumes": ["/data:/data"],
+    "command": "python train.py"
+}
+
+# Example: Build and tag image
+context={"action": "build", "tag": "myapp:latest", "context": "./docker"}
 
 ===============================================================================
 2. CORE CLASSES API
@@ -1425,6 +1586,8 @@ def monitor(
             sys.exit(1)
 
     # Determine store type from URL
+    store: WorkflowStore
+    queue: Queue | None = None
     if db_url.startswith("sqlite"):
         from stabilize.persistence.sqlite import SqliteWorkflowStore
         from stabilize.queue.sqlite_queue import SqliteQueue

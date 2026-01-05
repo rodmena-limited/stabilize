@@ -1,0 +1,15 @@
+--- FINAL VERIFIABLE OUTPUT ---
+WORKFLOW_START
+::BRANCH_A_SUCCESS
+::BRANCH_B_COMPENSATION_SUCCESS
+::BRANCH_C_EVENT_RECEIVED
+::SYNC_GATE_PASSED
+Processing file_A.log...
+Validating file_A.log...
+Processing file_B.log...
+Validating file_B.log...
+::SWITCH_CASE_ANIMALS
+::SWITCH_JOINED
+While loop iteration 0
+While loop iteration 1
+::WORKFLOW_END

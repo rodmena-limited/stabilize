@@ -53,6 +53,30 @@ class DockerTask(Task):
             network (str): Docker network to connect (optional)
             remove (bool): Remove container after run (default: True)
             detach (bool): Run in detached mode (default: False)
+            entrypoint (str|list): Override container entrypoint (optional)
+            user (str): Run as user, e.g., "1000:1000" or "root" (optional)
+            hostname (str): Container hostname (optional)
+            privileged (bool): Run in privileged mode (default: False)
+            cap_add (list[str]): Add Linux capabilities (optional)
+            cap_drop (list[str]): Drop Linux capabilities (optional)
+            memory (str): Memory limit, e.g., "512m", "2g" (optional)
+            memory_swap (str): Memory + swap limit (optional)
+            cpus (str): CPU limit, e.g., "0.5", "2" (optional)
+            gpus (str): GPU access, e.g., "all", "device=0" (optional)
+            shm_size (str): Shared memory size (optional)
+            tmpfs (list[str]): tmpfs mounts (optional)
+            read_only (bool): Read-only root filesystem (default: False)
+            security_opt (list[str]): Security options (optional)
+            ulimit (dict): Ulimit settings as {name: value} (optional)
+            labels (dict): Container labels (optional)
+            dns (list[str]): Custom DNS servers (optional)
+            extra_hosts (list[str]): Add host mappings as "host:ip" (optional)
+            init (bool): Run init inside container (default: False)
+            platform (str): Target platform, e.g., "linux/amd64" (optional)
+            pull (str): Pull policy: "always", "never", "missing" (optional)
+            restart (str): Restart policy: "no", "always", "on-failure" (optional)
+            stdin_open (bool): Keep stdin open (default: False)
+            tty (bool): Allocate pseudo-TTY (default: False)
 
         For 'exec' action:
             name (str): Container name (required)
@@ -251,6 +275,98 @@ class DockerTask(Task):
         if context.get("detach"):
             cmd.append("-d")
 
+        # Interactive/TTY
+        if context.get("stdin_open"):
+            cmd.append("-i")
+        if context.get("tty"):
+            cmd.append("-t")
+
+        # Entrypoint override
+        entrypoint = context.get("entrypoint")
+        if entrypoint:
+            if isinstance(entrypoint, list):
+                cmd.extend(["--entrypoint", entrypoint[0]])
+            else:
+                cmd.extend(["--entrypoint", entrypoint])
+
+        # User
+        if context.get("user"):
+            cmd.extend(["--user", context["user"]])
+
+        # Hostname
+        if context.get("hostname"):
+            cmd.extend(["--hostname", context["hostname"]])
+
+        # Privileged mode
+        if context.get("privileged"):
+            cmd.append("--privileged")
+
+        # Capabilities
+        for cap in context.get("cap_add", []):
+            cmd.extend(["--cap-add", cap])
+        for cap in context.get("cap_drop", []):
+            cmd.extend(["--cap-drop", cap])
+
+        # Resource limits
+        if context.get("memory"):
+            cmd.extend(["--memory", context["memory"]])
+        if context.get("memory_swap"):
+            cmd.extend(["--memory-swap", context["memory_swap"]])
+        if context.get("cpus"):
+            cmd.extend(["--cpus", str(context["cpus"])])
+
+        # GPU access
+        if context.get("gpus"):
+            cmd.extend(["--gpus", context["gpus"]])
+
+        # Shared memory
+        if context.get("shm_size"):
+            cmd.extend(["--shm-size", context["shm_size"]])
+
+        # tmpfs mounts
+        for tmpfs in context.get("tmpfs", []):
+            cmd.extend(["--tmpfs", tmpfs])
+
+        # Read-only filesystem
+        if context.get("read_only"):
+            cmd.append("--read-only")
+
+        # Security options
+        for opt in context.get("security_opt", []):
+            cmd.extend(["--security-opt", opt])
+
+        # Ulimits
+        for name, value in context.get("ulimit", {}).items():
+            cmd.extend(["--ulimit", f"{name}={value}"])
+
+        # Labels
+        for key, value in context.get("labels", {}).items():
+            cmd.extend(["--label", f"{key}={value}"])
+
+        # DNS
+        for dns in context.get("dns", []):
+            cmd.extend(["--dns", dns])
+
+        # Extra hosts
+        for host in context.get("extra_hosts", []):
+            cmd.extend(["--add-host", host])
+
+        # Init process
+        if context.get("init"):
+            cmd.append("--init")
+
+        # Platform
+        if context.get("platform"):
+            cmd.extend(["--platform", context["platform"]])
+
+        # Pull policy
+        if context.get("pull"):
+            cmd.extend(["--pull", context["pull"]])
+
+        # Restart policy
+        if context.get("restart"):
+            cmd.extend(["--restart", context["restart"]])
+
         # Volumes
         for vol in context.get("volumes", []):
             cmd.extend(["-v", vol])
@@ -274,7 +390,7 @@ class DockerTask(Task):
         # Image
         cmd.append(image)
 
-        # Command
+        # Command (must come after image)
         container_cmd = context.get("command")
         if container_cmd:
             if isinstance(container_cmd, str):

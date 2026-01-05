@@ -56,9 +56,9 @@ from stabilize import (
     TaskExecution,
     TaskRegistry,
     Workflow,
+    WorkflowStore,
+    Queue,
 )
-from stabilize.persistence.store import WorkflowStore
-from stabilize.queue.queue import Queue
 
 # =============================================================================
 # Highway Workflow Definition: Parallel URL Fetcher

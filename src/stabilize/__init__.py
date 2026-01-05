@@ -48,6 +48,9 @@ from stabilize.conditions import (
     ConditionType,
 )
 
+# Context helpers
+from stabilize.context.stage_context import StageContext
+
 # Configuration validation
 from stabilize.config_validation import (
     SchemaValidator,
@@ -77,8 +80,11 @@ from stabilize.models.workflow import Workflow
 
 # Infrastructure
 from stabilize.orchestrator import Orchestrator
+from stabilize.persistence.postgres import PostgresWorkflowStore
 from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize.persistence.store import WorkflowStore
 from stabilize.queue.processor import QueueProcessor
+from stabilize.queue.queue import PostgresQueue, Queue
 from stabilize.queue.sqlite_queue import SqliteQueue
 
 # Tasks
@@ -86,6 +92,7 @@ from stabilize.tasks.docker import DockerTask
 from stabilize.tasks.highway import HighwayTask
 from stabilize.tasks.http import HTTPTask
 from stabilize.tasks.interface import RetryableTask, Task
+from stabilize.tasks.python import PythonTask
 from stabilize.tasks.registry import TaskRegistry
 from stabilize.tasks.result import TaskResult
 from stabilize.tasks.shell import ShellTask
@@ -109,7 +116,11 @@ __all__ = [
     # Infrastructure
     "Orchestrator",
     "QueueProcessor",
+    "Queue",
+    "PostgresQueue",
     "SqliteQueue",
+    "WorkflowStore",
+    "PostgresWorkflowStore",
     "SqliteWorkflowStore",
     # Handlers
     "StabilizeHandler",
@@ -130,6 +141,7 @@ __all__ = [
     "DockerTask",
     "SSHTask",
     "HighwayTask",
+    "PythonTask",
     # Verification
     "Verifier",
     "VerifyResult",
@@ -141,6 +153,8 @@ __all__ = [
     "ConditionSet",
     "ConditionType",
     "ConditionReason",
+    # Context helpers
+    "StageContext",
     # Assertions
     "StabilizeError",
     "StabilizeFatalError",

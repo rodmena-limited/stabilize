@@ -34,10 +34,10 @@ from stabilize import (
     TaskExecution,
     TaskRegistry,
     Workflow,
+    WorkflowStore,
+    Queue,
     WorkflowStatus,
 )
-from stabilize.persistence.store import WorkflowStore
-from stabilize.queue.queue import Queue
 
 # =============================================================================
 # Helper: Setup pipeline infrastructure

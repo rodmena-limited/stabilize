@@ -162,12 +162,16 @@ class HighwayTask(RetryableTask):
 
         # Support dynamic input mappings from context paths
         # e.g., {"_artifact_id": "body_json.artifact_id"} maps context body_json.artifact_id to input _artifact_id
+        # Input mappings can reference both stage context AND ancestor outputs
         input_mappings = stage.context.get("highway_input_mappings", {})
-        for input_key, context_path in input_mappings.items():
-            value = self._resolve_context_path(stage.context, context_path)
-            if value is not None:
-                inputs[input_key] = value
-                logger.debug("Mapped context path %s to input %s = %s", context_path, input_key, value)
+        if input_mappings:
+            # Build merged context including ancestor outputs
+            merged_context = self._get_merged_context(stage)
+            for input_key, context_path in input_mappings.items():
+                value = self._resolve_context_path(merged_context, context_path)
+                if value is not None:
+                    inputs[input_key] = value
+                    logger.debug("Mapped context path %s to input %s = %s", context_path, input_key, value)
 
         payload = {
             "workflow_definition": workflow_def,
@@ -404,6 +408,32 @@ class HighwayTask(RetryableTask):
         except Exception as e:
             logger.exception("Unexpected error polling Highway")
             return TaskResult.terminal(error=f"Unexpected poll error: {e}")
+
+    def _get_merged_context(self, stage: StageExecution) -> dict[str, Any]:
+        """Get stage context merged with ancestor outputs.
+
+        This allows input mappings to reference values from upstream stages.
+
+        Args:
+            stage: The stage execution
+
+        Returns:
+            Merged context dictionary
+        """
+        merged = {}
+
+        # Collect ancestor outputs (closest ancestor overwrites earlier)
+        try:
+            for ancestor in reversed(stage.ancestors()):
+                merged.update(ancestor.outputs or {})
+        except (AttributeError, ValueError):
+            # Stage might not be attached to an execution yet
+            pass
+
+        # Own context takes precedence
+        merged.update(stage.context or {})
+
+        return merged
 
     def _resolve_context_path(
         self,

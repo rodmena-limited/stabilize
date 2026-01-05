@@ -34,6 +34,7 @@ from stabilize import (
     RunTaskHandler,
     SqliteQueue,
     SqliteWorkflowStore,
+    StageContext,
     StageExecution,
     StartStageHandler,
     StartTaskHandler,
@@ -44,7 +45,6 @@ from stabilize import (
     TaskResult,
     Workflow,
 )
-from stabilize.context.stage_context import StageContext
 
 # =============================================================================
 # Custom Task Implementations
