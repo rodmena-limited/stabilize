@@ -102,9 +102,7 @@ class TestGetTaskTimeout:
             def get_dynamic_timeout(self, stage: StageExecution) -> timedelta:
                 return timedelta(seconds=30)  # Dynamic override
 
-            def get_backoff_period(
-                self, stage: StageExecution, elapsed: timedelta
-            ) -> timedelta:
+            def get_backoff_period(self, stage: StageExecution, elapsed: timedelta) -> timedelta:
                 return timedelta(seconds=5)
 
         task = CustomRetryableTask()

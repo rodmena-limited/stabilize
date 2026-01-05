@@ -38,6 +38,8 @@ from stabilize.errors import RecoveryError
 from stabilize.models.status import WorkflowStatus
 
 if TYPE_CHECKING:
+    from stabilize.models.stage import StageExecution
+    from stabilize.models.workflow import Workflow
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue.queue import Queue
 
@@ -214,7 +216,7 @@ class WorkflowRecovery:
 
         return workflows
 
-    def _recover_workflow(self, workflow) -> RecoveryResult:
+    def _recover_workflow(self, workflow: Workflow) -> RecoveryResult:
         """Recover a single workflow.
 
         Args:
@@ -294,7 +296,7 @@ class WorkflowRecovery:
             stages_requeued=len(stages_to_requeue),
         )
 
-    def _has_started(self, stage) -> bool:
+    def _has_started(self, stage: StageExecution) -> bool:
         """Check if a stage has actually started execution.
 
         A stage may be in NOT_STARTED status but have a start_time,

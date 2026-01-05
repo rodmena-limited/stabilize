@@ -1,6 +1,6 @@
 [project]
 name = "stabilize"
-version = "0.10.2"
+version = "0.10.4"
 description = "Highway Workflow Engine - Stabilize execution layer"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,6 +28,7 @@ dependencies = [
 [project.optional-dependencies]
 postgres = [
     "psycopg[binary,pool]>=3.0",
+    "migretti>=0.3",
 ]
 rag = [
     "ragit>=0.7.5",
@@ -39,6 +40,7 @@ observability = [
 ]
 all = [
     "psycopg[binary,pool]>=3.0",
+    "migretti>=0.3",
     "ragit>=0.7.5",
     "structlog>=24.0",
     "opentelemetry-api>=1.20",
@@ -46,6 +48,7 @@ all = [
 ]
 dev = [
     "psycopg[binary,pool]>=3.0",
+    "migretti>=0.3",
     "pytest>=8.0",
     "pytest-xdist>=3.0",
     "pytest-asyncio>=0.23",

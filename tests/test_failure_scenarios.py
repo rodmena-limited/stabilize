@@ -275,13 +275,12 @@ class TestDeadLetterQueue:
         # If check_and_move_expired doesn't find by attempts, manually verify the test setup
         if moved == 0:
             # Check if message exists with high attempts
-            result = conn.execute(
-                f"SELECT attempts FROM {sqlite_queue.table_name}"
-            )
+            result = conn.execute(f"SELECT attempts FROM {sqlite_queue.table_name}")
             row = result.fetchone()
             if row:
-                assert row["attempts"] >= sqlite_queue.max_attempts, \
+                assert row["attempts"] >= sqlite_queue.max_attempts, (
                     f"Message attempts={row['attempts']} should be >= {sqlite_queue.max_attempts}"
+                )
 
         assert moved == 1, f"Expected 1 message to be moved, but {moved} were moved"
         assert sqlite_queue.dlq_size() == 1
@@ -440,6 +439,7 @@ class TestErrorHierarchy:
 
     def test_transient_detection_from_name(self):
         """Verify transient detection works on error names."""
+
         # Custom timeout error
         class CustomTimeoutError(Exception):
             pass
@@ -456,6 +456,7 @@ class TestErrorHierarchy:
 
     def test_permanent_detection_from_name(self):
         """Verify permanent detection works on error names."""
+
         # Custom validation error
         class ValidationError(Exception):
             pass

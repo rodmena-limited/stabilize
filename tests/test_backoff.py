@@ -4,8 +4,6 @@ These tests ensure that the backoff period calculation works correctly
 with exponential growth and jitter.
 """
 
-
-
 from stabilize.errors import PermanentError, TransientError, is_transient
 
 
@@ -80,6 +78,7 @@ class TestIsTransient:
 
     def test_timeout_errors_are_transient(self) -> None:
         """Errors with 'timeout' in name should be transient."""
+
         class SomeTimeoutError(Exception):
             pass
 
@@ -88,6 +87,7 @@ class TestIsTransient:
 
     def test_connection_errors_are_transient(self) -> None:
         """Errors with 'connection' in name should be transient."""
+
         class ConnectionRefusedError(Exception):
             pass
 
@@ -96,6 +96,7 @@ class TestIsTransient:
 
     def test_temporary_errors_are_transient(self) -> None:
         """Errors with 'temporary' in name should be transient."""
+
         class TemporaryFailureError(Exception):  # noqa: N818 - intentional name for testing
             pass
 
@@ -123,6 +124,7 @@ class TestIsTransient:
 
     def test_rate_limit_errors_are_transient(self) -> None:
         """Rate limit errors should be transient."""
+
         class RateLimitExceededError(Exception):
             pass
 
@@ -131,6 +133,7 @@ class TestIsTransient:
 
     def test_throttling_errors_are_transient(self) -> None:
         """Throttling errors should be transient."""
+
         class ThrottlingError(Exception):
             pass
 

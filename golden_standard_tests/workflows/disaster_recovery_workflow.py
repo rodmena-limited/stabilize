@@ -33,6 +33,7 @@ from stabilize.tasks.interface import RetryableTask
 # File paths - created once per test run
 # =============================================================================
 
+
 def get_temp_files() -> tuple[str, str]:
     """Get temp file paths for output and retry flag."""
     temp_dir = tempfile.gettempdir()
@@ -59,14 +60,11 @@ class DRSetupTask(Task):
             f"printf '%s\\n%s' '--- FINAL VERIFIABLE OUTPUT ---' 'WORKFLOW_START' > '{output_file}'",
             shell=True,
             capture_output=True,
-            text=True
+            text=True,
         )
 
         if result.returncode == 0:
-            return TaskResult.success(outputs={
-                "output_file": output_file,
-                "retry_flag": retry_flag
-            })
+            return TaskResult.success(outputs={"output_file": output_file, "retry_flag": retry_flag})
         else:
             return TaskResult.terminal(error=f"Setup failed: {result.stderr}")
 
@@ -89,9 +87,7 @@ class DRRetryTask(RetryableTask):
     def get_timeout(self) -> timedelta:
         return timedelta(seconds=30)
 
-    def get_backoff_period(
-        self, stage: StageExecution, duration: timedelta
-    ) -> timedelta:
+    def get_backoff_period(self, stage: StageExecution, duration: timedelta) -> timedelta:
         return timedelta(milliseconds=200)
 
     def execute(self, stage: StageExecution) -> TaskResult:
@@ -111,10 +107,7 @@ class DRRetryTask(RetryableTask):
             return TaskResult.running()
 
         result = subprocess.run(
-            f"printf '\\n::BRANCH_A_SUCCESS' >> '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
+            f"printf '\\n::BRANCH_A_SUCCESS' >> '{output_file}'", shell=True, capture_output=True, text=True
         )
 
         if result.returncode == 0:
@@ -132,19 +125,14 @@ class DRTimeoutTask(RetryableTask):
     def get_timeout(self) -> timedelta:
         return timedelta(milliseconds=300)
 
-    def get_backoff_period(
-        self, stage: StageExecution, duration: timedelta
-    ) -> timedelta:
+    def get_backoff_period(self, stage: StageExecution, duration: timedelta) -> timedelta:
         return timedelta(milliseconds=50)
 
     def execute(self, stage: StageExecution) -> TaskResult:
         return TaskResult.running()
 
     def on_timeout(self, stage: StageExecution) -> TaskResult:
-        return TaskResult.failed_continue(
-            error="Task timed out as expected",
-            outputs={"timeout_occurred": True}
-        )
+        return TaskResult.failed_continue(error="Task timed out as expected", outputs={"timeout_occurred": True})
 
 
 class DRCompensationTask(Task):
@@ -163,12 +151,7 @@ class DRCompensationTask(Task):
         else:
             token = "\\n::BRANCH_B_COMPENSATION_SUCCESS"
 
-        result = subprocess.run(
-            f"printf '{token}' >> '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
-        )
+        result = subprocess.run(f"printf '{token}' >> '{output_file}'", shell=True, capture_output=True, text=True)
 
         if result.returncode == 0:
             return TaskResult.success()
@@ -191,9 +174,7 @@ class DREventEmitterTask(RetryableTask):
     def get_timeout(self) -> timedelta:
         return timedelta(seconds=30)
 
-    def get_backoff_period(
-        self, stage: StageExecution, duration: timedelta
-    ) -> timedelta:
+    def get_backoff_period(self, stage: StageExecution, duration: timedelta) -> timedelta:
         return timedelta(milliseconds=500)
 
     def execute(self, stage: StageExecution) -> TaskResult:
@@ -223,12 +204,7 @@ class DREventReceiverTask(Task):
         else:
             token = f"\\n::ERROR_NO_EVENT_{event_payload}"
 
-        result = subprocess.run(
-            f"printf '{token}' >> '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
-        )
+        result = subprocess.run(f"printf '{token}' >> '{output_file}'", shell=True, capture_output=True, text=True)
 
         if result.returncode == 0:
             return TaskResult.success()
@@ -247,10 +223,7 @@ class DRSyncGateTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         result = subprocess.run(
-            f"printf '\\n::SYNC_GATE_PASSED' >> '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
+            f"printf '\\n::SYNC_GATE_PASSED' >> '{output_file}'", shell=True, capture_output=True, text=True
         )
 
         if result.returncode == 0:
@@ -271,10 +244,7 @@ class DRForeachProcessTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         result = subprocess.run(
-            f"printf '\\nProcessing {item}...' >> '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
+            f"printf '\\nProcessing {item}...' >> '{output_file}'", shell=True, capture_output=True, text=True
         )
 
         if result.returncode == 0:
@@ -295,10 +265,7 @@ class DRForeachValidateTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         result = subprocess.run(
-            f"printf '\\nValidating {item}...' >> '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
+            f"printf '\\nValidating {item}...' >> '{output_file}'", shell=True, capture_output=True, text=True
         )
 
         if result.returncode == 0:
@@ -318,10 +285,7 @@ class DRSwitchTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         result = subprocess.run(
-            f"printf '\\n::SWITCH_CASE_ANIMALS' >> '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
+            f"printf '\\n::SWITCH_CASE_ANIMALS' >> '{output_file}'", shell=True, capture_output=True, text=True
         )
 
         if result.returncode == 0:
@@ -341,10 +305,7 @@ class DRSwitchJoinTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         result = subprocess.run(
-            f"printf '\\n::SWITCH_JOINED' >> '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
+            f"printf '\\n::SWITCH_JOINED' >> '{output_file}'", shell=True, capture_output=True, text=True
         )
 
         if result.returncode == 0:
@@ -365,10 +326,7 @@ class DRWhileLoopTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         result = subprocess.run(
-            f"printf '\\nWhile loop iteration {counter}' >> '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
+            f"printf '\\nWhile loop iteration {counter}' >> '{output_file}'", shell=True, capture_output=True, text=True
         )
 
         if result.returncode == 0:
@@ -388,20 +346,10 @@ class DRFinalizeTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         # Append final token
-        subprocess.run(
-            f"printf '\\n::WORKFLOW_END' >> '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
-        )
+        subprocess.run(f"printf '\\n::WORKFLOW_END' >> '{output_file}'", shell=True, capture_output=True, text=True)
 
         # Read the entire file content
-        result = subprocess.run(
-            f"cat '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
-        )
+        result = subprocess.run(f"cat '{output_file}'", shell=True, capture_output=True, text=True)
 
         if result.returncode == 0:
             return TaskResult.success(outputs={"final_result": result.stdout.strip()})

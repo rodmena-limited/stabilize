@@ -31,68 +31,68 @@ logger = logging.getLogger(__name__)
 
 class PythonTask(Task):
     """
-    Execute Python code in isolated subprocess.
+        Execute Python code in isolated subprocess.
 
-    Supports three execution modes:
-    1. Inline script: Pass Python code as a string
-    2. Script file: Load and execute a Python file
-    3. Module + function: Import a module and call a function
+        Supports three execution modes:
+        1. Inline script: Pass Python code as a string
+        2. Script file: Load and execute a Python file
+        3. Module + function: Import a module and call a function
 
-    All modes run in a subprocess for isolation and hard timeout enforcement.
+        All modes run in a subprocess for isolation and hard timeout enforcement.
 
-    Context Parameters:
-        # Script execution (choose one):
-        script (str): Inline Python code to execute
-        script_file (str): Path to Python script file
-        module (str): Python module path (e.g., "myapp.tasks.validate")
-        function (str): Function name to call (requires module)
+        Context Parameters:
+            # Script execution (choose one):
+            script (str): Inline Python code to execute
+            script_file (str): Path to Python script file
+            module (str): Python module path (e.g., "myapp.tasks.validate")
+            function (str): Function name to call (requires module)
 
-        # Inputs:
-        inputs (dict): Input variables, available as INPUT in script (optional)
-        args (list): Command line arguments (optional)
+            # Inputs:
+            inputs (dict): Input variables, available as INPUT in script (optional)
+            args (list): Command line arguments (optional)
 
-        # Execution:
-        python_path (str): Python interpreter path (default: current interpreter)
-        timeout (int): Execution timeout in seconds (default: 60)
-        cwd (str): Working directory (optional)
-        env (dict): Environment variables to add (optional)
-        continue_on_failure (bool): Return failed_continue on error (default: False)
+            # Execution:
+            python_path (str): Python interpreter path (default: current interpreter)
+            timeout (int): Execution timeout in seconds (default: 60)
+            cwd (str): Working directory (optional)
+            env (dict): Environment variables to add (optional)
+            continue_on_failure (bool): Return failed_continue on error (default: False)
 
-    Outputs:
-        stdout (str): Standard output from script
-        stderr (str): Standard error from script
-        exit_code (int): Process exit code
-        result (any): Value of RESULT variable if set in script
+        Outputs:
+            stdout (str): Standard output from script
+            stderr (str): Standard error from script
+            exit_code (int): Process exit code
+            result (any): Value of RESULT variable if set in script
 
-    Notes:
-        - Scripts access input data via the INPUT dict
-        - Scripts set return value via the RESULT variable
-        - RESULT must be JSON-serializable
-        - Module mode: imports module.function and calls with INPUT as argument
-        - Upstream stage outputs are automatically available in INPUT
+        Notes:
+            - Scripts access input data via the INPUT dict
+            - Scripts set return value via the RESULT variable
+            - RESULT must be JSON-serializable
+            - Module mode: imports module.function and calls with INPUT as argument
+            - Upstream stage outputs are automatically available in INPUT
 
-    Examples:
-        # Inline script
-        context = {
-            "script": '''
-result = sum(INPUT["numbers"])
-RESULT = {"sum": result, "count": len(INPUT["numbers"])}
-''',
-            "inputs": {"numbers": [1, 2, 3, 4, 5]}
-        }
+        Examples:
+            # Inline script
+            context = {
+                "script": '''
+    result = sum(INPUT["numbers"])
+    RESULT = {"sum": result, "count": len(INPUT["numbers"])}
+    ''',
+                "inputs": {"numbers": [1, 2, 3, 4, 5]}
+            }
 
-        # Script file
-        context = {
-            "script_file": "/path/to/script.py",
-            "inputs": {"config": {"debug": True}}
-        }
+            # Script file
+            context = {
+                "script_file": "/path/to/script.py",
+                "inputs": {"config": {"debug": True}}
+            }
 
-        # Module + function
-        context = {
-            "module": "myapp.validators",
-            "function": "validate_input",
-            "inputs": {"data": {"name": "test"}}
-        }
+            # Module + function
+            context = {
+                "module": "myapp.validators",
+                "function": "validate_input",
+                "inputs": {"data": {"name": "test"}}
+            }
     """
 
     # Wrapper template for script mode - handles INPUT/RESULT
@@ -151,17 +151,11 @@ print("__PYTHONTASK_RESULT_END__")
         # Validate execution mode
         mode_count = sum(bool(x) for x in [script, script_file, module])
         if mode_count == 0:
-            return TaskResult.terminal(
-                error="One of 'script', 'script_file', or 'module' must be specified"
-            )
+            return TaskResult.terminal(error="One of 'script', 'script_file', or 'module' must be specified")
         if mode_count > 1:
-            return TaskResult.terminal(
-                error="Only one of 'script', 'script_file', or 'module' can be specified"
-            )
+            return TaskResult.terminal(error="Only one of 'script', 'script_file', or 'module' can be specified")
         if module and not function:
-            return TaskResult.terminal(
-                error="'function' is required when using 'module' mode"
-            )
+            return TaskResult.terminal(error="'function' is required when using 'module' mode")
 
         # Get execution parameters
         args = stage.context.get("args", [])
@@ -175,9 +169,17 @@ print("__PYTHONTASK_RESULT_END__")
         # This allows upstream stage outputs to flow to downstream Python tasks
         # Exclude internal parameters from being passed as inputs
         internal_keys = {
-            "script", "script_file", "module", "function",
-            "args", "python_path", "timeout", "cwd", "env",
-            "continue_on_failure", "inputs"
+            "script",
+            "script_file",
+            "module",
+            "function",
+            "args",
+            "python_path",
+            "timeout",
+            "cwd",
+            "env",
+            "continue_on_failure",
+            "inputs",
         }
 
         # Start with ancestor outputs (upstream stage data)
@@ -191,10 +193,7 @@ print("__PYTHONTASK_RESULT_END__")
             pass
 
         # Filter out internal keys from context
-        base_inputs = {
-            k: v for k, v in stage.context.items()
-            if k not in internal_keys
-        }
+        base_inputs = {k: v for k, v in stage.context.items() if k not in internal_keys}
 
         # Merge: ancestor outputs -> stage context -> explicit inputs
         explicit_inputs = stage.context.get("inputs", {})
@@ -215,9 +214,7 @@ print("__PYTHONTASK_RESULT_END__")
         # Write to temp file
         tmp_path = None
         try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".py", delete=False
-            ) as tmp:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as tmp:
                 tmp.write(wrapped_script)
                 tmp.flush()
                 tmp_path = tmp.name

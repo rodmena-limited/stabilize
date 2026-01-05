@@ -1131,6 +1131,16 @@ from stabilize.config_validation import (
     SHELL_TASK_SCHEMA, WAIT_TASK_SCHEMA,
 )
 
+# Error Handling & Reliability (NEW)
+from stabilize.errors import (
+    TransientError, PermanentError, TaskTimeoutError,
+    is_transient, is_permanent,
+)
+from stabilize.models.status import (
+    can_transition, validate_transition, InvalidStateTransitionError,
+)
+from stabilize.recovery import WorkflowRecovery, recover_on_startup
+
 ===============================================================================
 11. VERIFICATION SYSTEM (NEW)
 ===============================================================================
@@ -1385,6 +1395,113 @@ String:       "minLength", "maxLength", "pattern"
 Number:       "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"
 Array:        "minItems", "maxItems", "uniqueItems", "items" (schema for array elements)
 Object:       "properties", "additionalProperties", "minProperties", "maxProperties"
+
+===============================================================================
+15. ERROR HANDLING & RELIABILITY (NEW)
+===============================================================================
+
+Stabilize has enterprise-grade reliability features for production deployments.
+
+15.1 Transient vs Permanent Errors
+----------------------------------
+from stabilize.errors import TransientError, PermanentError, is_transient
+
+# Transient errors are automatically retried with exponential backoff
+raise TransientError("Connection timeout")  # Will retry
+
+# Permanent errors immediately fail the task
+raise PermanentError("Invalid input")  # No retry, marks task as terminal
+
+# Classification helper - checks exception class name for keywords
+is_transient(ConnectionError("timeout"))  # True - has "connection"
+is_transient(TimeoutError())              # True - has "timeout"
+is_transient(ValueError("bad input"))     # False - standard exception
+
+Keywords that make an error transient:
+  - "timeout", "temporary", "transient", "connection", "network"
+  - "unavailable", "retry", "throttl", "rate", "limit", "5xx"
+
+15.2 Automatic Retry with Exponential Backoff
+---------------------------------------------
+Transient errors are retried with exponential backoff:
+  - Attempt 1: ~1 second delay
+  - Attempt 2: ~2 seconds delay
+  - Attempt 3: ~4 seconds delay
+  - ...continues doubling up to 60 seconds max
+  - ±25% jitter added to prevent thundering herd
+
+Maximum 10 retry attempts before marking as terminal.
+
+15.3 Message Deduplication (Idempotency)
+----------------------------------------
+Messages are deduplicated to prevent duplicate processing:
+
+# Automatic - no code changes needed
+# Each message has a unique ID tracked in processed_messages table
+# Re-processing the same message is skipped
+
+This ensures:
+- Crash recovery doesn't cause duplicate side effects
+- Network retries don't duplicate work
+- At-least-once delivery becomes effectively-once processing
+
+15.4 State Transition Validation
+--------------------------------
+from stabilize.models.status import can_transition, validate_transition
+
+# Check if transition is valid
+can_transition(WorkflowStatus.NOT_STARTED, WorkflowStatus.RUNNING)  # True
+can_transition(WorkflowStatus.SUCCEEDED, WorkflowStatus.RUNNING)    # False
+
+# Validate with exception
+validate_transition(
+    WorkflowStatus.SUCCEEDED,
+    WorkflowStatus.RUNNING,
+    entity_type="workflow",
+    entity_id="wf-123",
+)  # Raises InvalidStateTransitionError
+
+Valid transitions:
+  NOT_STARTED → RUNNING, CANCELED, SKIPPED
+  RUNNING     → SUCCEEDED, FAILED_CONTINUE, TERMINAL, CANCELED, PAUSED, STOPPED
+  PAUSED      → RUNNING, CANCELED
+  Terminal states (SUCCEEDED, TERMINAL, CANCELED, STOPPED, SKIPPED) → no transitions
+
+15.5 Timeout Enforcement
+------------------------
+Tasks are executed with timeout enforcement using thread interruption:
+
+# Default timeout: 5 minutes for regular tasks
+# RetryableTask can override via get_dynamic_timeout()
+
+class MyRetryableTask(RetryableTask):
+    def get_timeout(self) -> timedelta:
+        return timedelta(minutes=30)
+
+    def get_dynamic_timeout(self, stage: StageExecution) -> timedelta:
+        # Can use stage context to determine timeout
+        return timedelta(milliseconds=stage.context.get("stageTimeoutMs", 300000))
+
+# When timeout occurs, task.on_timeout(stage) is called if defined
+def on_timeout(self, stage: StageExecution) -> TaskResult | None:
+    # Cleanup and return partial result, or None for default behavior
+    return TaskResult.failed_continue(error="Timed out", outputs={"partial": data})
+
+15.6 Crash Recovery
+-------------------
+from stabilize.recovery import WorkflowRecovery, recover_on_startup
+
+# At application startup, recover in-progress workflows
+recovery = WorkflowRecovery(store, queue)
+results = recovery.recover_pending_workflows()
+
+# Convenience function
+recover_on_startup(store, queue)  # Returns list of RecoveryResult
+
+Recovery automatically:
+- Finds workflows in RUNNING/NOT_STARTED state
+- Re-queues their current stages for continuation
+- Uses idempotency to prevent duplicate work
 
 ===============================================================================
 END OF REFERENCE

@@ -40,105 +40,22 @@ class PostgresWorkflowStore(WorkflowStore):
     efficient resource sharing across all repository instances.
     """
 
-    def __init__(
-        self,
-        connection_string: str,
-        create_tables: bool = False,
-    ) -> None:
+    def __init__(self, connection_string: str) -> None:
         """
         Initialize the repository.
 
         Args:
             connection_string: PostgreSQL connection string
-            create_tables: Whether to create tables if they don't exist
+
+        Note:
+            Tables must be created using migrations (migretti).
+            Run: stabilize migrate --database <connection_string>
         """
         from stabilize.persistence.connection import get_connection_manager
 
         self.connection_string = connection_string
         self._manager = get_connection_manager()
         self._pool = self._manager.get_postgres_pool(connection_string)
-
-        if create_tables:
-            self._create_tables()
-
-    def _create_tables(self) -> None:
-        """Create database tables if they don't exist."""
-        schema = """
-        CREATE TABLE IF NOT EXISTS pipeline_executions (
-            id VARCHAR(26) PRIMARY KEY,
-            type VARCHAR(50) NOT NULL,
-            application VARCHAR(255) NOT NULL,
-            name VARCHAR(255),
-            status VARCHAR(50) NOT NULL,
-            start_time BIGINT,
-            end_time BIGINT,
-            start_time_expiry BIGINT,
-            trigger JSONB,
-            is_canceled BOOLEAN DEFAULT FALSE,
-            canceled_by VARCHAR(255),
-            cancellation_reason TEXT,
-            paused JSONB,
-            pipeline_config_id VARCHAR(255),
-            is_limit_concurrent BOOLEAN DEFAULT FALSE,
-            max_concurrent_executions INT DEFAULT 0,
-            keep_waiting_pipelines BOOLEAN DEFAULT FALSE,
-            origin VARCHAR(255),
-            created_at TIMESTAMP DEFAULT NOW()
-        );
-
-        CREATE TABLE IF NOT EXISTS stage_executions (
-            id VARCHAR(26) PRIMARY KEY,
-            execution_id VARCHAR(26) REFERENCES pipeline_executions(id) ON DELETE CASCADE,
-            ref_id VARCHAR(50) NOT NULL,
-            type VARCHAR(100) NOT NULL,
-            name VARCHAR(255),
-            status VARCHAR(50) NOT NULL,
-            context JSONB DEFAULT '{}',
-            outputs JSONB DEFAULT '{}',
-            requisite_stage_ref_ids TEXT[],
-            parent_stage_id VARCHAR(26),
-            synthetic_stage_owner VARCHAR(20),
-            start_time BIGINT,
-            end_time BIGINT,
-            start_time_expiry BIGINT,
-            scheduled_time BIGINT,
-            UNIQUE(execution_id, ref_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS task_executions (
-            id VARCHAR(26) PRIMARY KEY,
-            stage_id VARCHAR(26) REFERENCES stage_executions(id) ON DELETE CASCADE,
-            name VARCHAR(255) NOT NULL,
-            implementing_class VARCHAR(255) NOT NULL,
-            status VARCHAR(50) NOT NULL,
-            start_time BIGINT,
-            end_time BIGINT,
-            stage_start BOOLEAN DEFAULT FALSE,
-            stage_end BOOLEAN DEFAULT FALSE,
-            loop_start BOOLEAN DEFAULT FALSE,
-            loop_end BOOLEAN DEFAULT FALSE,
-            task_exception_details JSONB DEFAULT '{}'
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_execution_application
-            ON pipeline_executions(application);
-        CREATE INDEX IF NOT EXISTS idx_execution_config
-            ON pipeline_executions(pipeline_config_id);
-        CREATE INDEX IF NOT EXISTS idx_execution_status
-            ON pipeline_executions(status);
-        CREATE INDEX IF NOT EXISTS idx_stage_execution
-            ON stage_executions(execution_id);
-        CREATE INDEX IF NOT EXISTS idx_task_stage
-            ON task_executions(stage_id);
-        """
-
-        with self._pool.connection() as conn:
-            with conn.cursor() as cur:
-                for statement in schema.split(";"):
-                    statement = statement.strip()
-                    if statement:
-                        cur.execute(statement)
-            conn.commit()
 
     def close(self) -> None:
         """Close the connection pool via connection manager."""

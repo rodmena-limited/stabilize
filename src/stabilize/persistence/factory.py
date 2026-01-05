@@ -50,15 +50,19 @@ def create_repository(
     Args:
         connection_string: Database connection URL
         create_tables: Whether to create tables if they don't exist
+                      (SQLite only - PostgreSQL uses migrations)
 
     Returns:
         WorkflowStore: PostgreSQL or SQLite repository instance
 
+    Note:
+        PostgreSQL requires running migrations first:
+            stabilize migrate --database <connection_string>
+
     Examples:
-        # PostgreSQL
+        # PostgreSQL (requires migrations)
         repo = create_repository(
-            "postgresql+psycopg://user:pass@localhost/stabilize",
-            create_tables=True
+            "postgresql+psycopg://user:pass@localhost/stabilize"
         )
 
         # SQLite file-based
@@ -82,7 +86,7 @@ def create_repository(
     else:
         from stabilize.persistence.postgres import PostgresWorkflowStore
 
-        return PostgresWorkflowStore(connection_string, create_tables)
+        return PostgresWorkflowStore(connection_string)
 
 
 def create_queue(

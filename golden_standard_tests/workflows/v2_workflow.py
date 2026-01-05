@@ -33,6 +33,7 @@ from stabilize.tasks.interface import RetryableTask
 # File paths - created once per test run
 # =============================================================================
 
+
 def get_temp_files() -> tuple[str, str]:
     """Get temp file paths for output and retry flag."""
     temp_dir = tempfile.gettempdir()
@@ -57,14 +58,11 @@ class SetupTask(Task):
             f"rm -f '{output_file}' '{retry_flag}' && printf 'PHASE1_SETUP' > '{output_file}'",
             shell=True,
             capture_output=True,
-            text=True
+            text=True,
         )
 
         if result.returncode == 0:
-            return TaskResult.success(outputs={
-                "output_file": output_file,
-                "retry_flag": retry_flag
-            })
+            return TaskResult.success(outputs={"output_file": output_file, "retry_flag": retry_flag})
         else:
             return TaskResult.terminal(error=f"Setup failed: {result.stderr}")
 
@@ -87,9 +85,7 @@ class RetryTask(RetryableTask):
     def get_timeout(self) -> timedelta:
         return timedelta(seconds=30)
 
-    def get_backoff_period(
-        self, stage: StageExecution, duration: timedelta
-    ) -> timedelta:
+    def get_backoff_period(self, stage: StageExecution, duration: timedelta) -> timedelta:
         return timedelta(milliseconds=200)  # Completes at ~200ms
 
     def execute(self, stage: StageExecution) -> TaskResult:
@@ -111,10 +107,7 @@ class RetryTask(RetryableTask):
 
         # Second attempt: append token to file
         result = subprocess.run(
-            f"printf '::PHASE2A_RETRY_SUCCESS' >> '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
+            f"printf '::PHASE2A_RETRY_SUCCESS' >> '{output_file}'", shell=True, capture_output=True, text=True
         )
 
         if result.returncode == 0:
@@ -135,9 +128,7 @@ class TimeoutTask(RetryableTask):
     def get_timeout(self) -> timedelta:
         return timedelta(milliseconds=300)  # Times out at ~300ms
 
-    def get_backoff_period(
-        self, stage: StageExecution, duration: timedelta
-    ) -> timedelta:
+    def get_backoff_period(self, stage: StageExecution, duration: timedelta) -> timedelta:
         return timedelta(milliseconds=50)
 
     def execute(self, stage: StageExecution) -> TaskResult:
@@ -145,10 +136,7 @@ class TimeoutTask(RetryableTask):
         return TaskResult.running()
 
     def on_timeout(self, stage: StageExecution) -> TaskResult:
-        return TaskResult.failed_continue(
-            error="Task timed out as expected",
-            outputs={"timeout_occurred": True}
-        )
+        return TaskResult.failed_continue(error="Task timed out as expected", outputs={"timeout_occurred": True})
 
 
 class CompensationTask(Task):
@@ -165,17 +153,11 @@ class CompensationTask(Task):
         if not timeout_occurred:
             # Timeout didn't occur - this is an engine bug
             result = subprocess.run(
-                f"printf '::ERROR_NO_TIMEOUT' >> '{output_file}'",
-                shell=True,
-                capture_output=True,
-                text=True
+                f"printf '::ERROR_NO_TIMEOUT' >> '{output_file}'", shell=True, capture_output=True, text=True
             )
         else:
             result = subprocess.run(
-                f"printf '::PHASE2B_TIMEOUT_COMPENSATED' >> '{output_file}'",
-                shell=True,
-                capture_output=True,
-                text=True
+                f"printf '::PHASE2B_TIMEOUT_COMPENSATED' >> '{output_file}'", shell=True, capture_output=True, text=True
             )
 
         if result.returncode == 0:
@@ -200,9 +182,7 @@ class EventEmitterTask(RetryableTask):
     def get_timeout(self) -> timedelta:
         return timedelta(seconds=30)
 
-    def get_backoff_period(
-        self, stage: StageExecution, duration: timedelta
-    ) -> timedelta:
+    def get_backoff_period(self, stage: StageExecution, duration: timedelta) -> timedelta:
         return timedelta(milliseconds=500)  # Wait 500ms before completing
 
     def execute(self, stage: StageExecution) -> TaskResult:
@@ -234,12 +214,7 @@ class EventReceiverTask(Task):
         else:
             token = f"::ERROR_NO_EVENT_{event_payload}"
 
-        result = subprocess.run(
-            f"printf '{token}' >> '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
-        )
+        result = subprocess.run(f"printf '{token}' >> '{output_file}'", shell=True, capture_output=True, text=True)
 
         if result.returncode == 0:
             return TaskResult.success()
@@ -258,10 +233,7 @@ class JoinGateTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         result = subprocess.run(
-            f"printf '::PHASE4_SYNC_GATE_PASSED' >> '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
+            f"printf '::PHASE4_SYNC_GATE_PASSED' >> '{output_file}'", shell=True, capture_output=True, text=True
         )
 
         if result.returncode == 0:
@@ -287,12 +259,7 @@ class LoopIterationTask(Task):
         else:
             token = f"::PHASE5_LOOP_ELSE_{counter}"
 
-        result = subprocess.run(
-            f"printf '{token}' >> '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
-        )
+        result = subprocess.run(f"printf '{token}' >> '{output_file}'", shell=True, capture_output=True, text=True)
 
         if result.returncode == 0:
             return TaskResult.success()
@@ -311,20 +278,10 @@ class FinalizeTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         # Append final token
-        subprocess.run(
-            f"printf '::PHASE6_END' >> '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
-        )
+        subprocess.run(f"printf '::PHASE6_END' >> '{output_file}'", shell=True, capture_output=True, text=True)
 
         # Read the entire file content
-        result = subprocess.run(
-            f"cat '{output_file}'",
-            shell=True,
-            capture_output=True,
-            text=True
-        )
+        result = subprocess.run(f"cat '{output_file}'", shell=True, capture_output=True, text=True)
 
         if result.returncode == 0:
             return TaskResult.success(outputs={"final_result": result.stdout.strip()})

@@ -183,6 +183,15 @@ class SqliteWorkflowStore(WorkflowStore):
             ON queue_messages(deliver_at);
         CREATE INDEX IF NOT EXISTS idx_queue_locked
             ON queue_messages(locked_until);
+
+        CREATE TABLE IF NOT EXISTS processed_messages (
+            message_id TEXT PRIMARY KEY,
+            processed_at TEXT NOT NULL DEFAULT (datetime('now')),
+            handler_type TEXT,
+            execution_id TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_processed_messages_at
+            ON processed_messages(processed_at);
         """
 
         conn = self._get_connection()
@@ -1201,9 +1210,7 @@ class AtomicTransaction(StoreTransaction):
                 "outputs": json.dumps(stage.outputs),
                 "requisite_stage_ref_ids": json.dumps(list(stage.requisite_stage_ref_ids)),
                 "parent_stage_id": stage.parent_stage_id,
-                "synthetic_stage_owner": (
-                    stage.synthetic_stage_owner.value if stage.synthetic_stage_owner else None
-                ),
+                "synthetic_stage_owner": (stage.synthetic_stage_owner.value if stage.synthetic_stage_owner else None),
                 "start_time": stage.start_time,
                 "end_time": stage.end_time,
                 "start_time_expiry": stage.start_time_expiry,

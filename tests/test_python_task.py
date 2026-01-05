@@ -95,9 +95,7 @@ class TestPythonTaskScriptFile:
         task = PythonTask()
 
         # Create temp script file
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as tmp:
             tmp.write("RESULT = {'status': 'from_file'}\n")
             tmp.flush()
             script_path = tmp.name

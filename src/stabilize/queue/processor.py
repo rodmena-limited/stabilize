@@ -244,15 +244,9 @@ class QueueProcessor:
         message_id = getattr(message, "message_id", None)
         execution_id = getattr(message, "execution_id", None)
 
-        if (
-            self.config.enable_deduplication
-            and self._store is not None
-            and message_id is not None
-        ):
+        if self.config.enable_deduplication and self._store is not None and message_id is not None:
             if self._store.is_message_processed(message_id):
-                logger.info(
-                    f"Skipping duplicate message {message_id} ({get_message_type_name(message)})"
-                )
+                logger.info(f"Skipping duplicate message {message_id} ({get_message_type_name(message)})")
                 return
 
         logger.debug(f"Handling {get_message_type_name(message)} (execution={execution_id or 'N/A'})")
@@ -260,11 +254,7 @@ class QueueProcessor:
         handler.handle(message)
 
         # Mark message as processed for deduplication
-        if (
-            self.config.enable_deduplication
-            and self._store is not None
-            and message_id is not None
-        ):
+        if self.config.enable_deduplication and self._store is not None and message_id is not None:
             self._store.mark_message_processed(
                 message_id=message_id,
                 handler_type=get_message_type_name(message),

@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, Any
 from stabilize.models.status import WorkflowStatus
 
 if TYPE_CHECKING:
-
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
     from stabilize.queue.messages import Message

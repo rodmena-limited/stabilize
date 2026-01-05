@@ -450,8 +450,7 @@ class SqliteQueue(Queue):
 
         self._pending.pop(msg_id, None)
         logger.warning(
-            f"Moved message to DLQ (id={msg_id}, type={row['message_type']}, "
-            f"attempts={row['attempts']}, error={error})"
+            f"Moved message to DLQ (id={msg_id}, type={row['message_type']}, attempts={row['attempts']}, error={error})"
         )
 
     def list_dlq(

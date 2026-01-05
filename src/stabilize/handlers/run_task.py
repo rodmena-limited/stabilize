@@ -126,9 +126,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 self._process_result(stage, task_model, result, message)
             except TaskTimeoutError as e:
                 logger.info("Task %s timed out: %s", task_model.name, e)
-                timeout_result: TaskResult | None = (
-                    task.on_timeout(stage) if hasattr(task, "on_timeout") else None
-                )
+                timeout_result: TaskResult | None = task.on_timeout(stage) if hasattr(task, "on_timeout") else None
                 if timeout_result is None:
                     self._complete_with_error(stage, task_model, message, str(e))
                 else:

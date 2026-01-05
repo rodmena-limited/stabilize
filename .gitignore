@@ -60,6 +60,4 @@ COMPLETE_S3_INTEGRATION.sh
 data/
 test_table*
 .env
-CLAUDE.md
-GEMINI.md
 next-steps.md

@@ -165,6 +165,4 @@ class TestValidTransitionsCompleteness:
             WorkflowStatus.SKIPPED,
         }
         for status in terminal_states:
-            assert len(VALID_TRANSITIONS[status]) == 0, (
-                f"{status} should have no transitions"
-            )
+            assert len(VALID_TRANSITIONS[status]) == 0, f"{status} should have no transitions"
