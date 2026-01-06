@@ -59,21 +59,15 @@ class ResilienceConfig:
         """
         # Load bulkhead configs from environment
         bulkheads = {
-            "shell": BulkheadConfig(
-                max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_SHELL_MAX_CONCURRENT", "5"))
-            ),
+            "shell": BulkheadConfig(max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_SHELL_MAX_CONCURRENT", "5"))),
             "python": BulkheadConfig(
                 max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_PYTHON_MAX_CONCURRENT", "3"))
             ),
-            "http": BulkheadConfig(
-                max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_HTTP_MAX_CONCURRENT", "10"))
-            ),
+            "http": BulkheadConfig(max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_HTTP_MAX_CONCURRENT", "10"))),
             "docker": BulkheadConfig(
                 max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_DOCKER_MAX_CONCURRENT", "3"))
             ),
-            "ssh": BulkheadConfig(
-                max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_SSH_MAX_CONCURRENT", "5"))
-            ),
+            "ssh": BulkheadConfig(max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_SSH_MAX_CONCURRENT", "5"))),
         }
 
         # Parse failure threshold as fraction
@@ -85,8 +79,6 @@ class ResilienceConfig:
         return cls(
             bulkheads=bulkheads,
             circuit_failure_threshold=circuit_failure_threshold,
-            circuit_cooldown_seconds=float(
-                os.environ.get("STABILIZE_CIRCUIT_COOLDOWN_SECONDS", "30")
-            ),
+            circuit_cooldown_seconds=float(os.environ.get("STABILIZE_CIRCUIT_COOLDOWN_SECONDS", "30")),
             database_url=os.environ.get("MG_DATABASE_URL"),
         )

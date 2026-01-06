@@ -69,8 +69,7 @@ class TaskBulkheadManager:
                 )
             )
             logger.debug(
-                f"Created bulkhead for task type '{task_type}' "
-                f"with max_concurrent={bulkhead_config.max_concurrent}"
+                f"Created bulkhead for task type '{task_type}' with max_concurrent={bulkhead_config.max_concurrent}"
             )
 
         # Create a default bulkhead for unknown task types

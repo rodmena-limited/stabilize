@@ -68,15 +68,10 @@ def _create_storage(database_url: str | None) -> CircuitBreakerStorage:
             logger.info("Using PostgreSQL storage for circuit breakers")
             return PostgresStorage(connection_string=conn_string)
         except ImportError:
-            logger.warning(
-                "psycopg not available, falling back to in-memory circuit breaker storage"
-            )
+            logger.warning("psycopg not available, falling back to in-memory circuit breaker storage")
             return InMemoryStorage()
         except Exception as e:
-            logger.warning(
-                f"Failed to create PostgreSQL storage: {e}, "
-                "falling back to in-memory storage"
-            )
+            logger.warning(f"Failed to create PostgreSQL storage: {e}, falling back to in-memory storage")
             return InMemoryStorage()
     else:
         # SQLite or no database: use in-memory storage
@@ -148,10 +143,7 @@ class WorkflowCircuitFactory:
                 failure_limit=self.config.circuit_failure_threshold,
                 cooldown=timedelta(seconds=self.config.circuit_cooldown_seconds),
             )
-            logger.debug(
-                f"Created circuit breaker for workflow={workflow_execution_id}, "
-                f"task_type={task_type}"
-            )
+            logger.debug(f"Created circuit breaker for workflow={workflow_execution_id}, task_type={task_type}")
 
         return self._circuits[key]
 
@@ -164,14 +156,9 @@ class WorkflowCircuitFactory:
         Args:
             workflow_execution_id: The workflow execution ID
         """
-        keys_to_remove = [
-            key for key in self._circuits if key[0] == workflow_execution_id
-        ]
+        keys_to_remove = [key for key in self._circuits if key[0] == workflow_execution_id]
         for key in keys_to_remove:
             del self._circuits[key]
 
         if keys_to_remove:
-            logger.debug(
-                f"Cleared {len(keys_to_remove)} circuit(s) for "
-                f"workflow={workflow_execution_id}"
-            )
+            logger.debug(f"Cleared {len(keys_to_remove)} circuit(s) for workflow={workflow_execution_id}")
