@@ -3,16 +3,18 @@ RunTaskHandler - executes tasks.
 
 This is the handler that actually runs task implementations.
 It handles execution, retries, timeouts, and result processing.
+
+Uses bulkman for bulkhead pattern (per-task-type isolation) and
+resilient_circuit for circuit breaker protection.
 """
 
 from __future__ import annotations
 
 import logging
-import random
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeoutError
 from datetime import timedelta
 from typing import TYPE_CHECKING
+
+from resilient_circuit import ExponentialDelay
 
 from stabilize.errors import TaskTimeoutError, is_transient
 from stabilize.handlers.base import StabilizeHandler
@@ -22,6 +24,10 @@ from stabilize.queue.messages import (
     PauseTask,
     RunTask,
 )
+from stabilize.resilience.bulkheads import TaskBulkheadManager
+from stabilize.resilience.circuits import WorkflowCircuitFactory
+from stabilize.resilience.config import ResilienceConfig
+from stabilize.resilience.executor import execute_with_resilience
 from stabilize.tasks.interface import RetryableTask, Task
 from stabilize.tasks.registry import TaskNotFoundError, TaskRegistry
 from stabilize.tasks.result import TaskResult
@@ -36,6 +42,14 @@ logger = logging.getLogger(__name__)
 
 # Default timeout for tasks that don't specify one (5 minutes)
 DEFAULT_TASK_TIMEOUT = timedelta(minutes=5)
+
+# Exponential backoff for retries: 1s, 2s, 4s, 8s... capped at 60s with ±25% jitter
+_BACKOFF = ExponentialDelay(
+    min_delay=timedelta(seconds=1),
+    max_delay=timedelta(seconds=60),
+    factor=2,
+    jitter=0.25,
+)
 
 
 class RunTaskHandler(StabilizeHandler[RunTask]):
@@ -56,9 +70,20 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         repository: WorkflowStore,
         task_registry: TaskRegistry,
         retry_delay: timedelta = timedelta(seconds=15),
+        bulkhead_manager: TaskBulkheadManager | None = None,
+        circuit_factory: WorkflowCircuitFactory | None = None,
     ) -> None:
         super().__init__(queue, repository, retry_delay)
         self.task_registry = task_registry
+
+        # Initialize resilience components with defaults if not provided
+        if bulkhead_manager is None or circuit_factory is None:
+            config = ResilienceConfig.from_env()
+            self.bulkhead_manager = bulkhead_manager or TaskBulkheadManager(config)
+            self.circuit_factory = circuit_factory or WorkflowCircuitFactory(config)
+        else:
+            self.bulkhead_manager = bulkhead_manager
+            self.circuit_factory = circuit_factory
 
     @property
     def message_type(self) -> type[RunTask]:
@@ -122,7 +147,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             # Execute the task with timeout enforcement
             try:
                 timeout = self._get_task_timeout(stage, task)
-                result = self._execute_with_timeout(task, stage, timeout)
+                result = self._execute_with_timeout(task, stage, timeout, message)
                 self._process_result(stage, task_model, result, message)
             except TaskTimeoutError as e:
                 logger.info("Task %s timed out: %s", task_model.name, e)
@@ -175,35 +200,48 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         task: Task,
         stage: StageExecution,
         timeout: timedelta,
+        message: RunTask,
     ) -> TaskResult:
-        """Execute a task with timeout enforcement.
+        """Execute a task with timeout enforcement via bulkhead.
 
-        Runs the task in a separate thread and interrupts if it exceeds the timeout.
+        Uses bulkhead for thread pool management and circuit breaker for
+        failure protection. Runs the task through the appropriate bulkhead
+        based on task type.
 
         Args:
             task: The task to execute
             stage: The stage execution context
             timeout: Maximum time allowed for execution
+            message: The RunTask message (for task type info)
 
         Returns:
             The task result
 
         Raises:
             TaskTimeoutError: If the task exceeds the timeout
+            TransientError: If bulkhead is full or circuit is open
         """
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(task.execute, stage)
-            try:
-                return future.result(timeout=timeout.total_seconds())
-            except FuturesTimeoutError:
-                # Attempt to cancel the future (may not always succeed)
-                future.cancel()
-                raise TaskTimeoutError(
-                    f"Task exceeded timeout of {timeout}",
-                    task_name=getattr(task, "name", type(task).__name__),
-                    stage_id=stage.id,
-                    execution_id=stage.execution.id if stage.execution else None,
-                )
+        task_name = getattr(task, "name", type(task).__name__)
+        execution_id = stage.execution.id if stage.execution else None
+
+        # Get circuit breaker for this workflow + task type
+        circuit = self.circuit_factory.get_circuit(
+            workflow_execution_id=execution_id or "unknown",
+            task_type=message.task_type,
+        )
+
+        # Execute through bulkhead with circuit breaker protection
+        return execute_with_resilience(
+            bulkhead_manager=self.bulkhead_manager,
+            circuit=circuit,
+            task_type=message.task_type,
+            func=task.execute,
+            func_args=(stage,),
+            timeout=timeout.total_seconds(),
+            task_name=task_name,
+            stage_id=stage.id,
+            execution_id=execution_id,
+        )
 
     def _process_result(
         self,
@@ -307,8 +345,8 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
     ) -> timedelta:
         """Calculate backoff period for retry with exponential backoff and jitter.
 
-        Uses exponential backoff: 1s, 2s, 4s, 8s, 16s, capped at 60s.
-        Adds ±25% jitter to prevent thundering herd.
+        Uses ExponentialDelay from resilient_circuit for consistent backoff
+        calculation: 1s, 2s, 4s, 8s... capped at 60s with ±25% jitter.
 
         Args:
             stage: The stage execution context
@@ -328,15 +366,9 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         except TaskNotFoundError:
             pass
 
-        # Default exponential backoff with jitter
-        # Exponential: 1s, 2s, 4s, 8s, 16s, 32s, capped at 60s
-        base_delay = min(2 ** (attempt - 1), 60)
-
-        # Add jitter (±25%) to prevent thundering herd
-        jitter = base_delay * random.uniform(-0.25, 0.25)
-        delay = base_delay + jitter
-
-        return timedelta(seconds=max(1.0, delay))
+        # Use ExponentialDelay from resilient_circuit for consistent backoff
+        # for_attempt() returns seconds as float, convert to timedelta
+        return timedelta(seconds=_BACKOFF.for_attempt(attempt))
 
     def _handle_cancellation(
         self,

@@ -23,6 +23,8 @@ classifiers = [
 dependencies = [
     "ulid-py>=1.1",
     "pydantic>=2.0",
+    "bulkman>=0.1.0",
+    "resilient-circuit>=0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -99,6 +101,7 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
