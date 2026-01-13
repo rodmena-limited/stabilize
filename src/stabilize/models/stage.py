@@ -28,9 +28,9 @@ if TYPE_CHECKING:
 
 def _generate_stage_id() -> str:
     """Generate a unique stage ID using ULID."""
-    import ulid
+    from ulid import ULID
 
-    return str(ulid.new())
+    return str(ULID())
 
 
 class SyntheticStageOwner(Enum):
@@ -374,12 +374,12 @@ class StageExecution:
         Returns:
             A new synthetic StageExecution
         """
-        import ulid
+        from ulid import ULID
 
         stage = cls(
             type=type,
             name=name,
-            ref_id=str(ulid.new()),  # Synthetic stages get unique ref_ids
+            ref_id=str(ULID()),  # Synthetic stages get unique ref_ids
             context=context or {},
             parent_stage_id=parent.id,
             synthetic_stage_owner=owner,

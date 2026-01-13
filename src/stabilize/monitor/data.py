@@ -160,130 +160,240 @@ class MonitorDataFetcher:
         limit: int,
         status_filter: str,
     ) -> list[WorkflowView]:
-        """Fetch workflows with their stages and tasks."""
-        workflows: list[WorkflowView] = []
+        """Fetch workflows efficiently using batch queries (3-query pattern)."""
+        workflows_map: dict[str, WorkflowView] = {}
+        stage_ids: list[str] = []
+        workflow_ids: list[str] = []
 
-        # Use existing store methods to fetch workflows
-        # We'll need to adapt based on the available methods
-        try:
-            if app_filter:
-                raw_workflows = list(self.store.retrieve_by_application(app_filter))
-            else:
-                # Get recent workflows - we need to use the connection directly
-                raw_workflows = self._fetch_recent_workflows(limit, status_filter)
+        # 1. Fetch Workflows
+        # ------------------
+        if hasattr(self.store, "_pool"):
+            # PostgreSQL
+            with self.store._pool.connection() as conn:  # type: ignore
+                with conn.cursor() as cur:
+                    # Build Query
+                    query, params = self._build_workflow_query(app_filter, limit, status_filter, dialect="postgres")
+                    cur.execute(query, params)
+                    rows = cur.fetchall()
 
-            for wf in raw_workflows[:limit]:
-                workflow_view = self._convert_workflow(wf)
-                workflows.append(workflow_view)
+                    for row in rows:
+                        wf_view = self._row_to_workflow_view(row)
+                        workflows_map[wf_view.id] = wf_view
+                        workflow_ids.append(wf_view.id)
 
-        except Exception:
-            # If retrieve_by_application doesn't exist, try alternative
-            raw_workflows = self._fetch_recent_workflows(limit, status_filter)
-            for wf in raw_workflows[:limit]:
-                workflow_view = self._convert_workflow(wf)
-                workflows.append(workflow_view)
+                    if not workflow_ids:
+                        return []
 
-        # Sort: running first, then by start time ascending (oldest first, newest at bottom)
-        workflows.sort(
-            key=lambda w: (
-                0 if w.status == WorkflowStatus.RUNNING else 1,
-                w.start_time or 0,
-            )
-        )
-
-        return workflows
-
-    def _fetch_recent_workflows(
-        self,
-        limit: int,
-        status_filter: str,
-    ) -> list:
-        """Fetch recent workflows directly from the database."""
-        from stabilize.models.workflow import Workflow
-
-        workflows: list[Workflow] = []
-
-        # Access the connection manager from the store
-        if hasattr(self.store, "_manager") and hasattr(self.store, "connection_string"):
-            conn_mgr = self.store._manager  # type: ignore[attr-defined]
-            conn = conn_mgr.get_sqlite_connection(self.store.connection_string)  # type: ignore[attr-defined]
-            try:
-                cursor = conn.cursor()
-
-                # Build query based on status filter
-                if status_filter == "running":
-                    status_clause = "WHERE status = 'RUNNING'"
-                elif status_filter == "failed":
-                    status_clause = "WHERE status IN ('TERMINAL', 'FAILED_CONTINUE', 'CANCELED')"
-                elif status_filter == "recent":
-                    status_clause = ""  # All statuses, just recent
-                else:
-                    status_clause = ""
-
-                query = f"""
-                    SELECT id FROM pipeline_executions
-                    {status_clause}
-                    ORDER BY
-                        CASE WHEN status = 'RUNNING' THEN 0 ELSE 1 END,
-                        created_at DESC
-                    LIMIT ?
-                """
-                cursor.execute(query, (limit,))
-                rows = cursor.fetchall()
-
-                for row in rows:
-                    try:
-                        wf = self.store.retrieve(row[0])
-                        workflows.append(wf)
-                    except Exception:
-                        pass
-            finally:
-                pass  # Connection is managed by the connection manager
-
-        return workflows
-
-    def _convert_workflow(self, wf: Any) -> WorkflowView:
-        """Convert a Workflow model to WorkflowView."""
-        stages = []
-        for stage in wf.stages:
-            tasks = []
-            for task in stage.tasks:
-                error = None
-                if task.task_exception_details:
-                    error = task.task_exception_details.get("message", str(task.task_exception_details))
-
-                tasks.append(
-                    TaskView(
-                        name=task.name,
-                        implementing_class=task.implementing_class,
-                        status=task.status,
-                        start_time=task.start_time,
-                        end_time=task.end_time,
-                        error=error,
+                    # 2. Fetch Stages
+                    # ---------------
+                    cur.execute(
+                        """
+                        SELECT * FROM stage_executions
+                        WHERE execution_id = ANY(%(ids)s)
+                        ORDER BY start_time ASC
+                        """,
+                        {"ids": workflow_ids}
                     )
-                )
+                    stage_rows = cur.fetchall()
 
-            stages.append(
-                StageView(
-                    ref_id=stage.ref_id,
-                    name=stage.name,
-                    status=stage.status,
-                    start_time=stage.start_time,
-                    end_time=stage.end_time,
-                    tasks=tasks,
-                )
+                    stage_map = {}  # id -> StageView
+                    for row in stage_rows:
+                        stage_view = self._row_to_stage_view(row)
+                        # Temp map by ref_id for linking? No, need unique ID
+                        stage_map[stage_view.ref_id] = stage_view
+                        # Actually we need to attach to workflow immediately
+                        if stage_view.execution_id in workflows_map:  # type: ignore
+                            workflows_map[stage_view.execution_id].stages.append(stage_view)  # type: ignore
+                            stage_ids.append(row["id"])  # type: ignore
+
+                    if not stage_ids:
+                        return list(workflows_map.values())
+
+                    # 3. Fetch Tasks
+                    # --------------
+                    cur.execute(
+                        """
+                        SELECT * FROM task_executions
+                        WHERE stage_id = ANY(%(ids)s)
+                        ORDER BY start_time ASC
+                        """,
+                        {"ids": stage_ids}
+                    )
+                    task_rows = cur.fetchall()
+
+                    # Map tasks to stages. We need a way to find stage by ID.
+                    # Re-iterate stages to build a lookup map by DB ID
+                    stage_lookup = {}
+                    for wf in workflows_map.values():
+                        for stage in wf.stages:
+                            # We need the internal DB ID to link tasks, but StageView doesn't have it by default.
+                            # We stored it in _row_to_stage_view temporarily
+                            if hasattr(stage, "_db_id"):
+                                stage_lookup[stage._db_id] = stage  # type: ignore
+
+                    for row in task_rows:
+                        task_view = self._row_to_task_view(row)
+                        stage_id = row["stage_id"]  # type: ignore
+                        if stage_id in stage_lookup:
+                            stage_lookup[stage_id].tasks.append(task_view)
+
+        elif hasattr(self.store, "_manager"):
+            # SQLite
+            conn_mgr = self.store._manager  # type: ignore
+            conn = conn_mgr.get_sqlite_connection(self.store.connection_string)  # type: ignore
+            cursor = conn.cursor()
+
+            # 1. Fetch Workflows
+            query, params = self._build_workflow_query(app_filter, limit, status_filter, dialect="sqlite")
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            for row in rows:
+                wf_view = self._row_to_workflow_view(row)
+                workflows_map[wf_view.id] = wf_view
+                workflow_ids.append(wf_view.id)
+
+            if not workflow_ids:
+                return []
+
+            # 2. Fetch Stages
+            # SQLite doesn't support = ANY(), use IN (?,?,?)
+            placeholders = ",".join("?" * len(workflow_ids))
+            cursor.execute(
+                f"""
+                SELECT * FROM stage_executions
+                WHERE execution_id IN ({placeholders})
+                ORDER BY start_time ASC
+                """,
+                workflow_ids
             )
+            stage_rows = cursor.fetchall()
 
+            stage_lookup = {}  # db_id -> StageView
+
+            for row in stage_rows:
+                stage_view = self._row_to_stage_view(row)
+                # SQLite rows can be accessed by name if RowFactory is set, usually is in Stabilize
+                ex_id = row["execution_id"]
+                if ex_id in workflows_map:
+                    workflows_map[ex_id].stages.append(stage_view)
+                    stage_ids.append(row["id"])
+                    stage_lookup[row["id"]] = stage_view
+
+            if not stage_ids:
+                return list(workflows_map.values())
+
+            # 3. Fetch Tasks
+            placeholders = ",".join("?" * len(stage_ids))
+            cursor.execute(
+                f"""
+                SELECT * FROM task_executions
+                WHERE stage_id IN ({placeholders})
+                ORDER BY start_time ASC
+                """,
+                stage_ids
+            )
+            task_rows = cursor.fetchall()
+
+            for row in task_rows:
+                task_view = self._row_to_task_view(row)
+                st_id = row["stage_id"]
+                if st_id in stage_lookup:
+                    stage_lookup[st_id].tasks.append(task_view)
+
+        # Sort stages and tasks just in case DB didn't
+        # And convert dictionary to list
+        sorted_workflows = sorted(
+            workflows_map.values(),
+            key=lambda w: (0 if w.status == WorkflowStatus.RUNNING else 1, w.start_time or 0)
+        )
+        return sorted_workflows
+
+    def _build_workflow_query(self, app: str | None, limit: int, status: str, dialect: str) -> tuple[str, Any]:
+        """Build the SQL query for fetching workflows."""
+        clauses = []
+        params = {} if dialect == "postgres" else []
+
+        if app:
+            clauses.append("application = %(app)s" if dialect == "postgres" else "application = ?")
+            if dialect == "postgres":
+                params["app"] = app
+            else:
+                params.append(app)  # type: ignore
+
+        if status == "running":
+            clauses.append("status = 'RUNNING'")
+        elif status == "failed":
+            clauses.append("status IN ('TERMINAL', 'FAILED_CONTINUE', 'CANCELED')")
+
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+
+        limit_param = "%(limit)s" if dialect == "postgres" else "?"
+        if dialect == "postgres":
+            params["limit"] = limit
+        else:
+            params.append(limit)  # type: ignore
+
+        query = f"""
+            SELECT * FROM pipeline_executions
+            {where}
+            ORDER BY
+                CASE WHEN status = 'RUNNING' THEN 0 ELSE 1 END,
+                created_at DESC
+            LIMIT {limit_param}
+        """
+        return query, params
+
+    def _row_to_workflow_view(self, row: Any) -> WorkflowView:
         return WorkflowView(
-            id=wf.id,
-            application=wf.application,
-            name=wf.name,
-            status=wf.status,
-            start_time=wf.start_time,
-            end_time=wf.end_time,
-            stages=stages,
+            id=row["id"],
+            application=row["application"],
+            name=row["name"] or "",
+            status=WorkflowStatus[row["status"]],
+            start_time=row["start_time"],
+            end_time=row["end_time"],
+            stages=[],
         )
 
+    def _row_to_stage_view(self, row: Any) -> StageView:
+        view = StageView(
+            ref_id=row["ref_id"],
+            name=row["name"] or "",
+            status=WorkflowStatus[row["status"]],
+            start_time=row["start_time"],
+            end_time=row["end_time"],
+            tasks=[],
+        )
+        # Attach internal DB info for linking
+        view._db_id = row["id"]  # type: ignore
+        view.execution_id = row["execution_id"]  # type: ignore
+        return view
+
+    def _row_to_task_view(self, row: Any) -> TaskView:
+        # Handle JSON exception details safely
+        error = None
+        try:
+            details = row["task_exception_details"]
+            if details:
+                if isinstance(details, str):
+                    import json
+
+                    details = json.loads(details)
+                if isinstance(details, dict):
+                    error = details.get("message")
+        except Exception:
+            pass
+
+        return TaskView(
+            name=row["name"],
+            implementing_class=row["implementing_class"],
+            status=WorkflowStatus[row["status"]],
+            start_time=row["start_time"],
+            end_time=row["end_time"],
+            error=error,
+        )
+
+        # Removed _fetch_recent_workflows and _convert_workflow as they are replaced by the batch logic above
     def _fetch_queue_stats(self) -> QueueStats:
         """Fetch queue statistics."""
         if self.queue is None:

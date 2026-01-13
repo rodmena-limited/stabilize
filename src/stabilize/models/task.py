@@ -18,9 +18,9 @@ if TYPE_CHECKING:
 
 def _generate_task_id() -> str:
     """Generate a unique task ID using ULID."""
-    import ulid
+    from ulid import ULID
 
-    return str(ulid.new())
+    return str(ULID())
 
 
 @dataclass

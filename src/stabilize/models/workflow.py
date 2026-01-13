@@ -21,9 +21,9 @@ from stabilize.models.status import WorkflowStatus
 
 def _generate_execution_id() -> str:
     """Generate a unique execution ID using ULID."""
-    import ulid
+    from ulid import ULID
 
-    return str(ulid.new())
+    return str(ULID())
 
 
 class WorkflowType(Enum):

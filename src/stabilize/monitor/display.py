@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import curses
+import queue
+import threading
 import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -37,6 +39,50 @@ PAIR_DIM = 5
 PAIR_HEADER = 100
 
 
+class DataFetcherThread(threading.Thread):
+    """Background thread for fetching monitoring data."""
+
+    def __init__(
+        self,
+        fetcher: MonitorDataFetcher,
+        data_queue: queue.Queue,
+        refresh_interval: int,
+        app_filter: str | None,
+        status_filter: str,
+    ) -> None:
+        super().__init__(daemon=True)
+        self.fetcher = fetcher
+        self.data_queue = data_queue
+        self.refresh_interval = refresh_interval
+        self.app_filter = app_filter
+        self.status_filter = status_filter
+        self.stop_event = threading.Event()
+
+    def run(self) -> None:
+        """Fetch data loop."""
+        while not self.stop_event.is_set():
+            try:
+                start_time = time.time()
+                data = self.fetcher.fetch(
+                    app_filter=self.app_filter,
+                    status_filter=self.status_filter,
+                )
+                self.data_queue.put(data)
+
+                # Sleep for remaining time, checking stop event
+                elapsed = time.time() - start_time
+                sleep_time = max(0.1, self.refresh_interval - elapsed)
+                self.stop_event.wait(sleep_time)
+
+            except Exception:
+                # Retry on error with backoff
+                self.stop_event.wait(1.0)
+
+    def stop(self) -> None:
+        """Signal thread to stop."""
+        self.stop_event.set()
+
+
 class MonitorDisplay:
     """Curses-based monitoring display with proper column alignment."""
 
@@ -54,8 +100,14 @@ class MonitorDisplay:
         self.app_filter = app_filter
         self.status_filter = status_filter
         self.scroll_offset = 0
-        self._auto_scroll = True  # Auto-scroll to bottom until user scrolls up
+        self.selected_index = 0  # Selection cursor
+        self._auto_follow = True  # Auto-scroll to keep selection in view
         self._init_colors()
+
+        # Threading setup
+        self.data_queue: queue.Queue = queue.Queue()
+        self.fetcher_thread: DataFetcherThread | None = None
+        self.current_data: MonitorData | None = None
 
     def _init_colors(self) -> None:
         """Initialize curses color pairs."""
@@ -93,41 +145,83 @@ class MonitorDisplay:
     def run(self) -> None:
         """Main display loop with auto-refresh."""
         curses.curs_set(0)
-        self.stdscr.timeout(self.refresh_interval * 1000)
+        # Non-blocking input (100ms timeout) to keep UI responsive
+        self.stdscr.timeout(100)
 
-        while True:
-            try:
-                data = self.data_fetcher.fetch(
-                    app_filter=self.app_filter,
-                    status_filter=self.status_filter,
-                )
-                self._render(data)
+        # Start background thread
+        self.fetcher_thread = DataFetcherThread(
+            self.data_fetcher,
+            self.data_queue,
+            self.refresh_interval,
+            self.app_filter,
+            self.status_filter,
+        )
+        self.fetcher_thread.start()
 
-                key = self.stdscr.getch()
-                if key == ord("q") or key == ord("Q"):
-                    break
-                elif key == curses.KEY_UP or key == ord("k"):
-                    self.scroll_offset = max(0, self.scroll_offset - 1)
-                    self._auto_scroll = False  # User scrolled up, disable auto-scroll
-                elif key == curses.KEY_DOWN or key == ord("j"):
-                    self.scroll_offset += 1
-                elif key == curses.KEY_PPAGE:
-                    height = self.stdscr.getmaxyx()[0]
-                    self.scroll_offset = max(0, self.scroll_offset - (height - 4))
-                    self._auto_scroll = False  # User scrolled up, disable auto-scroll
-                elif key == curses.KEY_NPAGE:
-                    height = self.stdscr.getmaxyx()[0]
-                    self.scroll_offset += height - 4
-                elif key == curses.KEY_HOME:
-                    self.scroll_offset = 0
-                    self._auto_scroll = False  # User scrolled to top, disable auto-scroll
-                elif key == curses.KEY_END:
-                    self._auto_scroll = True  # Re-enable auto-scroll to bottom
-                elif key == curses.KEY_RESIZE:
-                    self.stdscr.clear()
+        try:
+            while True:
+                # Check for new data
+                try:
+                    # Get latest data, clearing queue of any older updates
+                    while not self.data_queue.empty():
+                        self.current_data = self.data_queue.get_nowait()
+                except queue.Empty:
+                    pass
 
-            except curses.error:
-                time.sleep(0.1)
+                # Render if we have data
+                if self.current_data:
+                    self._render(self.current_data)
+                else:
+                    self._render_loading()
+
+                # Handle input
+                try:
+                    key = self.stdscr.getch()
+                    if key == -1:  # Timeout
+                        continue
+
+                    if key == ord("q") or key == ord("Q"):
+                        break
+                    elif key == curses.KEY_UP or key == ord("k"):
+                        self.selected_index = max(0, self.selected_index - 1)
+                        self._auto_follow = True
+                    elif key == curses.KEY_DOWN or key == ord("j"):
+                        self.selected_index += 1
+                        self._auto_follow = True
+                    elif key == curses.KEY_PPAGE:
+                        height = self.stdscr.getmaxyx()[0]
+                        self.selected_index = max(0, self.selected_index - (height - 4))
+                        self._auto_follow = True
+                    elif key == curses.KEY_NPAGE:
+                        height = self.stdscr.getmaxyx()[0]
+                        self.selected_index += height - 4
+                        self._auto_follow = True
+                    elif key == curses.KEY_HOME:
+                        self.selected_index = 0
+                        self._auto_follow = True
+                    elif key == curses.KEY_END:
+                        # Will be clamped in render
+                        self.selected_index = 999999
+                        self._auto_follow = True
+                    elif key == curses.KEY_RESIZE:
+                        self.stdscr.clear()
+
+                except curses.error:
+                    pass
+
+        finally:
+            if self.fetcher_thread:
+                self.fetcher_thread.stop()
+                self.fetcher_thread.join(timeout=1.0)
+
+    def _render_loading(self) -> None:
+        """Render loading state."""
+        self.stdscr.clear()
+        height, width = self.stdscr.getmaxyx()
+        self._render_header(width)
+        msg = "Loading data..."
+        self._addstr(height // 2, (width - len(msg)) // 2, msg, curses.A_DIM)
+        self.stdscr.refresh()
 
     def _render(self, data: MonitorData) -> None:
         """Render the complete display."""
@@ -146,27 +240,40 @@ class MonitorDisplay:
         self._addstr(1, 0, "─" * (width - 1), curses.A_DIM)
 
         # Content area
-        content_height = height - 4
+        content_height = max(1, height - 4)
         content_start_y = 2
 
         # Build line metadata for scrolling
         lines = self._build_line_metadata(data)
+        total_lines = len(lines)
 
-        # Apply scroll
-        max_scroll = max(0, len(lines) - content_height)
-
-        # Auto-scroll to bottom if enabled
-        if self._auto_scroll:
-            self.scroll_offset = max_scroll
+        # Clamp selection
+        if total_lines > 0:
+            self.selected_index = min(self.selected_index, total_lines - 1)
         else:
-            self.scroll_offset = min(self.scroll_offset, max_scroll)
+            self.selected_index = 0
+
+        # Auto-scroll logic to keep selection in view
+        if self._auto_follow:
+            if self.selected_index < self.scroll_offset:
+                self.scroll_offset = self.selected_index
+            elif self.selected_index >= self.scroll_offset + content_height:
+                self.scroll_offset = self.selected_index - content_height + 1
+
+        # Ensure scroll offset is valid
+        max_scroll = max(0, total_lines - content_height)
+        self.scroll_offset = max(0, min(self.scroll_offset, max_scroll))
 
         visible_lines = lines[self.scroll_offset : self.scroll_offset + content_height]
 
         # Render each visible line
         for i, line_info in enumerate(visible_lines):
             y = content_start_y + i
-            self._render_line(y, width, line_info)
+            if y < height - 2:  # Ensure we don't overwrite footer
+                # Check if this is the selected line
+                absolute_index = self.scroll_offset + i
+                is_selected = (absolute_index == self.selected_index)
+                self._render_line(y, width, line_info, is_selected)
 
         # Footer
         self._render_footer(data, height, width)
@@ -212,24 +319,34 @@ class MonitorDisplay:
 
         return lines
 
-    def _render_line(self, y: int, width: int, line_info: dict) -> None:
+    def _render_line(self, y: int, width: int, line_info: dict, is_selected: bool) -> None:
         """Render a single line based on its type."""
         line_type = line_info["type"]
 
-        if line_type == "error":
-            self._addstr(y, 0, line_info["text"], curses.A_BOLD)
-        elif line_type == "empty":
-            self._addstr(y, 0, line_info["text"], curses.A_DIM)
-        elif line_type == "blank":
-            pass  # Empty line
-        elif line_type == "workflow":
-            self._render_workflow_line(y, width, line_info["data"])
-        elif line_type == "stage":
-            self._render_stage_line(y, width, line_info["data"], line_info["is_last"])
-        elif line_type == "task":
-            self._render_task_line(y, width, line_info["data"], line_info["is_last_stage"], line_info["is_last_task"])
+        # Base attribute for the whole line if selected
+        base_attr = curses.A_REVERSE if is_selected else curses.A_NORMAL
 
-    def _render_workflow_line(self, y: int, width: int, wf: WorkflowView) -> None:
+        if line_type == "error":
+            self._addstr(y, 0, line_info["text"], curses.A_BOLD | base_attr)
+        elif line_type == "empty":
+            self._addstr(y, 0, line_info["text"], curses.A_DIM | base_attr)
+        elif line_type == "blank":
+             self._addstr(y, 0, " " * (width - 1), base_attr)
+        elif line_type == "workflow":
+            self._render_workflow_line(y, width, line_info["data"], base_attr)
+        elif line_type == "stage":
+            self._render_stage_line(y, width, line_info["data"], line_info["is_last"], base_attr)
+        elif line_type == "task":
+            self._render_task_line(
+                y,
+                width,
+                line_info["data"],
+                line_info["is_last_stage"],
+                line_info["is_last_task"],
+                base_attr,
+            )
+
+    def _render_workflow_line(self, y: int, width: int, wf: WorkflowView, base_attr: int) -> None:
         """Render a workflow line with proper column alignment."""
         # Calculate column positions
         pos_progress = width - COL_PROGRESS
@@ -253,20 +370,31 @@ class MonitorDisplay:
         completed, total = wf.stage_progress
         progress = f"{completed}/{total}" if total > 0 else "  -"
 
+        # Render full background for selection
+        if base_attr & curses.A_REVERSE:
+            self._addstr(y, 0, " " * (width - 1), base_attr)
+
         # Render left part (tree + id + app + name)
         prefix = f"▼ {wf_id}  {app:<14}  "
         name_max = pos_time - len(prefix) - 2
         name = wf.name[:name_max] if wf.name else "-"
 
-        self._addstr(y, 0, prefix + name, curses.A_NORMAL)
+        self._addstr(y, 0, prefix + name, base_attr)
 
         # Render columns at fixed positions
-        self._addstr(y, pos_time, f"{time_str:>23}", curses.A_NORMAL)
-        self._addstr(y, pos_status, f"{status:>10}", self._get_status_attr(wf.status))
-        self._addstr(y, pos_duration, f"{duration:>7}", curses.A_DIM if wf.status.is_complete else curses.A_NORMAL)
-        self._addstr(y, pos_progress, f"{progress:>5}", curses.A_NORMAL)
+        self._addstr(y, pos_time, f"{time_str:>23}", base_attr)
 
-    def _render_stage_line(self, y: int, width: int, stage: StageView, is_last: bool) -> None:
+        # Status has its own color, but if selected, we might want to keep selection style
+        # or combine them. Reverse + Color usually works.
+        status_attr = self._get_status_attr(wf.status)
+        if base_attr & curses.A_REVERSE:
+            status_attr = status_attr | curses.A_REVERSE
+
+        self._addstr(y, pos_status, f"{status:>10}", status_attr)
+        self._addstr(y, pos_duration, f"{duration:>7}", base_attr | (curses.A_DIM if wf.status.is_complete else 0))
+        self._addstr(y, pos_progress, f"{progress:>5}", base_attr)
+
+    def _render_stage_line(self, y: int, width: int, stage: StageView, is_last: bool, base_attr: int) -> None:
         """Render a stage line with proper column alignment."""
         pos_time = width - COL_TIME
         pos_duration = width - COL_DURATION
@@ -284,18 +412,35 @@ class MonitorDisplay:
         else:
             time_str = "-"
 
+        # Render full background for selection
+        if base_attr & curses.A_REVERSE:
+            self._addstr(y, 0, " " * (width - 1), base_attr)
+
         # Render left part (tree + name)
         name_max = pos_time - len(prefix) - 2
         name = stage.name[:name_max] if stage.name else "-"
 
-        self._addstr(y, 0, prefix + name, curses.A_NORMAL)
+        self._addstr(y, 0, prefix + name, base_attr)
 
         # Render columns
-        self._addstr(y, pos_time, f"{time_str:>23}", curses.A_NORMAL)
-        self._addstr(y, pos_status, f"{status:>10}", self._get_status_attr(stage.status))
-        self._addstr(y, pos_duration, f"{duration:>7}", curses.A_DIM if stage.status.is_complete else curses.A_NORMAL)
+        self._addstr(y, pos_time, f"{time_str:>23}", base_attr)
 
-    def _render_task_line(self, y: int, width: int, task: TaskView, is_last_stage: bool, is_last_task: bool) -> None:
+        status_attr = self._get_status_attr(stage.status)
+        if base_attr & curses.A_REVERSE:
+            status_attr = status_attr | curses.A_REVERSE
+
+        self._addstr(y, pos_status, f"{status:>10}", status_attr)
+        self._addstr(y, pos_duration, f"{duration:>7}", base_attr | (curses.A_DIM if stage.status.is_complete else 0))
+
+    def _render_task_line(
+        self,
+        y: int,
+        width: int,
+        task: TaskView,
+        is_last_stage: bool,
+        is_last_task: bool,
+        base_attr: int,
+    ) -> None:
         """Render a task line with proper column alignment."""
         pos_time = width - COL_TIME
         pos_duration = width - COL_DURATION
@@ -318,19 +463,32 @@ class MonitorDisplay:
         else:
             time_str = "-"
 
+        # Render full background for selection
+        if base_attr & curses.A_REVERSE:
+            self._addstr(y, 0, " " * (width - 1), base_attr)
+
         # Render left part (tree + name)
         name_max = pos_time - len(prefix) - 2
         name = task.name[:name_max] if task.name else "-"
 
-        self._addstr(y, 0, prefix + name, curses.A_NORMAL)
+        self._addstr(y, 0, prefix + name, base_attr)
 
         # Render columns
-        self._addstr(y, pos_time, f"{time_str:>23}", curses.A_NORMAL)
-        self._addstr(y, pos_status, f"{status:>10}", self._get_status_attr(task.status))
-        self._addstr(y, pos_duration, f"{duration:>7}", curses.A_DIM if task.status.is_complete else curses.A_NORMAL)
+        self._addstr(y, pos_time, f"{time_str:>23}", base_attr)
+
+        status_attr = self._get_status_attr(task.status)
+        if base_attr & curses.A_REVERSE:
+            status_attr = status_attr | curses.A_REVERSE
+
+        self._addstr(y, pos_status, f"{status:>10}", status_attr)
+        self._addstr(y, pos_duration, f"{duration:>7}", base_attr | (curses.A_DIM if task.status.is_complete else 0))
 
     def _render_footer(self, data: MonitorData, height: int, width: int) -> None:
         """Render footer with stats."""
+        # Ensure we have enough height for footer
+        if height < 3:
+            return
+
         # Separator
         self._addstr(height - 2, 0, "─" * (width - 1), curses.A_DIM)
 
