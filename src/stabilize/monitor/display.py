@@ -102,6 +102,7 @@ class MonitorDisplay:
         self.scroll_offset = 0
         self.selected_index = 0  # Selection cursor
         self._auto_follow = True  # Auto-scroll to keep selection in view
+        self.lines: list[dict] = []  # Store visible lines for selection mapping
         self._init_colors()
 
         # Threading setup
@@ -158,6 +159,8 @@ class MonitorDisplay:
         )
         self.fetcher_thread.start()
 
+        need_render = True
+
         try:
             while True:
                 # Check for new data
@@ -165,14 +168,17 @@ class MonitorDisplay:
                     # Get latest data, clearing queue of any older updates
                     while not self.data_queue.empty():
                         self.current_data = self.data_queue.get_nowait()
+                        need_render = True
                 except queue.Empty:
                     pass
 
-                # Render if we have data
-                if self.current_data:
-                    self._render(self.current_data)
-                else:
-                    self._render_loading()
+                # Render if needed
+                if need_render:
+                    if self.current_data:
+                        self._render(self.current_data)
+                    else:
+                        self._render_loading()
+                    need_render = False
 
                 # Handle input
                 try:
@@ -182,32 +188,60 @@ class MonitorDisplay:
 
                     if key == ord("q") or key == ord("Q"):
                         break
-                    elif key == curses.KEY_UP or key == ord("k"):
+
+                    # Navigation
+                    if key == curses.KEY_UP or key == ord("k"):
                         self.selected_index = max(0, self.selected_index - 1)
                         self._auto_follow = True
+                        need_render = True
                     elif key == curses.KEY_DOWN or key == ord("j"):
                         self.selected_index += 1
                         self._auto_follow = True
+                        need_render = True
                     elif key == curses.KEY_PPAGE:
                         height = self.stdscr.getmaxyx()[0]
                         self.selected_index = max(0, self.selected_index - (height - 4))
                         self._auto_follow = True
+                        need_render = True
                     elif key == curses.KEY_NPAGE:
                         height = self.stdscr.getmaxyx()[0]
                         self.selected_index += height - 4
                         self._auto_follow = True
+                        need_render = True
                     elif key == curses.KEY_HOME:
                         self.selected_index = 0
                         self._auto_follow = True
+                        need_render = True
                     elif key == curses.KEY_END:
-                        # Will be clamped in render
                         self.selected_index = 999999
                         self._auto_follow = True
+                        need_render = True
+
+                    # Actions
+                    elif key == 10:  # Enter
+                        self._show_details()
+                        need_render = True
+                    elif key == ord("p"):
+                        self._handle_workflow_action("pause")
+                        need_render = True
+                    elif key == ord("r"):
+                        self._handle_workflow_action("resume")
+                        need_render = True
+                    elif key == ord("c"):
+                        self._handle_workflow_action("cancel")
+                        need_render = True
+
+                    # Misc
                     elif key == curses.KEY_RESIZE:
                         self.stdscr.clear()
+                        need_render = True
 
                 except curses.error:
                     pass
+
+        except KeyboardInterrupt:
+            # Handle Ctrl+C gracefully
+            pass
 
         finally:
             if self.fetcher_thread:
@@ -243,9 +277,9 @@ class MonitorDisplay:
         content_height = max(1, height - 4)
         content_start_y = 2
 
-        # Build line metadata for scrolling
-        lines = self._build_line_metadata(data)
-        total_lines = len(lines)
+        # Build line metadata for scrolling AND selection tracking
+        self.lines = self._build_line_metadata(data)
+        total_lines = len(self.lines)
 
         # Clamp selection
         if total_lines > 0:
@@ -264,7 +298,7 @@ class MonitorDisplay:
         max_scroll = max(0, total_lines - content_height)
         self.scroll_offset = max(0, min(self.scroll_offset, max_scroll))
 
-        visible_lines = lines[self.scroll_offset : self.scroll_offset + content_height]
+        visible_lines = self.lines[self.scroll_offset : self.scroll_offset + content_height]
 
         # Render each visible line
         for i, line_info in enumerate(visible_lines):
@@ -272,11 +306,229 @@ class MonitorDisplay:
             if y < height - 2:  # Ensure we don't overwrite footer
                 # Check if this is the selected line
                 absolute_index = self.scroll_offset + i
-                is_selected = (absolute_index == self.selected_index)
+                is_selected = absolute_index == self.selected_index
                 self._render_line(y, width, line_info, is_selected)
 
         # Footer
         self._render_footer(data, height, width)
+        self.stdscr.refresh()
+
+    # ... [Existing render methods] ...
+
+    def _get_selected_item(self) -> dict | None:
+        """Get the currently selected line item."""
+        if 0 <= self.selected_index < len(self.lines):
+            return self.lines[self.selected_index]
+        return None
+
+    def _handle_workflow_action(self, action: str) -> None:
+        """Handle Pause/Resume/Cancel actions."""
+        item = self._get_selected_item()
+        if not item or item["type"] != "workflow":
+            self._show_message("Please select a Workflow first.", color=curses.COLOR_YELLOW)
+            return
+
+        wf_view: WorkflowView = item["data"]
+        wf_id = wf_view.id
+
+        try:
+            if action == "pause":
+                self.data_fetcher.store.pause(wf_id, paused_by="monitor")
+                self._show_message(f"Paused workflow {wf_id}")
+            elif action == "resume":
+                self.data_fetcher.store.resume(wf_id)
+                self._show_message(f"Resumed workflow {wf_id}")
+            elif action == "cancel":
+                reason = self._get_input("Cancellation reason: ")
+                if reason:
+                    self.data_fetcher.store.cancel(wf_id, canceled_by="monitor", reason=reason)
+                    self._show_message(f"Canceled workflow {wf_id}")
+                else:
+                    self._show_message("Cancellation aborted")
+        except Exception as e:
+            self._show_message(f"Error: {str(e)}", color=curses.COLOR_RED)
+
+    def _show_details(self) -> None:
+        """Show full details for the selected item."""
+        item = self._get_selected_item()
+        if not item:
+            return
+
+        import json
+
+        text = ""
+        title = "Details"
+
+        try:
+            if item["type"] == "workflow":
+                wf_view: WorkflowView = item["data"]
+                title = f"Workflow: {wf_view.id}"
+                # Fetch full workflow
+                wf = self.data_fetcher.store.retrieve(wf_view.id)
+                text = json.dumps(
+                    {
+                        "id": wf.id,
+                        "status": wf.status.name,
+                        "context": wf.trigger.payload if wf.trigger else {},
+                        "start_time": datetime.fromtimestamp(wf.start_time / 1000).isoformat()
+                        if wf.start_time
+                        else None,
+                        "end_time": datetime.fromtimestamp(wf.end_time / 1000).isoformat() if wf.end_time else None,
+                        "paused": wf.paused.__dict__ if wf.paused else None,
+                        "cancellation_reason": wf.cancellation_reason,
+                    },
+                    indent=2,
+                    default=str,
+                )
+
+            elif item["type"] == "stage":
+                stage_view: StageView = item["data"]
+                title = f"Stage: {stage_view.name}"
+                # We need DB ID to fetch stage. StageView has _db_id attached in data.py
+                if hasattr(stage_view, "_db_id"):
+                    stage = self.data_fetcher.store.retrieve_stage(stage_view._db_id)  # type: ignore
+                    text = json.dumps(
+                        {
+                            "name": stage.name,
+                            "status": stage.status.name,
+                            "context": stage.context,
+                            "outputs": stage.outputs,
+                            "start_time": datetime.fromtimestamp(stage.start_time / 1000).isoformat()
+                            if stage.start_time
+                            else None,
+                            "end_time": datetime.fromtimestamp(stage.end_time / 1000).isoformat()
+                            if stage.end_time
+                            else None,
+                        },
+                        indent=2,
+                        default=str,
+                    )
+                else:
+                    text = "Error: Missing DB ID for stage lookup."
+
+            elif item["type"] == "task":
+                task_view: TaskView = item["data"]
+                title = f"Task: {task_view.name}"
+                # Task doesn't have a direct lookup ID in view usually, let's use what we have
+                text = json.dumps(
+                    {
+                        "name": task_view.name,
+                        "status": task_view.status.name,
+                        "implementing_class": task_view.implementing_class,
+                        "error": task_view.error,
+                        "start_time": datetime.fromtimestamp(task_view.start_time / 1000).isoformat()
+                        if task_view.start_time
+                        else None,
+                    },
+                    indent=2,
+                    default=str,
+                )
+
+        except Exception as e:
+            text = f"Error fetching details: {str(e)}"
+
+        if text:
+            self._show_scrollable_modal(title, text)
+
+    def _get_input(self, prompt: str) -> str | None:
+        """Get input from user at bottom of screen."""
+        height, width = self.stdscr.getmaxyx()
+        self._addstr(height - 1, 0, " " * (width - 1), curses.A_REVERSE)
+        self._addstr(height - 1, 0, prompt, curses.A_REVERSE | curses.A_BOLD)
+        curses.echo()
+        curses.curs_set(1)
+        try:
+            # Read bytes and decode
+            input_bytes = self.stdscr.getstr(height - 1, len(prompt))
+            return input_bytes.decode("utf-8").strip()
+        except Exception:
+            return None
+        finally:
+            curses.noecho()
+            curses.curs_set(0)
+
+    def _show_message(self, message: str, color: int = 0) -> None:
+        """Show a temporary message at the bottom."""
+        height, width = self.stdscr.getmaxyx()
+        attr = curses.color_pair(PAIR_HEADER) | curses.A_BOLD
+        if color:
+            # If color is provided, try to mix it with existing pairs
+            # For simplicity in this constraints, just use reverse
+            attr = curses.A_REVERSE | curses.A_BOLD
+
+        self._addstr(height - 1, 0, f" {message} " + " " * (width - len(message) - 3), attr)
+        self.stdscr.refresh()
+        time.sleep(1.5)  # Pause to let user read
+
+    def _show_scrollable_modal(self, title: str, text: str) -> None:
+        """Show a scrollable modal with text."""
+        height, width = self.stdscr.getmaxyx()
+
+        # Calculate modal dimensions (80% of screen)
+        m_height = int(height * 0.8)
+        m_width = int(width * 0.8)
+        m_y = int(height * 0.1)
+        m_x = int(width * 0.1)
+
+        win = curses.newwin(m_height, m_width, m_y, m_x)
+        win.keypad(True)
+
+        lines = text.split("\n")
+        total_lines = len(lines)
+        offset = 0
+
+        while True:
+            win.clear()
+            win.box()
+
+            # Title
+            title_text = f" {title} "
+            if len(title_text) > m_width - 4:
+                title_text = title_text[: m_width - 4]
+            win.addstr(0, 2, title_text, curses.A_BOLD)
+
+            # Footer
+            footer = (
+                f" Lines {offset+1}-{min(offset+m_height-2, total_lines)}/{total_lines} "
+                "| Q/Esc to close | Up/Down/PgUp/PgDn "
+            )
+            if len(footer) > m_width - 4:
+                footer = footer[: m_width - 4]
+            win.addstr(m_height - 1, 2, footer, curses.A_DIM)
+
+            # Content
+            content_h = m_height - 2
+            content_w = m_width - 4
+
+            for i in range(content_h):
+                line_idx = offset + i
+                if line_idx < total_lines:
+                    line = lines[line_idx]
+                    if len(line) > content_w:
+                        line = line[:content_w]
+                    win.addstr(i + 1, 2, line)
+
+            win.refresh()
+
+            key = win.getch()
+            if key == ord("q") or key == 27:  # Q or Esc
+                break
+            elif key == curses.KEY_UP:
+                offset = max(0, offset - 1)
+            elif key == curses.KEY_DOWN:
+                offset = min(offset + 1, max(0, total_lines - content_h))
+            elif key == curses.KEY_PPAGE:
+                offset = max(0, offset - content_h)
+            elif key == curses.KEY_NPAGE:
+                offset = min(offset + content_h, max(0, total_lines - content_h))
+            elif key == curses.KEY_HOME:
+                offset = 0
+            elif key == curses.KEY_END:
+                offset = max(0, total_lines - content_h)
+
+        # Cleanup
+        del win
+        self.stdscr.touchwin()
         self.stdscr.refresh()
 
     def _render_header(self, width: int) -> None:
