@@ -192,7 +192,7 @@ class MonitorDataFetcher:
                         WHERE execution_id = ANY(%(ids)s)
                         ORDER BY start_time ASC
                         """,
-                        {"ids": workflow_ids}
+                        {"ids": workflow_ids},
                     )
                     stage_rows = cur.fetchall()
 
@@ -217,7 +217,7 @@ class MonitorDataFetcher:
                         WHERE stage_id = ANY(%(ids)s)
                         ORDER BY start_time ASC
                         """,
-                        {"ids": stage_ids}
+                        {"ids": stage_ids},
                     )
                     task_rows = cur.fetchall()
 
@@ -265,7 +265,7 @@ class MonitorDataFetcher:
                 WHERE execution_id IN ({placeholders})
                 ORDER BY start_time ASC
                 """,
-                workflow_ids
+                workflow_ids,
             )
             stage_rows = cursor.fetchall()
 
@@ -291,7 +291,7 @@ class MonitorDataFetcher:
                 WHERE stage_id IN ({placeholders})
                 ORDER BY start_time ASC
                 """,
-                stage_ids
+                stage_ids,
             )
             task_rows = cursor.fetchall()
 
@@ -304,8 +304,7 @@ class MonitorDataFetcher:
         # Sort stages and tasks just in case DB didn't
         # And convert dictionary to list
         sorted_workflows = sorted(
-            workflows_map.values(),
-            key=lambda w: (0 if w.status == WorkflowStatus.RUNNING else 1, w.start_time or 0)
+            workflows_map.values(), key=lambda w: (0 if w.status == WorkflowStatus.RUNNING else 1, w.start_time or 0)
         )
         return sorted_workflows
 
@@ -394,6 +393,7 @@ class MonitorDataFetcher:
         )
 
         # Removed _fetch_recent_workflows and _convert_workflow as they are replaced by the batch logic above
+
     def _fetch_queue_stats(self) -> QueueStats:
         """Fetch queue statistics."""
         if self.queue is None:

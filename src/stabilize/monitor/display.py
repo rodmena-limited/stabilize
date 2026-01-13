@@ -105,6 +105,12 @@ class MonitorDisplay:
         self.lines: list[dict] = []  # Store visible lines for selection mapping
         self._init_colors()
 
+        # Reduce ESC delay to make Escape key responsive
+        try:
+            curses.set_escdelay(25)
+        except Exception:
+            pass
+
         # Threading setup
         self.data_queue: queue.Queue = queue.Queue()
         self.fetcher_thread: DataFetcherThread | None = None
@@ -489,7 +495,7 @@ class MonitorDisplay:
 
             # Footer
             footer = (
-                f" Lines {offset+1}-{min(offset+m_height-2, total_lines)}/{total_lines} "
+                f" Lines {offset + 1}-{min(offset + m_height - 2, total_lines)}/{total_lines} "
                 "| Q/Esc to close | Up/Down/PgUp/PgDn "
             )
             if len(footer) > m_width - 4:
@@ -583,7 +589,7 @@ class MonitorDisplay:
         elif line_type == "empty":
             self._addstr(y, 0, line_info["text"], curses.A_DIM | base_attr)
         elif line_type == "blank":
-             self._addstr(y, 0, " " * (width - 1), base_attr)
+            self._addstr(y, 0, " " * (width - 1), base_attr)
         elif line_type == "workflow":
             self._render_workflow_line(y, width, line_info["data"], base_attr)
         elif line_type == "stage":

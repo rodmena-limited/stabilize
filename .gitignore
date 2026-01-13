@@ -17,6 +17,8 @@ eggs/
 lib/
 lib64/
 parts/
+.venv
+venv
 sdist/
 var/
 *.egg-info/
