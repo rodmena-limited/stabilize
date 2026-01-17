@@ -35,6 +35,7 @@ class StageView:
     status: WorkflowStatus
     start_time: int | None
     end_time: int | None
+    execution_id: str | None = None
     tasks: list[TaskView] = field(default_factory=list)
 
 
@@ -169,7 +170,7 @@ class MonitorDataFetcher:
         # ------------------
         if hasattr(self.store, "_pool"):
             # PostgreSQL
-            with self.store._pool.connection() as conn:  # type: ignore
+            with self.store._pool.connection() as conn:
                 with conn.cursor() as cur:
                     # Build Query
                     query, params = self._build_workflow_query(app_filter, limit, status_filter, dialect="postgres")
@@ -202,9 +203,9 @@ class MonitorDataFetcher:
                         # Temp map by ref_id for linking? No, need unique ID
                         stage_map[stage_view.ref_id] = stage_view
                         # Actually we need to attach to workflow immediately
-                        if stage_view.execution_id in workflows_map:  # type: ignore
-                            workflows_map[stage_view.execution_id].stages.append(stage_view)  # type: ignore
-                            stage_ids.append(row["id"])  # type: ignore
+                        if stage_view.execution_id in workflows_map:
+                            workflows_map[stage_view.execution_id].stages.append(stage_view)
+                            stage_ids.append(row["id"])
 
                     if not stage_ids:
                         return list(workflows_map.values())
@@ -229,17 +230,17 @@ class MonitorDataFetcher:
                             # We need the internal DB ID to link tasks, but StageView doesn't have it by default.
                             # We stored it in _row_to_stage_view temporarily
                             if hasattr(stage, "_db_id"):
-                                stage_lookup[stage._db_id] = stage  # type: ignore
+                                stage_lookup[stage._db_id] = stage
 
                     for row in task_rows:
                         task_view = self._row_to_task_view(row)
-                        stage_id = row["stage_id"]  # type: ignore
+                        stage_id = row["stage_id"]
                         if stage_id in stage_lookup:
                             stage_lookup[stage_id].tasks.append(task_view)
 
         elif hasattr(self.store, "_manager"):
             # SQLite
-            conn_mgr = self.store._manager  # type: ignore
+            conn_mgr = self.store._manager
             conn = conn_mgr.get_sqlite_connection(self.store.connection_string)  # type: ignore
             cursor = conn.cursor()
 
@@ -310,38 +311,54 @@ class MonitorDataFetcher:
 
     def _build_workflow_query(self, app: str | None, limit: int, status: str, dialect: str) -> tuple[str, Any]:
         """Build the SQL query for fetching workflows."""
-        clauses = []
-        params = {} if dialect == "postgres" else []
+        clauses: list[str] = []
 
-        if app:
-            clauses.append("application = %(app)s" if dialect == "postgres" else "application = ?")
-            if dialect == "postgres":
-                params["app"] = app
-            else:
-                params.append(app)  # type: ignore
-
-        if status == "running":
-            clauses.append("status = 'RUNNING'")
-        elif status == "failed":
-            clauses.append("status IN ('TERMINAL', 'FAILED_CONTINUE', 'CANCELED')")
-
-        where = "WHERE " + " AND ".join(clauses) if clauses else ""
-
-        limit_param = "%(limit)s" if dialect == "postgres" else "?"
         if dialect == "postgres":
-            params["limit"] = limit
-        else:
-            params.append(limit)  # type: ignore
+            pg_params: dict[str, Any] = {}
+            if app:
+                clauses.append("application = %(app)s")
+                pg_params["app"] = app
 
-        query = f"""
-            SELECT * FROM pipeline_executions
-            {where}
-            ORDER BY
-                CASE WHEN status = 'RUNNING' THEN 0 ELSE 1 END,
-                created_at DESC
-            LIMIT {limit_param}
-        """
-        return query, params
+            if status == "running":
+                clauses.append("status = 'RUNNING'")
+            elif status == "failed":
+                clauses.append("status IN ('TERMINAL', 'FAILED_CONTINUE', 'CANCELED')")
+
+            where = "WHERE " + " AND ".join(clauses) if clauses else ""
+            pg_params["limit"] = limit
+
+            query = f"""
+                SELECT * FROM pipeline_executions
+                {where}
+                ORDER BY
+                    CASE WHEN status = 'RUNNING' THEN 0 ELSE 1 END,
+                    created_at DESC
+                LIMIT %(limit)s
+            """
+            return query, pg_params
+        else:
+            sqlite_params: list[Any] = []
+            if app:
+                clauses.append("application = ?")
+                sqlite_params.append(app)
+
+            if status == "running":
+                clauses.append("status = 'RUNNING'")
+            elif status == "failed":
+                clauses.append("status IN ('TERMINAL', 'FAILED_CONTINUE', 'CANCELED')")
+
+            where = "WHERE " + " AND ".join(clauses) if clauses else ""
+            sqlite_params.append(limit)
+
+            query = f"""
+                SELECT * FROM pipeline_executions
+                {where}
+                ORDER BY
+                    CASE WHEN status = 'RUNNING' THEN 0 ELSE 1 END,
+                    created_at DESC
+                LIMIT ?
+            """
+            return query, sqlite_params
 
     def _row_to_workflow_view(self, row: Any) -> WorkflowView:
         return WorkflowView(
@@ -361,11 +378,11 @@ class MonitorDataFetcher:
             status=WorkflowStatus[row["status"]],
             start_time=row["start_time"],
             end_time=row["end_time"],
+            execution_id=row["execution_id"],
             tasks=[],
         )
         # Attach internal DB info for linking
-        view._db_id = row["id"]  # type: ignore
-        view.execution_id = row["execution_id"]  # type: ignore
+        view._db_id = row["id"]  # type: ignore[attr-defined]
         return view
 
     def _row_to_task_view(self, row: Any) -> TaskView:
@@ -402,8 +419,8 @@ class MonitorDataFetcher:
         try:
             # Try to get queue stats from the queue object
             if hasattr(self.queue, "_manager") and hasattr(self.queue, "connection_string"):
-                conn_mgr = self.queue._manager  # type: ignore[attr-defined]
-                conn = conn_mgr.get_sqlite_connection(self.queue.connection_string)  # type: ignore[attr-defined]
+                conn_mgr = self.queue._manager
+                conn = conn_mgr.get_sqlite_connection(self.queue.connection_string)
                 cursor = conn.cursor()
 
                 now = datetime.now().isoformat()

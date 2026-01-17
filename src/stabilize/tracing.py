@@ -36,10 +36,10 @@ try:
     OTEL_AVAILABLE = True
 except ImportError:
     OTEL_AVAILABLE = False
-    trace = None  # type: ignore
-    Span = None  # type: ignore
-    Status = None  # type: ignore
-    StatusCode = None  # type: ignore
+    trace = None  # type: ignore[assignment]
+    Span = None  # type: ignore[assignment, misc]
+    Status = None  # type: ignore[assignment, misc]
+    StatusCode = None  # type: ignore[assignment, misc]
 
 if TYPE_CHECKING:
     from opentelemetry.trace import Tracer

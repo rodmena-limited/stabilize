@@ -36,7 +36,7 @@ try:
     STRUCTLOG_AVAILABLE = True
 except ImportError:
     STRUCTLOG_AVAILABLE = False
-    structlog = None  # type: ignore
+    structlog = None  # type: ignore[assignment]
 
 
 _configured = False

@@ -460,7 +460,7 @@ class HTTPTask(Task):
         parse_json = context.get("parse_json", False)
 
         body: str = ""
-        body_json: dict | list | None = None
+        body_json: dict[str, Any] | list[Any] | None = None
 
         try:
             if download_to:

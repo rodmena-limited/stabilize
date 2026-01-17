@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 
 # =============================================================================
-# RAG PROMPT - Comprehensive documentation for AI coding agents
+# PROMPT - Comprehensive documentation for AI coding agents
 # =============================================================================
 
 PROMPT_TEXT = r'''
@@ -1672,7 +1672,7 @@ def mg_up(db_url: str | None = None) -> None:
 
 
 def prompt() -> None:
-    """Output comprehensive documentation for RAG systems and coding agents."""
+    """Output comprehensive documentation for AI coding agents."""
     print(PROMPT_TEXT)
 
 

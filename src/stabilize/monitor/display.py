@@ -45,7 +45,7 @@ class DataFetcherThread(threading.Thread):
     def __init__(
         self,
         fetcher: MonitorDataFetcher,
-        data_queue: queue.Queue,
+        data_queue: queue.Queue[MonitorData],
         refresh_interval: int,
         app_filter: str | None,
         status_filter: str,
@@ -103,7 +103,7 @@ class MonitorDisplay:
         self.selected_index = 0  # Selection cursor
         self._auto_follow = True  # Auto-scroll to keep selection in view
         self._initial_scroll_done = False  # Track if we've scrolled to end on startup
-        self.lines: list[dict] = []  # Store visible lines for selection mapping
+        self.lines: list[dict[str, Any]] = []  # Store visible lines for selection mapping
         self._init_colors()
 
         # Reduce ESC delay to make Escape key responsive
@@ -113,7 +113,7 @@ class MonitorDisplay:
             pass
 
         # Threading setup
-        self.data_queue: queue.Queue = queue.Queue()
+        self.data_queue: queue.Queue[MonitorData] = queue.Queue()
         self.fetcher_thread: DataFetcherThread | None = None
         self.current_data: MonitorData | None = None
 
@@ -327,7 +327,7 @@ class MonitorDisplay:
 
     # ... [Existing render methods] ...
 
-    def _get_selected_item(self) -> dict | None:
+    def _get_selected_item(self) -> dict[str, Any] | None:
         """Get the currently selected line item."""
         if 0 <= self.selected_index < len(self.lines):
             return self.lines[self.selected_index]
@@ -398,7 +398,7 @@ class MonitorDisplay:
                 title = f"Stage: {stage_view.name}"
                 # We need DB ID to fetch stage. StageView has _db_id attached in data.py
                 if hasattr(stage_view, "_db_id"):
-                    stage = self.data_fetcher.store.retrieve_stage(stage_view._db_id)  # type: ignore
+                    stage = self.data_fetcher.store.retrieve_stage(stage_view._db_id)
                     text = json.dumps(
                         {
                             "name": stage.name,
@@ -451,8 +451,8 @@ class MonitorDisplay:
         curses.curs_set(1)
         try:
             # Read bytes and decode
-            input_bytes = self.stdscr.getstr(height - 1, len(prompt))
-            return input_bytes.decode("utf-8").strip()
+            input_bytes: bytes = self.stdscr.getstr(height - 1, len(prompt))
+            return str(input_bytes.decode("utf-8").strip())
         except Exception:
             return None
         finally:
@@ -554,9 +554,9 @@ class MonitorDisplay:
 
         self._addstr(0, 0, header[: width - 1], curses.color_pair(PAIR_HEADER) | curses.A_BOLD)
 
-    def _build_line_metadata(self, data: MonitorData) -> list[dict]:
+    def _build_line_metadata(self, data: MonitorData) -> list[dict[str, Any]]:
         """Build metadata for all display lines."""
-        lines: list[dict] = []
+        lines: list[dict[str, Any]] = []
 
         if data.error:
             lines.append({"type": "error", "text": f"Error: {data.error}"})
@@ -583,7 +583,7 @@ class MonitorDisplay:
 
         return lines
 
-    def _render_line(self, y: int, width: int, line_info: dict, is_selected: bool) -> None:
+    def _render_line(self, y: int, width: int, line_info: dict[str, Any], is_selected: bool) -> None:
         """Render a single line based on its type."""
         line_type = line_info["type"]
 

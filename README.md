@@ -14,7 +14,6 @@ A lightweight Python workflow execution engine with DAG-based stage orchestratio
 ```bash
 pip install stabilize            # SQLite support only
 pip install stabilize[postgres]  # PostgreSQL support
-pip install stabilize[rag]       # RAG-powered pipeline generation
 pip install stabilize[all]       # All features
 ```
 
@@ -26,7 +25,6 @@ pip install stabilize[all]       # All features
 - PostgreSQL and SQLite persistence
 - Pluggable task system
 - Retry and timeout support
-- RAG-powered pipeline generation from natural language
 
 ## Quick Start
 
@@ -205,89 +203,13 @@ database:
   dbname: stabilize
 ```
 
-## RAG-Powered Pipeline Generation
-
-Stabilize includes an AI-powered assistant that generates pipeline code from natural language descriptions using RAG (Retrieval-Augmented Generation).
-
-### Requirements
-
-```bash
-pip install stabilize[rag]  # Installs ragit dependency
-```
-
-You also need:
-- **Local Ollama** (required for embeddings - ollama.com doesn't support embeddings API):
-  ```bash
-  # Install from https://ollama.com/download, then:
-  ollama serve                    # Start the server
-  ollama pull nomic-embed-text    # Download embedding model
-  ```
-- **Ollama API key** for LLM generation (uses ollama.com cloud)
-
-### Setup
-
-Create a `.env` file with your API key:
-
-```bash
-OLLAMA_API_KEY=your_api_key_here
-```
-
-Initialize the embedding cache:
-
-```bash
-# Initialize with default context (Stabilize docs + examples)
-stabilize rag init
-
-# Include your own code as additional training context
-stabilize rag init --additional-context /path/to/your/code/
-
-# Force regenerate embeddings
-stabilize rag init --force
-```
-
-### Generate Pipelines
-
-```bash
-# Generate a pipeline from natural language
-stabilize rag generate "create a pipeline that processes CSV files in parallel"
-
-# Save to file
-stabilize rag generate "build a CI/CD pipeline with test and deploy stages" > my_pipeline.py
-```
-
-### Clear Cache
-
-```bash
-stabilize rag clear
-```
-
-### Configuration
-
-Environment variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OLLAMA_API_KEY` | (required) | API key for ollama.com |
-| `OLLAMA_BASE_URL` | `https://ollama.com` | LLM endpoint URL |
-| `OLLAMA_EMBEDDING_URL` | `http://localhost:11434` | Local Ollama for embeddings |
-
-### Example
-
-```bash
-$ stabilize rag generate "create a hello world pipeline"
-
-from stabilize import Workflow, StageExecution, TaskExecution, Task, TaskResult
-...
-```
-
 ## CLI Reference
 
 ```
 stabilize mg-up [--db-url URL]      Apply pending PostgreSQL migrations
 stabilize mg-status [--db-url URL]  Show migration status
-stabilize rag init [--force] [--additional-context PATH]  Initialize RAG embeddings
-stabilize rag generate "prompt"     Generate pipeline from natural language
-stabilize rag clear                 Clear embedding cache
+stabilize monitor [--db-url URL]    Real-time workflow monitoring dashboard
+stabilize prompt                    Output documentation for pipeline code generation
 ```
 
 ## Naming Alignment with highway_dsl

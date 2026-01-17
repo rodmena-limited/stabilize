@@ -439,9 +439,9 @@ def assert_not_none(
 
 
 def assert_non_empty(
-    value: str | list | dict,
+    value: str | list[Any] | dict[str, Any],
     message: str,
-) -> str | list | dict:
+) -> str | list[Any] | dict[str, Any]:
     """
     Assert that a value is not empty.
 

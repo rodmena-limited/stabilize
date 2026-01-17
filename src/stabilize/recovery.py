@@ -178,7 +178,7 @@ class WorkflowRecovery:
         self,
         application: str | None,
         cutoff_time: int,
-    ) -> list:
+    ) -> list[Workflow]:
         """Get workflows that may need recovery.
 
         Args:

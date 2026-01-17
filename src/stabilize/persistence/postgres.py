@@ -655,7 +655,7 @@ class PostgresWorkflowStore(WorkflowStore):
                     """,
                     {"hours": max_age_hours},
                 )
-                deleted = cur.rowcount
+                deleted: int = cur.rowcount or 0
             conn.commit()
             return deleted
 

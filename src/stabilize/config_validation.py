@@ -336,7 +336,7 @@ class SchemaValidator:
 
     def _validate_array(
         self,
-        value: list,
+        value: list[Any],
         schema: dict[str, Any],
         path: str,
     ) -> list[ValidationError]:
@@ -389,7 +389,7 @@ class SchemaValidator:
 
     def _validate_object(
         self,
-        value: dict,
+        value: dict[str, Any],
         schema: dict[str, Any],
         path: str,
     ) -> list[ValidationError]:
