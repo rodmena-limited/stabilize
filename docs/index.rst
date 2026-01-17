@@ -5,7 +5,7 @@ Stabilize Documentation
    :target: https://pypi.org/project/stabilize/
    :alt: PyPI Version
 
-**Stabilize** is a lightweight, high-performance Python workflow engine designed for **massively parallel** execution and **"airport-grade" reliability**. It features a DAG-based orchestration model, robust concurrency control, and pluggable architecture.
+**Stabilize** is a lightweight, high-performance Python workflow engine designed for **massively parallel** execution and **"enterprise-grade" reliability**. It features a DAG-based orchestration model, robust concurrency control, and pluggable architecture.
 
 Key Features
 ------------
