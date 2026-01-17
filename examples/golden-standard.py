@@ -413,7 +413,7 @@ def setup_runner() -> tuple[SqliteWorkflowStore, SqliteQueue, QueueProcessor, Or
     handlers: list[Any] = [
         StartWorkflowHandler(queue, repository),
         StartStageHandler(queue, repository),
-        StartTaskHandler(queue, repository),
+        StartTaskHandler(queue, repository, task_registry),
         RunTaskHandler(queue, repository, task_registry),
         CompleteTaskHandler(queue, repository),
         CompleteStageHandler(queue, repository),

@@ -213,7 +213,7 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
     handlers: list[Any] = [
         StartWorkflowHandler(queue, store),
         StartStageHandler(queue, store),
-        StartTaskHandler(queue, store),
+        StartTaskHandler(queue, store, task_registry),
         RunTaskHandler(queue, store, task_registry),
         CompleteTaskHandler(queue, store),
         CompleteStageHandler(queue, store),

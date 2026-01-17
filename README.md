@@ -32,7 +32,8 @@ from stabilize import (
     SqliteWorkflowStore, SqliteQueue, QueueProcessor, Orchestrator,
     Task, TaskResult, TaskRegistry,
     StartWorkflowHandler, StartStageHandler, StartTaskHandler,
-    RunTaskHandler, CompleteTaskHandler, CompleteStageHandler, CompleteWorkflowHandler,
+    RunTaskHandler, CompleteTaskHandler, CompleteStageHandler,
+    CompleteWorkflowHandler, StartWaitingWorkflowsHandler,
 )
 
 # Define a custom task
@@ -76,8 +77,9 @@ registry.register("hello", HelloTask)
 processor = QueueProcessor(queue)
 for handler in [
     StartWorkflowHandler(queue, store),
+    StartWaitingWorkflowsHandler(queue, store),
     StartStageHandler(queue, store),
-    StartTaskHandler(queue, store),
+    StartTaskHandler(queue, store, registry),
     RunTaskHandler(queue, store, registry),
     CompleteTaskHandler(queue, store),
     CompleteStageHandler(queue, store),
