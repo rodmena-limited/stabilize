@@ -120,8 +120,8 @@ class PostgresWorkflowStore(WorkflowStore):
                     {"execution_id": execution_id},
                 )
 
-                stages_by_id = {}
-                stages = []
+                stages_by_id: dict[str, StageExecution] = {}
+                stages: list[StageExecution] = []
                 for stage_row in cur.fetchall():
                     stage = self._row_to_stage(cast(dict[str, Any], stage_row))
                     stage._execution = execution
@@ -140,12 +140,13 @@ class PostgresWorkflowStore(WorkflowStore):
                         {"stage_ids": stage_ids},
                     )
 
-                    for task_row in cur.fetchall():
-                        task = self._row_to_task(cast(dict[str, Any], task_row))
-                        stage = stages_by_id.get(task_row["stage_id"])
-                        if stage:
-                            task._stage = stage
-                            stage.tasks.append(task)
+                    for row in cur.fetchall():
+                        task_row = cast(dict[str, Any], row)
+                        task = self._row_to_task(task_row)
+                        stage_ref = stages_by_id.get(task_row["stage_id"])
+                        if stage_ref:
+                            task._stage = stage_ref
+                            stage_ref.tasks.append(task)
 
                 execution.stages = stages
                 return execution
@@ -1000,7 +1001,8 @@ class PostgresWorkflowStore(WorkflowStore):
             # But realistically for PostgresWorkflowStore, we need the queue to be passed
             # or we need to know how to push to the queue table if it's in the same DB.
             # Here we assume the caller provides the queue (like RunTaskHandler does).
-            yield from super().transaction(queue)
+            with super().transaction(queue) as txn:
+                yield txn
             return
 
         with self._pool.connection() as conn:

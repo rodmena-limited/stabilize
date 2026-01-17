@@ -79,6 +79,7 @@ from stabilize.handlers import (
     StabilizeHandler,
     StartStageHandler,
     StartTaskHandler,
+    StartWaitingWorkflowsHandler,
     StartWorkflowHandler,
 )
 
@@ -167,6 +168,7 @@ __all__ = [
     "StartWorkflowHandler",
     "StartStageHandler",
     "StartTaskHandler",
+    "StartWaitingWorkflowsHandler",
     "RunTaskHandler",
     "CompleteTaskHandler",
     "CompleteStageHandler",

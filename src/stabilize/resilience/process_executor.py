@@ -42,7 +42,7 @@ class ProcessResult:
 def _worker_wrapper(
     task: Task,
     stage_data: dict[str, Any],
-    queue: multiprocessing.Queue,
+    queue: multiprocessing.Queue[ProcessResult],
 ) -> None:
     """
     Worker function that runs in the separate process.
