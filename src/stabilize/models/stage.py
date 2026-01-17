@@ -88,6 +88,7 @@ class StageExecution:
     end_time: int | None = None
     start_time_expiry: int | None = None
     scheduled_time: int | None = None
+    version: int = 0
 
     # Back-reference to parent execution (set after construction)
     _execution: Workflow | None = field(default=None, repr=False)

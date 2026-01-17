@@ -8,8 +8,11 @@ or stage completion.
 from __future__ import annotations
 
 import logging
+import random
+import time
 from typing import TYPE_CHECKING
 
+from stabilize.errors import ConcurrencyError
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.queue.messages import (
     CompleteStage,
@@ -43,7 +46,38 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
 
         Uses atomic transactions to ensure stage updates and message pushes
         are committed together, preventing orphaned states.
+
+        Retries on ConcurrencyError (optimistic lock failure).
         """
+        max_retries = 3
+
+        for attempt in range(max_retries + 1):
+            try:
+                self._handle_with_retry(message)
+                return
+            except ConcurrencyError:
+                if attempt == max_retries:
+                    logger.error(
+                        "Failed to update task after %d attempts due to contention (execution=%s, stage=%s, task=%s)",
+                        max_retries,
+                        message.execution_id,
+                        message.stage_id,
+                        message.task_id,
+                    )
+                    raise
+
+                # Randomized exponential backoff
+                backoff = (0.1 * (2**attempt)) + (random.random() * 0.1)
+                logger.warning(
+                    "Concurrency error updating task, retrying in %.2fs (attempt %d/%d)",
+                    backoff,
+                    attempt + 1,
+                    max_retries,
+                )
+                time.sleep(backoff)
+
+    def _handle_with_retry(self, message: CompleteTask) -> None:
+        """Inner handle logic to be retried."""
 
         def on_task(stage: StageExecution, task: TaskExecution) -> None:
             # Update task status
@@ -58,6 +92,14 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
             # Atomic: store stage + push next message together
             with self.repository.transaction(self.queue) as txn:
                 txn.store_stage(stage)
+
+                # Atomic deduplication
+                if message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="CompleteTask",
+                        execution_id=message.execution_id,
+                    )
 
                 if next_task is not None:
                     txn.push_message(

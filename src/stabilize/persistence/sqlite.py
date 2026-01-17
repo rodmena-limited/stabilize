@@ -18,9 +18,10 @@ import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from stabilize.errors import ConcurrencyError
 from stabilize.models.stage import StageExecution, SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.task import TaskExecution
@@ -119,7 +120,7 @@ class SqliteWorkflowStore(WorkflowStore):
             max_concurrent_executions INTEGER DEFAULT 0,
             keep_waiting_pipelines INTEGER DEFAULT 0,
             origin TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
+            created_at TEXT DEFAULT (datetime('now', 'utc'))
         );
 
         CREATE TABLE IF NOT EXISTS stage_executions (
@@ -138,6 +139,7 @@ class SqliteWorkflowStore(WorkflowStore):
             end_time INTEGER,
             start_time_expiry INTEGER,
             scheduled_time INTEGER,
+            version INTEGER DEFAULT 0,
             UNIQUE(execution_id, ref_id)
         );
 
@@ -161,12 +163,12 @@ class SqliteWorkflowStore(WorkflowStore):
             message_id TEXT NOT NULL UNIQUE,
             message_type TEXT NOT NULL,
             payload TEXT NOT NULL,
-            deliver_at TEXT NOT NULL DEFAULT (datetime('now')),
+            deliver_at TEXT NOT NULL DEFAULT (datetime('now', 'utc')),
             attempts INTEGER DEFAULT 0,
             max_attempts INTEGER DEFAULT 10,
             locked_until TEXT,
             version INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT (datetime('now'))
+            created_at TEXT DEFAULT (datetime('now', 'utc'))
         );
 
         CREATE INDEX IF NOT EXISTS idx_execution_application
@@ -186,7 +188,7 @@ class SqliteWorkflowStore(WorkflowStore):
 
         CREATE TABLE IF NOT EXISTS processed_messages (
             message_id TEXT PRIMARY KEY,
-            processed_at TEXT NOT NULL DEFAULT (datetime('now')),
+            processed_at TEXT NOT NULL DEFAULT (datetime('now', 'utc')),
             handler_type TEXT,
             execution_id TEXT
         );
@@ -339,16 +341,17 @@ class SqliteWorkflowStore(WorkflowStore):
         exists = result.fetchone() is not None
 
         if exists:
-            # Update
-            conn.execute(
+            # Update with optimistic locking
+            cursor = conn.execute(
                 """
                 UPDATE stage_executions SET
                     status = :status,
                     context = :context,
                     outputs = :outputs,
                     start_time = :start_time,
-                    end_time = :end_time
-                WHERE id = :id
+                    end_time = :end_time,
+                    version = version + 1
+                WHERE id = :id AND version = :version
                 """,
                 {
                     "id": stage.id,
@@ -357,8 +360,15 @@ class SqliteWorkflowStore(WorkflowStore):
                     "outputs": json.dumps(stage.outputs),
                     "start_time": stage.start_time,
                     "end_time": stage.end_time,
+                    "version": stage.version,
                 },
             )
+
+            if cursor.rowcount == 0:
+                raise ConcurrencyError(f"Optimistic lock failed for stage {stage.id} (version {stage.version})")
+
+            # Update local version
+            stage.version += 1
 
             # Update tasks
             for task in stage.tasks:
@@ -776,7 +786,7 @@ class SqliteWorkflowStore(WorkflowStore):
             INSERT OR IGNORE INTO processed_messages (
                 message_id, processed_at, handler_type, execution_id
             ) VALUES (
-                :message_id, datetime('now'), :handler_type, :execution_id
+                :message_id, datetime('now', 'utc'), :handler_type, :execution_id
             )
             """,
             {
@@ -790,7 +800,7 @@ class SqliteWorkflowStore(WorkflowStore):
     def cleanup_old_processed_messages(self, max_age_hours: float = 24.0) -> int:
         """Clean up old processed message records."""
         conn = self._get_connection()
-        cutoff = datetime.now() - timedelta(hours=max_age_hours)
+        cutoff = datetime.now(UTC) - timedelta(hours=max_age_hours)
         cursor = conn.execute(
             "DELETE FROM processed_messages WHERE processed_at < :cutoff",
             {"cutoff": cutoff.isoformat()},
@@ -807,12 +817,12 @@ class SqliteWorkflowStore(WorkflowStore):
             INSERT INTO stage_executions (
                 id, execution_id, ref_id, type, name, status, context, outputs,
                 requisite_stage_ref_ids, parent_stage_id, synthetic_stage_owner,
-                start_time, end_time, start_time_expiry, scheduled_time
+                start_time, end_time, start_time_expiry, scheduled_time, version
             ) VALUES (
                 :id, :execution_id, :ref_id, :type, :name, :status,
                 :context, :outputs, :requisite_stage_ref_ids,
                 :parent_stage_id, :synthetic_stage_owner, :start_time,
-                :end_time, :start_time_expiry, :scheduled_time
+                :end_time, :start_time_expiry, :scheduled_time, :version
             )
             """,
             {
@@ -831,6 +841,7 @@ class SqliteWorkflowStore(WorkflowStore):
                 "end_time": stage.end_time,
                 "start_time_expiry": stage.start_time_expiry,
                 "scheduled_time": stage.scheduled_time,
+                "version": stage.version,
             },
         )
 
@@ -962,6 +973,7 @@ class SqliteWorkflowStore(WorkflowStore):
             end_time=row["end_time"],
             start_time_expiry=row["start_time_expiry"],
             scheduled_time=row["scheduled_time"],
+            version=row["version"],
         )
 
     def _row_to_task(self, row: sqlite3.Row) -> TaskExecution:
@@ -1097,16 +1109,17 @@ class AtomicTransaction(StoreTransaction):
         exists = result.fetchone() is not None
 
         if exists:
-            # Update
-            self._conn.execute(
+            # Update with optimistic locking
+            cursor = self._conn.execute(
                 """
                 UPDATE stage_executions SET
                     status = :status,
                     context = :context,
                     outputs = :outputs,
                     start_time = :start_time,
-                    end_time = :end_time
-                WHERE id = :id
+                    end_time = :end_time,
+                    version = version + 1
+                WHERE id = :id AND version = :version
                 """,
                 {
                     "id": stage.id,
@@ -1115,8 +1128,15 @@ class AtomicTransaction(StoreTransaction):
                     "outputs": json.dumps(stage.outputs),
                     "start_time": stage.start_time,
                     "end_time": stage.end_time,
+                    "version": stage.version,
                 },
             )
+
+            if cursor.rowcount == 0:
+                raise ConcurrencyError(f"Optimistic lock failed for stage {stage.id} (version {stage.version})")
+
+            # Update local version to reflect change
+            stage.version += 1
 
             # Update tasks
             for task in stage.tasks:
@@ -1142,7 +1162,7 @@ class AtomicTransaction(StoreTransaction):
 
         from stabilize.queue.messages import get_message_type_name
 
-        deliver_at = datetime.now()
+        deliver_at = datetime.now(UTC)
         if delay > 0:
             deliver_at = deliver_at + timedelta(seconds=delay)
 
@@ -1181,6 +1201,28 @@ class AtomicTransaction(StoreTransaction):
                 "payload": payload,
                 "deliver_at": deliver_at.isoformat(),
                 "max_attempts": getattr(message, "max_attempts", 10),
+            },
+        )
+
+    def mark_message_processed(
+        self,
+        message_id: str,
+        handler_type: str | None = None,
+        execution_id: str | None = None,
+    ) -> None:
+        """Mark a message as successfully processed within the transaction."""
+        self._conn.execute(
+            """
+            INSERT OR IGNORE INTO processed_messages (
+                message_id, processed_at, handler_type, execution_id
+            ) VALUES (
+                :message_id, datetime('now', 'utc'), :handler_type, :execution_id
+            )
+            """,
+            {
+                "message_id": message_id,
+                "handler_type": handler_type,
+                "execution_id": execution_id,
             },
         )
 

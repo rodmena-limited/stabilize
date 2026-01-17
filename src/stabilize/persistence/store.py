@@ -451,6 +451,21 @@ class StoreTransaction(ABC):
         """Push a message to the queue within the transaction."""
         pass
 
+    @abstractmethod
+    def mark_message_processed(
+        self,
+        message_id: str,
+        handler_type: str | None = None,
+        execution_id: str | None = None,
+    ) -> None:
+        """
+        Mark a message as successfully processed within the transaction.
+
+        This ensures that message processing is only marked complete if
+        the transaction commits successfully.
+        """
+        pass
+
 
 class NoOpTransaction(StoreTransaction):
     """Default transaction that just delegates to normal store methods.
@@ -479,6 +494,15 @@ class NoOpTransaction(StoreTransaction):
         successfully. If an exception occurs, messages are not pushed.
         """
         self._pending_messages.append((message, delay))
+
+    def mark_message_processed(
+        self,
+        message_id: str,
+        handler_type: str | None = None,
+        execution_id: str | None = None,
+    ) -> None:
+        """Mark message processed (commits immediately in no-op mode)."""
+        self._store.mark_message_processed(message_id, handler_type, execution_id)
 
     def _flush_messages(self) -> None:
         """Flush pending messages to the queue.

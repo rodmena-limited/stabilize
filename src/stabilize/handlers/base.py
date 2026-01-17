@@ -128,7 +128,7 @@ class StabilizeHandler(MessageHandler[M], ABC):
             )
         except Exception as e:
             logger.error("Failed to retrieve stage %s: %s", message.stage_id, e)
-            # Should we retry or fail? For now, log error.
+            raise
 
     def with_task(
         self,

@@ -59,6 +59,7 @@ class TaskExecution:
     loop_start: bool = False
     loop_end: bool = False
     task_exception_details: dict[str, Any] = field(default_factory=dict)
+    version: int = 0
 
     # Back-reference to parent stage (set after construction)
     _stage: StageExecution | None = field(default=None, repr=False)

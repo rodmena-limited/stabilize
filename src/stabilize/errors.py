@@ -171,6 +171,16 @@ class ConfigurationError(StabilizeError):
     code: int = 104
 
 
+class ConcurrencyError(TransientError):
+    """Optimistic locking failure.
+
+    Raised when a database update fails because the version changed
+    concurrently. This is a transient error and should be retried.
+    """
+
+    code: int = 105
+
+
 class TaskError(StabilizeError):
     """Task execution failed.
 

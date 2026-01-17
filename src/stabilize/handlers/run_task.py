@@ -11,6 +11,7 @@ resilient_circuit for circuit breaker protection.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -28,6 +29,7 @@ from stabilize.resilience.bulkheads import TaskBulkheadManager
 from stabilize.resilience.circuits import WorkflowCircuitFactory
 from stabilize.resilience.config import ResilienceConfig
 from stabilize.resilience.executor import execute_with_resilience
+from stabilize.resilience.process_executor import ProcessIsolatedTaskExecutor
 from stabilize.tasks.interface import RetryableTask, Task
 from stabilize.tasks.registry import TaskNotFoundError, TaskRegistry
 from stabilize.tasks.result import TaskResult
@@ -75,6 +77,10 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
     ) -> None:
         super().__init__(queue, repository, retry_delay)
         self.task_registry = task_registry
+
+        # Check isolation mode
+        self.isolation_mode = os.environ.get("STABILIZE_ISOLATION_MODE", "thread").lower()
+        self.process_executor = ProcessIsolatedTaskExecutor() if self.isolation_mode == "process" else None
 
         # Initialize resilience components with defaults if not provided
         if bulkhead_manager is None or circuit_factory is None:
@@ -230,12 +236,20 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             task_type=message.task_type,
         )
 
+        # Define the execution function (process-isolated or direct)
+        def execute_task(s: StageExecution) -> TaskResult:
+            if self.process_executor:
+                # Update timeout for process executor to match task timeout
+                self.process_executor.timeout_seconds = timeout.total_seconds()
+                return self.process_executor.execute(task, s)
+            return task.execute(s)
+
         # Execute through bulkhead with circuit breaker protection
         return execute_with_resilience(
             bulkhead_manager=self.bulkhead_manager,
             circuit=circuit,
             task_type=message.task_type,
-            func=task.execute,
+            func=execute_task,
             func_args=(stage,),
             timeout=timeout.total_seconds(),
             task_name=task_name,

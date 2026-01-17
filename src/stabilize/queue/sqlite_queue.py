@@ -18,7 +18,7 @@ import logging
 import sqlite3
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from stabilize.queue.messages import (
@@ -104,12 +104,12 @@ class SqliteQueue(Queue):
                 message_id TEXT NOT NULL UNIQUE,
                 message_type TEXT NOT NULL,
                 payload TEXT NOT NULL,
-                deliver_at TEXT NOT NULL DEFAULT (datetime('now')),
+                deliver_at TEXT NOT NULL DEFAULT (datetime('now', 'utc')),
                 attempts INTEGER DEFAULT 0,
                 max_attempts INTEGER DEFAULT 10,
                 locked_until TEXT,
                 version INTEGER DEFAULT 0,
-                created_at TEXT DEFAULT (datetime('now'))
+                created_at TEXT DEFAULT (datetime('now', 'utc'))
             )
         """
         )
@@ -138,8 +138,8 @@ class SqliteQueue(Queue):
                 attempts INTEGER,
                 error TEXT,
                 last_error_at TEXT,
-                created_at TEXT DEFAULT (datetime('now')),
-                moved_at TEXT DEFAULT (datetime('now'))
+                created_at TEXT DEFAULT (datetime('now', 'utc')),
+                moved_at TEXT DEFAULT (datetime('now', 'utc'))
             )
         """
         )
@@ -197,10 +197,11 @@ class SqliteQueue(Queue):
         self,
         message: Message,
         delay: timedelta | None = None,
+        connection: Any | None = None,
     ) -> None:
         """Push a message onto the queue."""
         conn = self._get_connection()
-        deliver_at = datetime.now()
+        deliver_at = datetime.now(UTC)
         if delay:
             deliver_at += delay
 
@@ -253,15 +254,15 @@ class SqliteQueue(Queue):
             The claimed message or None if no message available
         """
         conn = self._get_connection()
-        locked_until = datetime.now() + self.lock_duration
+        locked_until = datetime.now(UTC) + self.lock_duration
 
         # Step 1: Find a candidate message
         result = conn.execute(
             f"""
             SELECT id, message_type, payload, attempts, version
             FROM {self.table_name}
-            WHERE datetime(deliver_at) <= datetime('now')
-            AND (locked_until IS NULL OR datetime(locked_until) < datetime('now'))
+            WHERE datetime(deliver_at) <= datetime('now', 'utc')
+            AND (locked_until IS NULL OR datetime(locked_until) < datetime('now', 'utc'))
             AND attempts < :max_attempts
             ORDER BY deliver_at
             LIMIT 1
@@ -352,7 +353,7 @@ class SqliteQueue(Queue):
             return
 
         msg_id = int(message.message_id)
-        deliver_at = datetime.now() + delay
+        deliver_at = datetime.now(UTC) + delay
         conn = self._get_connection()
 
         conn.execute(
@@ -427,7 +428,7 @@ class SqliteQueue(Queue):
                 attempts, error, last_error_at, created_at
             ) VALUES (
                 :original_id, :message_id, :message_type, :payload,
-                :attempts, :error, datetime('now'), :created_at
+                :attempts, :error, datetime('now', 'utc'), :created_at
             )
             """,
             {
@@ -521,7 +522,7 @@ class SqliteQueue(Queue):
             INSERT INTO {self.table_name} (
                 message_id, message_type, payload, deliver_at, attempts
             ) VALUES (
-                :message_id, :message_type, :payload, datetime('now'), 0
+                :message_id, :message_type, :payload, datetime('now', 'utc'), 0
             )
             """,
             {

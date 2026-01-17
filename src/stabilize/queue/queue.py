@@ -41,6 +41,7 @@ class Queue(ABC):
         self,
         message: Message,
         delay: timedelta | None = None,
+        connection: Any | None = None,
     ) -> None:
         """
         Push a message onto the queue.
@@ -48,6 +49,7 @@ class Queue(ABC):
         Args:
             message: The message to push
             delay: Optional delay before message is delivered
+            connection: Optional database connection for atomic transactions
         """
         pass
 
@@ -164,6 +166,7 @@ class InMemoryQueue(Queue):
         self,
         message: Message,
         delay: timedelta | None = None,
+        connection: Any | None = None,
     ) -> None:
         """Push a message onto the queue."""
         with self._lock:
@@ -362,6 +365,7 @@ class PostgresQueue(Queue):
         self,
         message: Message,
         delay: timedelta | None = None,
+        connection: Any | None = None,
     ) -> None:
         """Push a message onto the queue."""
         pool = self._get_pool()
@@ -373,8 +377,10 @@ class PostgresQueue(Queue):
         message_id = str(uuid.uuid4())
         payload = self._serialize_message(message)
 
-        with pool.connection() as conn:
-            with conn.cursor() as cur:
+        # Use provided connection or get one from pool
+        # If provided, caller handles commit/rollback
+        if connection:
+            with connection.cursor() as cur:
                 cur.execute(
                     f"""
                     INSERT INTO {self.table_name}
@@ -388,7 +394,23 @@ class PostgresQueue(Queue):
                         "deliver_at": deliver_at,
                     },
                 )
-            conn.commit()
+        else:
+            with pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""
+                        INSERT INTO {self.table_name}
+                        (message_id, message_type, payload, deliver_at, attempts)
+                        VALUES (%(message_id)s, %(type)s, %(payload)s::jsonb, %(deliver_at)s, 0)
+                        """,
+                        {
+                            "message_id": message_id,
+                            "type": message_type,
+                            "payload": payload,
+                            "deliver_at": deliver_at,
+                        },
+                    )
+                conn.commit()
 
     def poll(self, callback: Callable[[Message], None]) -> None:
         """Poll for a message and process it with the callback."""

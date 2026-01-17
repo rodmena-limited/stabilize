@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from stabilize.audit import audit
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
@@ -99,6 +100,20 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
         execution.status = WorkflowStatus.RUNNING
         execution.start_time = self.current_time_millis()
         self.repository.update_status(execution)
+
+        # Audit log
+        audit(
+            event_type="WORKFLOW_LIFECYCLE",
+            action="START",
+            user=execution.trigger.user or "system",
+            resource_type="workflow",
+            resource_id=execution.id,
+            details={
+                "application": execution.application,
+                "name": execution.name,
+                "initial_stages": len(initial_stages),
+            },
+        )
 
         # Queue all initial stages
         for stage in initial_stages:
