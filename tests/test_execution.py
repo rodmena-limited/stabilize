@@ -12,6 +12,7 @@ from stabilize import (
     StageExecution,
     StartStageHandler,
     StartTaskHandler,
+    StartWaitingWorkflowsHandler,
     StartWorkflowHandler,
     Task,
     TaskExecution,
@@ -69,8 +70,9 @@ def setup_stabilize() -> tuple[
 
     handlers: list[Any] = [
         StartWorkflowHandler(queue, repository),
+        StartWaitingWorkflowsHandler(queue, repository),
         StartStageHandler(queue, repository),
-        StartTaskHandler(queue, repository),
+        StartTaskHandler(queue, repository, task_registry),
         RunTaskHandler(queue, repository, task_registry),
         CompleteTaskHandler(queue, repository),
         CompleteStageHandler(queue, repository),

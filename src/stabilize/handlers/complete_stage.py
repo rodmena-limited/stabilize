@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from stabilize.dag.graph import StageGraphBuilder
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
@@ -21,6 +22,7 @@ from stabilize.queue.messages import (
     CompleteWorkflow,
     StartStage,
 )
+from stabilize.stages.builder import get_default_factory
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -198,22 +200,32 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
         self.with_stage(message, on_stage)
 
     def _plan_after_stages(self, stage: StageExecution) -> None:
-        """
-        Plan after stages using the stage definition builder.
+        """Plan after stages using the stage definition builder."""
+        builder = get_default_factory().get(stage.type)
+        graph = StageGraphBuilder.after_stages(stage)
+        builder.after_stages(stage, graph)
 
-        TODO: Implement StageDefinitionBuilder integration
-        """
-        # For now, do nothing - after stages should be pre-defined
-        pass
+        for s in graph.build():
+            s.execution = stage.execution
+            self.repository.add_stage(s)
 
     def _plan_on_failure_stages(self, stage: StageExecution) -> bool:
         """
         Plan on-failure stages using the stage definition builder.
 
-        TODO: Implement StageDefinitionBuilder integration
-
         Returns:
             True if on-failure stages were added
         """
-        # For now, return False - no on-failure stages
-        return False
+        builder = get_default_factory().get(stage.type)
+        graph = StageGraphBuilder.after_stages(stage)
+        builder.on_failure_stages(stage, graph)
+
+        new_stages = graph.build()
+        if not new_stages:
+            return False
+
+        for s in new_stages:
+            s.execution = stage.execution
+            self.repository.add_stage(s)
+
+        return True

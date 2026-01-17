@@ -9,6 +9,7 @@ from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
 from stabilize.handlers.run_task import RunTaskHandler
 from stabilize.handlers.start_stage import StartStageHandler
 from stabilize.handlers.start_task import StartTaskHandler
+from stabilize.handlers.start_waiting_workflows import StartWaitingWorkflowsHandler
 from stabilize.handlers.start_workflow import StartWorkflowHandler
 
 __all__ = [
@@ -17,6 +18,7 @@ __all__ = [
     "StartWorkflowHandler",
     "StartStageHandler",
     "StartTaskHandler",
+    "StartWaitingWorkflowsHandler",
     "RunTaskHandler",
     "CompleteTaskHandler",
     "CompleteStageHandler",
@@ -41,8 +43,9 @@ def register_all_handlers(
     """
     handlers = [
         StartWorkflowHandler(queue, repository),
+        StartWaitingWorkflowsHandler(queue, repository),
         StartStageHandler(queue, repository),
-        StartTaskHandler(queue, repository),
+        StartTaskHandler(queue, repository, task_registry),
         RunTaskHandler(queue, repository, task_registry),
         CompleteTaskHandler(queue, repository),
         CompleteStageHandler(queue, repository),

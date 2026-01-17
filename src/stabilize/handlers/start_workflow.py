@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from stabilize.audit import audit
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
+from stabilize.persistence.store import WorkflowCriteria
 from stabilize.queue.messages import (
     CancelWorkflow,
     StartStage,
@@ -72,14 +73,42 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
                 )
                 return
 
-            # TODO: Check if should queue (concurrent execution limits)
-            # if execution.should_queue():
-            #     self.pending_execution_service.enqueue(execution.pipeline_config_id, message)
-            #     return
+            # Check if should queue (concurrent execution limits)
+            if self._should_queue(execution):
+                logger.info(
+                    "Execution %s queued due to concurrent execution limit (limit=%d)",
+                    execution.id,
+                    execution.max_concurrent_executions,
+                )
+                execution.status = WorkflowStatus.BUFFERED
+                self.repository.update_status(execution)
+                return
 
             self._start(execution, message)
 
         self.with_execution(message, on_execution)
+
+    def _should_queue(self, execution: Workflow) -> bool:
+        """Check if execution should be queued due to concurrency limits."""
+        if not execution.is_limit_concurrent or not execution.pipeline_config_id:
+            return False
+
+        if execution.max_concurrent_executions <= 0:
+            return False
+
+        # Count currently running executions for this pipeline config
+        criteria = WorkflowCriteria(
+            statuses={WorkflowStatus.RUNNING},
+            page_size=execution.max_concurrent_executions + 1,  # Fetch just enough to check limit
+        )
+
+        running_count = 0
+        for _ in self.repository.retrieve_by_pipeline_config_id(execution.pipeline_config_id, criteria):
+            running_count += 1
+            if running_count >= execution.max_concurrent_executions:
+                return True
+
+        return False
 
     def _start(
         self,

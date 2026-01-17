@@ -11,7 +11,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from stabilize.dag.graph import StageGraphBuilder
 from stabilize.handlers.base import StabilizeHandler
+from stabilize.models.stage import SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
     CompleteStage,
@@ -20,6 +22,7 @@ from stabilize.queue.messages import (
     StartStage,
     StartTask,
 )
+from stabilize.stages.builder import get_default_factory
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -183,11 +186,6 @@ class StartStageHandler(StabilizeHandler[StartStage]):
     def _plan_stage(self, stage: StageExecution) -> None:
         """
         Plan the stage - build tasks and before stages.
-
-        This is where StageDefinitionBuilder.buildTasks() and
-        buildBeforeStages() would be called.
-
-        For now, we assume tasks are already defined on the stage.
         """
         # Hydrate context with ancestor outputs
         # This ensures tasks have access to upstream data even with partial loading
@@ -206,15 +204,34 @@ class StartStageHandler(StabilizeHandler[StartStage]):
 
         stage.context = merged
 
+        # Get builder
+        builder = get_default_factory().get(stage.type)
+
+        # Build tasks if none exist
+        if not stage.tasks:
+            stage.tasks = builder.build_tasks(stage)
+
         # Mark first and last tasks
         if stage.tasks:
             stage.tasks[0].stage_start = True
             stage.tasks[-1].stage_end = True
 
-        # TODO: Call stage definition builder to:
-        # 1. Build tasks
-        # 2. Build before stages
-        # 3. Add context flags
+        # Build before stages
+        graph = StageGraphBuilder.before_stages(stage)
+        builder.before_stages(stage, graph)
+
+        # Save any new synthetic stages
+        for s in graph.build():
+            # If not already in repository, add it
+            # (StageGraphBuilder adds to execution.stages, but we need to persist)
+            # Actually StageGraphBuilder usually just modifies the object graph.
+            # We need to explicitly store new stages.
+            # Assuming graph.build() returns new stages.
+            s.execution = stage.execution  # Ensure backref
+            self.repository.add_stage(s)
+
+        # Add context flags
+        builder.add_context_flags(stage)
 
     def _start_stage(
         self,
@@ -230,7 +247,6 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         3. After stages (if any)
         4. Complete stage
         """
-        from stabilize.models.stage import SyntheticStageOwner
 
         # Fetch synthetic stages
         synthetic_stages = self.repository.get_synthetic_stages(stage.execution.id, stage.id)

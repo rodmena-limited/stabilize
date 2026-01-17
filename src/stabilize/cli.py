@@ -62,7 +62,7 @@ from stabilize import (
     # Handlers
     StartWorkflowHandler, StartStageHandler, StartTaskHandler,
     RunTaskHandler, CompleteTaskHandler, CompleteStageHandler,
-    CompleteWorkflowHandler,
+    CompleteWorkflowHandler, StartWaitingWorkflowsHandler,
 )
 
 
@@ -97,8 +97,9 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
     # Register all handlers in order
     handlers = [
         StartWorkflowHandler(queue, store),
+        StartWaitingWorkflowsHandler(queue, store),
         StartStageHandler(queue, store),
-        StartTaskHandler(queue, store),
+        StartTaskHandler(queue, store, task_registry),
         RunTaskHandler(queue, store, task_registry),
         CompleteTaskHandler(queue, store),
         CompleteStageHandler(queue, store),

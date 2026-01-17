@@ -29,6 +29,7 @@ from stabilize import (
     StageExecution,
     StartStageHandler,
     StartTaskHandler,
+    StartWaitingWorkflowsHandler,
     StartWorkflowHandler,
     TaskExecution,
     TaskRegistry,
@@ -53,8 +54,9 @@ def workflow_engine():
     processor = QueueProcessor(queue)
     handlers = [
         StartWorkflowHandler(queue, store),
+        StartWaitingWorkflowsHandler(queue, store),
         StartStageHandler(queue, store),
-        StartTaskHandler(queue, store),
+        StartTaskHandler(queue, store, registry),
         RunTaskHandler(queue, store, registry),
         CompleteTaskHandler(queue, store),
         CompleteStageHandler(queue, store),
