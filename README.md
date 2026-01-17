@@ -1,8 +1,6 @@
 # Stabilize
 
-Highway Workflow Engine - Stabilize execution layer.
-
-A lightweight Python workflow execution engine with DAG-based stage orchestration.
+A lightweight full featured Python workflow execution engine with DAG-based stage orchestration.
 
 ## Requirements
 
@@ -211,15 +209,6 @@ stabilize mg-status [--db-url URL]  Show migration status
 stabilize monitor [--db-url URL]    Real-time workflow monitoring dashboard
 stabilize prompt                    Output documentation for pipeline code generation
 ```
-
-## Naming Alignment with highway_dsl
-
-| highway_dsl | stabilize |
-|-------------|-----------|
-| Workflow | Workflow |
-| TaskOperator | Task interface |
-| RetryPolicy | RetryableTask |
-| TimeoutPolicy | OverridableTimeoutRetryableTask |
 
 ## Running Tests
 
