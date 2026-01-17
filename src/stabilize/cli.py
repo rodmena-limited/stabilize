@@ -1744,85 +1744,6 @@ def monitor(
     )
 
 
-def rag_init(
-    db_url: str | None = None,
-    force: bool = False,
-    additional_context: list[str] | None = None,
-) -> None:
-    """Initialize RAG embeddings from examples, documentation, and additional context."""
-    try:
-        from stabilize.rag import StabilizeRAG, get_cache
-    except ImportError:
-        print("Error: RAG support requires: pip install stabilize[rag]")
-        sys.exit(1)
-
-    cache = get_cache(db_url)
-    rag = StabilizeRAG(cache)
-
-    print("Initializing embeddings...")
-    count = rag.init(force=force, additional_paths=additional_context)
-    if count > 0:
-        print(f"Cached {count} embeddings")
-    else:
-        print("Embeddings already initialized (use --force to regenerate)")
-
-
-def rag_clear(db_url: str | None = None) -> None:
-    """Clear all cached embeddings."""
-    try:
-        from stabilize.rag import get_cache
-    except ImportError:
-        print("Error: RAG support requires: pip install stabilize[rag]")
-        sys.exit(1)
-
-    cache = get_cache(db_url)
-    cache.clear()
-    print("Embedding cache cleared")
-
-
-def rag_generate(
-    prompt_text: str,
-    db_url: str | None = None,
-    execute: bool = False,
-    top_k: int = 5,
-    temperature: float = 0.3,
-    llm_model: str | None = None,
-) -> None:
-    """Generate pipeline code from natural language prompt."""
-    try:
-        from stabilize.rag import StabilizeRAG, get_cache
-    except ImportError:
-        print("Error: RAG support requires: pip install stabilize[rag]")
-        sys.exit(1)
-
-    cache = get_cache(db_url)
-    rag = StabilizeRAG(cache, llm_model=llm_model)
-
-    try:
-        code = rag.generate(prompt_text, top_k=top_k, temperature=temperature)
-    except RuntimeError as e:
-        print(f"Error: {e}")
-        sys.exit(1)
-
-    print(code)
-
-    if execute:
-        print("\n--- Executing generated code ---\n")
-        try:
-            exec(code, {"__name__": "__main__"})
-        except ImportError as e:
-            print("\n--- Execution failed: Import error ---")
-            print(f"Error: {e}")
-            print("\nThe generated code has incorrect imports.")
-            print("Review the imports above and compare with examples/shell-example.py")
-            sys.exit(1)
-        except Exception as e:
-            print("\n--- Execution failed ---")
-            print(f"Error: {type(e).__name__}: {e}")
-            print("\nThe generated code may need manual adjustments.")
-            sys.exit(1)
-
-
 def mg_status(db_url: str | None = None) -> None:
     """Show migration status."""
     try:
@@ -1909,82 +1830,7 @@ def main() -> None:
     # prompt command
     subparsers.add_parser(
         "prompt",
-        help="Output comprehensive RAG context for pipeline code generation",
-    )
-
-    # rag command (with subcommands)
-    rag_parser = subparsers.add_parser(
-        "rag",
-        help="RAG-powered pipeline generation",
-    )
-    rag_subparsers = rag_parser.add_subparsers(dest="rag_command")
-
-    # rag init
-    init_parser = rag_subparsers.add_parser(
-        "init",
-        help="Initialize embeddings cache from examples and documentation",
-    )
-    init_parser.add_argument(
-        "--db-url",
-        help="Database URL for caching (postgres://... or sqlite path)",
-    )
-    init_parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Force regeneration even if cache exists",
-    )
-    init_parser.add_argument(
-        "--additional-context",
-        action="append",
-        metavar="PATH",
-        help="Additional file or directory to include in training context (can be specified multiple times)",
-    )
-
-    # rag generate
-    gen_parser = rag_subparsers.add_parser(
-        "generate",
-        help="Generate pipeline code from natural language prompt",
-    )
-    gen_parser.add_argument(
-        "prompt",
-        help="Natural language description of the desired pipeline",
-    )
-    gen_parser.add_argument(
-        "--db-url",
-        help="Database URL for caching",
-    )
-    gen_parser.add_argument(
-        "-x",
-        "--execute",
-        action="store_true",
-        help="Execute the generated code after displaying it",
-    )
-    gen_parser.add_argument(
-        "--top-k",
-        type=int,
-        default=10,
-        help="Number of context chunks to retrieve (default: 10)",
-    )
-    gen_parser.add_argument(
-        "--temperature",
-        type=float,
-        default=0.3,
-        help="LLM temperature for generation (default: 0.3)",
-    )
-    gen_parser.add_argument(
-        "--llm-model",
-        default=None,
-        help="LLM model for generation (default: qwen3-vl:235b)",
-    )
-
-    # rag clear
-    clear_parser = rag_subparsers.add_parser(
-        "clear",
-        help="Clear all cached embeddings",
-    )
-    clear_parser.add_argument(
-        "--db-url",
-        help="Database URL for caching",
+        help="Output comprehensive documentation for pipeline code generation",
     )
 
     # monitor command
@@ -2021,23 +1867,6 @@ def main() -> None:
         mg_status(args.db_url)
     elif args.command == "prompt":
         prompt()
-    elif args.command == "rag":
-        if args.rag_command == "init":
-            rag_init(args.db_url, args.force, args.additional_context)
-        elif args.rag_command == "generate":
-            rag_generate(
-                args.prompt,
-                args.db_url,
-                args.execute,
-                args.top_k,
-                args.temperature,
-                args.llm_model,
-            )
-        elif args.rag_command == "clear":
-            rag_clear(args.db_url)
-        else:
-            rag_parser.print_help()
-            sys.exit(1)
     elif args.command == "monitor":
         monitor(args.db_url, args.app, args.refresh, args.status)
     else:

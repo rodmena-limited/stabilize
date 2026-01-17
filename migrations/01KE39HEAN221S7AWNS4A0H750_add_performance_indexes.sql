@@ -29,10 +29,6 @@ CREATE INDEX IF NOT EXISTS idx_stage_execution_ref
 CREATE INDEX IF NOT EXISTS idx_stage_synthetic
     ON stage_executions(execution_id, parent_stage_id);
 
--- Priority 3: RAG embeddings composite index for ordered retrieval
-CREATE INDEX IF NOT EXISTS idx_rag_model_doc_chunk
-    ON rag_embeddings(embedding_model, doc_id, chunk_index);
-
 
 -- migrate: down
 
@@ -42,4 +38,3 @@ DROP INDEX IF EXISTS idx_execution_application_status;
 DROP INDEX IF EXISTS idx_execution_config_status;
 DROP INDEX IF EXISTS idx_stage_execution_ref;
 DROP INDEX IF EXISTS idx_stage_synthetic;
-DROP INDEX IF EXISTS idx_rag_model_doc_chunk;

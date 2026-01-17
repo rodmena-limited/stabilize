@@ -124,7 +124,7 @@ def postgres_url(postgres_container: Any) -> str:
         text=True,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"Migration failed: {result.stderr}")
+        raise RuntimeError(f"Migration failed (exit {result.returncode}): stdout={result.stdout}, stderr={result.stderr}")
 
     return str(url)
 

@@ -1,1 +1,1 @@
-"""Stabilize example pipelines for RAG context."""
+"""Stabilize example pipelines."""

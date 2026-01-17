@@ -32,9 +32,6 @@ postgres = [
     "psycopg[pool]>=3.0",
     "migretti>=0.3",
 ]
-rag = [
-    "ragit>=0.7.5",
-]
 observability = [
     "structlog>=24.0",
     "opentelemetry-api>=1.20",
@@ -43,7 +40,6 @@ observability = [
 all = [
     "psycopg[pool]>=3.0",
     "migretti>=0.3",
-    "ragit>=0.7.5",
     "structlog>=24.0",
     "opentelemetry-api>=1.20",
     "opentelemetry-sdk>=1.20",
