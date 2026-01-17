@@ -102,6 +102,7 @@ class MonitorDisplay:
         self.scroll_offset = 0
         self.selected_index = 0  # Selection cursor
         self._auto_follow = True  # Auto-scroll to keep selection in view
+        self._initial_scroll_done = False  # Track if we've scrolled to end on startup
         self.lines: list[dict] = []  # Store visible lines for selection mapping
         self._init_colors()
 
@@ -256,7 +257,7 @@ class MonitorDisplay:
 
     def _render_loading(self) -> None:
         """Render loading state."""
-        self.stdscr.clear()
+        self.stdscr.erase()
         height, width = self.stdscr.getmaxyx()
         self._render_header(width)
         msg = "Loading data..."
@@ -265,7 +266,7 @@ class MonitorDisplay:
 
     def _render(self, data: MonitorData) -> None:
         """Render the complete display."""
-        self.stdscr.clear()
+        self.stdscr.erase()
         height, width = self.stdscr.getmaxyx()
 
         if height < 5 or width < 60:
@@ -286,6 +287,11 @@ class MonitorDisplay:
         # Build line metadata for scrolling AND selection tracking
         self.lines = self._build_line_metadata(data)
         total_lines = len(self.lines)
+
+        # On first render, scroll to the last item
+        if not self._initial_scroll_done and total_lines > 0:
+            self.selected_index = total_lines - 1
+            self._initial_scroll_done = True
 
         # Clamp selection
         if total_lines > 0:
