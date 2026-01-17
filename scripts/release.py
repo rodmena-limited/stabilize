@@ -55,6 +55,7 @@ from stabilize import (
     StageExecution,
     StartStageHandler,
     StartTaskHandler,
+    StartWaitingWorkflowsHandler,
     StartWorkflowHandler,
     Task,
     TaskExecution,
@@ -492,8 +493,9 @@ def run_release(
     processor = QueueProcessor(queue)
     handlers: list[Any] = [
         StartWorkflowHandler(queue, store),
+        StartWaitingWorkflowsHandler(queue, store),
         StartStageHandler(queue, store),
-        StartTaskHandler(queue, store),
+        StartTaskHandler(queue, store, registry),
         RunTaskHandler(queue, store, registry),
         CompleteTaskHandler(queue, store),
         CompleteStageHandler(queue, store),

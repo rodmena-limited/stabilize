@@ -903,7 +903,7 @@ def setup_pipeline_runner(store, queue):
     handlers = [
         StartWorkflowHandler(queue, store),
         StartStageHandler(queue, store),
-        StartTaskHandler(queue, store),
+        StartTaskHandler(queue, store, registry),
         RunTaskHandler(queue, store, registry),
         CompleteTaskHandler(queue, store),
         CompleteStageHandler(queue, store),
@@ -1006,7 +1006,7 @@ def setup_pipeline_runner(store, queue):
     for h in [
         StartWorkflowHandler(queue, store),
         StartStageHandler(queue, store),
-        StartTaskHandler(queue, store),
+        StartTaskHandler(queue, store, registry),
         RunTaskHandler(queue, store, registry),
         CompleteTaskHandler(queue, store),
         CompleteStageHandler(queue, store),
