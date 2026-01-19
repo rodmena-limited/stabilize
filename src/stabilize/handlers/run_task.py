@@ -15,9 +15,9 @@ import os
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from resilient_circuit import ExponentialDelay
+from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
 
-from stabilize.errors import TaskTimeoutError, is_transient
+from stabilize.errors import ConcurrencyError, TaskTimeoutError, is_transient
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
@@ -51,6 +51,19 @@ _BACKOFF = ExponentialDelay(
     max_delay=timedelta(seconds=60),
     factor=2,
     jitter=0.25,
+)
+
+# Retry policy for ConcurrencyError during stage updates
+# Uses faster backoff (100ms-1s) since these are quick DB retries
+_CONCURRENCY_RETRY = RetryWithBackoffPolicy(
+    max_retries=3,
+    backoff=ExponentialDelay(
+        min_delay=timedelta(milliseconds=100),
+        max_delay=timedelta(seconds=1),
+        factor=2,
+        jitter=0.25,
+    ),
+    should_handle=lambda e: isinstance(e, ConcurrencyError),
 )
 
 
@@ -460,34 +473,71 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         """Handle execution cancellation.
 
         Uses atomic transaction for stage update + message push.
+        Retries on ConcurrencyError with exponential backoff when storing stage.
         """
         result = task.on_cancel(stage) if hasattr(task, "on_cancel") else None
-        if result:
-            # Defensive type checks (same as _process_result)
-            if result.context and isinstance(result.context, dict):
-                stage.context.update(result.context)
-            if result.outputs and isinstance(result.outputs, dict):
-                stage.outputs.update(result.outputs)
 
-        # Atomic: store stage (if modified) + mark processed + push CompleteTask together
-        with self.repository.transaction(self.queue) as txn:
-            if result:
-                txn.store_stage(stage)
-            if message.message_id:
-                txn.mark_message_processed(
-                    message_id=message.message_id,
-                    handler_type="RunTask",
-                    execution_id=message.execution_id,
-                )
-            txn.push_message(
-                CompleteTask(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=message.stage_id,
-                    task_id=message.task_id,
-                    status=WorkflowStatus.CANCELED,
-                )
-            )
+        # Extract context/outputs to apply on retry (if result exists)
+        result_context = None
+        result_outputs = None
+        if result:
+            if result.context and isinstance(result.context, dict):
+                result_context = result.context
+            if result.outputs and isinstance(result.outputs, dict):
+                result_outputs = result.outputs
+
+        @_CONCURRENCY_RETRY
+        def do_cancel() -> None:
+            if result_context or result_outputs:
+                # Re-fetch stage to get current version on each retry attempt
+                fresh_stage = self.repository.retrieve_stage(message.stage_id)
+                if fresh_stage is None:
+                    logger.error("Stage %s not found during cancellation", message.stage_id)
+                    return
+
+                if result_context:
+                    fresh_stage.context.update(result_context)
+                if result_outputs:
+                    fresh_stage.outputs.update(result_outputs)
+
+                # Atomic: store stage + mark processed + push CompleteTask together
+                with self.repository.transaction(self.queue) as txn:
+                    txn.store_stage(fresh_stage)
+                    if message.message_id:
+                        txn.mark_message_processed(
+                            message_id=message.message_id,
+                            handler_type="RunTask",
+                            execution_id=message.execution_id,
+                        )
+                    txn.push_message(
+                        CompleteTask(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                            task_id=message.task_id,
+                            status=WorkflowStatus.CANCELED,
+                        )
+                    )
+            else:
+                # No stage modification needed, no retry required
+                with self.repository.transaction(self.queue) as txn:
+                    if message.message_id:
+                        txn.mark_message_processed(
+                            message_id=message.message_id,
+                            handler_type="RunTask",
+                            execution_id=message.execution_id,
+                        )
+                    txn.push_message(
+                        CompleteTask(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                            task_id=message.task_id,
+                            status=WorkflowStatus.CANCELED,
+                        )
+                    )
+
+        do_cancel()
 
     def _handle_exception(
         self,
@@ -554,30 +604,41 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             }
         }
 
-        stage.context["exception"] = exception_details
+        # Update task model (not persisted via stage, so no concurrency issue)
         task_model.task_exception_details["exception"] = exception_details
 
-        status = stage.failure_status(default=WorkflowStatus.TERMINAL)
+        @_CONCURRENCY_RETRY
+        def do_mark_terminal() -> None:
+            # Re-fetch stage to get current version on each retry attempt
+            fresh_stage = self.repository.retrieve_stage(message.stage_id)
+            if fresh_stage is None:
+                logger.error("Stage %s not found during exception handling", message.stage_id)
+                return
 
-        # Atomic: store stage + mark processed + push CompleteTask together
-        with self.repository.transaction(self.queue) as txn:
-            txn.store_stage(stage)
-            if message.message_id:
-                txn.mark_message_processed(
-                    message_id=message.message_id,
-                    handler_type="RunTask",
-                    execution_id=message.execution_id,
+            fresh_stage.context["exception"] = exception_details
+            status = fresh_stage.failure_status(default=WorkflowStatus.TERMINAL)
+
+            # Atomic: store stage + mark processed + push CompleteTask together
+            with self.repository.transaction(self.queue) as txn:
+                txn.store_stage(fresh_stage)
+                if message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="RunTask",
+                        execution_id=message.execution_id,
+                    )
+                txn.push_message(
+                    CompleteTask(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                        task_id=message.task_id,
+                        status=status,
+                        original_status=WorkflowStatus.TERMINAL,
+                    )
                 )
-            txn.push_message(
-                CompleteTask(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=message.stage_id,
-                    task_id=message.task_id,
-                    status=status,
-                    original_status=WorkflowStatus.TERMINAL,
-                )
-            )
+
+        do_mark_terminal()
 
     def _complete_with_error(
         self,
@@ -589,26 +650,38 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         """Complete task with an error.
 
         Uses atomic transaction for stage update + message push.
+        Retries on ConcurrencyError with exponential backoff.
         """
-        stage.context["exception"] = {
-            "details": {"error": error},
-        }
 
-        # Atomic: store stage + mark processed + push CompleteTask together
-        with self.repository.transaction(self.queue) as txn:
-            txn.store_stage(stage)
-            if message.message_id:
-                txn.mark_message_processed(
-                    message_id=message.message_id,
-                    handler_type="RunTask",
-                    execution_id=message.execution_id,
+        @_CONCURRENCY_RETRY
+        def do_complete() -> None:
+            # Re-fetch stage to get current version on each retry attempt
+            fresh_stage = self.repository.retrieve_stage(message.stage_id)
+            if fresh_stage is None:
+                logger.error("Stage %s not found during error completion", message.stage_id)
+                return
+
+            fresh_stage.context["exception"] = {
+                "details": {"error": error},
+            }
+
+            # Atomic: store stage + mark processed + push CompleteTask together
+            with self.repository.transaction(self.queue) as txn:
+                txn.store_stage(fresh_stage)
+                if message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="RunTask",
+                        execution_id=message.execution_id,
+                    )
+                txn.push_message(
+                    CompleteTask(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                        task_id=message.task_id,
+                        status=WorkflowStatus.TERMINAL,
+                    )
                 )
-            txn.push_message(
-                CompleteTask(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=message.stage_id,
-                    task_id=message.task_id,
-                    status=WorkflowStatus.TERMINAL,
-                )
-            )
+
+        do_complete()

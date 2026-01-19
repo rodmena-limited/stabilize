@@ -89,6 +89,14 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
                     task.id,
                     task.status,
                 )
+                # Mark message as processed to prevent infinite reprocessing
+                if message.message_id:
+                    with self.repository.transaction(self.queue) as txn:
+                        txn.mark_message_processed(
+                            message_id=message.message_id,
+                            handler_type="CompleteTask",
+                            execution_id=message.execution_id,
+                        )
                 return
 
             # Update task status

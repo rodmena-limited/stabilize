@@ -8,8 +8,11 @@ and the parent stage needs to be notified to continue processing.
 from __future__ import annotations
 
 import logging
+import random
+import time
 from typing import TYPE_CHECKING
 
+from stabilize.errors import ConcurrencyError
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.stage import SyntheticStageOwner
 from stabilize.models.status import CONTINUABLE_STATUSES, HALT_STATUSES, WorkflowStatus
@@ -52,7 +55,37 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
         return ContinueParentStage
 
     def handle(self, message: ContinueParentStage) -> None:
-        """Handle the ContinueParentStage message."""
+        """Handle the ContinueParentStage message.
+
+        Retries on ConcurrencyError (optimistic lock failure).
+        """
+        max_retries = 3
+
+        for attempt in range(max_retries + 1):
+            try:
+                self._handle_with_retry(message)
+                return
+            except ConcurrencyError:
+                if attempt == max_retries:
+                    logger.error(
+                        "Failed to continue parent stage after %d attempts due to contention (execution=%s, stage=%s)",
+                        max_retries,
+                        message.execution_id,
+                        message.stage_id,
+                    )
+                    raise
+
+                backoff = (0.1 * (2**attempt)) + (random.random() * 0.1)
+                logger.warning(
+                    "Concurrency error continuing parent stage, retrying in %.2fs (attempt %d/%d)",
+                    backoff,
+                    attempt + 1,
+                    max_retries,
+                )
+                time.sleep(backoff)
+
+    def _handle_with_retry(self, message: ContinueParentStage) -> None:
+        """Inner handle logic to be retried."""
 
         def on_stage(stage: StageExecution) -> None:
             phase = message.phase

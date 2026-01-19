@@ -7,9 +7,12 @@ This handler prepares a task for execution and triggers RunTask.
 from __future__ import annotations
 
 import logging
+import random
+import time
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
+from stabilize.errors import ConcurrencyError
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
@@ -56,7 +59,39 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
         return StartTask
 
     def handle(self, message: StartTask) -> None:
-        """Handle the StartTask message."""
+        """Handle the StartTask message.
+
+        Retries on ConcurrencyError (optimistic lock failure).
+        """
+        max_retries = 3
+
+        for attempt in range(max_retries + 1):
+            try:
+                self._handle_with_retry(message)
+                return
+            except ConcurrencyError:
+                if attempt == max_retries:
+                    logger.error(
+                        "Failed to start task after %d attempts due to contention (execution=%s, stage=%s, task=%s)",
+                        max_retries,
+                        message.execution_id,
+                        message.stage_id,
+                        message.task_id,
+                    )
+                    raise
+
+                # Randomized exponential backoff
+                backoff = (0.1 * (2**attempt)) + (random.random() * 0.1)
+                logger.warning(
+                    "Concurrency error starting task, retrying in %.2fs (attempt %d/%d)",
+                    backoff,
+                    attempt + 1,
+                    max_retries,
+                )
+                time.sleep(backoff)
+
+    def _handle_with_retry(self, message: StartTask) -> None:
+        """Inner handle logic to be retried."""
 
         def on_task(stage: StageExecution, task_model: TaskExecution) -> None:
             # Idempotency check - only start tasks that are NOT_STARTED
@@ -67,6 +102,14 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
                     task_model.id,
                     task_model.status,
                 )
+                # Mark message as processed to prevent infinite reprocessing
+                if message.message_id:
+                    with self.repository.transaction(self.queue) as txn:
+                        txn.mark_message_processed(
+                            message_id=message.message_id,
+                            handler_type="StartTask",
+                            execution_id=message.execution_id,
+                        )
                 return
 
             # Check if task should be skipped

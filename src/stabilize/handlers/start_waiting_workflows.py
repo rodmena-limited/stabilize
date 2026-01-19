@@ -9,7 +9,10 @@ and starts them if capacity allows.
 from __future__ import annotations
 
 import logging
+import random
+import time
 
+from stabilize.errors import ConcurrencyError
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.persistence.store import WorkflowCriteria
@@ -37,7 +40,36 @@ class StartWaitingWorkflowsHandler(StabilizeHandler[StartWaitingWorkflows]):
         return StartWaitingWorkflows
 
     def handle(self, message: StartWaitingWorkflows) -> None:
-        """Handle the StartWaitingWorkflows message."""
+        """Handle the StartWaitingWorkflows message.
+
+        Retries on ConcurrencyError (optimistic lock failure).
+        """
+        max_retries = 3
+
+        for attempt in range(max_retries + 1):
+            try:
+                self._handle_with_retry(message)
+                return
+            except ConcurrencyError:
+                if attempt == max_retries:
+                    logger.error(
+                        "Failed to start waiting workflows after %d attempts due to contention (pipeline_config=%s)",
+                        max_retries,
+                        message.pipeline_config_id,
+                    )
+                    raise
+
+                backoff = (0.1 * (2**attempt)) + (random.random() * 0.1)
+                logger.warning(
+                    "Concurrency error starting waiting workflows, retrying in %.2fs (attempt %d/%d)",
+                    backoff,
+                    attempt + 1,
+                    max_retries,
+                )
+                time.sleep(backoff)
+
+    def _handle_with_retry(self, message: StartWaitingWorkflows) -> None:
+        """Inner handle logic to be retried."""
         if not message.pipeline_config_id:
             return
 

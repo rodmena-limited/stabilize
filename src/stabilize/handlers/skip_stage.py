@@ -8,8 +8,11 @@ execution or start time expiry.
 from __future__ import annotations
 
 import logging
+import random
+import time
 from typing import TYPE_CHECKING
 
+from stabilize.errors import ConcurrencyError
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
@@ -41,7 +44,37 @@ class SkipStageHandler(StabilizeHandler[SkipStage]):
         return SkipStage
 
     def handle(self, message: SkipStage) -> None:
-        """Handle the SkipStage message."""
+        """Handle the SkipStage message.
+
+        Retries on ConcurrencyError (optimistic lock failure).
+        """
+        max_retries = 3
+
+        for attempt in range(max_retries + 1):
+            try:
+                self._handle_with_retry(message)
+                return
+            except ConcurrencyError:
+                if attempt == max_retries:
+                    logger.error(
+                        "Failed to skip stage after %d attempts due to contention (execution=%s, stage=%s)",
+                        max_retries,
+                        message.execution_id,
+                        message.stage_id,
+                    )
+                    raise
+
+                backoff = (0.1 * (2**attempt)) + (random.random() * 0.1)
+                logger.warning(
+                    "Concurrency error skipping stage, retrying in %.2fs (attempt %d/%d)",
+                    backoff,
+                    attempt + 1,
+                    max_retries,
+                )
+                time.sleep(backoff)
+
+    def _handle_with_retry(self, message: SkipStage) -> None:
+        """Inner handle logic to be retried."""
 
         def on_stage(stage: StageExecution) -> None:
             # Check if stage is still in a skippable state

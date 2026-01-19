@@ -9,9 +9,13 @@ and synthetic stages, and starts execution.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
+from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
+
 from stabilize.dag.graph import StageGraphBuilder
+from stabilize.errors import ConcurrencyError
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.stage import SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
@@ -32,6 +36,18 @@ logger = logging.getLogger(__name__)
 # Maximum number of times to re-queue StartStage before giving up
 # With a 15-second retry delay, 240 retries = 1 hour maximum wait
 MAX_START_STAGE_RETRIES = 240
+
+# Retry policy for ConcurrencyError during stage updates
+_CONCURRENCY_RETRY = RetryWithBackoffPolicy(
+    max_retries=3,
+    backoff=ExponentialDelay(
+        min_delay=timedelta(milliseconds=100),
+        max_delay=timedelta(seconds=1),
+        factor=2,
+        jitter=0.25,
+    ),
+    should_handle=lambda e: isinstance(e, ConcurrencyError),
+)
 
 
 class StartStageHandler(StabilizeHandler[StartStage]):
@@ -165,18 +181,33 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                     e,
                     exc_info=True,
                 )
-                stage.context["exception"] = {
-                    "details": {"error": str(e)},
-                }
-                stage.context["beforeStagePlanningFailed"] = True
-                self.repository.store_stage(stage)
-                self.queue.push(
-                    CompleteStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=message.stage_id,
-                    )
-                )
+                error_str = str(e)
+
+                @_CONCURRENCY_RETRY
+                def do_mark_error() -> None:
+                    # Re-fetch stage to get current version on each retry attempt
+                    fresh_stage = self.repository.retrieve_stage(message.stage_id)
+                    if fresh_stage is None:
+                        logger.error("Stage %s not found during error handling", message.stage_id)
+                        return
+
+                    fresh_stage.context["exception"] = {
+                        "details": {"error": error_str},
+                    }
+                    fresh_stage.context["beforeStagePlanningFailed"] = True
+
+                    # Atomic: store stage + push CompleteStage together
+                    with self.repository.transaction(self.queue) as txn:
+                        txn.store_stage(fresh_stage)
+                        txn.push_message(
+                            CompleteStage(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=message.stage_id,
+                            )
+                        )
+
+                do_mark_error()
 
         self.with_stage(message, on_stage)
 
