@@ -239,9 +239,8 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         # Define the execution function (process-isolated or direct)
         def execute_task(s: StageExecution) -> TaskResult:
             if self.process_executor:
-                # Update timeout for process executor to match task timeout
-                self.process_executor.timeout_seconds = timeout.total_seconds()
-                return self.process_executor.execute(task, s)
+                # Pass timeout directly to avoid race conditions with concurrent tasks
+                return self.process_executor.execute(task, s, timeout_seconds=timeout.total_seconds())
             return task.execute(s)
 
         # Execute through bulkhead with circuit breaker protection

@@ -515,27 +515,36 @@ class NoOpTransaction(StoreTransaction):
         """Flush all pending operations.
 
         Called by the context manager on successful exit.
-        Order: stages first, then processed marks, then messages.
+
+        Order is critical for crash safety:
+        1. Stages first (persist state changes)
+        2. Messages second (ensure workflow can continue)
+        3. Processed marks LAST (only after everything else succeeds)
+
+        This order ensures that a crash during flush leaves the workflow in a
+        recoverable state. Worst case (crash after stages, before processed marks)
+        results in duplicate message handling, which handlers are designed to be
+        idempotent against.
         """
-        # Flush stages first
+        # 1. Flush stages first - persist state changes
         for stage in self._pending_stages:
             self._store.store_stage(stage)
         self._pending_stages.clear()
 
-        # Flush processed message marks
+        # 2. Flush messages second - ensure workflow continues
+        if self._queue:
+            from datetime import timedelta
+
+            for message, delay in self._pending_messages:
+                if delay > 0:
+                    self._queue.push(message, timedelta(seconds=delay))
+                else:
+                    self._queue.push(message)
+            self._pending_messages.clear()
+
+        # 3. Flush processed marks LAST - only after everything else succeeds
+        # This ensures that if we crash before this point, the message will be
+        # redelivered and the handler's idempotency check will handle it correctly
         for message_id, handler_type, execution_id in self._pending_processed:
             self._store.mark_message_processed(message_id, handler_type, execution_id)
         self._pending_processed.clear()
-
-        # Flush messages last
-        if not self._queue:
-            return
-
-        from datetime import timedelta
-
-        for message, delay in self._pending_messages:
-            if delay > 0:
-                self._queue.push(message, timedelta(seconds=delay))
-            else:
-                self._queue.push(message)
-        self._pending_messages.clear()

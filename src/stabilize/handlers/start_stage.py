@@ -129,7 +129,16 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                         stage.context["exception"] = {
                             "details": {"error": "Exceeded max retries waiting for upstream stages"},
                         }
-                        self.repository.store_stage(stage)
+                        # Use atomic transaction and propagate failure downstream
+                        with self.repository.transaction(self.queue) as txn:
+                            txn.store_stage(stage)
+                            txn.push_message(
+                                CompleteStage(
+                                    execution_type=message.execution_type,
+                                    execution_id=message.execution_id,
+                                    stage_id=stage.id,
+                                )
+                            )
                         return
 
                     logger.debug(
@@ -186,39 +195,146 @@ class StartStageHandler(StabilizeHandler[StartStage]):
             )
             return
 
-        # Check if should skip
+        # Check if should skip - use transaction for atomicity
         if self._should_skip(stage):
             logger.info("Skipping optional stage %s", stage.name)
-            self.queue.push(
-                SkipStage(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=message.stage_id,
+            with self.repository.transaction(self.queue) as txn:
+                if message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="StartStage",
+                        execution_id=message.execution_id,
+                    )
+                txn.push_message(
+                    SkipStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                    )
                 )
-            )
             return
 
-        # Check if start time expired
+        # Check if start time expired - use transaction for atomicity
         if self._is_after_start_time_expiry(stage):
             logger.warning("Stage %s start time expired, skipping", stage.name)
-            self.queue.push(
-                SkipStage(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=message.stage_id,
+            with self.repository.transaction(self.queue) as txn:
+                if message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="StartStage",
+                        execution_id=message.execution_id,
+                    )
+                txn.push_message(
+                    SkipStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                    )
                 )
-            )
             return
 
-        # Plan and start the stage
+        # Plan the stage (this modifies stage state but doesn't persist yet)
         stage.start_time = self.current_time_millis()
         self._plan_stage(stage)
         stage.status = WorkflowStatus.RUNNING
-        self.repository.store_stage(stage)
 
-        self._start_stage(stage, message)
+        # Collect messages to push BEFORE starting the transaction
+        messages_to_push = self._collect_start_messages(stage, message)
+
+        # Atomic: store stage + push all start messages together
+        with self.repository.transaction(self.queue) as txn:
+            txn.store_stage(stage)
+
+            # Message deduplication
+            if message.message_id:
+                txn.mark_message_processed(
+                    message_id=message.message_id,
+                    handler_type="StartStage",
+                    execution_id=message.execution_id,
+                )
+
+            for msg in messages_to_push:
+                txn.push_message(msg)
 
         logger.info("Started stage %s (%s)", stage.name, stage.id)
+
+    def _collect_start_messages(
+        self,
+        stage: StageExecution,
+        message: StartStage,
+    ) -> list:
+        """Collect messages needed to start the stage.
+
+        This method queries the repository but doesn't push any messages.
+        The caller is responsible for pushing the returned messages atomically.
+        """
+        from stabilize.queue.messages import Message
+
+        messages: list[Message] = []
+
+        # Fetch synthetic stages (returns empty list if none)
+        synthetic_stages = self.repository.get_synthetic_stages(stage.execution.id, stage.id)
+        if synthetic_stages is None:
+            synthetic_stages = []
+
+        # Check for before stages
+        before_stages = [
+            s
+            for s in synthetic_stages
+            if s is not None and s.synthetic_stage_owner == SyntheticStageOwner.STAGE_BEFORE and s.is_initial()
+        ]
+
+        if before_stages:
+            for before in before_stages:
+                messages.append(
+                    StartStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=before.id,
+                    )
+                )
+            return messages
+
+        # No before stages - start first task
+        first_task = stage.first_task()
+        if first_task:
+            messages.append(
+                StartTask(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
+                    task_id=first_task.id,
+                )
+            )
+            return messages
+
+        # No tasks - check for after stages
+        after_stages = [
+            s
+            for s in synthetic_stages
+            if s is not None and s.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER and s.is_initial()
+        ]
+
+        if after_stages:
+            for after in after_stages:
+                messages.append(
+                    StartStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=after.id,
+                    )
+                )
+            return messages
+
+        # No tasks or synthetic stages - complete immediately
+        messages.append(
+            CompleteStage(
+                execution_type=message.execution_type,
+                execution_id=message.execution_id,
+                stage_id=message.stage_id,
+            )
+        )
+        return messages
 
     def _plan_stage(self, stage: StageExecution) -> None:
         """
@@ -271,85 +387,6 @@ class StartStageHandler(StabilizeHandler[StartStage]):
 
         # Add context flags
         builder.add_context_flags(stage)
-
-    def _start_stage(
-        self,
-        stage: StageExecution,
-        message: StartStage,
-    ) -> None:
-        """
-        Start stage execution.
-
-        Order of execution:
-        1. Before stages (if any)
-        2. Tasks (if any)
-        3. After stages (if any)
-        4. Complete stage
-        """
-
-        # Fetch synthetic stages (returns empty list if none)
-        synthetic_stages = self.repository.get_synthetic_stages(stage.execution.id, stage.id)
-        if synthetic_stages is None:
-            synthetic_stages = []
-
-        # Check for before stages
-        # We need initial before stages (those with no dependencies)
-        before_stages = [
-            s
-            for s in synthetic_stages
-            if s is not None and s.synthetic_stage_owner == SyntheticStageOwner.STAGE_BEFORE and s.is_initial()
-        ]
-
-        if before_stages:
-            for before in before_stages:
-                self.queue.push(
-                    StartStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=before.id,
-                    )
-                )
-            return
-
-        # No before stages - start first task
-        first_task = stage.first_task()
-        if first_task:
-            self.queue.push(
-                StartTask(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=message.stage_id,
-                    task_id=first_task.id,
-                )
-            )
-            return
-
-        # No tasks - check for after stages
-        after_stages = [
-            s
-            for s in synthetic_stages
-            if s is not None and s.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER and s.is_initial()
-        ]
-
-        if after_stages:
-            for after in after_stages:
-                self.queue.push(
-                    StartStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=after.id,
-                    )
-                )
-            return
-
-        # No tasks or synthetic stages - complete immediately
-        self.queue.push(
-            CompleteStage(
-                execution_type=message.execution_type,
-                execution_id=message.execution_id,
-                stage_id=message.stage_id,
-            )
-        )
 
     def _should_skip(self, stage: StageExecution) -> bool:
         """

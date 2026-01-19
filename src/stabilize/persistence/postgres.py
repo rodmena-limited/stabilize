@@ -745,28 +745,34 @@ class PostgresWorkflowStore(WorkflowStore):
         """Resume a paused execution.
 
         Uses atomic UPDATE with status check to prevent race conditions.
+        Calculates resume_time and paused_ms atomically in the UPDATE to avoid
+        race conditions between retrieve and update.
         """
-        # First get current paused details
-        execution = self.retrieve(execution_id)
-        if execution.paused and execution.paused.pause_time:
-            current_time = int(time.time() * 1000)
-            execution.paused.resume_time = current_time
-            execution.paused.paused_ms = current_time - execution.paused.pause_time
+        current_time = int(time.time() * 1000)
 
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
-                # Atomic update: only resume if still PAUSED to prevent race conditions
+                # Atomic update: calculate resume_time and paused_ms in the UPDATE itself
+                # This prevents race conditions where paused details could change between read and write
                 cur.execute(
                     """
                     UPDATE pipeline_executions SET
                         status = %(status)s,
-                        paused = %(paused)s::jsonb
+                        paused = CASE
+                            WHEN paused IS NOT NULL THEN
+                                jsonb_set(
+                                    jsonb_set(paused, '{resume_time}', to_jsonb(%(resume_time)s)),
+                                    '{paused_ms}',
+                                    to_jsonb(%(resume_time)s - (paused->>'pause_time')::bigint)
+                                )
+                            ELSE NULL
+                        END
                     WHERE id = %(id)s AND status = 'PAUSED'
                     """,
                     {
                         "id": execution_id,
                         "status": WorkflowStatus.RUNNING.name,
-                        "paused": (json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None),
+                        "resume_time": current_time,
                     },
                 )
                 if cur.rowcount == 0:
@@ -846,7 +852,7 @@ class PostgresWorkflowStore(WorkflowStore):
                 cur.execute(
                     """
                     DELETE FROM processed_messages
-                    WHERE processed_at < NOW() - INTERVAL '%(hours)s hours'
+                    WHERE processed_at < NOW() - make_interval(hours => %(hours)s)
                     """,
                     {"hours": max_age_hours},
                 )

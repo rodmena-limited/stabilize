@@ -25,6 +25,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Statuses that indicate a halt condition - parent stage should not proceed
+HALT_STATUSES = {WorkflowStatus.TERMINAL, WorkflowStatus.CANCELED, WorkflowStatus.STOPPED}
+
 
 class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
     """
@@ -75,15 +78,14 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
         # Get all before-stages for this parent
         before_stages = stage.before_stages()
 
-        # Check if all before-stages are complete
+        # Check if all before-stages are complete with continuable status
         all_complete = all(s.status in CONTINUABLE_STATUSES for s in before_stages)
 
-        # Check if any failed with a halt status
-        halt_statuses = {WorkflowStatus.TERMINAL, WorkflowStatus.CANCELED}
-        any_failed = any(s.status in halt_statuses for s in before_stages)
+        # Check if any failed with a halt status (TERMINAL, CANCELED, STOPPED)
+        any_failed = any(s.status in HALT_STATUSES for s in before_stages)
 
         if any_failed:
-            # Before-stage failed - mark parent as failed too
+            # Before-stage failed - mark parent as failed too using atomic transaction
             logger.warning(
                 "Before-stage failed for parent %s (%s), marking as failed",
                 stage.name,
@@ -91,8 +93,16 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
             )
             stage.status = WorkflowStatus.TERMINAL
             stage.end_time = self.current_time_millis()
-            self.repository.store_stage(stage)
-            self.start_next(stage)
+            # Use atomic transaction to ensure state and message are committed together
+            with self.repository.transaction(self.queue) as txn:
+                txn.store_stage(stage)
+                txn.push_message(
+                    CompleteStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=stage.id,
+                    )
+                )
             return
 
         if not all_complete:
@@ -111,37 +121,41 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
             stage.id,
         )
 
+        # Use atomic transaction for message queuing
         first_task = stage.first_task()
         if first_task:
-            self.queue.push(
-                StartTask(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=stage.id,
-                    task_id=first_task.id,
+            with self.repository.transaction(self.queue) as txn:
+                txn.push_message(
+                    StartTask(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=stage.id,
+                        task_id=first_task.id,
+                    )
                 )
-            )
         else:
             # No tasks - check for after-stages or complete
             after_stages = stage.first_after_stages()
             if after_stages:
-                for after in after_stages:
-                    self.queue.push(
-                        StartStage(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=after.id,
+                with self.repository.transaction(self.queue) as txn:
+                    for after in after_stages:
+                        txn.push_message(
+                            StartStage(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=after.id,
+                            )
                         )
-                    )
             else:
                 # No tasks, no after-stages - complete stage
-                self.queue.push(
-                    CompleteStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=stage.id,
+                with self.repository.transaction(self.queue) as txn:
+                    txn.push_message(
+                        CompleteStage(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=stage.id,
+                        )
                     )
-                )
 
     def _handle_after_phase(
         self,
@@ -152,8 +166,31 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
         # Get all after-stages for this parent
         after_stages = stage.after_stages()
 
-        # Check if all after-stages are complete
-        all_complete = all(s.status.is_complete for s in after_stages)
+        # Check if all after-stages are complete with continuable status
+        all_complete = all(s.status in CONTINUABLE_STATUSES for s in after_stages)
+
+        # Check if any failed with a halt status (TERMINAL, CANCELED, STOPPED)
+        any_failed = any(s.status in HALT_STATUSES for s in after_stages)
+
+        if any_failed:
+            # After-stage failed - mark parent as failed using atomic transaction
+            logger.warning(
+                "After-stage failed for parent %s (%s), marking as failed",
+                stage.name,
+                stage.id,
+            )
+            stage.status = WorkflowStatus.TERMINAL
+            stage.end_time = self.current_time_millis()
+            with self.repository.transaction(self.queue) as txn:
+                txn.store_stage(stage)
+                txn.push_message(
+                    CompleteStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=stage.id,
+                    )
+                )
+            return
 
         if not all_complete:
             # Not all after-stages complete yet - wait
@@ -164,18 +201,19 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
             )
             return
 
-        # All after-stages complete - complete the parent stage
+        # All after-stages complete successfully - complete the parent stage
         logger.debug(
             "All after-stages complete for %s (%s), completing parent",
             stage.name,
             stage.id,
         )
 
-        # Push CompleteStage to finalize
-        self.queue.push(
-            CompleteStage(
-                execution_type=message.execution_type,
-                execution_id=message.execution_id,
-                stage_id=stage.id,
+        # Push CompleteStage to finalize using atomic transaction
+        with self.repository.transaction(self.queue) as txn:
+            txn.push_message(
+                CompleteStage(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=stage.id,
+                )
             )
-        )

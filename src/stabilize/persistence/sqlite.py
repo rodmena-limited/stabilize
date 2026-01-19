@@ -158,7 +158,8 @@ class SqliteWorkflowStore(WorkflowStore):
             stage_end INTEGER DEFAULT 0,
             loop_start INTEGER DEFAULT 0,
             loop_end INTEGER DEFAULT 0,
-            task_exception_details TEXT DEFAULT '{}'
+            task_exception_details TEXT DEFAULT '{}',
+            version INTEGER DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS queue_messages (
@@ -783,27 +784,33 @@ class SqliteWorkflowStore(WorkflowStore):
         """Resume a paused execution.
 
         Uses atomic UPDATE with status check to prevent race conditions.
+        Calculates resume_time and paused_ms atomically in the UPDATE to avoid
+        race conditions between retrieve and update.
         """
-        # First get current paused details
-        execution = self.retrieve(execution_id)
-        if execution.paused and execution.paused.pause_time:
-            current_time = int(time.time() * 1000)
-            execution.paused.resume_time = current_time
-            execution.paused.paused_ms = current_time - execution.paused.pause_time
-
+        current_time = int(time.time() * 1000)
         conn = self._get_connection()
-        # Atomic update: only resume if still PAUSED to prevent race conditions
+
+        # Atomic update: calculate resume_time and paused_ms in the UPDATE itself
+        # This prevents race conditions where paused details could change between read and write
         cursor = conn.execute(
             """
             UPDATE pipeline_executions SET
                 status = :status,
-                paused = :paused
+                paused = CASE
+                    WHEN paused IS NOT NULL THEN
+                        json_set(
+                            json_set(paused, '$.resume_time', :resume_time),
+                            '$.paused_ms',
+                            :resume_time - CAST(json_extract(paused, '$.pause_time') AS INTEGER)
+                        )
+                    ELSE NULL
+                END
             WHERE id = :id AND status = 'PAUSED'
             """,
             {
                 "id": execution_id,
                 "status": WorkflowStatus.RUNNING.name,
-                "paused": (json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None),
+                "resume_time": current_time,
             },
         )
         conn.commit()
@@ -925,22 +932,26 @@ class SqliteWorkflowStore(WorkflowStore):
             self._upsert_task(conn, task, stage.id)
 
     def _upsert_task(self, conn: sqlite3.Connection, task: TaskExecution, stage_id: str) -> None:
-        """Insert or update a task."""
-        conn.execute(
+        """Insert or update a task with optimistic locking."""
+        # First try to update existing row with version check
+        cursor = conn.execute(
             """
-            INSERT OR REPLACE INTO task_executions (
-                id, stage_id, name, implementing_class, status,
-                start_time, end_time, stage_start, stage_end,
-                loop_start, loop_end, task_exception_details
-            ) VALUES (
-                :id, :stage_id, :name, :implementing_class, :status,
-                :start_time, :end_time, :stage_start, :stage_end,
-                :loop_start, :loop_end, :task_exception_details
-            )
+            UPDATE task_executions SET
+                name = :name,
+                implementing_class = :implementing_class,
+                status = :status,
+                start_time = :start_time,
+                end_time = :end_time,
+                stage_start = :stage_start,
+                stage_end = :stage_end,
+                loop_start = :loop_start,
+                loop_end = :loop_end,
+                task_exception_details = :task_exception_details,
+                version = version + 1
+            WHERE id = :id AND version = :version
             """,
             {
                 "id": task.id,
-                "stage_id": stage_id,
                 "name": task.name,
                 "implementing_class": task.implementing_class,
                 "status": task.status.name,
@@ -951,8 +962,46 @@ class SqliteWorkflowStore(WorkflowStore):
                 "loop_start": 1 if task.loop_start else 0,
                 "loop_end": 1 if task.loop_end else 0,
                 "task_exception_details": json.dumps(task.task_exception_details),
+                "version": task.version,
             },
         )
+
+        if cursor.rowcount == 0:
+            # Row doesn't exist or version mismatch - try insert
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO task_executions (
+                        id, stage_id, name, implementing_class, status,
+                        start_time, end_time, stage_start, stage_end,
+                        loop_start, loop_end, task_exception_details, version
+                    ) VALUES (
+                        :id, :stage_id, :name, :implementing_class, :status,
+                        :start_time, :end_time, :stage_start, :stage_end,
+                        :loop_start, :loop_end, :task_exception_details, 0
+                    )
+                    """,
+                    {
+                        "id": task.id,
+                        "stage_id": stage_id,
+                        "name": task.name,
+                        "implementing_class": task.implementing_class,
+                        "status": task.status.name,
+                        "start_time": task.start_time,
+                        "end_time": task.end_time,
+                        "stage_start": 1 if task.stage_start else 0,
+                        "stage_end": 1 if task.stage_end else 0,
+                        "loop_start": 1 if task.loop_start else 0,
+                        "loop_end": 1 if task.loop_end else 0,
+                        "task_exception_details": json.dumps(task.task_exception_details),
+                    },
+                )
+            except sqlite3.IntegrityError:
+                # Row exists but version mismatch - concurrent modification
+                raise ConcurrencyError(f"Task {task.id} was modified concurrently (expected version {task.version})")
+        else:
+            # Update successful - increment local version
+            task.version += 1
 
     def _execution_to_dict(self, execution: Workflow) -> dict[str, Any]:
         """Convert execution to dictionary for storage."""
@@ -1055,6 +1104,12 @@ class SqliteWorkflowStore(WorkflowStore):
         """Convert database row to TaskExecution."""
         exception_details = json.loads(row["task_exception_details"] or "{}")
 
+        # Handle version column - may not exist in older schemas
+        try:
+            version = row["version"] or 0
+        except (IndexError, KeyError):
+            version = 0
+
         return TaskExecution(
             id=row["id"],
             name=row["name"],
@@ -1067,6 +1122,7 @@ class SqliteWorkflowStore(WorkflowStore):
             loop_start=bool(row["loop_start"]),
             loop_end=bool(row["loop_end"]),
             task_exception_details=exception_details,
+            version=version,
         )
 
     def is_healthy(self) -> bool:
@@ -1358,22 +1414,29 @@ class AtomicTransaction(StoreTransaction):
             self._upsert_task(task, stage.id)
 
     def _upsert_task(self, task: TaskExecution, stage_id: str) -> None:
-        """Insert or update a task (no commit)."""
-        self._conn.execute(
+        """Insert or update a task with optimistic locking (no commit)."""
+        # Track original version for rollback
+        self._staged_objects.append((task, task.version))
+
+        # First try to update existing row with version check
+        cursor = self._conn.execute(
             """
-            INSERT OR REPLACE INTO task_executions (
-                id, stage_id, name, implementing_class, status,
-                start_time, end_time, stage_start, stage_end,
-                loop_start, loop_end, task_exception_details
-            ) VALUES (
-                :id, :stage_id, :name, :implementing_class, :status,
-                :start_time, :end_time, :stage_start, :stage_end,
-                :loop_start, :loop_end, :task_exception_details
-            )
+            UPDATE task_executions SET
+                name = :name,
+                implementing_class = :implementing_class,
+                status = :status,
+                start_time = :start_time,
+                end_time = :end_time,
+                stage_start = :stage_start,
+                stage_end = :stage_end,
+                loop_start = :loop_start,
+                loop_end = :loop_end,
+                task_exception_details = :task_exception_details,
+                version = version + 1
+            WHERE id = :id AND version = :version
             """,
             {
                 "id": task.id,
-                "stage_id": stage_id,
                 "name": task.name,
                 "implementing_class": task.implementing_class,
                 "status": task.status.name,
@@ -1384,5 +1447,43 @@ class AtomicTransaction(StoreTransaction):
                 "loop_start": 1 if task.loop_start else 0,
                 "loop_end": 1 if task.loop_end else 0,
                 "task_exception_details": json.dumps(task.task_exception_details),
+                "version": task.version,
             },
         )
+
+        if cursor.rowcount == 0:
+            # Row doesn't exist or version mismatch - try insert
+            try:
+                self._conn.execute(
+                    """
+                    INSERT INTO task_executions (
+                        id, stage_id, name, implementing_class, status,
+                        start_time, end_time, stage_start, stage_end,
+                        loop_start, loop_end, task_exception_details, version
+                    ) VALUES (
+                        :id, :stage_id, :name, :implementing_class, :status,
+                        :start_time, :end_time, :stage_start, :stage_end,
+                        :loop_start, :loop_end, :task_exception_details, 0
+                    )
+                    """,
+                    {
+                        "id": task.id,
+                        "stage_id": stage_id,
+                        "name": task.name,
+                        "implementing_class": task.implementing_class,
+                        "status": task.status.name,
+                        "start_time": task.start_time,
+                        "end_time": task.end_time,
+                        "stage_start": 1 if task.stage_start else 0,
+                        "stage_end": 1 if task.stage_end else 0,
+                        "loop_start": 1 if task.loop_start else 0,
+                        "loop_end": 1 if task.loop_end else 0,
+                        "task_exception_details": json.dumps(task.task_exception_details),
+                    },
+                )
+            except sqlite3.IntegrityError:
+                # Row exists but version mismatch - concurrent modification
+                raise ConcurrencyError(f"Task {task.id} was modified concurrently (expected version {task.version})")
+        else:
+            # Update successful - increment local version
+            task.version += 1

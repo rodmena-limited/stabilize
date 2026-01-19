@@ -249,44 +249,79 @@ class StageExecution:
     # ========== Status Methods ==========
 
     def determine_status(self) -> WorkflowStatus:
-        """Determine the stage status based on before-stages and tasks.
+        """Determine the stage status based on before-stages, tasks, and after-stages.
 
-        Note: After-stages are NOT included in status determination because they
-        run AFTER the stage completes. Including them would create a circular
-        dependency where the stage can't complete until after-stages complete,
-        but after-stages can't start until the stage completes.
+        Status priority (highest to lowest):
+        1. TERMINAL/STOPPED/CANCELED - halt conditions
+        2. PAUSED/BUFFERED/SUSPENDED - waiting conditions
+        3. RUNNING - in progress
+        4. FAILED_CONTINUE - completed with non-fatal failure
+        5. SUCCEEDED/SKIPPED - completed successfully
+
+        After-stages ARE included in status determination to ensure the stage
+        doesn't report SUCCEEDED while after-stages are still running.
         """
-        # Only include before-stages (not after-stages) in status calculation
+        # Collect statuses from all components
         before_stage_statuses = [s.status for s in self.before_stages()]
         task_statuses = [t.status for t in self.tasks]
-        all_statuses = before_stage_statuses + task_statuses
         after_stage_statuses = [s.status for s in self.after_stages()]
 
-        if not all_statuses:
+        # Core statuses (before-stages + tasks) determine the main outcome
+        core_statuses = before_stage_statuses + task_statuses
+
+        if not core_statuses:
             return WorkflowStatus.NOT_STARTED
 
-        if WorkflowStatus.TERMINAL in all_statuses:
+        # Check halt conditions first (highest priority)
+        if WorkflowStatus.TERMINAL in core_statuses:
             return self.failure_status()
-        if WorkflowStatus.STOPPED in all_statuses:
+        if WorkflowStatus.STOPPED in core_statuses:
             return WorkflowStatus.STOPPED
-        if WorkflowStatus.CANCELED in all_statuses:
+        if WorkflowStatus.CANCELED in core_statuses:
             return WorkflowStatus.CANCELED
-        if WorkflowStatus.PAUSED in all_statuses:
+
+        # Check waiting conditions
+        if WorkflowStatus.PAUSED in core_statuses:
             return WorkflowStatus.PAUSED
-        if WorkflowStatus.FAILED_CONTINUE in all_statuses:
-            return WorkflowStatus.FAILED_CONTINUE
-        if all(s in {WorkflowStatus.SUCCEEDED, WorkflowStatus.SKIPPED} for s in all_statuses):
-            return WorkflowStatus.SUCCEEDED
-        if WorkflowStatus.NOT_STARTED in after_stage_statuses:
-            return WorkflowStatus.RUNNING
+        if WorkflowStatus.BUFFERED in core_statuses:
+            return WorkflowStatus.BUFFERED
+        if WorkflowStatus.SUSPENDED in core_statuses:
+            return WorkflowStatus.SUSPENDED
 
-        # If there are any incomplete statuses (NOT_STARTED, RUNNING), return RUNNING
-        # This handles the case where tasks or stages are still in progress
+        # Check if core work is still in progress
         incomplete_statuses = {WorkflowStatus.NOT_STARTED, WorkflowStatus.RUNNING}
-        if any(s in incomplete_statuses for s in all_statuses):
+        if any(s in incomplete_statuses for s in core_statuses):
             return WorkflowStatus.RUNNING
 
-        return WorkflowStatus.RUNNING
+        # Core work is complete - check if it succeeded or failed with continue
+        core_has_failure = WorkflowStatus.FAILED_CONTINUE in core_statuses
+        core_all_done = all(
+            s in {WorkflowStatus.SUCCEEDED, WorkflowStatus.SKIPPED, WorkflowStatus.FAILED_CONTINUE}
+            for s in core_statuses
+        )
+
+        if not core_all_done:
+            # Unexpected status in core - treat as running
+            return WorkflowStatus.RUNNING
+
+        # Core work is done - now check after-stages
+        if after_stage_statuses:
+            # Check if after-stages have halted
+            if WorkflowStatus.TERMINAL in after_stage_statuses:
+                return WorkflowStatus.TERMINAL
+            if WorkflowStatus.STOPPED in after_stage_statuses:
+                return WorkflowStatus.STOPPED
+            if WorkflowStatus.CANCELED in after_stage_statuses:
+                return WorkflowStatus.CANCELED
+
+            # Check if after-stages are still in progress
+            if any(s in incomplete_statuses for s in after_stage_statuses):
+                return WorkflowStatus.RUNNING
+
+        # All work complete - return final status
+        if core_has_failure:
+            return WorkflowStatus.FAILED_CONTINUE
+        return WorkflowStatus.SUCCEEDED
 
     def failure_status(self, default: WorkflowStatus = WorkflowStatus.TERMINAL) -> WorkflowStatus:
         """Get the appropriate failure status based on stage configuration."""

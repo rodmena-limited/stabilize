@@ -61,8 +61,17 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
             stage.status = WorkflowStatus.CANCELED
             stage.end_time = self.current_time_millis()
 
-            # Store the updated stage
-            self.repository.store_stage(stage)
+            # Atomic: store stage + message deduplication
+            with self.repository.transaction(self.queue) as txn:
+                txn.store_stage(stage)
+
+                # Message deduplication
+                if message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="CancelStage",
+                        execution_id=message.execution_id,
+                    )
 
             logger.info("Canceled stage %s (%s)", stage.name, stage.id)
 

@@ -20,6 +20,7 @@ from stabilize.queue.messages import (
     CancelStage,
     CompleteStage,
     CompleteWorkflow,
+    ContinueParentStage,
     StartStage,
 )
 from stabilize.stages.builder import get_default_factory
@@ -140,9 +141,53 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                     WorkflowStatus.FAILED_CONTINUE,
                     WorkflowStatus.SKIPPED,
                 }:
-                    # Store stage first, then continue to downstream stages
-                    self.repository.store_stage(stage)
-                    self.start_next(stage)
+                    # Get downstream stages and parent info BEFORE transaction
+                    execution = stage.execution
+                    downstream_stages = self.repository.get_downstream_stages(execution.id, stage.ref_id)
+                    phase = stage.synthetic_stage_owner
+
+                    # Atomic: store stage + push all downstream/parent messages together
+                    with self.repository.transaction(self.queue) as txn:
+                        txn.store_stage(stage)
+
+                        # Message deduplication
+                        if message.message_id:
+                            txn.mark_message_processed(
+                                message_id=message.message_id,
+                                handler_type="CompleteStage",
+                                execution_id=message.execution_id,
+                            )
+
+                        if downstream_stages:
+                            # Start all downstream stages
+                            for downstream in downstream_stages:
+                                txn.push_message(
+                                    StartStage(
+                                        execution_type=execution.type.value,
+                                        execution_id=execution.id,
+                                        stage_id=downstream.id,
+                                    )
+                                )
+                        elif phase is not None:
+                            # Synthetic stage - notify parent
+                            parent_id = stage.parent_stage_id
+                            if parent_id:
+                                txn.push_message(
+                                    ContinueParentStage(
+                                        execution_type=execution.type.value,
+                                        execution_id=execution.id,
+                                        stage_id=parent_id,
+                                        phase=phase,
+                                    )
+                                )
+                        else:
+                            # Terminal stage - complete workflow
+                            txn.push_message(
+                                CompleteWorkflow(
+                                    execution_type=execution.type.value,
+                                    execution_id=execution.id,
+                                )
+                            )
                 else:
                     # Failure - atomic: store stage + cancel + complete
                     with self.repository.transaction(self.queue) as txn:

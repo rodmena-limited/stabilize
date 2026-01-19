@@ -80,13 +80,14 @@ class ProcessIsolatedTaskExecutor:
     def __init__(self, timeout_seconds: float = 300.0) -> None:
         self.timeout_seconds = timeout_seconds
 
-    def execute(self, task: Task, stage: StageExecution) -> TaskResult:
+    def execute(self, task: Task, stage: StageExecution, timeout_seconds: float | None = None) -> TaskResult:
         """
         Execute the task in a separate process.
 
         Args:
             task: The task instance to execute
             stage: The stage execution context
+            timeout_seconds: Optional timeout override. If not provided, uses instance default.
 
         Returns:
             The TaskResult from the task
@@ -95,6 +96,9 @@ class ProcessIsolatedTaskExecutor:
             TimeoutError: If execution exceeds timeout
             RuntimeError: If process crashes or returns invalid result
         """
+        # Use provided timeout or fall back to instance default
+        effective_timeout = timeout_seconds if timeout_seconds is not None else self.timeout_seconds
+
         # Prepare stage data for pickling (avoid circular refs in full objects)
         stage_data = {
             "id": stage.id,
@@ -120,14 +124,14 @@ class ProcessIsolatedTaskExecutor:
         try:
             # Wait for result with timeout
             # We add a small buffer to the process join timeout to allow queue put
-            process.join(timeout=self.timeout_seconds)
+            process.join(timeout=effective_timeout)
 
             if process.is_alive():
                 process.terminate()
                 process.join(timeout=5)
                 if process.is_alive():
                     process.kill()
-                return TaskResult.terminal(error=f"Task timed out after {self.timeout_seconds}s (Process enforced)")
+                return TaskResult.terminal(error=f"Task timed out after {effective_timeout}s (Process enforced)")
 
             if process.exitcode != 0:
                 # Process crashed (segfault, OOM, etc.)
