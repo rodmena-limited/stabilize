@@ -117,7 +117,7 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                             return
 
                 # Update stage status
-                stage.status = status
+                self.set_stage_status(stage, status)
                 stage.end_time = self.current_time_millis()
 
                 logger.info("Stage %s completed with status %s", stage.name, status)
@@ -229,7 +229,7 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                 stage.context["exception"] = {
                     "details": {"error": str(e)},
                 }
-                stage.status = WorkflowStatus.TERMINAL
+                self.set_stage_status(stage, WorkflowStatus.TERMINAL)
                 stage.end_time = self.current_time_millis()
 
                 # Atomic: store stage + cancel + complete workflow

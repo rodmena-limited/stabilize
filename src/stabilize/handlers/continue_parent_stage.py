@@ -92,7 +92,7 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                 stage.name,
                 stage.id,
             )
-            stage.status = WorkflowStatus.TERMINAL
+            self.set_stage_status(stage, WorkflowStatus.TERMINAL)
             stage.end_time = self.current_time_millis()
             # Use atomic transaction to ensure state and message are committed together
             with self.repository.transaction(self.queue) as txn:
@@ -118,7 +118,7 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                     stage.id,
                     MAX_CONTINUE_PARENT_RETRIES,
                 )
-                stage.status = WorkflowStatus.TERMINAL
+                self.set_stage_status(stage, WorkflowStatus.TERMINAL)
                 stage.end_time = self.current_time_millis()
                 stage.context["exception"] = {
                     "details": {"error": "Exceeded max retries waiting for before-stages"},
@@ -222,7 +222,7 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                 stage.name,
                 stage.id,
             )
-            stage.status = WorkflowStatus.TERMINAL
+            self.set_stage_status(stage, WorkflowStatus.TERMINAL)
             stage.end_time = self.current_time_millis()
             with self.repository.transaction(self.queue) as txn:
                 txn.store_stage(stage)
@@ -247,7 +247,7 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                     stage.id,
                     MAX_CONTINUE_PARENT_RETRIES,
                 )
-                stage.status = WorkflowStatus.TERMINAL
+                self.set_stage_status(stage, WorkflowStatus.TERMINAL)
                 stage.end_time = self.current_time_millis()
                 stage.context["exception"] = {
                     "details": {"error": "Exceeded max retries waiting for after-stages"},

@@ -15,6 +15,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Generic, TypeVar
 
 from stabilize.models.stage import StageExecution
+from stabilize.models.status import WorkflowStatus, validate_transition
 from stabilize.models.task import TaskExecution
 from stabilize.models.workflow import Workflow
 from stabilize.queue.messages import (
@@ -224,3 +225,77 @@ class StabilizeHandler(MessageHandler[M], ABC):
     def current_time_millis(self) -> int:
         """Get current time in milliseconds."""
         return int(time.time() * 1000)
+
+    # ========== State Transition Helpers ==========
+
+    def set_stage_status(
+        self,
+        stage: StageExecution,
+        new_status: WorkflowStatus,
+    ) -> None:
+        """Set stage status with validation.
+
+        Validates the transition is allowed before setting the status.
+
+        Args:
+            stage: The stage to update
+            new_status: The new status to set
+
+        Raises:
+            InvalidStateTransitionError: If the transition is not allowed
+        """
+        validate_transition(
+            stage.status,
+            new_status,
+            entity_type="stage",
+            entity_id=stage.id,
+        )
+        stage.status = new_status
+
+    def set_task_status(
+        self,
+        task: TaskExecution,
+        new_status: WorkflowStatus,
+    ) -> None:
+        """Set task status with validation.
+
+        Validates the transition is allowed before setting the status.
+
+        Args:
+            task: The task to update
+            new_status: The new status to set
+
+        Raises:
+            InvalidStateTransitionError: If the transition is not allowed
+        """
+        validate_transition(
+            task.status,
+            new_status,
+            entity_type="task",
+            entity_id=task.id,
+        )
+        task.status = new_status
+
+    def set_workflow_status(
+        self,
+        workflow: Workflow,
+        new_status: WorkflowStatus,
+    ) -> None:
+        """Set workflow status with validation.
+
+        Validates the transition is allowed before setting the status.
+
+        Args:
+            workflow: The workflow to update
+            new_status: The new status to set
+
+        Raises:
+            InvalidStateTransitionError: If the transition is not allowed
+        """
+        validate_transition(
+            workflow.status,
+            new_status,
+            entity_type="workflow",
+            entity_id=workflow.id,
+        )
+        workflow.status = new_status

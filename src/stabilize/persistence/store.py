@@ -447,6 +447,11 @@ class StoreTransaction(ABC):
         pass
 
     @abstractmethod
+    def update_workflow_status(self, workflow: Workflow) -> None:
+        """Update workflow status within the transaction."""
+        pass
+
+    @abstractmethod
     def push_message(self, message: Message, delay: int = 0) -> None:
         """Push a message to the queue within the transaction."""
         pass
@@ -483,6 +488,7 @@ class NoOpTransaction(StoreTransaction):
         self._store = store
         self._queue = queue
         self._pending_stages: list[StageExecution] = []
+        self._pending_workflows: list[Workflow] = []
         self._pending_messages: list[tuple[Message, int]] = []
         self._pending_processed: list[tuple[str, str | None, str | None]] = []
 
@@ -493,6 +499,14 @@ class NoOpTransaction(StoreTransaction):
         successfully. If an exception occurs, stages are not stored.
         """
         self._pending_stages.append(stage)
+
+    def update_workflow_status(self, workflow: Workflow) -> None:
+        """Buffer workflow status update when transaction completes.
+
+        Workflows are buffered and flushed when the context manager exits
+        successfully. If an exception occurs, workflows are not updated.
+        """
+        self._pending_workflows.append(workflow)
 
     def push_message(self, message: Message, delay: int = 0) -> None:
         """Buffer message to be pushed when transaction completes.
@@ -517,21 +531,27 @@ class NoOpTransaction(StoreTransaction):
         Called by the context manager on successful exit.
 
         Order is critical for crash safety:
-        1. Stages first (persist state changes)
-        2. Messages second (ensure workflow can continue)
-        3. Processed marks LAST (only after everything else succeeds)
+        1. Workflows first (persist workflow status changes)
+        2. Stages second (persist stage state changes)
+        3. Messages third (ensure workflow can continue)
+        4. Processed marks LAST (only after everything else succeeds)
 
         This order ensures that a crash during flush leaves the workflow in a
         recoverable state. Worst case (crash after stages, before processed marks)
         results in duplicate message handling, which handlers are designed to be
         idempotent against.
         """
-        # 1. Flush stages first - persist state changes
+        # 1. Flush workflows first - persist workflow status changes
+        for workflow in self._pending_workflows:
+            self._store.update_status(workflow)
+        self._pending_workflows.clear()
+
+        # 2. Flush stages second - persist stage state changes
         for stage in self._pending_stages:
             self._store.store_stage(stage)
         self._pending_stages.clear()
 
-        # 2. Flush messages second - ensure workflow continues
+        # 3. Flush messages third - ensure workflow continues
         if self._queue:
             from datetime import timedelta
 
@@ -542,7 +562,7 @@ class NoOpTransaction(StoreTransaction):
                     self._queue.push(message)
             self._pending_messages.clear()
 
-        # 3. Flush processed marks LAST - only after everything else succeeds
+        # 4. Flush processed marks LAST - only after everything else succeeds
         # This ensures that if we crash before this point, the message will be
         # redelivered and the handler's idempotency check will handle it correctly
         for message_id, handler_type, execution_id in self._pending_processed:

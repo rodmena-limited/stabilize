@@ -91,29 +91,20 @@ class StartWaitingWorkflowsHandler(StabilizeHandler[StartWaitingWorkflows]):
 
         for i, execution in enumerate(buffered):
             if i < available_slots:
-                # Promote to NOT_STARTED so StartWorkflowHandler picks it up
-                # (actually we push StartWorkflow message directly)
-
-                # Wait, StartWorkflowHandler checks limit AGAIN.
-                # If we push StartWorkflow, it will check running count.
-                # If we do it concurrently, it might race.
-                # But queue processing is sequential per handler usually?
-                # No, parallel workers.
-
-                # Better approach:
-                # Mark execution as NOT_STARTED in DB.
-                # Then push StartWorkflow.
-
-                execution.status = WorkflowStatus.NOT_STARTED
-                self.repository.update_status(execution)
+                # Promote to NOT_STARTED and push StartWorkflow message atomically
+                self.set_workflow_status(execution, WorkflowStatus.NOT_STARTED)
 
                 logger.info("Promoting buffered execution %s to queued", execution.id)
-                self.queue.push(
-                    StartWorkflow(
-                        execution_type=execution.type.value,
-                        execution_id=execution.id,
+
+                # Atomic: update execution status + push StartWorkflow
+                with self.repository.transaction(self.queue) as txn:
+                    txn.update_workflow_status(execution)
+                    txn.push_message(
+                        StartWorkflow(
+                            execution_type=execution.type.value,
+                            execution_id=execution.id,
+                        )
                     )
-                )
             elif message.purge_queue:
                 # Cancel remaining
                 logger.info("Purging waiting execution %s", execution.id)

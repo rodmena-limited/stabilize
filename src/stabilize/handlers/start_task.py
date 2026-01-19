@@ -76,7 +76,7 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
                     logger.info("Skipping task %s (disabled)", task_model.name)
 
                     # Mark as skipped - use atomic transaction
-                    task_model.status = WorkflowStatus.SKIPPED
+                    self.set_task_status(task_model, WorkflowStatus.SKIPPED)
                     with self.repository.transaction(self.queue) as txn:
                         txn.store_stage(stage)
                         if message.message_id:
@@ -101,7 +101,7 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
                 pass
 
             # Update task status
-            task_model.status = WorkflowStatus.RUNNING
+            self.set_task_status(task_model, WorkflowStatus.RUNNING)
             task_model.start_time = self.current_time_millis()
 
             # Atomic: store stage + push RunTask together

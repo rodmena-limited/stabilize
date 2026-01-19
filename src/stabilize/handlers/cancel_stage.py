@@ -54,11 +54,11 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
             # Cancel all tasks that are still running
             for task in stage.tasks:
                 if task.status in {WorkflowStatus.NOT_STARTED, WorkflowStatus.RUNNING}:
-                    task.status = WorkflowStatus.CANCELED
+                    self.set_task_status(task, WorkflowStatus.CANCELED)
                     task.end_time = self.current_time_millis()
 
             # Mark stage as canceled
-            stage.status = WorkflowStatus.CANCELED
+            self.set_stage_status(stage, WorkflowStatus.CANCELED)
             stage.end_time = self.current_time_millis()
 
             # Atomic: store stage + message deduplication

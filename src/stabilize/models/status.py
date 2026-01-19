@@ -165,6 +165,7 @@ VALID_TRANSITIONS: dict[WorkflowStatus, frozenset[WorkflowStatus]] = {
             WorkflowStatus.CANCELED,
             WorkflowStatus.SKIPPED,
             WorkflowStatus.BUFFERED,
+            WorkflowStatus.TERMINAL,  # For error cases before task starts (e.g., max retries exceeded)
         }
     ),
     WorkflowStatus.BUFFERED: frozenset(
@@ -185,6 +186,7 @@ VALID_TRANSITIONS: dict[WorkflowStatus, frozenset[WorkflowStatus]] = {
             WorkflowStatus.STOPPED,
             WorkflowStatus.SUSPENDED,
             WorkflowStatus.REDIRECT,
+            WorkflowStatus.SKIPPED,  # For manual skip of running task
         }
     ),
     WorkflowStatus.PAUSED: frozenset(

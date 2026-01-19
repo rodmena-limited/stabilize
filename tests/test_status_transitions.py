@@ -101,9 +101,11 @@ class TestInvalidTransitions:
         """NOT_STARTED -> SUCCEEDED is invalid (must go through RUNNING)."""
         assert not can_transition(WorkflowStatus.NOT_STARTED, WorkflowStatus.SUCCEEDED)
 
-    def test_not_started_to_terminal_invalid(self) -> None:
-        """NOT_STARTED -> TERMINAL is invalid (must go through RUNNING)."""
-        assert not can_transition(WorkflowStatus.NOT_STARTED, WorkflowStatus.TERMINAL)
+    def test_not_started_to_terminal_is_valid(self) -> None:
+        """NOT_STARTED -> TERMINAL is now valid for error cases (e.g., max retries exceeded)."""
+        # Changed from invalid to valid - stages can fail before starting
+        # (e.g., timeout waiting for upstream stages, planning errors)
+        assert can_transition(WorkflowStatus.NOT_STARTED, WorkflowStatus.TERMINAL)
 
 
 class TestValidateTransition:

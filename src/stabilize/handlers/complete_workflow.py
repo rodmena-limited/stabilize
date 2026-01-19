@@ -64,18 +64,32 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
                 # Not ready to complete - stages still running
                 return
 
-            # Update execution
-            execution.status = status
+            # Update execution status
+            self.set_workflow_status(execution, status)
             execution.end_time = self.current_time_millis()
-            self.repository.update_status(execution)
 
             logger.info("Execution %s completed with status %s", execution.id, status)
 
-            # Cancel any running stages if not successful
+            # Collect running stages to cancel if not successful
+            running_stages = []
             if status != WorkflowStatus.SUCCEEDED:
                 running_stages = [s for s in execution.top_level_stages() if s.status == WorkflowStatus.RUNNING]
+
+            # Atomic: update execution status + cancel stages + start waiting workflows
+            with self.repository.transaction(self.queue) as txn:
+                txn.update_workflow_status(execution)
+
+                # Message deduplication
+                if message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="CompleteWorkflow",
+                        execution_id=message.execution_id,
+                    )
+
+                # Cancel any running stages if not successful
                 for stage in running_stages:
-                    self.queue.push(
+                    txn.push_message(
                         CancelStage(
                             execution_type=message.execution_type,
                             execution_id=message.execution_id,
@@ -83,14 +97,14 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
                         )
                     )
 
-            # Start waiting executions if configured
-            if execution.status != WorkflowStatus.RUNNING and execution.pipeline_config_id:
-                self.queue.push(
-                    StartWaitingWorkflows(
-                        pipeline_config_id=execution.pipeline_config_id,
-                        purge_queue=not execution.keep_waiting_pipelines,
+                # Start waiting executions if configured
+                if execution.pipeline_config_id:
+                    txn.push_message(
+                        StartWaitingWorkflows(
+                            pipeline_config_id=execution.pipeline_config_id,
+                            purge_queue=not execution.keep_waiting_pipelines,
+                        )
                     )
-                )
 
         self.with_execution(message, on_execution)
 

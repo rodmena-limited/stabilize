@@ -57,7 +57,7 @@ class SkipStageHandler(StabilizeHandler[SkipStage]):
                 return
 
             # Mark stage as skipped
-            stage.status = WorkflowStatus.SKIPPED
+            self.set_stage_status(stage, WorkflowStatus.SKIPPED)
             stage.end_time = self.current_time_millis()
 
             logger.info("Skipped stage %s (%s)", stage.name, stage.id)

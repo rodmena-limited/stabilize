@@ -140,9 +140,12 @@ def test_complete_task_handler_retries_on_contention(store, queue):
     # No, that's deduplication test.
     # For retry test, we want to see Thread A and Thread B fighting for same Stage.
 
-    # Setup: 2 tasks in 1 stage. Both complete at same time.
+    # Setup: 2 tasks in 1 stage, both RUNNING. Both complete at same time.
     task1 = TaskExecution.create("T1", "shell", stage_start=True)
+    task1.status = WorkflowStatus.RUNNING
     task2 = TaskExecution.create("T2", "shell", stage_end=True)
+    task2.status = WorkflowStatus.RUNNING
+    stage.status = WorkflowStatus.RUNNING
     stage.tasks = [task1, task2]
     store.store_stage(stage)  # reset
 

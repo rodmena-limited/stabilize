@@ -80,8 +80,16 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
                     execution.id,
                     execution.max_concurrent_executions,
                 )
-                execution.status = WorkflowStatus.BUFFERED
-                self.repository.update_status(execution)
+                self.set_workflow_status(execution, WorkflowStatus.BUFFERED)
+                # Atomic: update execution status + message deduplication
+                with self.repository.transaction(self.queue) as txn:
+                    txn.update_workflow_status(execution)
+                    if message.message_id:
+                        txn.mark_message_processed(
+                            message_id=message.message_id,
+                            handler_type="StartWorkflow",
+                            execution_id=message.execution_id,
+                        )
                 return
 
             self._start(execution, message)
@@ -120,15 +128,46 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
 
         if not initial_stages:
             logger.warning("No initial stages found for execution %s", execution.id)
-            execution.status = WorkflowStatus.TERMINAL
-            self.repository.update_status(execution)
+            self.set_workflow_status(execution, WorkflowStatus.TERMINAL)
+            # Atomic: update execution status + message deduplication
+            with self.repository.transaction(self.queue) as txn:
+                txn.update_workflow_status(execution)
+                if message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="StartWorkflow",
+                        execution_id=message.execution_id,
+                    )
             # Publish ExecutionComplete event
             return
 
         # Mark as running
-        execution.status = WorkflowStatus.RUNNING
+        self.set_workflow_status(execution, WorkflowStatus.RUNNING)
         execution.start_time = self.current_time_millis()
-        self.repository.update_status(execution)
+
+        # Atomic: update execution status + queue all initial stages + message deduplication
+        with self.repository.transaction(self.queue) as txn:
+            txn.update_workflow_status(execution)
+            if message.message_id:
+                txn.mark_message_processed(
+                    message_id=message.message_id,
+                    handler_type="StartWorkflow",
+                    execution_id=message.execution_id,
+                )
+            for stage in initial_stages:
+                logger.debug(
+                    "Queuing initial stage %s (%s) for execution %s",
+                    stage.name,
+                    stage.id,
+                    execution.id,
+                )
+                txn.push_message(
+                    StartStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=stage.id,
+                    )
+                )
 
         # Audit log
         audit(
@@ -143,22 +182,6 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
                 "initial_stages": len(initial_stages),
             },
         )
-
-        # Queue all initial stages
-        for stage in initial_stages:
-            logger.debug(
-                "Queuing initial stage %s (%s) for execution %s",
-                stage.name,
-                stage.id,
-                execution.id,
-            )
-            self.queue.push(
-                StartStage(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=stage.id,
-                )
-            )
 
         logger.info(
             "Started execution %s with %d initial stage(s)",

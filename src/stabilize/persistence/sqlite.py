@@ -1292,6 +1292,32 @@ class AtomicTransaction(StoreTransaction):
         else:
             self._insert_stage(stage, stage.execution.id)
 
+    def update_workflow_status(self, workflow: Workflow) -> None:
+        """Update workflow status within the transaction.
+
+        This performs the same operations as SqliteWorkflowStore.update_status()
+        but does NOT commit - the commit happens when the transaction
+        context manager exits successfully.
+
+        Args:
+            workflow: Workflow with updated status
+        """
+        self._conn.execute(
+            """
+            UPDATE pipeline_executions SET
+                status = :status,
+                start_time = :start_time,
+                end_time = :end_time
+            WHERE id = :id
+            """,
+            {
+                "id": workflow.id,
+                "status": workflow.status.name,
+                "start_time": workflow.start_time,
+                "end_time": workflow.end_time,
+            },
+        )
+
     def push_message(
         self,
         message: Message,

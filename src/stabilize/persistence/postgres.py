@@ -1109,6 +1109,8 @@ class PostgresWorkflowStore(WorkflowStore):
                 conn.commit()
             except Exception:
                 conn.rollback()
+                # Restore in-memory versions to match rolled-back database state
+                txn.rollback_versions()
                 raise
 
 
@@ -1120,10 +1122,49 @@ class PostgresTransaction(StoreTransaction):
         self._conn = conn
         self._store = store
         self._queue = queue
+        # Track stage/task objects and their original versions for rollback
+        self._staged_objects: list[tuple[StageExecution | TaskExecution, int]] = []
+
+    def rollback_versions(self) -> None:
+        """Restore original versions on rollback.
+
+        Called by the transaction context manager when rolling back to ensure
+        in-memory stage/task versions match the database state.
+        """
+        for obj, original_version in self._staged_objects:
+            obj.version = original_version
+        self._staged_objects.clear()
 
     def store_stage(self, stage: StageExecution) -> None:
         """Store or update a stage within the transaction."""
+        # Track original version before store (which may increment it)
+        original_version = stage.version
         self._store.store_stage(stage, connection=self._conn)
+        # Track for potential rollback (store after because store_stage increments version)
+        self._staged_objects.append((stage, original_version))
+        # Also track tasks that were updated
+        for task in stage.tasks:
+            if task.version != 0:  # Only track tasks that were updated
+                self._staged_objects.append((task, task.version - 1))
+
+    def update_workflow_status(self, workflow: Workflow) -> None:
+        """Update workflow status within the transaction."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE pipeline_executions SET
+                    status = %(status)s,
+                    start_time = %(start_time)s,
+                    end_time = %(end_time)s
+                WHERE id = %(id)s
+                """,
+                {
+                    "id": workflow.id,
+                    "status": workflow.status.name,
+                    "start_time": workflow.start_time,
+                    "end_time": workflow.end_time,
+                },
+            )
 
     def push_message(self, message: Message, delay: int = 0) -> None:
         """Push a message to the queue within the transaction."""

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from stabilize.errors import ConcurrencyError
 from stabilize.handlers.base import StabilizeHandler
+from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
     CompleteStage,
     CompleteTask,
@@ -80,8 +81,18 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
         """Inner handle logic to be retried."""
 
         def on_task(stage: StageExecution, task: TaskExecution) -> None:
+            # Idempotency check - only complete tasks that are RUNNING
+            if task.status != WorkflowStatus.RUNNING:
+                logger.debug(
+                    "Ignoring CompleteTask for %s (%s) - already %s",
+                    task.name,
+                    task.id,
+                    task.status,
+                )
+                return
+
             # Update task status
-            task.status = message.status
+            self.set_task_status(task, message.status)
             task.end_time = self.current_time_millis()
 
             logger.debug("Task %s completed with status %s", task.name, message.status)

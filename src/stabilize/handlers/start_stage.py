@@ -124,7 +124,7 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                             stage.id,
                             MAX_START_STAGE_RETRIES,
                         )
-                        stage.status = WorkflowStatus.TERMINAL
+                        self.set_stage_status(stage, WorkflowStatus.TERMINAL)
                         stage.end_time = self.current_time_millis()
                         stage.context["exception"] = {
                             "details": {"error": "Exceeded max retries waiting for upstream stages"},
@@ -236,7 +236,7 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         # Plan the stage (this modifies stage state but doesn't persist yet)
         stage.start_time = self.current_time_millis()
         self._plan_stage(stage)
-        stage.status = WorkflowStatus.RUNNING
+        self.set_stage_status(stage, WorkflowStatus.RUNNING)
 
         # Collect messages to push BEFORE starting the transaction
         messages_to_push = self._collect_start_messages(stage, message)
