@@ -64,3 +64,5 @@ test_table*
 .env
 next-steps.md
 CERTIFICATION_AUDIT_REPORT.md
+
+*.md

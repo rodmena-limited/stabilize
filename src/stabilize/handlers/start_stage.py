@@ -235,7 +235,17 @@ class StartStageHandler(StabilizeHandler[StartStage]):
 
         # Plan the stage (this modifies stage state but doesn't persist yet)
         stage.start_time = self.current_time_millis()
-        self._plan_stage(stage)
+        try:
+            self._plan_stage(stage)
+        except Exception as e:
+            logger.error(
+                "Failed to plan stage %s (%s) in execution %s: %s",
+                stage.name,
+                stage.id,
+                message.execution_id,
+                e,
+            )
+            raise
         self.set_stage_status(stage, WorkflowStatus.RUNNING)
 
         # Collect messages to push BEFORE starting the transaction

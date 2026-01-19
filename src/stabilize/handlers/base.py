@@ -96,12 +96,20 @@ class StabilizeHandler(MessageHandler[M], ABC):
             block(execution)
         except Exception as e:
             logger.error("Failed to retrieve execution %s: %s", message.execution_id, e)
-            self.queue.push(
-                InvalidWorkflowId(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
+            # Use atomic transaction with deduplication to prevent infinite retries
+            with self.repository.transaction(self.queue) as txn:
+                if hasattr(message, "message_id") and message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="with_execution",
+                        execution_id=message.execution_id,
+                    )
+                txn.push_message(
+                    InvalidWorkflowId(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                    )
                 )
-            )
 
     def with_stage(
         self,
@@ -120,13 +128,21 @@ class StabilizeHandler(MessageHandler[M], ABC):
             block(stage)
         except ValueError:
             logger.error("Stage not found: %s", message.stage_id)
-            self.queue.push(
-                InvalidStageId(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=message.stage_id,
+            # Use atomic transaction with deduplication to prevent infinite retries
+            with self.repository.transaction(self.queue) as txn:
+                if hasattr(message, "message_id") and message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="with_stage",
+                        execution_id=message.execution_id,
+                    )
+                txn.push_message(
+                    InvalidStageId(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                    )
                 )
-            )
         except Exception as e:
             logger.error("Failed to retrieve stage %s: %s", message.stage_id, e)
             raise
@@ -148,14 +164,22 @@ class StabilizeHandler(MessageHandler[M], ABC):
             task = self._find_task(stage, message.task_id)
             if task is None:
                 logger.error("Task not found: %s", message.task_id)
-                self.queue.push(
-                    InvalidTaskId(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=message.stage_id,
-                        task_id=message.task_id,
+                # Use atomic transaction with deduplication to prevent infinite retries
+                with self.repository.transaction(self.queue) as txn:
+                    if hasattr(message, "message_id") and message.message_id:
+                        txn.mark_message_processed(
+                            message_id=message.message_id,
+                            handler_type="with_task",
+                            execution_id=message.execution_id,
+                        )
+                    txn.push_message(
+                        InvalidTaskId(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                            task_id=message.task_id,
+                        )
                     )
-                )
             else:
                 block(stage, task)
 
@@ -200,16 +224,24 @@ class StabilizeHandler(MessageHandler[M], ABC):
                 )
         elif phase is not None:
             # Synthetic stage - notify parent
+            # Use atomic transaction to ensure message is persisted with stage state
             parent_id = stage.parent_stage_id
             if parent_id:
-                self.queue.ensure(
-                    ContinueParentStage(
-                        execution_type=execution.type.value,
-                        execution_id=execution.id,
-                        stage_id=parent_id,
-                        phase=phase,
-                    ),
-                    timedelta(seconds=0),
+                with self.repository.transaction(self.queue) as txn:
+                    txn.push_message(
+                        ContinueParentStage(
+                            execution_type=execution.type.value,
+                            execution_id=execution.id,
+                            stage_id=parent_id,
+                            phase=phase,
+                        )
+                    )
+            else:
+                logger.warning(
+                    "Synthetic stage %s has phase=%s but no parent_stage_id - workflow may hang. Execution: %s",
+                    stage.id,
+                    phase,
+                    execution.id,
                 )
         else:
             # Top-level stage with no downstream - complete execution

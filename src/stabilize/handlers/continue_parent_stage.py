@@ -211,8 +211,14 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                                     stage_id=after.id,
                                 )
                             )
-                # If after-stages exist but are already running/complete, don't complete stage yet
-                # They will trigger ContinueParentStage when done
+                else:
+                    # All after-stages already started/running/complete - waiting for them to finish
+                    logger.debug(
+                        "After-stages for stage %s exist but none are NOT_STARTED - "
+                        "waiting for existing after-stages to complete: %s",
+                        stage.id,
+                        [(s.id, s.status.name) for s in after_stages],
+                    )
             else:
                 # No tasks, no after-stages - complete stage
                 with self.repository.transaction(self.queue) as txn:

@@ -167,15 +167,26 @@ class SqliteQueue(Queue):
                 data[key] = value
         return json.dumps(data)
 
-    def _deserialize_message(self, type_name: str, payload: Any) -> Message:
-        """Deserialize a message from JSON string or dict."""
+    def _deserialize_message(self, type_name: str, payload: Any) -> Message | None:
+        """Deserialize a message from JSON string or dict.
+
+        Returns None if deserialization fails (corrupted message).
+        """
         from stabilize.models.stage import SyntheticStageOwner
         from stabilize.models.status import WorkflowStatus
 
-        if isinstance(payload, dict):
-            data = payload
-        else:
-            data = json.loads(payload)
+        try:
+            if isinstance(payload, dict):
+                data = payload
+            else:
+                data = json.loads(payload)
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.error(
+                "Failed to decode message payload: %s. Payload: %s",
+                e,
+                payload[:200] if isinstance(payload, str) else payload,
+            )
+            return None
 
         # Convert enum values
         if "status" in data and isinstance(data["status"], str):
@@ -305,6 +316,16 @@ class SqliteQueue(Queue):
 
         # Step 4: Successfully claimed - deserialize and return
         message = self._deserialize_message(msg_type, payload)
+        if message is None:
+            # Corrupted message - delete it to prevent infinite retry
+            logger.warning("Deleting corrupted message %s (type: %s)", msg_id, msg_type)
+            conn.execute(
+                f"DELETE FROM {self.table_name} WHERE id = :id",
+                {"id": msg_id},
+            )
+            conn.commit()
+            return None
+
         message.message_id = str(msg_id)
         message.attempts = attempts + 1
 
@@ -321,7 +342,12 @@ class SqliteQueue(Queue):
         if not message.message_id:
             return
 
-        msg_id = int(message.message_id)
+        try:
+            msg_id = int(message.message_id)
+        except ValueError:
+            logger.error("Invalid message_id format in ack(): %s", message.message_id)
+            return
+
         conn = self._get_connection()
 
         conn.execute(

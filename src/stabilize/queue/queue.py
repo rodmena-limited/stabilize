@@ -334,16 +334,27 @@ class PostgresQueue(Queue):
                 data[key] = value
         return json.dumps(data)
 
-    def _deserialize_message(self, type_name: str, payload: Any) -> Message:
-        """Deserialize a message from JSON or dict."""
+    def _deserialize_message(self, type_name: str, payload: Any) -> Message | None:
+        """Deserialize a message from JSON or dict.
+
+        Returns None if deserialization fails (corrupted message).
+        """
         from stabilize.models.stage import SyntheticStageOwner
         from stabilize.models.status import WorkflowStatus
 
-        # psycopg3 returns JSONB as dict directly
-        if isinstance(payload, dict):
-            data = payload
-        else:
-            data = json.loads(payload)
+        try:
+            # psycopg3 returns JSONB as dict directly
+            if isinstance(payload, dict):
+                data = payload
+            else:
+                data = json.loads(payload)
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.error(
+                "Failed to decode message payload: %s. Payload: %s",
+                e,
+                payload[:200] if isinstance(payload, str) else payload,
+            )
+            return None
 
         # Convert enum values
         if "status" in data and isinstance(data["status"], str):
@@ -462,6 +473,17 @@ class PostgresQueue(Queue):
                 attempts = row["attempts"]
 
                 message = self._deserialize_message(msg_type, payload)
+                if message is None:
+                    # Corrupted message - delete it to prevent infinite retry
+                    logger.warning("Deleting corrupted message %s (type: %s)", msg_id, msg_type)
+                    with conn.cursor() as del_cur:
+                        del_cur.execute(
+                            f"DELETE FROM {self.table_name} WHERE id = %(id)s",
+                            {"id": msg_id},
+                        )
+                    conn.commit()
+                    return None
+
                 message.message_id = str(msg_id)
                 message.attempts = attempts
                 self._pending[msg_id] = {
@@ -477,7 +499,12 @@ class PostgresQueue(Queue):
         if not message.message_id:
             return
 
-        msg_id = int(message.message_id)
+        try:
+            msg_id = int(message.message_id)
+        except ValueError:
+            logger.error("Invalid message_id format in ack(): %s", message.message_id)
+            return
+
         pool = self._get_pool()
 
         with pool.connection() as conn:

@@ -293,10 +293,10 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         are committed together. This prevents orphaned workflows where the
         stage is saved but the continuation message is lost.
         """
-        # Store outputs in stage
-        if result.context:
+        # Store outputs in stage (with defensive type checks for user-defined tasks)
+        if result.context and isinstance(result.context, dict):
             stage.context.update(result.context)
-        if result.outputs:
+        if result.outputs and isinstance(result.outputs, dict):
             stage.outputs.update(result.outputs)
 
         # Handle based on status - use atomic transactions
@@ -463,8 +463,11 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         """
         result = task.on_cancel(stage) if hasattr(task, "on_cancel") else None
         if result:
-            stage.context.update(result.context)
-            stage.outputs.update(result.outputs)
+            # Defensive type checks (same as _process_result)
+            if result.context and isinstance(result.context, dict):
+                stage.context.update(result.context)
+            if result.outputs and isinstance(result.outputs, dict):
+                stage.outputs.update(result.outputs)
 
         # Atomic: store stage (if modified) + mark processed + push CompleteTask together
         with self.repository.transaction(self.queue) as txn:

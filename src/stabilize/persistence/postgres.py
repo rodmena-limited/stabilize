@@ -1053,9 +1053,18 @@ class PostgresWorkflowStore(WorkflowStore):
 
     def _row_to_task(self, row: dict[str, Any]) -> TaskExecution:
         """Convert database row to TaskExecution."""
-        exception_details = row["task_exception_details"]
-        if isinstance(exception_details, str):
-            exception_details = json.loads(exception_details or "{}")
+        # Handle exception_details consistently with SQLite:
+        # - None -> {}
+        # - str -> parse as JSON
+        # - dict -> use directly (JSONB auto-parsed)
+        raw_exception = row["task_exception_details"]
+        if raw_exception is None:
+            exception_details = {}
+        elif isinstance(raw_exception, str):
+            exception_details = json.loads(raw_exception) if raw_exception else {}
+        else:
+            # Already a dict (JSONB auto-parsed by psycopg)
+            exception_details = raw_exception if raw_exception else {}
 
         return TaskExecution(
             id=row["id"],
@@ -1068,7 +1077,7 @@ class PostgresWorkflowStore(WorkflowStore):
             stage_end=row["stage_end"] or False,
             loop_start=row["loop_start"] or False,
             loop_end=row["loop_end"] or False,
-            task_exception_details=exception_details or {},
+            task_exception_details=exception_details,
             version=row.get("version", 0) or 0,
         )
 
