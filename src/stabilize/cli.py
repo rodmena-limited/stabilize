@@ -60,7 +60,8 @@ from stabilize import (
     DockerTask,     # For Docker container execution
     HTTPTask,       # For HTTP requests
     # Handlers
-    StartWorkflowHandler, StartStageHandler, StartTaskHandler,
+    StartWorkflowHandler, StartStageHandler, SkipStageHandler,
+    CancelStageHandler, ContinueParentStageHandler, StartTaskHandler,
     RunTaskHandler, CompleteTaskHandler, CompleteStageHandler,
     CompleteWorkflowHandler, StartWaitingWorkflowsHandler,
 )
@@ -99,6 +100,9 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
         StartWorkflowHandler(queue, store),
         StartWaitingWorkflowsHandler(queue, store),
         StartStageHandler(queue, store),
+        SkipStageHandler(queue, store),
+        CancelStageHandler(queue, store),
+        ContinueParentStageHandler(queue, store),
         StartTaskHandler(queue, store, task_registry),
         RunTaskHandler(queue, store, task_registry),
         CompleteTaskHandler(queue, store),
@@ -806,9 +810,11 @@ RIGHT:
 
 MISTAKE 5: Missing handlers
 ----------------------------
-All 7 handlers are REQUIRED for the engine to work:
-    StartWorkflowHandler, StartStageHandler, StartTaskHandler,
-    RunTaskHandler, CompleteTaskHandler, CompleteStageHandler, CompleteWorkflowHandler
+All 11 handlers are REQUIRED for the engine to work:
+    StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
+    SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
+    StartTaskHandler, RunTaskHandler, CompleteTaskHandler,
+    CompleteStageHandler, CompleteWorkflowHandler
 
 
 MISTAKE 6: Forgetting requisite_stage_ref_ids for sequential stages
@@ -854,9 +860,10 @@ from stabilize import (
     Workflow, StageExecution, TaskExecution, WorkflowStatus,
     Orchestrator, QueueProcessor, SqliteQueue, SqliteWorkflowStore,
     Task, TaskResult, TaskRegistry,
-    StartWorkflowHandler, StartStageHandler, StartTaskHandler,
-    RunTaskHandler, CompleteTaskHandler, CompleteStageHandler,
-    CompleteWorkflowHandler,
+    StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
+    SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
+    StartTaskHandler, RunTaskHandler, CompleteTaskHandler,
+    CompleteStageHandler, CompleteWorkflowHandler,
 )
 
 
@@ -902,7 +909,11 @@ def setup_pipeline_runner(store, queue):
     processor = QueueProcessor(queue)
     handlers = [
         StartWorkflowHandler(queue, store),
+        StartWaitingWorkflowsHandler(queue, store),
         StartStageHandler(queue, store),
+        SkipStageHandler(queue, store),
+        CancelStageHandler(queue, store),
+        ContinueParentStageHandler(queue, store),
         StartTaskHandler(queue, store, registry),
         RunTaskHandler(queue, store, registry),
         CompleteTaskHandler(queue, store),
@@ -973,9 +984,10 @@ from stabilize import (
     Workflow, StageExecution, TaskExecution,
     Orchestrator, QueueProcessor, SqliteQueue, SqliteWorkflowStore,
     Task, TaskResult, TaskRegistry,
-    StartWorkflowHandler, StartStageHandler, StartTaskHandler,
-    RunTaskHandler, CompleteTaskHandler, CompleteStageHandler,
-    CompleteWorkflowHandler,
+    StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
+    SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
+    StartTaskHandler, RunTaskHandler, CompleteTaskHandler,
+    CompleteStageHandler, CompleteWorkflowHandler,
 )
 
 
@@ -1005,7 +1017,11 @@ def setup_pipeline_runner(store, queue):
     processor = QueueProcessor(queue)
     for h in [
         StartWorkflowHandler(queue, store),
+        StartWaitingWorkflowsHandler(queue, store),
         StartStageHandler(queue, store),
+        SkipStageHandler(queue, store),
+        CancelStageHandler(queue, store),
+        ContinueParentStageHandler(queue, store),
         StartTaskHandler(queue, store, registry),
         RunTaskHandler(queue, store, registry),
         CompleteTaskHandler(queue, store),
@@ -1090,10 +1106,11 @@ from stabilize import (
     # Tasks
     Task, RetryableTask, TaskResult, TaskRegistry,
     ShellTask, HTTPTask, DockerTask, SSHTask, HighwayTask,
-    # Handlers (all 7 required)
-    StartWorkflowHandler, StartStageHandler, StartTaskHandler,
-    RunTaskHandler, CompleteTaskHandler, CompleteStageHandler,
-    CompleteWorkflowHandler,
+    # Handlers (all 11 required)
+    StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
+    SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
+    StartTaskHandler, RunTaskHandler, CompleteTaskHandler,
+    CompleteStageHandler, CompleteWorkflowHandler,
 )
 
 # Advanced imports (for specialized use cases)

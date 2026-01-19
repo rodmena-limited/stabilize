@@ -27,9 +27,11 @@ Create a simple "Hello World" workflow.
         Workflow, StageExecution, TaskExecution,
         SqliteWorkflowStore, SqliteQueue, QueueProcessor, Orchestrator,
         Task, TaskResult, TaskRegistry,
-        StartWorkflowHandler, StartStageHandler, StartTaskHandler,
-        RunTaskHandler, CompleteTaskHandler, CompleteStageHandler,
-        CompleteWorkflowHandler, StartWaitingWorkflowsHandler,
+        # All 11 handlers are required
+        StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
+        SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
+        StartTaskHandler, RunTaskHandler, CompleteTaskHandler,
+        CompleteStageHandler, CompleteWorkflowHandler,
     )
 
     # 1. Define a Task
@@ -52,6 +54,9 @@ Create a simple "Hello World" workflow.
         StartWorkflowHandler(queue, store),
         StartWaitingWorkflowsHandler(queue, store),
         StartStageHandler(queue, store),
+        SkipStageHandler(queue, store),
+        CancelStageHandler(queue, store),
+        ContinueParentStageHandler(queue, store),
         StartTaskHandler(queue, store, registry),
         RunTaskHandler(queue, store, registry),
         CompleteTaskHandler(queue, store),
