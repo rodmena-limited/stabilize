@@ -174,7 +174,11 @@ class InMemoryQueue(Queue):
             # Check size limit (queue + pending)
             current_size = len(self._queue) + len(self._pending)
             if current_size >= self.max_size:
-                logger.warning("Queue full (size=%d), dropping message type %s", current_size, get_message_type_name(message))
+                logger.warning(
+                    "Queue full (size=%d), dropping message type %s",
+                    current_size,
+                    get_message_type_name(message),
+                )
                 return
 
             deliver_at = time.time()

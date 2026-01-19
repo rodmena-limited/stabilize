@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
+    from stabilize.persistence.store import WorkflowStore
     from stabilize.queue.messages import Message
     from stabilize.queue.queue import Queue
-    from stabilize.persistence.store import WorkflowStore
 
 
 class TransactionHelper:

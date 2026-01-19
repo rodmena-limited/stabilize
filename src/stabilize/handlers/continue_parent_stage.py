@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.stage import SyntheticStageOwner
 from stabilize.models.status import CONTINUABLE_STATUSES, HALT_STATUSES, WorkflowStatus
+from stabilize.persistence.transaction import TransactionHelper
 from stabilize.queue.messages import (
     CompleteStage,
     ContinueParentStage,
@@ -21,7 +22,6 @@ from stabilize.queue.messages import (
     StartTask,
 )
 from stabilize.resilience.config import HandlerConfig
-from stabilize.persistence.transaction import TransactionHelper
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -120,14 +120,16 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
             self.txn_helper.execute_atomic(
                 stage=stage,
                 source_message=message,
-                messages_to_push=[(
-                    CompleteStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=stage.id,
-                    ),
-                    None
-                )],
+                messages_to_push=[
+                    (
+                        CompleteStage(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=stage.id,
+                        ),
+                        None,
+                    )
+                ],
                 handler_name="ContinueParentStage",
             )
             return
@@ -153,14 +155,16 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                 self.txn_helper.execute_atomic(
                     stage=stage,
                     source_message=message,
-                    messages_to_push=[(
-                        CompleteStage(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=stage.id,
-                        ),
-                        None
-                    )],
+                    messages_to_push=[
+                        (
+                            CompleteStage(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=stage.id,
+                            ),
+                            None,
+                        )
+                    ],
                     handler_name="ContinueParentStage",
                 )
                 return
@@ -195,15 +199,17 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
         if first_task:
             self.txn_helper.execute_atomic(
                 source_message=message,
-                messages_to_push=[(
-                    StartTask(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=stage.id,
-                        task_id=first_task.id,
-                    ),
-                    None
-                )],
+                messages_to_push=[
+                    (
+                        StartTask(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=stage.id,
+                            task_id=first_task.id,
+                        ),
+                        None,
+                    )
+                ],
                 handler_name="ContinueParentStage",
             )
         else:
@@ -220,7 +226,7 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                                 execution_id=message.execution_id,
                                 stage_id=after.id,
                             ),
-                            None
+                            None,
                         )
                         for after in not_started_after
                     ]
@@ -241,14 +247,16 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                 # No tasks, no after-stages - complete stage
                 self.txn_helper.execute_atomic(
                     source_message=message,
-                    messages_to_push=[(
-                        CompleteStage(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=stage.id,
-                        ),
-                        None
-                    )],
+                    messages_to_push=[
+                        (
+                            CompleteStage(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=stage.id,
+                            ),
+                            None,
+                        )
+                    ],
                     handler_name="ContinueParentStage",
                 )
 
@@ -279,14 +287,16 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
             self.txn_helper.execute_atomic(
                 stage=stage,
                 source_message=message,
-                messages_to_push=[(
-                    CompleteStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=stage.id,
-                    ),
-                    None
-                )],
+                messages_to_push=[
+                    (
+                        CompleteStage(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=stage.id,
+                        ),
+                        None,
+                    )
+                ],
                 handler_name="ContinueParentStage",
             )
             return
@@ -312,14 +322,16 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                 self.txn_helper.execute_atomic(
                     stage=stage,
                     source_message=message,
-                    messages_to_push=[(
-                        CompleteStage(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=stage.id,
-                        ),
-                        None
-                    )],
+                    messages_to_push=[
+                        (
+                            CompleteStage(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=stage.id,
+                            ),
+                            None,
+                        )
+                    ],
                     handler_name="ContinueParentStage",
                 )
                 return
@@ -352,13 +364,15 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
         # Push CompleteStage to finalize using atomic transaction
         self.txn_helper.execute_atomic(
             source_message=message,
-            messages_to_push=[(
-                CompleteStage(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=stage.id,
-                ),
-                None
-            )],
+            messages_to_push=[
+                (
+                    CompleteStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=stage.id,
+                    ),
+                    None,
+                )
+            ],
             handler_name="ContinueParentStage",
         )

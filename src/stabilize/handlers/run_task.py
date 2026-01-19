@@ -20,6 +20,7 @@ from resilient_circuit import ExponentialDelay
 from stabilize.errors import TaskTimeoutError, is_transient
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
+from stabilize.persistence.transaction import TransactionHelper
 from stabilize.queue.messages import (
     CompleteTask,
     PauseTask,
@@ -33,7 +34,6 @@ from stabilize.resilience.process_executor import ProcessIsolatedTaskExecutor
 from stabilize.tasks.interface import RetryableTask, Task
 from stabilize.tasks.registry import TaskNotFoundError, TaskRegistry
 from stabilize.tasks.result import TaskResult
-from stabilize.persistence.transaction import TransactionHelper
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -118,16 +118,18 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 # Atomic: mark message processed + push CompleteTask
                 self.txn_helper.execute_atomic(
                     source_message=message,
-                    messages_to_push=[(
-                        CompleteTask(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=message.stage_id,
-                            task_id=message.task_id,
-                            status=WorkflowStatus.CANCELED,
-                        ),
-                        None
-                    )],
+                    messages_to_push=[
+                        (
+                            CompleteTask(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=message.stage_id,
+                                task_id=message.task_id,
+                                status=WorkflowStatus.CANCELED,
+                            ),
+                            None,
+                        )
+                    ],
                     handler_name="RunTask",
                 )
                 return
@@ -136,15 +138,17 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 # Atomic: mark message processed + push PauseTask
                 self.txn_helper.execute_atomic(
                     source_message=message,
-                    messages_to_push=[(
-                        PauseTask(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=message.stage_id,
-                            task_id=message.task_id,
-                        ),
-                        None
-                    )],
+                    messages_to_push=[
+                        (
+                            PauseTask(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=message.stage_id,
+                                task_id=message.task_id,
+                            ),
+                            None,
+                        )
+                    ],
                     handler_name="RunTask",
                 )
                 return
@@ -154,16 +158,18 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 # Atomic: mark message processed + push CompleteTask
                 self.txn_helper.execute_atomic(
                     source_message=message,
-                    messages_to_push=[(
-                        CompleteTask(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=message.stage_id,
-                            task_id=message.task_id,
-                            status=WorkflowStatus.SKIPPED,
-                        ),
-                        None
-                    )],
+                    messages_to_push=[
+                        (
+                            CompleteTask(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=message.stage_id,
+                                task_id=message.task_id,
+                                status=WorkflowStatus.SKIPPED,
+                            ),
+                            None,
+                        )
+                    ],
                     handler_name="RunTask",
                 )
                 return
@@ -323,16 +329,18 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             self.txn_helper.execute_atomic(
                 stage=stage,
                 source_message=message,
-                messages_to_push=[(
-                    CompleteTask(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=message.stage_id,
-                        task_id=message.task_id,
-                        status=result.status,
-                    ),
-                    None
-                )],
+                messages_to_push=[
+                    (
+                        CompleteTask(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                            task_id=message.task_id,
+                            status=result.status,
+                        ),
+                        None,
+                    )
+                ],
                 handler_name="RunTask",
             )
 
@@ -343,17 +351,19 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             self.txn_helper.execute_atomic(
                 stage=stage,
                 source_message=message,
-                messages_to_push=[(
-                    CompleteTask(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=message.stage_id,
-                        task_id=message.task_id,
-                        status=status,
-                        original_status=result.status,
-                    ),
-                    None
-                )],
+                messages_to_push=[
+                    (
+                        CompleteTask(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                            task_id=message.task_id,
+                            status=status,
+                            original_status=result.status,
+                        ),
+                        None,
+                    )
+                ],
                 handler_name="RunTask",
             )
 
@@ -364,17 +374,19 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             self.txn_helper.execute_atomic(
                 stage=stage,
                 source_message=message,
-                messages_to_push=[(
-                    CompleteTask(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=message.stage_id,
-                        task_id=message.task_id,
-                        status=status,
-                        original_status=result.status,
-                    ),
-                    None
-                )],
+                messages_to_push=[
+                    (
+                        CompleteTask(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                            task_id=message.task_id,
+                            status=status,
+                            original_status=result.status,
+                        ),
+                        None,
+                    )
+                ],
                 handler_name="RunTask",
             )
 
@@ -391,17 +403,19 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             self.txn_helper.execute_atomic(
                 stage=stage,
                 source_message=message,
-                messages_to_push=[(
-                    CompleteTask(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=message.stage_id,
-                        task_id=message.task_id,
-                        status=status,
-                        original_status=result.status,
-                    ),
-                    None
-                )],
+                messages_to_push=[
+                    (
+                        CompleteTask(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                            task_id=message.task_id,
+                            status=status,
+                            original_status=result.status,
+                        ),
+                        None,
+                    )
+                ],
                 handler_name="RunTask",
             )
 
@@ -472,16 +486,18 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                     # Mark message processed and push CompleteTask to prevent workflow hang
                     self.txn_helper.execute_atomic(
                         source_message=message,
-                        messages_to_push=[(
-                            CompleteTask(
-                                execution_type=message.execution_type,
-                                execution_id=message.execution_id,
-                                stage_id=message.stage_id,
-                                task_id=message.task_id,
-                                status=WorkflowStatus.CANCELED,
-                            ),
-                            None
-                        )],
+                        messages_to_push=[
+                            (
+                                CompleteTask(
+                                    execution_type=message.execution_type,
+                                    execution_id=message.execution_id,
+                                    stage_id=message.stage_id,
+                                    task_id=message.task_id,
+                                    status=WorkflowStatus.CANCELED,
+                                ),
+                                None,
+                            )
+                        ],
                         handler_name="RunTask",
                     )
                     return
@@ -495,32 +511,36 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 self.txn_helper.execute_atomic(
                     stage=fresh_stage,
                     source_message=message,
-                    messages_to_push=[(
-                        CompleteTask(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=message.stage_id,
-                            task_id=message.task_id,
-                            status=WorkflowStatus.CANCELED,
-                        ),
-                        None
-                    )],
+                    messages_to_push=[
+                        (
+                            CompleteTask(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=message.stage_id,
+                                task_id=message.task_id,
+                                status=WorkflowStatus.CANCELED,
+                            ),
+                            None,
+                        )
+                    ],
                     handler_name="RunTask",
                 )
             else:
                 # No stage modification needed, no retry required
                 self.txn_helper.execute_atomic(
                     source_message=message,
-                    messages_to_push=[(
-                        CompleteTask(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=message.stage_id,
-                            task_id=message.task_id,
-                            status=WorkflowStatus.CANCELED,
-                        ),
-                        None
-                    )],
+                    messages_to_push=[
+                        (
+                            CompleteTask(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=message.stage_id,
+                                task_id=message.task_id,
+                                status=WorkflowStatus.CANCELED,
+                            ),
+                            None,
+                        )
+                    ],
                     handler_name="RunTask",
                 )
 
@@ -604,16 +624,18 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 # Mark message processed and push CompleteTask to prevent workflow hang
                 self.txn_helper.execute_atomic(
                     source_message=message,
-                    messages_to_push=[(
-                        CompleteTask(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=message.stage_id,
-                            task_id=message.task_id,
-                            status=WorkflowStatus.TERMINAL,
-                        ),
-                        None
-                    )],
+                    messages_to_push=[
+                        (
+                            CompleteTask(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=message.stage_id,
+                                task_id=message.task_id,
+                                status=WorkflowStatus.TERMINAL,
+                            ),
+                            None,
+                        )
+                    ],
                     handler_name="RunTask",
                 )
                 return
@@ -625,17 +647,19 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             self.txn_helper.execute_atomic(
                 stage=fresh_stage,
                 source_message=message,
-                messages_to_push=[(
-                    CompleteTask(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=message.stage_id,
-                        task_id=message.task_id,
-                        status=status,
-                        original_status=WorkflowStatus.TERMINAL,
-                    ),
-                    None
-                )],
+                messages_to_push=[
+                    (
+                        CompleteTask(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                            task_id=message.task_id,
+                            status=status,
+                            original_status=WorkflowStatus.TERMINAL,
+                        ),
+                        None,
+                    )
+                ],
                 handler_name="RunTask",
             )
 
@@ -662,16 +686,18 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 # Mark message processed and push CompleteTask to prevent workflow hang
                 self.txn_helper.execute_atomic(
                     source_message=message,
-                    messages_to_push=[(
-                        CompleteTask(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=message.stage_id,
-                            task_id=message.task_id,
-                            status=WorkflowStatus.TERMINAL,
-                        ),
-                        None
-                    )],
+                    messages_to_push=[
+                        (
+                            CompleteTask(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=message.stage_id,
+                                task_id=message.task_id,
+                                status=WorkflowStatus.TERMINAL,
+                            ),
+                            None,
+                        )
+                    ],
                     handler_name="RunTask",
                 )
                 return
@@ -684,16 +710,18 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             self.txn_helper.execute_atomic(
                 stage=fresh_stage,
                 source_message=message,
-                messages_to_push=[(
-                    CompleteTask(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=message.stage_id,
-                        task_id=message.task_id,
-                        status=WorkflowStatus.TERMINAL,
-                    ),
-                    None
-                )],
+                messages_to_push=[
+                    (
+                        CompleteTask(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                            task_id=message.task_id,
+                            status=WorkflowStatus.TERMINAL,
+                        ),
+                        None,
+                    )
+                ],
                 handler_name="RunTask",
             )
 
