@@ -156,6 +156,12 @@ class Workflow:
         """Remove a stage from this execution."""
         self.stages = [s for s in self.stages if s.id != stage_id]
 
+    def cleanup(self) -> None:
+        """Explicitly break circular references."""
+        for stage in self.stages:
+            stage.cleanup()
+        self.stages.clear()
+
     def stage_by_id(self, stage_id: str) -> StageExecution:
         """
         Get a stage by its ID.

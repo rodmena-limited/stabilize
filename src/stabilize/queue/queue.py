@@ -150,12 +150,13 @@ class InMemoryQueue(Queue):
     Messages are ordered by delivery time.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_size: int = 10000) -> None:
         self._queue: list[QueuedMessage] = []
         self._lock = threading.Lock()
         self._message_id_counter = 0
         self._pending: dict[str, QueuedMessage] = {}  # Messages being processed
         self._message_index: dict[str, QueuedMessage] = {}  # For ensure/reschedule
+        self.max_size = max_size
 
     def _generate_message_id(self) -> str:
         """Generate a unique message ID."""
@@ -170,6 +171,12 @@ class InMemoryQueue(Queue):
     ) -> None:
         """Push a message onto the queue."""
         with self._lock:
+            # Check size limit (queue + pending)
+            current_size = len(self._queue) + len(self._pending)
+            if current_size >= self.max_size:
+                logger.warning("Queue full (size=%d), dropping message type %s", current_size, get_message_type_name(message))
+                return
+
             deliver_at = time.time()
             if delay:
                 deliver_at += delay.total_seconds()

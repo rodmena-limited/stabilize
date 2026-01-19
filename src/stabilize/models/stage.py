@@ -109,6 +109,12 @@ class StageExecution:
         """Check if this stage is attached to an execution."""
         return self._execution is not None
 
+    def cleanup(self) -> None:
+        """Explicitly break circular references."""
+        self._execution = None
+        for task in self.tasks:
+            task.cleanup()
+
     # ========== DAG Navigation Methods ==========
 
     def is_initial(self) -> bool:

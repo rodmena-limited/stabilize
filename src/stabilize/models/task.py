@@ -94,6 +94,10 @@ class TaskExecution:
         """Check if this task ends a loop."""
         return self.loop_end
 
+    def cleanup(self) -> None:
+        """Explicitly break circular references."""
+        self._stage = None
+
     def set_exception_details(self, exception: dict[str, Any]) -> None:
         """Store exception details for this task."""
         self.task_exception_details["exception"] = exception

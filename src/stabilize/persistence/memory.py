@@ -29,13 +29,20 @@ class InMemoryWorkflowStore(WorkflowStore):
     Thread-safe storage for testing and single-process execution.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_entries: int = 10000) -> None:
         self._executions: dict[str, Workflow] = {}
         self._lock = threading.Lock()
+        self.max_entries = max_entries
 
     def store(self, execution: Workflow) -> None:
         """Store a complete execution."""
         with self._lock:
+            # Check for eviction if new entry
+            if execution.id not in self._executions and len(self._executions) >= self.max_entries:
+                # Evict oldest (FIFO)
+                oldest_id = next(iter(self._executions))
+                del self._executions[oldest_id]
+
             # Deep copy to prevent external modifications
             self._executions[execution.id] = copy.deepcopy(execution)
 

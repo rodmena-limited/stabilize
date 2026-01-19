@@ -21,6 +21,7 @@ from stabilize.queue.messages import (
     StartTask,
 )
 from stabilize.resilience.config import HandlerConfig
+from stabilize.persistence.transaction import TransactionHelper
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -55,6 +56,7 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
         handler_config: HandlerConfig | None = None,
     ) -> None:
         super().__init__(queue, repository, retry_delay, handler_config)
+        self.txn_helper = TransactionHelper(repository, queue)
 
     @property
     def message_type(self) -> type[ContinueParentStage]:
@@ -115,21 +117,19 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
             self.set_stage_status(stage, WorkflowStatus.TERMINAL)
             stage.end_time = self.current_time_millis()
             # Use atomic transaction to ensure state and message are committed together
-            with self.repository.transaction(self.queue) as txn:
-                txn.store_stage(stage)
-                if message.message_id:
-                    txn.mark_message_processed(
-                        message_id=message.message_id,
-                        handler_type="ContinueParentStage",
-                        execution_id=message.execution_id,
-                    )
-                txn.push_message(
+            self.txn_helper.execute_atomic(
+                stage=stage,
+                source_message=message,
+                messages_to_push=[(
                     CompleteStage(
                         execution_type=message.execution_type,
                         execution_id=message.execution_id,
                         stage_id=stage.id,
-                    )
-                )
+                    ),
+                    None
+                )],
+                handler_name="ContinueParentStage",
+            )
             return
 
         if not all_complete:
@@ -150,21 +150,19 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                 stage.context["exception"] = {
                     "details": {"error": "Exceeded max retries waiting for before-stages"},
                 }
-                with self.repository.transaction(self.queue) as txn:
-                    txn.store_stage(stage)
-                    if message.message_id:
-                        txn.mark_message_processed(
-                            message_id=message.message_id,
-                            handler_type="ContinueParentStage",
-                            execution_id=message.execution_id,
-                        )
-                    txn.push_message(
+                self.txn_helper.execute_atomic(
+                    stage=stage,
+                    source_message=message,
+                    messages_to_push=[(
                         CompleteStage(
                             execution_type=message.execution_type,
                             execution_id=message.execution_id,
                             stage_id=stage.id,
-                        )
-                    )
+                        ),
+                        None
+                    )],
+                    handler_name="ContinueParentStage",
+                )
                 return
 
             # Re-queue with incremented retry count
@@ -195,21 +193,19 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
         # Use atomic transaction for message queuing
         first_task = stage.first_task()
         if first_task:
-            with self.repository.transaction(self.queue) as txn:
-                if message.message_id:
-                    txn.mark_message_processed(
-                        message_id=message.message_id,
-                        handler_type="ContinueParentStage",
-                        execution_id=message.execution_id,
-                    )
-                txn.push_message(
+            self.txn_helper.execute_atomic(
+                source_message=message,
+                messages_to_push=[(
                     StartTask(
                         execution_type=message.execution_type,
                         execution_id=message.execution_id,
                         stage_id=stage.id,
                         task_id=first_task.id,
-                    )
-                )
+                    ),
+                    None
+                )],
+                handler_name="ContinueParentStage",
+            )
         else:
             # No tasks - check for after-stages or complete
             after_stages = stage.first_after_stages()
@@ -217,21 +213,22 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                 # Only push StartStage for after-stages that are NOT_STARTED to prevent duplicates
                 not_started_after = [s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED]
                 if not_started_after:
-                    with self.repository.transaction(self.queue) as txn:
-                        if message.message_id:
-                            txn.mark_message_processed(
-                                message_id=message.message_id,
-                                handler_type="ContinueParentStage",
+                    messages_to_push = [
+                        (
+                            StartStage(
+                                execution_type=message.execution_type,
                                 execution_id=message.execution_id,
-                            )
-                        for after in not_started_after:
-                            txn.push_message(
-                                StartStage(
-                                    execution_type=message.execution_type,
-                                    execution_id=message.execution_id,
-                                    stage_id=after.id,
-                                )
-                            )
+                                stage_id=after.id,
+                            ),
+                            None
+                        )
+                        for after in not_started_after
+                    ]
+                    self.txn_helper.execute_atomic(
+                        source_message=message,
+                        messages_to_push=messages_to_push,
+                        handler_name="ContinueParentStage",
+                    )
                 else:
                     # All after-stages already started/running/complete - waiting for them to finish
                     logger.debug(
@@ -242,20 +239,18 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                     )
             else:
                 # No tasks, no after-stages - complete stage
-                with self.repository.transaction(self.queue) as txn:
-                    if message.message_id:
-                        txn.mark_message_processed(
-                            message_id=message.message_id,
-                            handler_type="ContinueParentStage",
-                            execution_id=message.execution_id,
-                        )
-                    txn.push_message(
+                self.txn_helper.execute_atomic(
+                    source_message=message,
+                    messages_to_push=[(
                         CompleteStage(
                             execution_type=message.execution_type,
                             execution_id=message.execution_id,
                             stage_id=stage.id,
-                        )
-                    )
+                        ),
+                        None
+                    )],
+                    handler_name="ContinueParentStage",
+                )
 
     def _handle_after_phase(
         self,
@@ -281,21 +276,19 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
             )
             self.set_stage_status(stage, WorkflowStatus.TERMINAL)
             stage.end_time = self.current_time_millis()
-            with self.repository.transaction(self.queue) as txn:
-                txn.store_stage(stage)
-                if message.message_id:
-                    txn.mark_message_processed(
-                        message_id=message.message_id,
-                        handler_type="ContinueParentStage",
-                        execution_id=message.execution_id,
-                    )
-                txn.push_message(
+            self.txn_helper.execute_atomic(
+                stage=stage,
+                source_message=message,
+                messages_to_push=[(
                     CompleteStage(
                         execution_type=message.execution_type,
                         execution_id=message.execution_id,
                         stage_id=stage.id,
-                    )
-                )
+                    ),
+                    None
+                )],
+                handler_name="ContinueParentStage",
+            )
             return
 
         if not all_complete:
@@ -316,21 +309,19 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                 stage.context["exception"] = {
                     "details": {"error": "Exceeded max retries waiting for after-stages"},
                 }
-                with self.repository.transaction(self.queue) as txn:
-                    txn.store_stage(stage)
-                    if message.message_id:
-                        txn.mark_message_processed(
-                            message_id=message.message_id,
-                            handler_type="ContinueParentStage",
-                            execution_id=message.execution_id,
-                        )
-                    txn.push_message(
+                self.txn_helper.execute_atomic(
+                    stage=stage,
+                    source_message=message,
+                    messages_to_push=[(
                         CompleteStage(
                             execution_type=message.execution_type,
                             execution_id=message.execution_id,
                             stage_id=stage.id,
-                        )
-                    )
+                        ),
+                        None
+                    )],
+                    handler_name="ContinueParentStage",
+                )
                 return
 
             # Re-queue with incremented retry count
@@ -359,17 +350,15 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
         )
 
         # Push CompleteStage to finalize using atomic transaction
-        with self.repository.transaction(self.queue) as txn:
-            if message.message_id:
-                txn.mark_message_processed(
-                    message_id=message.message_id,
-                    handler_type="ContinueParentStage",
-                    execution_id=message.execution_id,
-                )
-            txn.push_message(
+        self.txn_helper.execute_atomic(
+            source_message=message,
+            messages_to_push=[(
                 CompleteStage(
                     execution_type=message.execution_type,
                     execution_id=message.execution_id,
                     stage_id=stage.id,
-                )
-            )
+                ),
+                None
+            )],
+            handler_name="ContinueParentStage",
+        )
