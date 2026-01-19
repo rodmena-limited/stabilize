@@ -24,6 +24,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Maximum number of times to re-queue CompleteWorkflow before giving up
+# With a 15-second retry delay, 240 retries = 1 hour maximum wait
+MAX_COMPLETE_WORKFLOW_RETRIES = 240
+
 
 class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
     """
@@ -123,13 +127,33 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
                     return WorkflowStatus.TERMINAL
                 return WorkflowStatus.SUCCEEDED
 
-        # Still running - re-queue
+        # Still running - check retry count before re-queuing
+        retry_count = getattr(message, "retry_count", 0) or 0
+
+        if retry_count >= MAX_COMPLETE_WORKFLOW_RETRIES:
+            logger.error(
+                "CompleteWorkflow for %s exceeded max retries (%d). Stages stuck in statuses: %s. Marking as TERMINAL.",
+                execution.id,
+                MAX_COMPLETE_WORKFLOW_RETRIES,
+                statuses,
+            )
+            return WorkflowStatus.TERMINAL
+
+        # Re-queue with incremented retry count
         logger.debug(
-            "Re-queuing CompleteWorkflow for %s - stages not complete. Statuses: %s",
+            "Re-queuing CompleteWorkflow for %s (retry %d/%d) - stages not complete. Statuses: %s",
             execution.id,
+            retry_count + 1,
+            MAX_COMPLETE_WORKFLOW_RETRIES,
             statuses,
         )
-        self.queue.push(message, self.retry_delay)
+        # Create new message with incremented retry count
+        new_message = CompleteWorkflow(
+            execution_type=message.execution_type,
+            execution_id=message.execution_id,
+            retry_count=retry_count + 1,
+        )
+        self.queue.push(new_message, self.retry_delay)
         return None
 
     def _other_branches_incomplete(self, stages: list[StageExecution]) -> bool:

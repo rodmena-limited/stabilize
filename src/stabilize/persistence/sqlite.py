@@ -419,8 +419,15 @@ class SqliteWorkflowStore(WorkflowStore):
         if exec_row:
             execution = self._row_to_execution(exec_row)
             stage._execution = execution
-            # Add stage to execution's stage list so it can be found
-            execution.stages = [stage]
+
+            # Load current stage AND its upstream stages so upstream_stages() works
+            # This is critical for tasks that need to access upstream stage outputs
+            all_stages = [stage]
+            upstream_stages = self.get_upstream_stages(execution.id, stage.ref_id)
+            for us in upstream_stages:
+                us._execution = execution
+                all_stages.append(us)
+            execution.stages = all_stages
 
         # Get tasks
         task_result = conn.execute(
@@ -437,12 +444,66 @@ class SqliteWorkflowStore(WorkflowStore):
 
         return stage
 
+    def _load_tasks_for_stages(
+        self,
+        conn: sqlite3.Connection,
+        stages: list[StageExecution],
+    ) -> None:
+        """Load tasks for a list of stages."""
+        if not stages:
+            return
+
+        stage_map = {s.id: s for s in stages}
+        stage_ids = list(stage_map.keys())
+
+        # Build query for stage_ids
+        placeholders = ", ".join(f":sid_{i}" for i in range(len(stage_ids)))
+        params = {}
+        for i, sid in enumerate(stage_ids):
+            params[f"sid_{i}"] = sid
+
+        result = conn.execute(
+            f"""
+            SELECT * FROM task_executions
+            WHERE stage_id IN ({placeholders})
+            ORDER BY start_time ASC
+            """,
+            params,
+        )
+
+        for row in result.fetchall():
+            task = self._row_to_task(row)
+            stage_ref = stage_map.get(row["stage_id"])
+            if stage_ref:
+                task._stage = stage_ref
+                stage_ref.tasks.append(task)
+
+    def _set_execution_reference(
+        self,
+        conn: sqlite3.Connection,
+        stages: list[StageExecution],
+        execution_id: str,
+    ) -> None:
+        """Set the _execution reference for stages by loading execution summary."""
+        if not stages:
+            return
+
+        result = conn.execute(
+            "SELECT * FROM pipeline_executions WHERE id = :id",
+            {"id": execution_id},
+        )
+        exec_row = result.fetchone()
+        if exec_row:
+            execution = self._row_to_execution(exec_row)
+            for stage in stages:
+                stage._execution = execution
+
     def get_upstream_stages(
         self,
         execution_id: str,
         stage_ref_id: str,
     ) -> list[StageExecution]:
-        """Get upstream stages."""
+        """Get upstream stages with tasks loaded."""
         conn = self._get_connection()
 
         # First find the requisite ref ids of the target stage
@@ -463,7 +524,7 @@ class SqliteWorkflowStore(WorkflowStore):
 
         # Build query for ref_ids
         placeholders = ", ".join(f":ref_{i}" for i in range(len(requisites)))
-        params = {"execution_id": execution_id}
+        params: dict[str, Any] = {"execution_id": execution_id}
         for i, ref in enumerate(requisites):
             params[f"ref_{i}"] = ref
 
@@ -481,6 +542,12 @@ class SqliteWorkflowStore(WorkflowStore):
             stage = self._row_to_stage(stage_row)
             stages.append(stage)
 
+        # Load tasks for all stages
+        self._load_tasks_for_stages(conn, stages)
+
+        # Set execution reference
+        self._set_execution_reference(conn, stages, execution_id)
+
         return stages
 
     def get_downstream_stages(
@@ -488,7 +555,7 @@ class SqliteWorkflowStore(WorkflowStore):
         execution_id: str,
         stage_ref_id: str,
     ) -> list[StageExecution]:
-        """Get downstream stages."""
+        """Get downstream stages with tasks loaded."""
         conn = self._get_connection()
 
         # Use LIKE for JSON array membership test as it's portable and safe enough here
@@ -520,6 +587,12 @@ class SqliteWorkflowStore(WorkflowStore):
             stage = self._row_to_stage(stage_row)
             stages.append(stage)
 
+        # Load tasks for all stages
+        self._load_tasks_for_stages(conn, stages)
+
+        # Set execution reference
+        self._set_execution_reference(conn, stages, execution_id)
+
         return stages
 
     def get_synthetic_stages(
@@ -527,7 +600,7 @@ class SqliteWorkflowStore(WorkflowStore):
         execution_id: str,
         parent_stage_id: str,
     ) -> list[StageExecution]:
-        """Get synthetic stages."""
+        """Get synthetic stages with tasks loaded."""
         conn = self._get_connection()
         result = conn.execute(
             """
@@ -542,6 +615,12 @@ class SqliteWorkflowStore(WorkflowStore):
         for stage_row in result.fetchall():
             stage = self._row_to_stage(stage_row)
             stages.append(stage)
+
+        # Load tasks for all stages
+        self._load_tasks_for_stages(conn, stages)
+
+        # Set execution reference
+        self._set_execution_reference(conn, stages, execution_id)
 
         return stages
 

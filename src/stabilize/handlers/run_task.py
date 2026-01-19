@@ -347,8 +347,27 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 )
 
         else:
-            logger.warning("Unhandled task status: %s", result.status)
-            self.repository.store_stage(stage)
+            # Unhandled status - treat as error to prevent workflow hang
+            logger.warning(
+                "Unhandled task status %s for task %s, treating as TERMINAL",
+                result.status,
+                task_model.name,
+            )
+            status = stage.failure_status(default=WorkflowStatus.TERMINAL)
+
+            # Atomic: store stage + push CompleteTask together
+            with self.repository.transaction(self.queue) as txn:
+                txn.store_stage(stage)
+                txn.push_message(
+                    CompleteTask(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                        task_id=message.task_id,
+                        status=status,
+                        original_status=result.status,
+                    )
+                )
 
     def _get_backoff_period(
         self,

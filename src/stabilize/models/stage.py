@@ -128,7 +128,10 @@ class StageExecution:
         Get all stages directly upstream of this stage.
 
         Returns stages whose ref_id is in this stage's requisite_stage_ref_ids.
+        Returns empty list if stage is not attached to an execution.
         """
+        if not self.has_execution():
+            return []
         return [stage for stage in self.execution.stages if stage.ref_id in self.requisite_stage_ref_ids]
 
     def downstream_stages(self) -> list[StageExecution]:
@@ -136,7 +139,10 @@ class StageExecution:
         Get all stages directly downstream of this stage.
 
         Returns stages that have this stage's ref_id in their requisite_stage_ref_ids.
+        Returns empty list if stage is not attached to an execution.
         """
+        if not self.has_execution():
+            return []
         return [stage for stage in self.execution.stages if self.ref_id in stage.requisite_stage_ref_ids]
 
     def all_upstream_stages_complete(self) -> bool:
@@ -170,7 +176,12 @@ class StageExecution:
     # ========== Synthetic Stage Methods ==========
 
     def synthetic_stages(self) -> list[StageExecution]:
-        """Get all synthetic stages (children) of this stage."""
+        """Get all synthetic stages (children) of this stage.
+
+        Returns empty list if stage is not attached to an execution.
+        """
+        if not self.has_execution():
+            return []
         return [stage for stage in self.execution.stages if stage.parent_stage_id == self.id]
 
     def before_stages(self) -> list[StageExecution]:
@@ -200,10 +211,12 @@ class StageExecution:
         Get the parent stage for this synthetic stage.
 
         Raises:
-            ValueError: If this is not a synthetic stage
+            ValueError: If this is not a synthetic stage or not attached to an execution
         """
         if self.parent_stage_id is None:
             raise ValueError("Not a synthetic stage")
+        if not self.has_execution():
+            raise ValueError("Stage is not attached to an execution")
         for stage in self.execution.stages:
             if stage.id == self.parent_stage_id:
                 return stage
@@ -258,7 +271,13 @@ class StageExecution:
         if WorkflowStatus.NOT_STARTED in after_stage_statuses:
             return WorkflowStatus.RUNNING
 
-        return WorkflowStatus.TERMINAL
+        # If there are any incomplete statuses (NOT_STARTED, RUNNING), return RUNNING
+        # This handles the case where tasks or stages are still in progress
+        incomplete_statuses = {WorkflowStatus.NOT_STARTED, WorkflowStatus.RUNNING}
+        if any(s in incomplete_statuses for s in all_statuses):
+            return WorkflowStatus.RUNNING
+
+        return WorkflowStatus.RUNNING
 
     def failure_status(self, default: WorkflowStatus = WorkflowStatus.TERMINAL) -> WorkflowStatus:
         """Get the appropriate failure status based on stage configuration."""

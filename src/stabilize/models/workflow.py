@@ -201,15 +201,36 @@ class Workflow:
         from stabilize.dag.topological import topological_sort
 
         result: dict[str, Any] = {}
+        # Use a set for O(1) membership checking when concatenating lists
+        seen_items: dict[str, set[Any]] = {}
 
         for stage in topological_sort(self.stages):
             for key, value in stage.outputs.items():
                 if key in result and isinstance(result[key], list) and isinstance(value, list):
-                    # Concatenate lists, avoiding duplicates
+                    # Concatenate lists, avoiding duplicates using set for O(1) lookup
                     existing = result[key]
+                    if key not in seen_items:
+                        # Initialize seen set with existing items
+                        # Only hashable items can be tracked this way
+                        try:
+                            seen_items[key] = set(existing)
+                        except TypeError:
+                            # Items are not hashable, fall back to O(n) check
+                            for item in value:
+                                if item not in existing:
+                                    existing.append(item)
+                            continue
+
+                    seen = seen_items[key]
                     for item in value:
-                        if item not in existing:
-                            existing.append(item)
+                        try:
+                            if item not in seen:
+                                seen.add(item)
+                                existing.append(item)
+                        except TypeError:
+                            # Item is not hashable, fall back to O(n) check
+                            if item not in existing:
+                                existing.append(item)
                 else:
                     result[key] = value
 

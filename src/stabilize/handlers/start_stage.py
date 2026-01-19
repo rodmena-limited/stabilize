@@ -57,8 +57,10 @@ class StartStageHandler(StabilizeHandler[StartStage]):
 
         def on_stage(stage: StageExecution) -> None:
             try:
-                # Get upstream stages from repository
+                # Get upstream stages from repository (returns empty list if none)
                 upstream_stages = self.repository.get_upstream_stages(stage.execution.id, stage.ref_id)
+                if upstream_stages is None:
+                    upstream_stages = []
 
                 # Check if any upstream stages failed
                 # We check for terminal statuses in direct dependencies
@@ -70,6 +72,8 @@ class StartStageHandler(StabilizeHandler[StartStage]):
 
                 upstream_failed = False
                 for upstream in upstream_stages:
+                    if upstream is None:
+                        continue
                     if upstream.status in halt_statuses:
                         upstream_failed = True
                         break
@@ -96,6 +100,8 @@ class StartStageHandler(StabilizeHandler[StartStage]):
 
                 all_complete = True
                 for upstream in upstream_stages:
+                    if upstream is None:
+                        continue
                     if upstream.status not in CONTINUABLE_STATUSES:
                         all_complete = False
                         break
@@ -248,15 +254,17 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         4. Complete stage
         """
 
-        # Fetch synthetic stages
+        # Fetch synthetic stages (returns empty list if none)
         synthetic_stages = self.repository.get_synthetic_stages(stage.execution.id, stage.id)
+        if synthetic_stages is None:
+            synthetic_stages = []
 
         # Check for before stages
         # We need initial before stages (those with no dependencies)
         before_stages = [
             s
             for s in synthetic_stages
-            if s.synthetic_stage_owner == SyntheticStageOwner.STAGE_BEFORE and s.is_initial()
+            if s is not None and s.synthetic_stage_owner == SyntheticStageOwner.STAGE_BEFORE and s.is_initial()
         ]
 
         if before_stages:
@@ -285,7 +293,9 @@ class StartStageHandler(StabilizeHandler[StartStage]):
 
         # No tasks - check for after stages
         after_stages = [
-            s for s in synthetic_stages if s.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER and s.is_initial()
+            s
+            for s in synthetic_stages
+            if s is not None and s.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER and s.is_initial()
         ]
 
         if after_stages:

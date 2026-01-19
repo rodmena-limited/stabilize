@@ -63,27 +63,37 @@ def topological_sort(
         sorted_stages = topological_sort(stages)
         # Result: [A, B, C, D] or [A, C, B, D] (B and C can be in any order)
     """
-    # Filter stages by predicate
-    unsorted: list[StageExecution] = [s for s in stages if stage_filter(s)]
+    # Filter stages by predicate, build a map for O(1) lookup
+    filtered_stages = [s for s in stages if stage_filter(s)]
+    # Use set of stage ids for O(1) removal tracking
+    unsorted_ids: set[str] = {s.id for s in filtered_stages}
+    # Map from id to stage for quick lookup
+    stage_by_id: dict[str, StageExecution] = {s.id: s for s in filtered_stages}
+
     sorted_stages: list[StageExecution] = []
     ref_ids: set[str] = set()
 
-    while unsorted:
+    while unsorted_ids:
         # Find all stages whose requisites have been satisfied
         # A stage is sortable if all its requisite_stage_ref_ids are in ref_ids
-        sortable = [stage for stage in unsorted if ref_ids.issuperset(stage.requisite_stage_ref_ids)]
+        sortable = [
+            stage_by_id[sid] for sid in unsorted_ids if ref_ids.issuperset(stage_by_id[sid].requisite_stage_ref_ids)
+        ]
 
         if not sortable:
             # No progress possible - circular dependency
-            relationships = ", ".join(f"{list(stage.requisite_stage_ref_ids)}->{stage.ref_id}" for stage in stages)
+            unsorted_stages = [stage_by_id[sid] for sid in unsorted_ids]
+            relationships = ", ".join(
+                f"{list(stage.requisite_stage_ref_ids)}->{stage.ref_id}" for stage in unsorted_stages
+            )
             raise CircularDependencyError(
                 f"Invalid stage relationships found: {relationships}",
-                stages=unsorted,
+                stages=unsorted_stages,
             )
 
-        # Add all sortable stages to result
+        # Add all sortable stages to result (O(1) removal from set)
         for stage in sortable:
-            unsorted.remove(stage)
+            unsorted_ids.remove(stage.id)
             ref_ids.add(stage.ref_id)
             sorted_stages.append(stage)
 
@@ -178,13 +188,19 @@ def get_execution_layers(stages: list[StageExecution]) -> list[list[StageExecuti
         # Layer 1: [B, C]
         # Layer 2: [D]
     """
-    unsorted: list[StageExecution] = [s for s in stages if s.parent_stage_id is None]
+    # Filter and build maps for O(1) operations
+    filtered_stages = [s for s in stages if s.parent_stage_id is None]
+    unsorted_ids: set[str] = {s.id for s in filtered_stages}
+    stage_by_id: dict[str, StageExecution] = {s.id: s for s in filtered_stages}
+
     layers: list[list[StageExecution]] = []
     ref_ids: set[str] = set()
 
-    while unsorted:
+    while unsorted_ids:
         # Find all stages whose requisites are satisfied
-        layer = [stage for stage in unsorted if ref_ids.issuperset(stage.requisite_stage_ref_ids)]
+        layer = [
+            stage_by_id[sid] for sid in unsorted_ids if ref_ids.issuperset(stage_by_id[sid].requisite_stage_ref_ids)
+        ]
 
         if not layer:
             # This shouldn't happen if topological_sort passes
@@ -192,8 +208,9 @@ def get_execution_layers(stages: list[StageExecution]) -> list[list[StageExecuti
 
         layers.append(layer)
 
+        # O(1) removal from set
         for stage in layer:
-            unsorted.remove(stage)
+            unsorted_ids.remove(stage.id)
             ref_ids.add(stage.ref_id)
 
     return layers

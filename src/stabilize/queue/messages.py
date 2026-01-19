@@ -71,9 +71,13 @@ class CompleteWorkflow(WorkflowLevel):
     Message to complete a pipeline execution.
 
     Sent when all stages have completed or execution should be finalized.
+
+    Attributes:
+        retry_count: Number of times this message has been re-queued while
+                    waiting for stages to complete. Used to prevent infinite loops.
     """
 
-    pass
+    retry_count: int = 0
 
 
 @dataclass

@@ -264,96 +264,71 @@ class PostgresWorkflowStore(WorkflowStore):
 
         Uses INSERT ... ON CONFLICT to handle both new and existing tasks efficiently.
         For updates, it increments version and checks the previous version to prevent lost updates.
+
+        Raises:
+            ConcurrencyError: If any task update fails due to version mismatch.
         """
+        from stabilize.errors import ConcurrencyError
+
         if not tasks:
             return
 
-        # Prepare batch data
-        values_list = []
+        # Process each task individually to properly detect optimistic lock failures.
+        # While executemany is more efficient, it doesn't provide per-row feedback
+        # needed to properly implement optimistic locking.
         for task in tasks:
-            values_list.append(
-                {
-                    "id": task.id,
-                    "stage_id": stage_id,
-                    "name": task.name,
-                    "implementing_class": task.implementing_class,
-                    "status": task.status.name,
-                    "start_time": task.start_time,
-                    "end_time": task.end_time,
-                    "stage_start": task.stage_start,
-                    "stage_end": task.stage_end,
-                    "loop_start": task.loop_start,
-                    "loop_end": task.loop_end,
-                    "task_exception_details": json.dumps(task.task_exception_details),
-                    "version": task.version,
-                }
+            params = {
+                "id": task.id,
+                "stage_id": stage_id,
+                "name": task.name,
+                "implementing_class": task.implementing_class,
+                "status": task.status.name,
+                "start_time": task.start_time,
+                "end_time": task.end_time,
+                "stage_start": task.stage_start,
+                "stage_end": task.stage_end,
+                "loop_start": task.loop_start,
+                "loop_end": task.loop_end,
+                "task_exception_details": json.dumps(task.task_exception_details),
+                "version": task.version,
+            }
+
+            # Use INSERT ... ON CONFLICT with RETURNING to detect what happened
+            cur.execute(
+                """
+                INSERT INTO task_executions (
+                    id, stage_id, name, implementing_class, status,
+                    start_time, end_time, stage_start, stage_end,
+                    loop_start, loop_end, task_exception_details, version
+                ) VALUES (
+                    %(id)s, %(stage_id)s, %(name)s, %(implementing_class)s, %(status)s,
+                    %(start_time)s, %(end_time)s, %(stage_start)s, %(stage_end)s,
+                    %(loop_start)s, %(loop_end)s, %(task_exception_details)s::jsonb, %(version)s
+                )
+                ON CONFLICT (id) DO UPDATE SET
+                    status = EXCLUDED.status,
+                    start_time = EXCLUDED.start_time,
+                    end_time = EXCLUDED.end_time,
+                    task_exception_details = EXCLUDED.task_exception_details,
+                    version = task_executions.version + 1
+                WHERE task_executions.version = EXCLUDED.version
+                RETURNING version
+                """,
+                params,
             )
 
-        # We execute one by one for now because psycopg3's executemany
-        # doesn't support returning logic easily for optimistic locking checks
-        # mixed with inserts in a single statement without complex SQL.
-        # However, to avoid N+1 round trips, we can use a CTE or just accept
-        # that we send a batch of commands.
-        # But wait, we want to be "massively parallel" scalable.
-        #
-        # Better approach: Use executemany for the batch.
-        # For optimistic locking:
-        # UPDATE ... WHERE id=... AND version=...
-        # If rowcount=0, it failed.
-        #
-        # But we have a mix of inserts and updates (upsert).
-        # Native ON CONFLICT doesn't support "WHERE version = old_version" directly in the conflict target,
-        # but supports it in the DO UPDATE clause.
-
-        # We will separate into new tasks (version=0) and existing tasks (version>0).
-        # Actually, newly created tasks in Python might have version=0.
-
-        # Strategy:
-        # 1. Try to INSERT new tasks (where we expect them to be new).
-        #    If conflict, it means they exist -> treat as update.
-        # 2. For updates, we use a prepared statement with executemany.
-
-        # Simplified "Massive" approach:
-        # Just use executemany with ON CONFLICT.
-        # To support optimistic locking in ON CONFLICT:
-        # ... ON CONFLICT (id) DO UPDATE SET ...
-        #     version = task_executions.version + 1
-        #     WHERE task_executions.version = EXCLUDED.version
-
-        cur.executemany(
-            """
-            INSERT INTO task_executions (
-                id, stage_id, name, implementing_class, status,
-                start_time, end_time, stage_start, stage_end,
-                loop_start, loop_end, task_exception_details, version
-            ) VALUES (
-                %(id)s, %(stage_id)s, %(name)s, %(implementing_class)s, %(status)s,
-                %(start_time)s, %(end_time)s, %(stage_start)s, %(stage_end)s,
-                %(loop_start)s, %(loop_end)s, %(task_exception_details)s::jsonb, %(version)s
-            )
-            ON CONFLICT (id) DO UPDATE SET
-                status = EXCLUDED.status,
-                start_time = EXCLUDED.start_time,
-                end_time = EXCLUDED.end_time,
-                task_exception_details = EXCLUDED.task_exception_details,
-                version = task_executions.version + 1
-            WHERE task_executions.version = EXCLUDED.version
-            """,
-            values_list,
-        )
-
-        # Note: In a true strict optimistic locking scenario, we would check rowcount.
-        # executemany with psycopg3 returns total rows affected.
-        # If total < len(tasks), some updates failed due to version mismatch.
-        # Handling that is complex (which ones failed?).
-        # For this implementation, we rely on the DB enforcing consistency.
-        # If a concurrent update happens, one will succeed and increment version.
-        # The other will technically "fail" the update (row not updated), keeping the DB consistent
-        # but potentially losing the second writer's update (which is valid for optimistic locking - first writer wins).
-        # To make sure our in-memory objects reflect the new version, we should increment them.
-
-        for task in tasks:
-            task.version += 1
+            result = cur.fetchone()
+            if result:
+                # Operation succeeded (insert or update), get the new version
+                new_version = result[0] if isinstance(result, tuple) else result.get("version", task.version + 1)
+                task.version = new_version
+            else:
+                # No row returned means the update failed due to version mismatch
+                # (the WHERE clause filtered it out)
+                raise ConcurrencyError(
+                    f"Optimistic lock failed for task {task.id} (version {task.version}). "
+                    f"Another process has modified this task."
+                )
 
     def add_stage(self, stage: StageExecution) -> None:
         """Add a new stage."""
@@ -398,8 +373,28 @@ class PostgresWorkflowStore(WorkflowStore):
                 if exec_row:
                     execution = self._row_to_execution(cast(dict[str, Any], exec_row))
                     stage._execution = execution
-                    # Add stage to execution's stage list so it can be found
-                    execution.stages = [stage]
+
+                    # Load current stage AND its upstream stages so upstream_stages() works
+                    # This is critical for tasks that need to access upstream stage outputs
+                    all_stages = [stage]
+
+                    # Get upstream stages within the same connection
+                    requisites = list(stage.requisite_stage_ref_ids)
+                    if requisites:
+                        cur.execute(
+                            """
+                            SELECT * FROM stage_executions
+                            WHERE execution_id = %(execution_id)s
+                            AND ref_id = ANY(%(requisites)s)
+                            """,
+                            {"execution_id": execution.id, "requisites": requisites},
+                        )
+                        for us_row in cur.fetchall():
+                            us = self._row_to_stage(cast(dict[str, Any], us_row))
+                            us._execution = execution
+                            all_stages.append(us)
+
+                    execution.stages = all_stages
 
                 # Get tasks
                 cur.execute(
@@ -416,12 +411,61 @@ class PostgresWorkflowStore(WorkflowStore):
 
                 return stage
 
+    def _load_tasks_for_stages(
+        self,
+        cur: Any,
+        stages: list[StageExecution],
+    ) -> None:
+        """Load tasks for a list of stages in a single query."""
+        if not stages:
+            return
+
+        stage_map = {s.id: s for s in stages}
+        stage_ids = list(stage_map.keys())
+
+        cur.execute(
+            """
+            SELECT * FROM task_executions
+            WHERE stage_id = ANY(%(stage_ids)s)
+            ORDER BY start_time ASC
+            """,
+            {"stage_ids": stage_ids},
+        )
+
+        for row in cur.fetchall():
+            task_row = cast(dict[str, Any], row)
+            task = self._row_to_task(task_row)
+            stage_ref = stage_map.get(task_row["stage_id"])
+            if stage_ref:
+                task._stage = stage_ref
+                stage_ref.tasks.append(task)
+
+    def _set_execution_reference(
+        self,
+        cur: Any,
+        stages: list[StageExecution],
+        execution_id: str,
+    ) -> None:
+        """Set the _execution reference for stages by loading execution summary."""
+        if not stages:
+            return
+
+        cur.execute(
+            "SELECT * FROM pipeline_executions WHERE id = %(id)s",
+            {"id": execution_id},
+        )
+        exec_row = cur.fetchone()
+        if exec_row:
+            execution = self._row_to_execution(cast(dict[str, Any], exec_row))
+            for stage in stages:
+                stage._execution = execution
+
     def get_upstream_stages(
         self,
         execution_id: str,
         stage_ref_id: str,
     ) -> list[StageExecution]:
-        """Get upstream stages."""
+        """Get upstream stages with tasks loaded."""
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 # First find the requisite ref ids of the target stage
@@ -453,6 +497,12 @@ class PostgresWorkflowStore(WorkflowStore):
                     stage = self._row_to_stage(cast(dict[str, Any], stage_row))
                     stages.append(stage)
 
+                # Load tasks for all stages
+                self._load_tasks_for_stages(cur, stages)
+
+                # Set execution reference
+                self._set_execution_reference(cur, stages, execution_id)
+
                 return stages
 
     def get_downstream_stages(
@@ -460,7 +510,7 @@ class PostgresWorkflowStore(WorkflowStore):
         execution_id: str,
         stage_ref_id: str,
     ) -> list[StageExecution]:
-        """Get downstream stages."""
+        """Get downstream stages with tasks loaded."""
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 # Find stages that have stage_ref_id in their requisites
@@ -476,9 +526,13 @@ class PostgresWorkflowStore(WorkflowStore):
                 stages = []
                 for stage_row in cur.fetchall():
                     stage = self._row_to_stage(cast(dict[str, Any], stage_row))
-                    # We don't populate tasks or full execution here for performance
-                    # But we need execution ID
                     stages.append(stage)
+
+                # Load tasks for all stages
+                self._load_tasks_for_stages(cur, stages)
+
+                # Set execution reference
+                self._set_execution_reference(cur, stages, execution_id)
 
                 return stages
 
@@ -487,7 +541,7 @@ class PostgresWorkflowStore(WorkflowStore):
         execution_id: str,
         parent_stage_id: str,
     ) -> list[StageExecution]:
-        """Get synthetic stages."""
+        """Get synthetic stages with tasks loaded."""
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -503,6 +557,12 @@ class PostgresWorkflowStore(WorkflowStore):
                 for stage_row in cur.fetchall():
                     stage = self._row_to_stage(cast(dict[str, Any], stage_row))
                     stages.append(stage)
+
+                # Load tasks for all stages
+                self._load_tasks_for_stages(cur, stages)
+
+                # Set execution reference
+                self._set_execution_reference(cur, stages, execution_id)
 
                 return stages
 
