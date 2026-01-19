@@ -97,6 +97,12 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
             # Use atomic transaction to ensure state and message are committed together
             with self.repository.transaction(self.queue) as txn:
                 txn.store_stage(stage)
+                if message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="ContinueParentStage",
+                        execution_id=message.execution_id,
+                    )
                 txn.push_message(
                     CompleteStage(
                         execution_type=message.execution_type,
@@ -125,6 +131,12 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                 }
                 with self.repository.transaction(self.queue) as txn:
                     txn.store_stage(stage)
+                    if message.message_id:
+                        txn.mark_message_processed(
+                            message_id=message.message_id,
+                            handler_type="ContinueParentStage",
+                            execution_id=message.execution_id,
+                        )
                     txn.push_message(
                         CompleteStage(
                             execution_type=message.execution_type,
@@ -163,6 +175,12 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
         first_task = stage.first_task()
         if first_task:
             with self.repository.transaction(self.queue) as txn:
+                if message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="ContinueParentStage",
+                        execution_id=message.execution_id,
+                    )
                 txn.push_message(
                     StartTask(
                         execution_type=message.execution_type,
@@ -179,6 +197,12 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                 not_started_after = [s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED]
                 if not_started_after:
                     with self.repository.transaction(self.queue) as txn:
+                        if message.message_id:
+                            txn.mark_message_processed(
+                                message_id=message.message_id,
+                                handler_type="ContinueParentStage",
+                                execution_id=message.execution_id,
+                            )
                         for after in not_started_after:
                             txn.push_message(
                                 StartStage(
@@ -192,6 +216,12 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
             else:
                 # No tasks, no after-stages - complete stage
                 with self.repository.transaction(self.queue) as txn:
+                    if message.message_id:
+                        txn.mark_message_processed(
+                            message_id=message.message_id,
+                            handler_type="ContinueParentStage",
+                            execution_id=message.execution_id,
+                        )
                     txn.push_message(
                         CompleteStage(
                             execution_type=message.execution_type,
@@ -226,6 +256,12 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
             stage.end_time = self.current_time_millis()
             with self.repository.transaction(self.queue) as txn:
                 txn.store_stage(stage)
+                if message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="ContinueParentStage",
+                        execution_id=message.execution_id,
+                    )
                 txn.push_message(
                     CompleteStage(
                         execution_type=message.execution_type,
@@ -254,6 +290,12 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                 }
                 with self.repository.transaction(self.queue) as txn:
                     txn.store_stage(stage)
+                    if message.message_id:
+                        txn.mark_message_processed(
+                            message_id=message.message_id,
+                            handler_type="ContinueParentStage",
+                            execution_id=message.execution_id,
+                        )
                     txn.push_message(
                         CompleteStage(
                             execution_type=message.execution_type,
@@ -290,6 +332,12 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
 
         # Push CompleteStage to finalize using atomic transaction
         with self.repository.transaction(self.queue) as txn:
+            if message.message_id:
+                txn.mark_message_processed(
+                    message_id=message.message_id,
+                    handler_type="ContinueParentStage",
+                    execution_id=message.execution_id,
+                )
             txn.push_message(
                 CompleteStage(
                     execution_type=message.execution_type,

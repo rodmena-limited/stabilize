@@ -116,3 +116,14 @@ class StartWaitingWorkflowsHandler(StabilizeHandler[StartWaitingWorkflows]):
             else:
                 # Leave in buffer
                 pass
+
+        # Mark message as processed after all buffered executions have been handled
+        # This ensures idempotency - if re-delivered, the same buffered executions
+        # won't be found (they're now NOT_STARTED or CANCELED)
+        if message.message_id:
+            with self.repository.transaction(self.queue) as txn:
+                txn.mark_message_processed(
+                    message_id=message.message_id,
+                    handler_type="StartWaitingWorkflows",
+                    execution_id=message.pipeline_config_id,
+                )
