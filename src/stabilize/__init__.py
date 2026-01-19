@@ -72,10 +72,13 @@ from stabilize.errors import (
 
 # Handlers
 from stabilize.handlers import (
+    CancelStageHandler,
     CompleteStageHandler,
     CompleteTaskHandler,
     CompleteWorkflowHandler,
+    ContinueParentStageHandler,
     RunTaskHandler,
+    SkipStageHandler,
     StabilizeHandler,
     StartStageHandler,
     StartTaskHandler,
@@ -167,6 +170,9 @@ __all__ = [
     "StabilizeHandler",
     "StartWorkflowHandler",
     "StartStageHandler",
+    "SkipStageHandler",
+    "CancelStageHandler",
+    "ContinueParentStageHandler",
     "StartTaskHandler",
     "StartWaitingWorkflowsHandler",
     "RunTaskHandler",

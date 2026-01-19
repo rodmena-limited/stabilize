@@ -115,9 +115,15 @@ class StageLevel(WorkflowLevel):
     Base class for stage-level messages.
 
     These messages target a specific stage within an execution.
+
+    Attributes:
+        stage_id: The ID of the stage this message targets
+        retry_count: Number of times this message has been re-queued while
+                    waiting for upstream stages to complete. Used to prevent infinite loops.
     """
 
     stage_id: str = ""
+    retry_count: int = 0
 
     @classmethod
     def from_execution_level(cls, msg: WorkflowLevel, stage_id: str) -> StageLevel:

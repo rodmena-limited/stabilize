@@ -29,6 +29,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Maximum number of times to re-queue StartStage before giving up
+# With a 15-second retry delay, 240 retries = 1 hour maximum wait
+MAX_START_STAGE_RETRIES = 240
+
 
 class StartStageHandler(StabilizeHandler[StartStage]):
     """
@@ -109,13 +113,40 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                 if all_complete:
                     self._start_if_ready(stage, message)
                 else:
-                    # Upstream not complete - re-queue
+                    # Upstream not complete - check retry count before re-queuing
+                    retry_count = getattr(message, "retry_count", 0) or 0
+
+                    if retry_count >= MAX_START_STAGE_RETRIES:
+                        logger.error(
+                            "StartStage for %s (%s) exceeded max retries (%d). "
+                            "Upstream stages may be stuck. Marking as TERMINAL.",
+                            stage.name,
+                            stage.id,
+                            MAX_START_STAGE_RETRIES,
+                        )
+                        stage.status = WorkflowStatus.TERMINAL
+                        stage.end_time = self.current_time_millis()
+                        stage.context["exception"] = {
+                            "details": {"error": "Exceeded max retries waiting for upstream stages"},
+                        }
+                        self.repository.store_stage(stage)
+                        return
+
                     logger.debug(
-                        "Re-queuing %s (%s) - upstream stages not complete",
+                        "Re-queuing %s (%s) (retry %d/%d) - upstream stages not complete",
                         stage.name,
                         stage.id,
+                        retry_count + 1,
+                        MAX_START_STAGE_RETRIES,
                     )
-                    self.queue.push(message, self.retry_delay)
+                    # Create new message with incremented retry count
+                    new_message = StartStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                        retry_count=retry_count + 1,
+                    )
+                    self.queue.push(new_message, self.retry_delay)
 
             except Exception as e:
                 logger.error(
@@ -217,8 +248,10 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         if not stage.tasks:
             stage.tasks = builder.build_tasks(stage)
 
-        # Mark first and last tasks
+        # Set task-stage back-references and mark first/last tasks
         if stage.tasks:
+            for task in stage.tasks:
+                task._stage = stage
             stage.tasks[0].stage_start = True
             stage.tasks[-1].stage_end = True
 

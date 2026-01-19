@@ -468,24 +468,31 @@ class StoreTransaction(ABC):
 
 
 class NoOpTransaction(StoreTransaction):
-    """Default transaction that just delegates to normal store methods.
+    """Default transaction that buffers operations and flushes on commit.
 
     This is used when the storage backend doesn't support atomic transactions.
-    Operations are NOT atomic - a crash between store_stage and push_message
-    can leave workflows in an inconsistent state.
+    Operations are buffered and flushed together when the context manager
+    exits successfully. While not truly atomic (a crash during flush can
+    leave partial state), this is safer than committing immediately.
 
-    Only use this as a fallback. For production, use SqliteWorkflowStore
+    For production with strict consistency requirements, use SqliteWorkflowStore
     or PostgresWorkflowStore which provide true atomic transactions.
     """
 
     def __init__(self, store: WorkflowStore, queue: Queue | None = None) -> None:
         self._store = store
         self._queue = queue
+        self._pending_stages: list[StageExecution] = []
         self._pending_messages: list[tuple[Message, int]] = []
+        self._pending_processed: list[tuple[str, str | None, str | None]] = []
 
     def store_stage(self, stage: StageExecution) -> None:
-        """Store stage (commits immediately in no-op mode)."""
-        self._store.store_stage(stage)
+        """Buffer stage to be stored when transaction completes.
+
+        Stages are buffered and flushed when the context manager exits
+        successfully. If an exception occurs, stages are not stored.
+        """
+        self._pending_stages.append(stage)
 
     def push_message(self, message: Message, delay: int = 0) -> None:
         """Buffer message to be pushed when transaction completes.
@@ -501,14 +508,26 @@ class NoOpTransaction(StoreTransaction):
         handler_type: str | None = None,
         execution_id: str | None = None,
     ) -> None:
-        """Mark message processed (commits immediately in no-op mode)."""
-        self._store.mark_message_processed(message_id, handler_type, execution_id)
+        """Buffer processed message mark to be stored when transaction completes."""
+        self._pending_processed.append((message_id, handler_type, execution_id))
 
     def _flush_messages(self) -> None:
-        """Flush pending messages to the queue.
+        """Flush all pending operations.
 
         Called by the context manager on successful exit.
+        Order: stages first, then processed marks, then messages.
         """
+        # Flush stages first
+        for stage in self._pending_stages:
+            self._store.store_stage(stage)
+        self._pending_stages.clear()
+
+        # Flush processed message marks
+        for message_id, handler_type, execution_id in self._pending_processed:
+            self._store.mark_message_processed(message_id, handler_type, execution_id)
+        self._pending_processed.clear()
+
+        # Flush messages last
         if not self._queue:
             return
 

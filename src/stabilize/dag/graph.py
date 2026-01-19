@@ -152,7 +152,24 @@ class StageGraphBuilder:
         Args:
             previous: The stage that must complete first
             next_stage: The stage that depends on previous
+
+        Raises:
+            ValueError: If stages have different parents or if creating a self-reference
         """
+        # Validate no self-reference
+        if previous.ref_id == next_stage.ref_id:
+            raise ValueError(
+                f"Cannot create self-reference: stage '{previous.name}' ({previous.ref_id}) cannot depend on itself"
+            )
+
+        # Validate same parent (both stages should belong to the same parent)
+        if previous.parent_stage_id != next_stage.parent_stage_id:
+            raise ValueError(
+                f"Cannot connect stages with different parents: "
+                f"'{previous.name}' (parent={previous.parent_stage_id}) -> "
+                f"'{next_stage.name}' (parent={next_stage.parent_stage_id})"
+            )
+
         requisites = set(next_stage.requisite_stage_ref_ids)
         requisites.add(previous.ref_id)
         next_stage.requisite_stage_ref_ids = requisites

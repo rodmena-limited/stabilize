@@ -457,22 +457,17 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 exception,
             )
 
-            # Get attempt count from message or default to 1
-            attempt = getattr(message, "attempt", 1) or 1
-            max_attempts = 10  # Maximum retry attempts
+            # Get attempt count from message (0-indexed) and increment
+            current_attempts = message.attempts or 0
+            max_attempts = message.max_attempts or 10
 
-            if attempt < max_attempts:
+            if current_attempts + 1 < max_attempts:
                 # Reschedule with backoff
-                delay = self._get_backoff_period(stage, task_model, message, attempt + 1)
+                next_attempt = current_attempts + 1
+                delay = self._get_backoff_period(stage, task_model, message, next_attempt + 1)
 
-                # Create new message with incremented attempt
-                retry_message = RunTask(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=message.stage_id,
-                    task_id=message.task_id,
-                    task_type=message.task_type,
-                )
+                # Create new message with incremented attempt count
+                retry_message = message.copy_with_attempts(next_attempt)
 
                 # Atomic: push retry message
                 with self.repository.transaction(self.queue) as txn:
@@ -481,7 +476,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 logger.debug(
                     "Task %s rescheduled for retry %d/%d with delay %s",
                     task_model.name,
-                    attempt + 1,
+                    next_attempt + 1,
                     max_attempts,
                     delay,
                 )

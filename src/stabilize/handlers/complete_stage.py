@@ -74,8 +74,10 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
 
                     not_started = [s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED]
                     if not_started:
-                        # Atomic: push all after stage messages together
+                        # Atomic: store stage + push all after stage messages together
+                        # Store stage to persist any context changes from planning
                         with self.repository.transaction(self.queue) as txn:
+                            txn.store_stage(stage)
                             for s in not_started:
                                 txn.push_message(
                                     StartStage(
@@ -96,8 +98,10 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                     has_on_failure = self._plan_on_failure_stages(stage)
                     if has_on_failure:
                         after_stages = stage.first_after_stages()
-                        # Atomic: push all on-failure stage messages together
+                        # Atomic: store stage + push all on-failure stage messages together
+                        # Store stage to persist any context changes from planning
                         with self.repository.transaction(self.queue) as txn:
+                            txn.store_stage(stage)
                             for s in after_stages:
                                 txn.push_message(
                                     StartStage(

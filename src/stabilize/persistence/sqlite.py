@@ -13,6 +13,7 @@ Enterprise Features:
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 import uuid
@@ -41,6 +42,8 @@ from stabilize.persistence.store import (
 if TYPE_CHECKING:
     from stabilize.queue.messages import Message
     from stabilize.queue.queue import Queue
+
+logger = logging.getLogger(__name__)
 
 
 class SqliteWorkflowStore(WorkflowStore):
@@ -558,29 +561,13 @@ class SqliteWorkflowStore(WorkflowStore):
         """Get downstream stages with tasks loaded."""
         conn = self._get_connection()
 
-        # Use LIKE for JSON array membership test as it's portable and safe enough here
-        # (Assuming standard formatting of ["a", "b"])
-        # Alternatively, we could use json_each if available, but fallback to LIKE is safer for older sqlite
-        # For this codebase (Python 3.11), json_each is available.
-
-        try:
-            query = """
-                SELECT stage_executions.* FROM stage_executions, json_each(stage_executions.requisite_stage_ref_ids)
-                WHERE execution_id = :execution_id
-                AND json_each.value = :ref_id
-            """
-            result = conn.execute(query, {"execution_id": execution_id, "ref_id": stage_ref_id})
-        except sqlite3.OperationalError:
-            # Fallback if json_each is not enabled (unlikely in 3.11 but safe)
-            # "ref_id" inside ["..."]
-            # Match "%"ref_id"%"
-            json_ref_id = json.dumps(stage_ref_id)
-            query = """
-                SELECT * FROM stage_executions
-                WHERE execution_id = :execution_id
-                AND requisite_stage_ref_ids LIKE :pattern
-             """
-            result = conn.execute(query, {"execution_id": execution_id, "pattern": f"%{json_ref_id}%"})
+        # Use json_each for JSON array membership test (available in Python 3.11+ sqlite)
+        query = """
+            SELECT stage_executions.* FROM stage_executions, json_each(stage_executions.requisite_stage_ref_ids)
+            WHERE execution_id = :execution_id
+            AND json_each.value = :ref_id
+        """
+        result = conn.execute(query, {"execution_id": execution_id, "ref_id": stage_ref_id})
 
         stages = []
         for stage_row in result.fetchall():
@@ -793,7 +780,10 @@ class SqliteWorkflowStore(WorkflowStore):
         conn.commit()
 
     def resume(self, execution_id: str) -> None:
-        """Resume a paused execution."""
+        """Resume a paused execution.
+
+        Uses atomic UPDATE with status check to prevent race conditions.
+        """
         # First get current paused details
         execution = self.retrieve(execution_id)
         if execution.paused and execution.paused.pause_time:
@@ -802,12 +792,13 @@ class SqliteWorkflowStore(WorkflowStore):
             execution.paused.paused_ms = current_time - execution.paused.pause_time
 
         conn = self._get_connection()
-        conn.execute(
+        # Atomic update: only resume if still PAUSED to prevent race conditions
+        cursor = conn.execute(
             """
             UPDATE pipeline_executions SET
                 status = :status,
                 paused = :paused
-            WHERE id = :id
+            WHERE id = :id AND status = 'PAUSED'
             """,
             {
                 "id": execution_id,
@@ -816,6 +807,11 @@ class SqliteWorkflowStore(WorkflowStore):
             },
         )
         conn.commit()
+        if cursor.rowcount == 0:
+            logger.warning(
+                "Resume had no effect for execution %s - not in PAUSED status",
+                execution_id,
+            )
 
     def cancel(
         self,
@@ -1112,6 +1108,8 @@ class SqliteWorkflowStore(WorkflowStore):
             conn.commit()
         except Exception:
             conn.rollback()
+            # Restore in-memory versions to match rolled-back database state
+            txn.rollback_versions()
             raise
 
     def list_workflows(
@@ -1169,6 +1167,18 @@ class AtomicTransaction(StoreTransaction):
         """
         self._conn = conn
         self._store = store
+        # Track stage objects and their original versions for rollback
+        self._staged_objects: list[tuple[StageExecution, int]] = []
+
+    def rollback_versions(self) -> None:
+        """Restore original versions on rollback.
+
+        Called by the transaction context manager when rolling back to ensure
+        in-memory stage versions match the database state.
+        """
+        for stage, original_version in self._staged_objects:
+            stage.version = original_version
+        self._staged_objects.clear()
 
     def store_stage(self, stage: StageExecution) -> None:
         """Store or update a stage within the transaction.
@@ -1213,6 +1223,9 @@ class AtomicTransaction(StoreTransaction):
 
             if cursor.rowcount == 0:
                 raise ConcurrencyError(f"Optimistic lock failed for stage {stage.id} (version {stage.version})")
+
+            # Track original version for rollback before incrementing
+            self._staged_objects.append((stage, stage.version))
 
             # Update local version to reflect change
             stage.version += 1
@@ -1312,12 +1325,12 @@ class AtomicTransaction(StoreTransaction):
             INSERT INTO stage_executions (
                 id, execution_id, ref_id, type, name, status, context, outputs,
                 requisite_stage_ref_ids, parent_stage_id, synthetic_stage_owner,
-                start_time, end_time, start_time_expiry, scheduled_time
+                start_time, end_time, start_time_expiry, scheduled_time, version
             ) VALUES (
                 :id, :execution_id, :ref_id, :type, :name, :status,
                 :context, :outputs, :requisite_stage_ref_ids,
                 :parent_stage_id, :synthetic_stage_owner, :start_time,
-                :end_time, :start_time_expiry, :scheduled_time
+                :end_time, :start_time_expiry, :scheduled_time, :version
             )
             """,
             {
@@ -1336,6 +1349,7 @@ class AtomicTransaction(StoreTransaction):
                 "end_time": stage.end_time,
                 "start_time_expiry": stage.start_time_expiry,
                 "scheduled_time": stage.scheduled_time,
+                "version": stage.version,
             },
         )
 

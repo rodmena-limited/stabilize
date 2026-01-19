@@ -8,6 +8,7 @@ Uses singleton ConnectionManager for efficient connection pool sharing.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -30,6 +31,8 @@ from stabilize.persistence.store import (
 )
 from stabilize.queue.messages import Message
 from stabilize.queue.queue import Queue
+
+logger = logging.getLogger(__name__)
 
 
 class PostgresWorkflowStore(WorkflowStore):
@@ -739,7 +742,10 @@ class PostgresWorkflowStore(WorkflowStore):
             conn.commit()
 
     def resume(self, execution_id: str) -> None:
-        """Resume a paused execution."""
+        """Resume a paused execution.
+
+        Uses atomic UPDATE with status check to prevent race conditions.
+        """
         # First get current paused details
         execution = self.retrieve(execution_id)
         if execution.paused and execution.paused.pause_time:
@@ -749,12 +755,13 @@ class PostgresWorkflowStore(WorkflowStore):
 
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
+                # Atomic update: only resume if still PAUSED to prevent race conditions
                 cur.execute(
                     """
                     UPDATE pipeline_executions SET
                         status = %(status)s,
                         paused = %(paused)s::jsonb
-                    WHERE id = %(id)s
+                    WHERE id = %(id)s AND status = 'PAUSED'
                     """,
                     {
                         "id": execution_id,
@@ -762,6 +769,11 @@ class PostgresWorkflowStore(WorkflowStore):
                         "paused": (json.dumps(self._paused_to_dict(execution.paused)) if execution.paused else None),
                     },
                 )
+                if cur.rowcount == 0:
+                    logger.warning(
+                        "Resume had no effect for execution %s - not in PAUSED status",
+                        execution_id,
+                    )
             conn.commit()
 
     def cancel(

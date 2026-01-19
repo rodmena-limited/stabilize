@@ -249,10 +249,17 @@ class StageExecution:
     # ========== Status Methods ==========
 
     def determine_status(self) -> WorkflowStatus:
-        """Determine the stage status based on synthetic stages and tasks."""
-        synthetic_statuses = [s.status for s in self.synthetic_stages()]
+        """Determine the stage status based on before-stages and tasks.
+
+        Note: After-stages are NOT included in status determination because they
+        run AFTER the stage completes. Including them would create a circular
+        dependency where the stage can't complete until after-stages complete,
+        but after-stages can't start until the stage completes.
+        """
+        # Only include before-stages (not after-stages) in status calculation
+        before_stage_statuses = [s.status for s in self.before_stages()]
         task_statuses = [t.status for t in self.tasks]
-        all_statuses = synthetic_statuses + task_statuses
+        all_statuses = before_stage_statuses + task_statuses
         after_stage_statuses = [s.status for s in self.after_stages()]
 
         if not all_statuses:
@@ -264,6 +271,8 @@ class StageExecution:
             return WorkflowStatus.STOPPED
         if WorkflowStatus.CANCELED in all_statuses:
             return WorkflowStatus.CANCELED
+        if WorkflowStatus.PAUSED in all_statuses:
+            return WorkflowStatus.PAUSED
         if WorkflowStatus.FAILED_CONTINUE in all_statuses:
             return WorkflowStatus.FAILED_CONTINUE
         if all(s in {WorkflowStatus.SUCCEEDED, WorkflowStatus.SKIPPED} for s in all_statuses):

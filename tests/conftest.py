@@ -8,12 +8,15 @@ from typing import Any
 import pytest
 
 from stabilize import (
+    CancelStageHandler,
     CompleteStageHandler,
     CompleteTaskHandler,
     CompleteWorkflowHandler,
+    ContinueParentStageHandler,
     Orchestrator,
     QueueProcessor,
     RunTaskHandler,
+    SkipStageHandler,
     SqliteQueue,
     SqliteWorkflowStore,
     StageExecution,
@@ -230,6 +233,9 @@ def setup_stabilize(
         StartWorkflowHandler(queue, repository),
         StartWaitingWorkflowsHandler(queue, repository),
         StartStageHandler(queue, repository),
+        SkipStageHandler(queue, repository),
+        CancelStageHandler(queue, repository),
+        ContinueParentStageHandler(queue, repository),
         StartTaskHandler(queue, repository, task_registry),
         RunTaskHandler(queue, repository, task_registry),
         CompleteTaskHandler(queue, repository),

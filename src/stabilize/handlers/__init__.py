@@ -3,10 +3,13 @@
 from typing import Any
 
 from stabilize.handlers.base import MessageHandler, StabilizeHandler
+from stabilize.handlers.cancel_stage import CancelStageHandler
 from stabilize.handlers.complete_stage import CompleteStageHandler
 from stabilize.handlers.complete_task import CompleteTaskHandler
 from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
+from stabilize.handlers.continue_parent_stage import ContinueParentStageHandler
 from stabilize.handlers.run_task import RunTaskHandler
+from stabilize.handlers.skip_stage import SkipStageHandler
 from stabilize.handlers.start_stage import StartStageHandler
 from stabilize.handlers.start_task import StartTaskHandler
 from stabilize.handlers.start_waiting_workflows import StartWaitingWorkflowsHandler
@@ -23,6 +26,9 @@ __all__ = [
     "CompleteTaskHandler",
     "CompleteStageHandler",
     "CompleteWorkflowHandler",
+    "SkipStageHandler",
+    "CancelStageHandler",
+    "ContinueParentStageHandler",
 ]
 
 
@@ -45,6 +51,9 @@ def register_all_handlers(
         StartWorkflowHandler(queue, repository),
         StartWaitingWorkflowsHandler(queue, repository),
         StartStageHandler(queue, repository),
+        SkipStageHandler(queue, repository),
+        CancelStageHandler(queue, repository),
+        ContinueParentStageHandler(queue, repository),
         StartTaskHandler(queue, repository, task_registry),
         RunTaskHandler(queue, repository, task_registry),
         CompleteTaskHandler(queue, repository),
