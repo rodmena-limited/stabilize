@@ -15,9 +15,9 @@ import os
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
+from resilient_circuit import ExponentialDelay
 
-from stabilize.errors import ConcurrencyError, TaskTimeoutError, is_transient
+from stabilize.errors import TaskTimeoutError, is_transient
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
@@ -27,7 +27,7 @@ from stabilize.queue.messages import (
 )
 from stabilize.resilience.bulkheads import TaskBulkheadManager
 from stabilize.resilience.circuits import WorkflowCircuitFactory
-from stabilize.resilience.config import ResilienceConfig
+from stabilize.resilience.config import HandlerConfig, ResilienceConfig
 from stabilize.resilience.executor import execute_with_resilience
 from stabilize.resilience.process_executor import ProcessIsolatedTaskExecutor
 from stabilize.tasks.interface import RetryableTask, Task
@@ -41,30 +41,6 @@ if TYPE_CHECKING:
     from stabilize.queue.queue import Queue
 
 logger = logging.getLogger(__name__)
-
-# Default timeout for tasks that don't specify one (5 minutes)
-DEFAULT_TASK_TIMEOUT = timedelta(minutes=5)
-
-# Exponential backoff for retries: 1s, 2s, 4s, 8s... capped at 60s with ±25% jitter
-_BACKOFF = ExponentialDelay(
-    min_delay=timedelta(seconds=1),
-    max_delay=timedelta(seconds=60),
-    factor=2,
-    jitter=0.25,
-)
-
-# Retry policy for ConcurrencyError during stage updates
-# Uses faster backoff (100ms-1s) since these are quick DB retries
-_CONCURRENCY_RETRY = RetryWithBackoffPolicy(
-    max_retries=3,
-    backoff=ExponentialDelay(
-        min_delay=timedelta(milliseconds=100),
-        max_delay=timedelta(seconds=1),
-        factor=2,
-        jitter=0.25,
-    ),
-    should_handle=lambda e: isinstance(e, ConcurrencyError),
-)
 
 
 class RunTaskHandler(StabilizeHandler[RunTask]):
@@ -84,12 +60,21 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         queue: Queue,
         repository: WorkflowStore,
         task_registry: TaskRegistry,
-        retry_delay: timedelta = timedelta(seconds=15),
+        retry_delay: timedelta | None = None,
         bulkhead_manager: TaskBulkheadManager | None = None,
         circuit_factory: WorkflowCircuitFactory | None = None,
+        handler_config: HandlerConfig | None = None,
     ) -> None:
-        super().__init__(queue, repository, retry_delay)
+        super().__init__(queue, repository, retry_delay, handler_config)
         self.task_registry = task_registry
+
+        # Create backoff calculator from config
+        self._task_backoff = ExponentialDelay(
+            min_delay=timedelta(milliseconds=self.handler_config.task_backoff_min_delay_ms),
+            max_delay=timedelta(milliseconds=self.handler_config.task_backoff_max_delay_ms),
+            factor=self.handler_config.concurrency_backoff_factor,
+            jitter=self.handler_config.concurrency_jitter,
+        )
 
         # Check isolation mode
         self.isolation_mode = os.environ.get("STABILIZE_ISOLATION_MODE", "thread").lower()
@@ -232,11 +217,12 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
     ) -> timedelta:
         """Get the timeout for a task.
 
-        Returns the dynamic timeout for RetryableTask or default timeout for others.
+        Returns the dynamic timeout for RetryableTask or configured default for others.
+        The default is configurable via STABILIZE_DEFAULT_TASK_TIMEOUT_S env var.
         """
         if isinstance(task, RetryableTask):
             return task.get_dynamic_timeout(stage)
-        return DEFAULT_TASK_TIMEOUT
+        return timedelta(seconds=self.handler_config.default_task_timeout_seconds)
 
     def _execute_with_timeout(
         self,
@@ -438,8 +424,9 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
     ) -> timedelta:
         """Calculate backoff period for retry with exponential backoff and jitter.
 
-        Uses ExponentialDelay from resilient_circuit for consistent backoff
-        calculation: 1s, 2s, 4s, 8s... capped at 60s with ±25% jitter.
+        Uses configurable ExponentialDelay for consistent backoff calculation.
+        Defaults can be customized via STABILIZE_TASK_BACKOFF_MIN_MS and
+        STABILIZE_TASK_BACKOFF_MAX_MS environment variables.
 
         Args:
             stage: The stage execution context
@@ -459,9 +446,9 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         except TaskNotFoundError:
             pass
 
-        # Use ExponentialDelay from resilient_circuit for consistent backoff
+        # Use configured ExponentialDelay for consistent backoff
         # for_attempt() returns seconds as float, convert to timedelta
-        return timedelta(seconds=_BACKOFF.for_attempt(attempt))
+        return timedelta(seconds=self._task_backoff.for_attempt(attempt))
 
     def _handle_cancellation(
         self,
@@ -486,13 +473,29 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             if result.outputs and isinstance(result.outputs, dict):
                 result_outputs = result.outputs
 
-        @_CONCURRENCY_RETRY
         def do_cancel() -> None:
             if result_context or result_outputs:
                 # Re-fetch stage to get current version on each retry attempt
                 fresh_stage = self.repository.retrieve_stage(message.stage_id)
                 if fresh_stage is None:
                     logger.error("Stage %s not found during cancellation", message.stage_id)
+                    # Mark message processed and push CompleteTask to prevent workflow hang
+                    with self.repository.transaction(self.queue) as txn:
+                        if message.message_id:
+                            txn.mark_message_processed(
+                                message_id=message.message_id,
+                                handler_type="RunTask",
+                                execution_id=message.execution_id,
+                            )
+                        txn.push_message(
+                            CompleteTask(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=message.stage_id,
+                                task_id=message.task_id,
+                                status=WorkflowStatus.CANCELED,
+                            )
+                        )
                     return
 
                 if result_context:
@@ -537,7 +540,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                         )
                     )
 
-        do_cancel()
+        self.retry_on_concurrency_error(do_cancel, f"canceling task {message.task_id}")
 
     def _handle_exception(
         self,
@@ -607,12 +610,28 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         # Update task model (not persisted via stage, so no concurrency issue)
         task_model.task_exception_details["exception"] = exception_details
 
-        @_CONCURRENCY_RETRY
         def do_mark_terminal() -> None:
             # Re-fetch stage to get current version on each retry attempt
             fresh_stage = self.repository.retrieve_stage(message.stage_id)
             if fresh_stage is None:
                 logger.error("Stage %s not found during exception handling", message.stage_id)
+                # Mark message processed and push CompleteTask to prevent workflow hang
+                with self.repository.transaction(self.queue) as txn:
+                    if message.message_id:
+                        txn.mark_message_processed(
+                            message_id=message.message_id,
+                            handler_type="RunTask",
+                            execution_id=message.execution_id,
+                        )
+                    txn.push_message(
+                        CompleteTask(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                            task_id=message.task_id,
+                            status=WorkflowStatus.TERMINAL,
+                        )
+                    )
                 return
 
             fresh_stage.context["exception"] = exception_details
@@ -638,7 +657,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                     )
                 )
 
-        do_mark_terminal()
+        self.retry_on_concurrency_error(do_mark_terminal, f"marking task {message.task_id} terminal")
 
     def _complete_with_error(
         self,
@@ -653,12 +672,28 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         Retries on ConcurrencyError with exponential backoff.
         """
 
-        @_CONCURRENCY_RETRY
         def do_complete() -> None:
             # Re-fetch stage to get current version on each retry attempt
             fresh_stage = self.repository.retrieve_stage(message.stage_id)
             if fresh_stage is None:
                 logger.error("Stage %s not found during error completion", message.stage_id)
+                # Mark message processed and push CompleteTask to prevent workflow hang
+                with self.repository.transaction(self.queue) as txn:
+                    if message.message_id:
+                        txn.mark_message_processed(
+                            message_id=message.message_id,
+                            handler_type="RunTask",
+                            execution_id=message.execution_id,
+                        )
+                    txn.push_message(
+                        CompleteTask(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                            task_id=message.task_id,
+                            status=WorkflowStatus.TERMINAL,
+                        )
+                    )
                 return
 
             fresh_stage.context["exception"] = {
@@ -684,4 +719,4 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                     )
                 )
 
-        do_complete()
+        self.retry_on_concurrency_error(do_complete, f"completing task {message.task_id} with error")

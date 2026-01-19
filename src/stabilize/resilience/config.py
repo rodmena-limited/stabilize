@@ -1,7 +1,7 @@
 """
 Resilience configuration for Stabilize.
 
-Provides configuration for bulkheads and circuit breakers,
+Provides configuration for bulkheads, circuit breakers, and handler behavior,
 with support for loading from environment variables.
 """
 
@@ -10,6 +10,153 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from fractions import Fraction
+
+
+@dataclass
+class BackoffConfig:
+    """Configuration for exponential backoff.
+
+    Attributes:
+        min_delay_ms: Minimum delay between retries in milliseconds
+        max_delay_ms: Maximum delay between retries in milliseconds
+        factor: Multiplication factor for exponential backoff
+        jitter: Random jitter factor (0.0 to 1.0) to prevent thundering herd
+    """
+
+    min_delay_ms: int = 100
+    max_delay_ms: int = 1000
+    factor: float = 2.0
+    jitter: float = 0.25
+
+
+@dataclass
+class HandlerConfig:
+    """Handler retry and backoff settings.
+
+    This configuration controls how handlers retry on ConcurrencyError and
+    other transient failures. All values have sensible defaults that match
+    the previous hardcoded behavior for backward compatibility.
+
+    Environment Variables:
+        STABILIZE_HANDLER_MAX_RETRIES: Max ConcurrencyError retries (default: 3, 0 to disable)
+        STABILIZE_HANDLER_MIN_DELAY_MS: Min backoff delay in ms (default: 100)
+        STABILIZE_HANDLER_MAX_DELAY_MS: Max backoff delay in ms (default: 1000)
+        STABILIZE_HANDLER_BACKOFF_FACTOR: Backoff multiplication factor (default: 2.0)
+        STABILIZE_HANDLER_JITTER: Backoff jitter factor (default: 0.25)
+
+        STABILIZE_MAX_STAGE_WAIT_RETRIES: Max retries waiting for stages (default: 240)
+        STABILIZE_DEFAULT_TASK_TIMEOUT_S: Default task timeout in seconds (default: 300)
+        STABILIZE_TASK_BACKOFF_MIN_MS: Task retry min delay in ms (default: 1000)
+        STABILIZE_TASK_BACKOFF_MAX_MS: Task retry max delay in ms (default: 60000)
+        STABILIZE_HANDLER_RETRY_DELAY_S: Re-queue delay in seconds (default: 15)
+
+        STABILIZE_PROCESSOR_POLL_MS: Queue poll frequency in ms (default: 50)
+        STABILIZE_PROCESSOR_MAX_WORKERS: Max worker threads (default: 10)
+        STABILIZE_DEFAULT_PAGE_SIZE: Default page size for queries (default: 100)
+
+    Attributes:
+        concurrency_max_retries: Max retries for ConcurrencyError. Set to 0 to disable.
+        concurrency_min_delay_ms: Min backoff delay for concurrency retries
+        concurrency_max_delay_ms: Max backoff delay for concurrency retries
+        concurrency_backoff_factor: Exponential backoff factor
+        concurrency_jitter: Jitter factor to prevent thundering herd
+
+        max_stage_wait_retries: Max retries waiting for upstream stages
+            (with 15s delay, 240 retries = 1 hour)
+        default_task_timeout_seconds: Default timeout for tasks that don't specify one
+        task_backoff_min_delay_ms: Min backoff for task retries
+        task_backoff_max_delay_ms: Max backoff for task retries
+        handler_retry_delay_seconds: Delay before re-queuing messages
+
+        poll_frequency_ms: How often to poll the queue
+        max_workers: Maximum concurrent handler threads
+        default_page_size: Default page size for repository queries
+    """
+
+    # Concurrency retry (for ConcurrencyError)
+    concurrency_max_retries: int = 3  # 0 disables retries
+    concurrency_min_delay_ms: int = 100
+    concurrency_max_delay_ms: int = 1000
+    concurrency_backoff_factor: float = 2.0
+    concurrency_jitter: float = 0.25
+
+    # Long-running retry limits
+    max_stage_wait_retries: int = 240  # With 15s delay = 1 hour
+
+    # Task execution
+    default_task_timeout_seconds: float = 300.0  # 5 minutes
+    task_backoff_min_delay_ms: int = 1000
+    task_backoff_max_delay_ms: int = 60000
+
+    # Handler retry delay
+    handler_retry_delay_seconds: float = 15.0
+
+    # Processor settings
+    poll_frequency_ms: int = 50
+    max_workers: int = 10
+    default_page_size: int = 100
+
+    @classmethod
+    def from_env(cls) -> HandlerConfig:
+        """Load configuration from environment variables with defaults.
+
+        All settings have sensible defaults that match previous hardcoded values,
+        ensuring backward compatibility for existing deployments.
+
+        Returns:
+            HandlerConfig with values loaded from environment or defaults
+        """
+        return cls(
+            # Concurrency retry settings
+            concurrency_max_retries=int(os.getenv("STABILIZE_HANDLER_MAX_RETRIES", "3")),
+            concurrency_min_delay_ms=int(os.getenv("STABILIZE_HANDLER_MIN_DELAY_MS", "100")),
+            concurrency_max_delay_ms=int(os.getenv("STABILIZE_HANDLER_MAX_DELAY_MS", "1000")),
+            concurrency_backoff_factor=float(os.getenv("STABILIZE_HANDLER_BACKOFF_FACTOR", "2.0")),
+            concurrency_jitter=float(os.getenv("STABILIZE_HANDLER_JITTER", "0.25")),
+            # Stage wait retry settings
+            max_stage_wait_retries=int(os.getenv("STABILIZE_MAX_STAGE_WAIT_RETRIES", "240")),
+            # Task execution settings
+            default_task_timeout_seconds=float(os.getenv("STABILIZE_DEFAULT_TASK_TIMEOUT_S", "300")),
+            task_backoff_min_delay_ms=int(os.getenv("STABILIZE_TASK_BACKOFF_MIN_MS", "1000")),
+            task_backoff_max_delay_ms=int(os.getenv("STABILIZE_TASK_BACKOFF_MAX_MS", "60000")),
+            # Handler retry delay
+            handler_retry_delay_seconds=float(os.getenv("STABILIZE_HANDLER_RETRY_DELAY_S", "15")),
+            # Processor settings
+            poll_frequency_ms=int(os.getenv("STABILIZE_PROCESSOR_POLL_MS", "50")),
+            max_workers=int(os.getenv("STABILIZE_PROCESSOR_MAX_WORKERS", "10")),
+            default_page_size=int(os.getenv("STABILIZE_DEFAULT_PAGE_SIZE", "100")),
+        )
+
+    def get_backoff_config(self) -> BackoffConfig:
+        """Get BackoffConfig for concurrency retries."""
+        return BackoffConfig(
+            min_delay_ms=self.concurrency_min_delay_ms,
+            max_delay_ms=self.concurrency_max_delay_ms,
+            factor=self.concurrency_backoff_factor,
+            jitter=self.concurrency_jitter,
+        )
+
+
+# Singleton for default handler config (loaded lazily)
+_default_handler_config: HandlerConfig | None = None
+
+
+def get_handler_config() -> HandlerConfig:
+    """Get the default HandlerConfig, loading from environment on first call.
+
+    Returns:
+        The singleton HandlerConfig instance
+    """
+    global _default_handler_config
+    if _default_handler_config is None:
+        _default_handler_config = HandlerConfig.from_env()
+    return _default_handler_config
+
+
+def reset_handler_config() -> None:
+    """Reset the handler config singleton. Useful for testing."""
+    global _default_handler_config
+    _default_handler_config = None
 
 
 @dataclass

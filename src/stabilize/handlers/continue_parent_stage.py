@@ -8,11 +8,9 @@ and the parent stage needs to be notified to continue processing.
 from __future__ import annotations
 
 import logging
-import random
-import time
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from stabilize.errors import ConcurrencyError
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.stage import SyntheticStageOwner
 from stabilize.models.status import CONTINUABLE_STATUSES, HALT_STATUSES, WorkflowStatus
@@ -22,15 +20,14 @@ from stabilize.queue.messages import (
     StartStage,
     StartTask,
 )
+from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
+    from stabilize.persistence.store import WorkflowStore
+    from stabilize.queue.queue import Queue
 
 logger = logging.getLogger(__name__)
-
-# Maximum number of times to re-queue ContinueParentStage before giving up
-# With a 15-second retry delay, 240 retries = 1 hour maximum wait
-MAX_CONTINUE_PARENT_RETRIES = 240
 
 
 class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
@@ -50,6 +47,15 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
     3. If not: wait (another ContinueParentStage will be sent)
     """
 
+    def __init__(
+        self,
+        queue: Queue,
+        repository: WorkflowStore,
+        retry_delay: timedelta | None = None,
+        handler_config: HandlerConfig | None = None,
+    ) -> None:
+        super().__init__(queue, repository, retry_delay, handler_config)
+
     @property
     def message_type(self) -> type[ContinueParentStage]:
         return ContinueParentStage
@@ -57,32 +63,13 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
     def handle(self, message: ContinueParentStage) -> None:
         """Handle the ContinueParentStage message.
 
-        Retries on ConcurrencyError (optimistic lock failure).
+        Retries on ConcurrencyError (optimistic lock failure) using
+        configurable retry settings.
         """
-        max_retries = 3
-
-        for attempt in range(max_retries + 1):
-            try:
-                self._handle_with_retry(message)
-                return
-            except ConcurrencyError:
-                if attempt == max_retries:
-                    logger.error(
-                        "Failed to continue parent stage after %d attempts due to contention (execution=%s, stage=%s)",
-                        max_retries,
-                        message.execution_id,
-                        message.stage_id,
-                    )
-                    raise
-
-                backoff = (0.1 * (2**attempt)) + (random.random() * 0.1)
-                logger.warning(
-                    "Concurrency error continuing parent stage, retrying in %.2fs (attempt %d/%d)",
-                    backoff,
-                    attempt + 1,
-                    max_retries,
-                )
-                time.sleep(backoff)
+        self.retry_on_concurrency_error(
+            lambda: self._handle_with_retry(message),
+            f"continuing parent stage {message.stage_id}",
+        )
 
     def _handle_with_retry(self, message: ContinueParentStage) -> None:
         """Inner handle logic to be retried."""
@@ -148,14 +135,15 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
         if not all_complete:
             # Not all before-stages complete yet - check retry count
             retry_count = message.retry_count or 0
+            max_retries = self.handler_config.max_stage_wait_retries
 
-            if retry_count >= MAX_CONTINUE_PARENT_RETRIES:
+            if retry_count >= max_retries:
                 logger.error(
                     "ContinueParentStage for %s (%s) exceeded max retries (%d). "
                     "Before-stages may be stuck. Marking parent as TERMINAL.",
                     stage.name,
                     stage.id,
-                    MAX_CONTINUE_PARENT_RETRIES,
+                    max_retries,
                 )
                 self.set_stage_status(stage, WorkflowStatus.TERMINAL)
                 stage.end_time = self.current_time_millis()
@@ -185,7 +173,7 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                 stage.name,
                 stage.id,
                 retry_count + 1,
-                MAX_CONTINUE_PARENT_RETRIES,
+                max_retries,
             )
             new_message = ContinueParentStage(
                 execution_type=message.execution_type,
@@ -313,14 +301,15 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
         if not all_complete:
             # Not all after-stages complete yet - check retry count
             retry_count = message.retry_count or 0
+            max_retries = self.handler_config.max_stage_wait_retries
 
-            if retry_count >= MAX_CONTINUE_PARENT_RETRIES:
+            if retry_count >= max_retries:
                 logger.error(
                     "ContinueParentStage for %s (%s) exceeded max retries (%d). "
                     "After-stages may be stuck. Marking parent as TERMINAL.",
                     stage.name,
                     stage.id,
-                    MAX_CONTINUE_PARENT_RETRIES,
+                    max_retries,
                 )
                 self.set_stage_status(stage, WorkflowStatus.TERMINAL)
                 stage.end_time = self.current_time_millis()
@@ -350,7 +339,7 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                 stage.name,
                 stage.id,
                 retry_count + 1,
-                MAX_CONTINUE_PARENT_RETRIES,
+                max_retries,
             )
             new_message = ContinueParentStage(
                 execution_type=message.execution_type,

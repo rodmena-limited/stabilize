@@ -8,12 +8,14 @@ pipeline execution engine.
 from __future__ import annotations
 
 import logging
+import random
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import timedelta
 from typing import TYPE_CHECKING, Generic, TypeVar
 
+from stabilize.errors import ConcurrencyError
 from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus, validate_transition
 from stabilize.models.task import TaskExecution
@@ -30,6 +32,7 @@ from stabilize.queue.messages import (
     TaskLevel,
     WorkflowLevel,
 )
+from stabilize.resilience.config import HandlerConfig, get_handler_config
 
 if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
@@ -65,17 +68,26 @@ class StabilizeHandler(MessageHandler[M], ABC):
 
     Provides helper methods for retrieving executions, stages, and tasks,
     as well as the startNext() implementation.
+
+    Attributes:
+        queue: The message queue for pushing messages
+        repository: The workflow store for persistence
+        retry_delay: Delay before re-queuing messages (from config or override)
+        handler_config: Configuration for retry behavior and other settings
     """
 
     def __init__(
         self,
         queue: Queue,
         repository: WorkflowStore,
-        retry_delay: timedelta = timedelta(seconds=15),
+        retry_delay: timedelta | None = None,
+        handler_config: HandlerConfig | None = None,
     ) -> None:
         self.queue = queue
         self.repository = repository
-        self.retry_delay = retry_delay
+        self.handler_config = handler_config or get_handler_config()
+        # Use explicit retry_delay if provided, otherwise use config
+        self.retry_delay = retry_delay or timedelta(seconds=self.handler_config.handler_retry_delay_seconds)
 
     # ========== Execution Retrieval ==========
 
@@ -237,11 +249,19 @@ class StabilizeHandler(MessageHandler[M], ABC):
                         )
                     )
             else:
-                logger.warning(
-                    "Synthetic stage %s has phase=%s but no parent_stage_id - workflow may hang. Execution: %s",
+                logger.error(
+                    "Synthetic stage %s has phase=%s but no parent_stage_id. "
+                    "Data inconsistency - completing workflow to prevent hang. Execution: %s",
                     stage.id,
                     phase,
                     execution.id,
+                )
+                # Complete workflow to prevent hang from data inconsistency
+                self.queue.push(
+                    CompleteWorkflow(
+                        execution_type=execution.type.value,
+                        execution_id=execution.id,
+                    )
                 )
         else:
             # Top-level stage with no downstream - complete execution
@@ -257,6 +277,66 @@ class StabilizeHandler(MessageHandler[M], ABC):
     def current_time_millis(self) -> int:
         """Get current time in milliseconds."""
         return int(time.time() * 1000)
+
+    def retry_on_concurrency_error(
+        self,
+        func: Callable[[], None],
+        context: str = "operation",
+    ) -> None:
+        """Execute a function with retry on ConcurrencyError.
+
+        Uses the handler_config settings for max retries and backoff.
+        Set concurrency_max_retries to 0 to disable retries entirely.
+
+        Args:
+            func: The function to execute
+            context: Description for logging (e.g., "completing task", "starting stage")
+
+        Raises:
+            ConcurrencyError: If max retries exceeded
+        """
+        max_retries = self.handler_config.concurrency_max_retries
+
+        # If retries disabled, just run once
+        if max_retries == 0:
+            func()
+            return
+
+        for attempt in range(max_retries + 1):
+            try:
+                func()
+                return
+            except ConcurrencyError:
+                if attempt == max_retries:
+                    logger.error(
+                        "Failed %s after %d attempts due to contention",
+                        context,
+                        max_retries,
+                    )
+                    raise
+
+                # Calculate backoff with jitter
+                min_delay = self.handler_config.concurrency_min_delay_ms / 1000.0
+                max_delay = self.handler_config.concurrency_max_delay_ms / 1000.0
+                factor = self.handler_config.concurrency_backoff_factor
+                jitter = self.handler_config.concurrency_jitter
+
+                # Exponential backoff: min_delay * factor^attempt
+                base_delay = min_delay * (factor**attempt)
+                # Cap at max_delay
+                base_delay = min(base_delay, max_delay)
+                # Add jitter
+                jitter_amount = base_delay * jitter * random.random()
+                backoff = base_delay + jitter_amount
+
+                logger.warning(
+                    "Concurrency error %s, retrying in %.2fs (attempt %d/%d)",
+                    context,
+                    backoff,
+                    attempt + 1,
+                    max_retries,
+                )
+                time.sleep(backoff)
 
     # ========== State Transition Helpers ==========
 

@@ -9,10 +9,9 @@ and starts them if capacity allows.
 from __future__ import annotations
 
 import logging
-import random
-import time
+from datetime import timedelta
+from typing import TYPE_CHECKING
 
-from stabilize.errors import ConcurrencyError
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.persistence.store import WorkflowCriteria
@@ -20,6 +19,11 @@ from stabilize.queue.messages import (
     StartWaitingWorkflows,
     StartWorkflow,
 )
+from stabilize.resilience.config import HandlerConfig
+
+if TYPE_CHECKING:
+    from stabilize.persistence.store import WorkflowStore
+    from stabilize.queue.queue import Queue
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +39,15 @@ class StartWaitingWorkflowsHandler(StabilizeHandler[StartWaitingWorkflows]):
     4. If purge_queue is True, cancel remaining buffered executions
     """
 
+    def __init__(
+        self,
+        queue: Queue,
+        repository: WorkflowStore,
+        retry_delay: timedelta | None = None,
+        handler_config: HandlerConfig | None = None,
+    ) -> None:
+        super().__init__(queue, repository, retry_delay, handler_config)
+
     @property
     def message_type(self) -> type[StartWaitingWorkflows]:
         return StartWaitingWorkflows
@@ -42,31 +55,13 @@ class StartWaitingWorkflowsHandler(StabilizeHandler[StartWaitingWorkflows]):
     def handle(self, message: StartWaitingWorkflows) -> None:
         """Handle the StartWaitingWorkflows message.
 
-        Retries on ConcurrencyError (optimistic lock failure).
+        Retries on ConcurrencyError (optimistic lock failure) using
+        configurable retry settings.
         """
-        max_retries = 3
-
-        for attempt in range(max_retries + 1):
-            try:
-                self._handle_with_retry(message)
-                return
-            except ConcurrencyError:
-                if attempt == max_retries:
-                    logger.error(
-                        "Failed to start waiting workflows after %d attempts due to contention (pipeline_config=%s)",
-                        max_retries,
-                        message.pipeline_config_id,
-                    )
-                    raise
-
-                backoff = (0.1 * (2**attempt)) + (random.random() * 0.1)
-                logger.warning(
-                    "Concurrency error starting waiting workflows, retrying in %.2fs (attempt %d/%d)",
-                    backoff,
-                    attempt + 1,
-                    max_retries,
-                )
-                time.sleep(backoff)
+        self.retry_on_concurrency_error(
+            lambda: self._handle_with_retry(message),
+            f"starting waiting workflows for {message.pipeline_config_id}",
+        )
 
     def _handle_with_retry(self, message: StartWaitingWorkflows) -> None:
         """Inner handle logic to be retried."""
@@ -76,7 +71,7 @@ class StartWaitingWorkflowsHandler(StabilizeHandler[StartWaitingWorkflows]):
         # Get buffered executions (oldest first)
         criteria = WorkflowCriteria(
             statuses={WorkflowStatus.BUFFERED},
-            page_size=100,  # Arbitrary batch size
+            page_size=self.handler_config.default_page_size,
         )
         # Note: repository retrieve usually orders by start_time DESC.
         # We want oldest first (FIFO). Ideally we'd sort by created_at ASC.

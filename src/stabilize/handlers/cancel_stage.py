@@ -8,17 +8,18 @@ due to upstream failure or execution cancellation.
 from __future__ import annotations
 
 import logging
-import random
-import time
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from stabilize.errors import ConcurrencyError
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import CancelStage
+from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
+    from stabilize.persistence.store import WorkflowStore
+    from stabilize.queue.queue import Queue
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,15 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
     6. Does NOT trigger downstream (cancellation terminates the path)
     """
 
+    def __init__(
+        self,
+        queue: Queue,
+        repository: WorkflowStore,
+        retry_delay: timedelta | None = None,
+        handler_config: HandlerConfig | None = None,
+    ) -> None:
+        super().__init__(queue, repository, retry_delay, handler_config)
+
     @property
     def message_type(self) -> type[CancelStage]:
         return CancelStage
@@ -43,32 +53,13 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
     def handle(self, message: CancelStage) -> None:
         """Handle the CancelStage message.
 
-        Retries on ConcurrencyError (optimistic lock failure).
+        Retries on ConcurrencyError (optimistic lock failure) using
+        configurable retry settings.
         """
-        max_retries = 3
-
-        for attempt in range(max_retries + 1):
-            try:
-                self._handle_with_retry(message)
-                return
-            except ConcurrencyError:
-                if attempt == max_retries:
-                    logger.error(
-                        "Failed to cancel stage after %d attempts due to contention (execution=%s, stage=%s)",
-                        max_retries,
-                        message.execution_id,
-                        message.stage_id,
-                    )
-                    raise
-
-                backoff = (0.1 * (2**attempt)) + (random.random() * 0.1)
-                logger.warning(
-                    "Concurrency error canceling stage, retrying in %.2fs (attempt %d/%d)",
-                    backoff,
-                    attempt + 1,
-                    max_retries,
-                )
-                time.sleep(backoff)
+        self.retry_on_concurrency_error(
+            lambda: self._handle_with_retry(message),
+            f"canceling stage {message.stage_id}",
+        )
 
     def _handle_with_retry(self, message: CancelStage) -> None:
         """Inner handle logic to be retried."""

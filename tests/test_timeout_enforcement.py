@@ -83,10 +83,16 @@ class TestGetTaskTimeout:
     """Tests for timeout retrieval."""
 
     def test_default_timeout_is_five_minutes(self) -> None:
-        """Default timeout should be 5 minutes for non-retryable tasks."""
-        from stabilize.handlers.run_task import DEFAULT_TASK_TIMEOUT
+        """Default timeout should be 5 minutes for non-retryable tasks.
 
-        assert DEFAULT_TASK_TIMEOUT == timedelta(minutes=5)
+        This is now configurable via STABILIZE_DEFAULT_TASK_TIMEOUT_S env var.
+        """
+        from stabilize.resilience.config import HandlerConfig
+
+        # Default config should have 300 seconds (5 minutes)
+        config = HandlerConfig()
+        assert config.default_task_timeout_seconds == 300.0
+        assert timedelta(seconds=config.default_task_timeout_seconds) == timedelta(minutes=5)
 
     def test_retryable_task_uses_dynamic_timeout(self) -> None:
         """RetryableTask should use get_dynamic_timeout."""

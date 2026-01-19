@@ -9,12 +9,10 @@ for execution.
 from __future__ import annotations
 
 import logging
-import random
-import time
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.audit import audit
-from stabilize.errors import ConcurrencyError
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.persistence.store import WorkflowCriteria
@@ -23,9 +21,12 @@ from stabilize.queue.messages import (
     StartStage,
     StartWorkflow,
 )
+from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
     from stabilize.models.workflow import Workflow
+    from stabilize.persistence.store import WorkflowStore
+    from stabilize.queue.queue import Queue
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,15 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
     4. Mark execution as RUNNING
     """
 
+    def __init__(
+        self,
+        queue: Queue,
+        repository: WorkflowStore,
+        retry_delay: timedelta | None = None,
+        handler_config: HandlerConfig | None = None,
+    ) -> None:
+        super().__init__(queue, repository, retry_delay, handler_config)
+
     @property
     def message_type(self) -> type[StartWorkflow]:
         return StartWorkflow
@@ -48,31 +58,13 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
     def handle(self, message: StartWorkflow) -> None:
         """Handle the StartWorkflow message.
 
-        Retries on ConcurrencyError (optimistic lock failure).
+        Retries on ConcurrencyError (optimistic lock failure) using
+        configurable retry settings.
         """
-        max_retries = 3
-
-        for attempt in range(max_retries + 1):
-            try:
-                self._handle_with_retry(message)
-                return
-            except ConcurrencyError:
-                if attempt == max_retries:
-                    logger.error(
-                        "Failed to start workflow after %d attempts due to contention (execution=%s)",
-                        max_retries,
-                        message.execution_id,
-                    )
-                    raise
-
-                backoff = (0.1 * (2**attempt)) + (random.random() * 0.1)
-                logger.warning(
-                    "Concurrency error starting workflow, retrying in %.2fs (attempt %d/%d)",
-                    backoff,
-                    attempt + 1,
-                    max_retries,
-                )
-                time.sleep(backoff)
+        self.retry_on_concurrency_error(
+            lambda: self._handle_with_retry(message),
+            f"starting workflow {message.execution_id}",
+        )
 
     def _handle_with_retry(self, message: StartWorkflow) -> None:
         """Inner handle logic to be retried."""

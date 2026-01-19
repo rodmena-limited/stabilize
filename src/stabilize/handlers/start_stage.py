@@ -12,10 +12,7 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
-
 from stabilize.dag.graph import StageGraphBuilder
-from stabilize.errors import ConcurrencyError
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.stage import SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
@@ -26,28 +23,15 @@ from stabilize.queue.messages import (
     StartStage,
     StartTask,
 )
+from stabilize.resilience.config import HandlerConfig
 from stabilize.stages.builder import get_default_factory
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
+    from stabilize.persistence.store import WorkflowStore
+    from stabilize.queue.queue import Queue
 
 logger = logging.getLogger(__name__)
-
-# Maximum number of times to re-queue StartStage before giving up
-# With a 15-second retry delay, 240 retries = 1 hour maximum wait
-MAX_START_STAGE_RETRIES = 240
-
-# Retry policy for ConcurrencyError during stage updates
-_CONCURRENCY_RETRY = RetryWithBackoffPolicy(
-    max_retries=3,
-    backoff=ExponentialDelay(
-        min_delay=timedelta(milliseconds=100),
-        max_delay=timedelta(seconds=1),
-        factor=2,
-        jitter=0.25,
-    ),
-    should_handle=lambda e: isinstance(e, ConcurrencyError),
-)
 
 
 class StartStageHandler(StabilizeHandler[StartStage]):
@@ -67,6 +51,15 @@ class StartStageHandler(StabilizeHandler[StartStage]):
        - Else if has tasks: StartTask for first task
        - Else: CompleteStage
     """
+
+    def __init__(
+        self,
+        queue: Queue,
+        repository: WorkflowStore,
+        retry_delay: timedelta | None = None,
+        handler_config: HandlerConfig | None = None,
+    ) -> None:
+        super().__init__(queue, repository, retry_delay, handler_config)
 
     @property
     def message_type(self) -> type[StartStage]:
@@ -131,14 +124,15 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                 else:
                     # Upstream not complete - check retry count before re-queuing
                     retry_count = getattr(message, "retry_count", 0) or 0
+                    max_retries = self.handler_config.max_stage_wait_retries
 
-                    if retry_count >= MAX_START_STAGE_RETRIES:
+                    if retry_count >= max_retries:
                         logger.error(
                             "StartStage for %s (%s) exceeded max retries (%d). "
                             "Upstream stages may be stuck. Marking as TERMINAL.",
                             stage.name,
                             stage.id,
-                            MAX_START_STAGE_RETRIES,
+                            max_retries,
                         )
                         self.set_stage_status(stage, WorkflowStatus.TERMINAL)
                         stage.end_time = self.current_time_millis()
@@ -162,7 +156,7 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                         stage.name,
                         stage.id,
                         retry_count + 1,
-                        MAX_START_STAGE_RETRIES,
+                        max_retries,
                     )
                     # Create new message with incremented retry count
                     new_message = StartStage(
@@ -183,7 +177,6 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                 )
                 error_str = str(e)
 
-                @_CONCURRENCY_RETRY
                 def do_mark_error() -> None:
                     # Re-fetch stage to get current version on each retry attempt
                     fresh_stage = self.repository.retrieve_stage(message.stage_id)
@@ -207,7 +200,7 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                             )
                         )
 
-                do_mark_error()
+                self.retry_on_concurrency_error(do_mark_error, f"marking stage {stage.id} error")
 
         self.with_stage(message, on_stage)
 

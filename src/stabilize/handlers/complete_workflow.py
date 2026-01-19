@@ -8,11 +8,9 @@ top-level stages and marks the execution as complete.
 from __future__ import annotations
 
 import logging
-import random
-import time
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from stabilize.errors import ConcurrencyError
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import CONTINUABLE_STATUSES, WorkflowStatus
 from stabilize.queue.messages import (
@@ -20,16 +18,15 @@ from stabilize.queue.messages import (
     CompleteWorkflow,
     StartWaitingWorkflows,
 )
+from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
+    from stabilize.persistence.store import WorkflowStore
+    from stabilize.queue.queue import Queue
 
 logger = logging.getLogger(__name__)
-
-# Maximum number of times to re-queue CompleteWorkflow before giving up
-# With a 15-second retry delay, 240 retries = 1 hour maximum wait
-MAX_COMPLETE_WORKFLOW_RETRIES = 240
 
 
 class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
@@ -44,6 +41,15 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
     5. Start waiting executions if queue is enabled
     """
 
+    def __init__(
+        self,
+        queue: Queue,
+        repository: WorkflowStore,
+        retry_delay: timedelta | None = None,
+        handler_config: HandlerConfig | None = None,
+    ) -> None:
+        super().__init__(queue, repository, retry_delay, handler_config)
+
     @property
     def message_type(self) -> type[CompleteWorkflow]:
         return CompleteWorkflow
@@ -51,31 +57,13 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
     def handle(self, message: CompleteWorkflow) -> None:
         """Handle the CompleteWorkflow message.
 
-        Retries on ConcurrencyError (optimistic lock failure).
+        Retries on ConcurrencyError (optimistic lock failure) using
+        configurable retry settings.
         """
-        max_retries = 3
-
-        for attempt in range(max_retries + 1):
-            try:
-                self._handle_with_retry(message)
-                return
-            except ConcurrencyError:
-                if attempt == max_retries:
-                    logger.error(
-                        "Failed to complete workflow after %d attempts due to contention (execution=%s)",
-                        max_retries,
-                        message.execution_id,
-                    )
-                    raise
-
-                backoff = (0.1 * (2**attempt)) + (random.random() * 0.1)
-                logger.warning(
-                    "Concurrency error completing workflow, retrying in %.2fs (attempt %d/%d)",
-                    backoff,
-                    attempt + 1,
-                    max_retries,
-                )
-                time.sleep(backoff)
+        self.retry_on_concurrency_error(
+            lambda: self._handle_with_retry(message),
+            f"completing workflow {message.execution_id}",
+        )
 
     def _handle_with_retry(self, message: CompleteWorkflow) -> None:
         """Inner handle logic to be retried."""
@@ -175,12 +163,13 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
 
         # Still running - check retry count before re-queuing
         retry_count = getattr(message, "retry_count", 0) or 0
+        max_retries = self.handler_config.max_stage_wait_retries
 
-        if retry_count >= MAX_COMPLETE_WORKFLOW_RETRIES:
+        if retry_count >= max_retries:
             logger.error(
                 "CompleteWorkflow for %s exceeded max retries (%d). Stages stuck in statuses: %s. Marking as TERMINAL.",
                 execution.id,
-                MAX_COMPLETE_WORKFLOW_RETRIES,
+                max_retries,
                 statuses,
             )
             return WorkflowStatus.TERMINAL
@@ -190,7 +179,7 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
             "Re-queuing CompleteWorkflow for %s (retry %d/%d) - stages not complete. Statuses: %s",
             execution.id,
             retry_count + 1,
-            MAX_COMPLETE_WORKFLOW_RETRIES,
+            max_retries,
             statuses,
         )
         # Create new message with incremented retry count

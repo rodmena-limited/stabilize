@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.queue import Queue
+from stabilize.resilience.config import HandlerConfig, get_handler_config
 
 if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
@@ -56,7 +57,11 @@ class MessageHandler(Generic[M]):
 
 @dataclass
 class QueueProcessorConfig:
-    """Configuration for the queue processor."""
+    """Configuration for the queue processor.
+
+    Values can be loaded from environment variables via HandlerConfig.
+    See HandlerConfig documentation for environment variable names.
+    """
 
     # How often to poll the queue (milliseconds)
     poll_frequency_ms: int = 50
@@ -72,6 +77,23 @@ class QueueProcessorConfig:
 
     # Enable message deduplication for idempotency
     enable_deduplication: bool = True
+
+    @classmethod
+    def from_handler_config(cls, handler_config: HandlerConfig | None = None) -> QueueProcessorConfig:
+        """Create QueueProcessorConfig from HandlerConfig.
+
+        Args:
+            handler_config: HandlerConfig to use. If None, loads from environment.
+
+        Returns:
+            QueueProcessorConfig with values from HandlerConfig
+        """
+        config = handler_config or get_handler_config()
+        return cls(
+            poll_frequency_ms=config.poll_frequency_ms,
+            max_workers=config.max_workers,
+            retry_delay=timedelta(seconds=config.handler_retry_delay_seconds),
+        )
 
 
 class QueueProcessor:
@@ -94,17 +116,25 @@ class QueueProcessor:
         queue: Queue,
         config: QueueProcessorConfig | None = None,
         store: WorkflowStore | None = None,
+        handler_config: HandlerConfig | None = None,
     ) -> None:
         """
         Initialize the queue processor.
 
         Args:
             queue: The queue to process
-            config: Optional configuration
+            config: Optional configuration (takes precedence if provided)
             store: Optional store for message deduplication (idempotency)
+            handler_config: Optional HandlerConfig. If config is None, uses this
+                           to create QueueProcessorConfig. If both are None,
+                           loads from environment.
         """
         self.queue = queue
-        self.config = config or QueueProcessorConfig()
+        # Use explicit config if provided, otherwise create from handler_config
+        if config is not None:
+            self.config = config
+        else:
+            self.config = QueueProcessorConfig.from_handler_config(handler_config)
         self._store = store
         self._handlers: dict[type[Message], MessageHandler[Any]] = {}
         self._running = False

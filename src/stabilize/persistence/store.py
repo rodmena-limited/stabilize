@@ -540,31 +540,69 @@ class NoOpTransaction(StoreTransaction):
         recoverable state. Worst case (crash after stages, before processed marks)
         results in duplicate message handling, which handlers are designed to be
         idempotent against.
+
+        NOTE: This implementation is NOT truly atomic. If store_stage() fails after
+        update_status() succeeds, the workflow will be in an inconsistent state.
+        For production with strict consistency requirements, use SqliteWorkflowStore
+        or PostgresWorkflowStore which provide true atomic transactions.
         """
-        # 1. Flush workflows first - persist workflow status changes
-        for workflow in self._pending_workflows:
-            self._store.update_status(workflow)
-        self._pending_workflows.clear()
+        import logging
 
-        # 2. Flush stages second - persist stage state changes
-        for stage in self._pending_stages:
-            self._store.store_stage(stage)
-        self._pending_stages.clear()
+        _logger = logging.getLogger(__name__)
 
-        # 3. Flush messages third - ensure workflow continues
-        if self._queue:
-            from datetime import timedelta
+        # Track what we've flushed for error reporting
+        workflows_flushed = 0
+        stages_flushed = 0
+        messages_flushed = 0
 
-            for message, delay in self._pending_messages:
-                if delay > 0:
-                    self._queue.push(message, timedelta(seconds=delay))
-                else:
-                    self._queue.push(message)
+        try:
+            # 1. Flush workflows first - persist workflow status changes
+            for workflow in self._pending_workflows:
+                self._store.update_status(workflow)
+                workflows_flushed += 1
+            self._pending_workflows.clear()
+
+            # 2. Flush stages second - persist stage state changes
+            for stage in self._pending_stages:
+                self._store.store_stage(stage)
+                stages_flushed += 1
+            self._pending_stages.clear()
+
+            # 3. Flush messages third - ensure workflow continues
+            if self._queue:
+                from datetime import timedelta
+
+                for message, delay in self._pending_messages:
+                    if delay > 0:
+                        self._queue.push(message, timedelta(seconds=delay))
+                    else:
+                        self._queue.push(message)
+                    messages_flushed += 1
+                self._pending_messages.clear()
+
+            # 4. Flush processed marks LAST - only after everything else succeeds
+            # This ensures that if we crash before this point, the message will be
+            # redelivered and the handler's idempotency check will handle it correctly
+            for message_id, handler_type, execution_id in self._pending_processed:
+                self._store.mark_message_processed(message_id, handler_type, execution_id)
+            self._pending_processed.clear()
+
+        except Exception as e:
+            # Log what was partially flushed before the error
+            _logger.error(
+                "NoOpTransaction partial flush failure: flushed %d/%d workflows, "
+                "%d/%d stages, %d/%d messages before error: %s",
+                workflows_flushed,
+                workflows_flushed + len(self._pending_workflows),
+                stages_flushed,
+                stages_flushed + len(self._pending_stages),
+                messages_flushed,
+                messages_flushed + len(self._pending_messages),
+                e,
+            )
+            # Clear remaining pending items to prevent double-flush on retry
+            self._pending_workflows.clear()
+            self._pending_stages.clear()
             self._pending_messages.clear()
-
-        # 4. Flush processed marks LAST - only after everything else succeeds
-        # This ensures that if we crash before this point, the message will be
-        # redelivered and the handler's idempotency check will handle it correctly
-        for message_id, handler_type, execution_id in self._pending_processed:
-            self._store.mark_message_processed(message_id, handler_type, execution_id)
-        self._pending_processed.clear()
+            self._pending_processed.clear()
+            raise
