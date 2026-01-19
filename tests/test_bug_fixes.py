@@ -313,3 +313,88 @@ class TestHandlerRetryDisabling:
 
         # Should have been called 3 times (initial + 2 retries)
         assert call_count == 3
+
+
+class TestBug4WrappedTransientErrorNotRetried:
+    """
+    Regression tests for Bug 4: Wrapped TransientError not detected.
+
+    When a TransientError is wrapped by another exception (e.g., BulkheadError),
+    is_transient() should check the __cause__ chain to detect the original
+    transient error and trigger retry logic.
+    """
+
+    def test_is_transient_detects_direct_transient_error(self) -> None:
+        """Test that direct TransientError is detected."""
+        from stabilize.errors import TransientError, is_transient
+
+        error = TransientError("Test error")
+        assert is_transient(error) is True
+
+    def test_is_transient_detects_wrapped_transient_error(self) -> None:
+        """Test that TransientError wrapped in another exception is detected."""
+        from stabilize.errors import TransientError, is_transient
+
+        # Simulate what bulkman does - wrap the error
+        original = TransientError("DDD failed in iteration 1, retrying")
+        wrapper = RuntimeError("Execution failed")
+        wrapper.__cause__ = original
+
+        assert is_transient(wrapper) is True
+
+    def test_is_transient_detects_deeply_wrapped_transient_error(self) -> None:
+        """Test that deeply nested TransientError is detected."""
+        from stabilize.errors import TransientError, is_transient
+
+        original = TransientError("Network timeout")
+        middle = ValueError("Task failed")
+        middle.__cause__ = original
+        outer = RuntimeError("Execution failed")
+        outer.__cause__ = middle
+
+        assert is_transient(outer) is True
+
+    def test_is_transient_returns_false_for_permanent_errors(self) -> None:
+        """Test that permanent errors are not detected as transient."""
+        from stabilize.errors import PermanentError, is_transient
+
+        error = PermanentError("Validation failed")
+        assert is_transient(error) is False
+
+    def test_is_transient_returns_false_for_wrapped_permanent_errors(self) -> None:
+        """Test that wrapped permanent errors are not detected as transient."""
+        from stabilize.errors import PermanentError, is_transient
+
+        original = PermanentError("Auth failed")
+        wrapper = RuntimeError("Execution failed")
+        wrapper.__cause__ = original
+
+        assert is_transient(wrapper) is False
+
+    def test_is_permanent_detects_wrapped_permanent_error(self) -> None:
+        """Test that PermanentError wrapped in another exception is detected."""
+        from stabilize.errors import PermanentError, is_permanent
+
+        original = PermanentError("Invalid input")
+        wrapper = RuntimeError("Execution failed")
+        wrapper.__cause__ = original
+
+        assert is_permanent(wrapper) is True
+
+    def test_is_transient_handles_none_cause(self) -> None:
+        """Test that is_transient handles errors without __cause__."""
+        from stabilize.errors import is_transient
+
+        error = RuntimeError("Some error")
+        # No __cause__ set
+        assert is_transient(error) is False
+
+    def test_is_transient_handles_self_referential_cause(self) -> None:
+        """Test that is_transient handles self-referential __cause__ safely."""
+        from stabilize.errors import is_transient
+
+        error = RuntimeError("Some error")
+        error.__cause__ = error  # Edge case: self-reference
+
+        # Should not infinite loop
+        assert is_transient(error) is False

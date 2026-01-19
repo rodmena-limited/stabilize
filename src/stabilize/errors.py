@@ -345,6 +345,10 @@ class DeadLetterError(QueueError):
 def is_transient(error: Exception) -> bool:
     """Check if an error is transient and should be retried.
 
+    Checks the error itself and its cause chain (__cause__) for transient errors.
+    This handles cases where libraries wrap errors (e.g., BulkheadError wrapping
+    a TransientError).
+
     Args:
         error: The exception to check
 
@@ -365,11 +369,22 @@ def is_transient(error: Exception) -> bool:
         "throttl",
         "ratelimit",
     ]
-    return any(pattern in error_name for pattern in transient_patterns)
+    if any(pattern in error_name for pattern in transient_patterns):
+        return True
+
+    # Check the cause chain for wrapped transient errors
+    cause = getattr(error, "__cause__", None)
+    if cause is not None and cause is not error:
+        return is_transient(cause)
+
+    return False
 
 
 def is_permanent(error: Exception) -> bool:
     """Check if an error is permanent and should not be retried.
+
+    Checks the error itself and its cause chain (__cause__) for permanent errors.
+    This handles cases where libraries wrap errors.
 
     Args:
         error: The exception to check
@@ -390,4 +405,12 @@ def is_permanent(error: Exception) -> bool:
         "notfound",
         "invalid",
     ]
-    return any(pattern in error_name for pattern in permanent_patterns)
+    if any(pattern in error_name for pattern in permanent_patterns):
+        return True
+
+    # Check the cause chain for wrapped permanent errors
+    cause = getattr(error, "__cause__", None)
+    if cause is not None and cause is not error:
+        return is_permanent(cause)
+
+    return False
