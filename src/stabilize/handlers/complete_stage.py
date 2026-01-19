@@ -99,19 +99,22 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                     has_on_failure = self._plan_on_failure_stages(stage)
                     if has_on_failure:
                         after_stages = stage.first_after_stages()
-                        # Atomic: store stage + push all on-failure stage messages together
-                        # Store stage to persist any context changes from planning
-                        with self.repository.transaction(self.queue) as txn:
-                            txn.store_stage(stage)
-                            for s in after_stages:
-                                txn.push_message(
-                                    StartStage(
-                                        execution_type=message.execution_type,
-                                        execution_id=message.execution_id,
-                                        stage_id=s.id,
+                        # Only push StartStage for on-failure stages that are NOT_STARTED
+                        not_started_on_failure = [s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED]
+                        if not_started_on_failure:
+                            # Atomic: store stage + push all on-failure stage messages together
+                            # Store stage to persist any context changes from planning
+                            with self.repository.transaction(self.queue) as txn:
+                                txn.store_stage(stage)
+                                for s in not_started_on_failure:
+                                    txn.push_message(
+                                        StartStage(
+                                            execution_type=message.execution_type,
+                                            execution_id=message.execution_id,
+                                            stage_id=s.id,
+                                        )
                                     )
-                                )
-                        return
+                            return
 
                 # Update stage status
                 stage.status = status

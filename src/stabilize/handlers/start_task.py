@@ -59,25 +59,41 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
         """Handle the StartTask message."""
 
         def on_task(stage: StageExecution, task_model: TaskExecution) -> None:
+            # Idempotency check - only start tasks that are NOT_STARTED
+            if task_model.status != WorkflowStatus.NOT_STARTED:
+                logger.debug(
+                    "Ignoring StartTask for %s (%s) - already %s",
+                    task_model.name,
+                    task_model.id,
+                    task_model.status,
+                )
+                return
+
             # Check if task should be skipped
             try:
                 task_impl = self.task_registry.get(task_model.implementing_class)
                 if isinstance(task_impl, SkippableTask) and not task_impl.is_enabled(stage):
                     logger.info("Skipping task %s (disabled)", task_model.name)
 
-                    # Mark as skipped immediately
+                    # Mark as skipped - use atomic transaction
                     task_model.status = WorkflowStatus.SKIPPED
-                    self.repository.store_stage(stage)
-
-                    self.queue.push(
-                        CompleteTask(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=message.stage_id,
-                            task_id=message.task_id,
-                            status=WorkflowStatus.SKIPPED,
+                    with self.repository.transaction(self.queue) as txn:
+                        txn.store_stage(stage)
+                        if message.message_id:
+                            txn.mark_message_processed(
+                                message_id=message.message_id,
+                                handler_type="StartTask",
+                                execution_id=message.execution_id,
+                            )
+                        txn.push_message(
+                            CompleteTask(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=message.stage_id,
+                                task_id=message.task_id,
+                                status=WorkflowStatus.SKIPPED,
+                            )
                         )
-                    )
                     return
             except TaskNotFoundError:
                 # If implementation not found, RunTaskHandler will handle the error.
@@ -88,19 +104,24 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
             task_model.status = WorkflowStatus.RUNNING
             task_model.start_time = self.current_time_millis()
 
-            # Save the stage (which includes the task)
-            self.repository.store_stage(stage)
-
-            # Push RunTask
-            self.queue.push(
-                RunTask(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=message.stage_id,
-                    task_id=message.task_id,
-                    task_type=task_model.implementing_class,
+            # Atomic: store stage + push RunTask together
+            with self.repository.transaction(self.queue) as txn:
+                txn.store_stage(stage)
+                if message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="StartTask",
+                        execution_id=message.execution_id,
+                    )
+                txn.push_message(
+                    RunTask(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                        task_id=message.task_id,
+                        task_type=task_model.implementing_class,
+                    )
                 )
-            )
 
             logger.debug(
                 "Started task %s (%s) in stage %s",

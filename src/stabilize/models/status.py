@@ -132,6 +132,16 @@ CONTINUABLE_STATUSES: frozenset[WorkflowStatus] = frozenset(
         WorkflowStatus.SUCCEEDED,
         WorkflowStatus.FAILED_CONTINUE,
         WorkflowStatus.SKIPPED,
+        WorkflowStatus.REDIRECT,
+    }
+)
+
+# Statuses that indicate a halt condition - downstream execution should be blocked
+HALT_STATUSES: frozenset[WorkflowStatus] = frozenset(
+    {
+        WorkflowStatus.TERMINAL,
+        WorkflowStatus.CANCELED,
+        WorkflowStatus.STOPPED,
     }
 )
 

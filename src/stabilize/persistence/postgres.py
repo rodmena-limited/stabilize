@@ -225,7 +225,9 @@ class PostgresWorkflowStore(WorkflowStore):
                 conn.commit()
 
     def _store_stage_impl(self, cur: Any, stage: StageExecution) -> None:
-        """Implementation of store_stage using a cursor."""
+        """Implementation of store_stage using a cursor with optimistic locking."""
+        from stabilize.errors import ConcurrencyError
+
         # Check if stage exists
         cur.execute(
             "SELECT id FROM stage_executions WHERE id = %(id)s",
@@ -234,7 +236,7 @@ class PostgresWorkflowStore(WorkflowStore):
         exists = cur.fetchone() is not None
 
         if exists:
-            # Update
+            # Update with optimistic locking - check version and increment
             cur.execute(
                 """
                 UPDATE stage_executions SET
@@ -242,8 +244,10 @@ class PostgresWorkflowStore(WorkflowStore):
                     context = %(context)s::jsonb,
                     outputs = %(outputs)s::jsonb,
                     start_time = %(start_time)s,
-                    end_time = %(end_time)s
-                WHERE id = %(id)s
+                    end_time = %(end_time)s,
+                    version = version + 1
+                WHERE id = %(id)s AND version = %(version)s
+                RETURNING version
                 """,
                 {
                     "id": stage.id,
@@ -252,8 +256,21 @@ class PostgresWorkflowStore(WorkflowStore):
                     "outputs": json.dumps(stage.outputs),
                     "start_time": stage.start_time,
                     "end_time": stage.end_time,
+                    "version": stage.version,
                 },
             )
+
+            result = cur.fetchone()
+            if result:
+                # Update succeeded, get new version
+                new_version = result[0] if isinstance(result, tuple) else result.get("version", stage.version + 1)
+                stage.version = new_version
+            else:
+                # No row returned means version mismatch - concurrent modification
+                raise ConcurrencyError(
+                    f"Optimistic lock failed for stage {stage.id} (version {stage.version}). "
+                    f"Another process has modified this stage."
+                )
 
             # Batch upsert tasks
             if stage.tasks:
@@ -869,12 +886,12 @@ class PostgresWorkflowStore(WorkflowStore):
             INSERT INTO stage_executions (
                 id, execution_id, ref_id, type, name, status, context, outputs,
                 requisite_stage_ref_ids, parent_stage_id, synthetic_stage_owner,
-                start_time, end_time, start_time_expiry, scheduled_time
+                start_time, end_time, start_time_expiry, scheduled_time, version
             ) VALUES (
                 %(id)s, %(execution_id)s, %(ref_id)s, %(type)s, %(name)s, %(status)s,
                 %(context)s::jsonb, %(outputs)s::jsonb, %(requisite_stage_ref_ids)s,
                 %(parent_stage_id)s, %(synthetic_stage_owner)s, %(start_time)s,
-                %(end_time)s, %(start_time_expiry)s, %(scheduled_time)s
+                %(end_time)s, %(start_time_expiry)s, %(scheduled_time)s, %(version)s
             )
             """,
             {
@@ -893,6 +910,7 @@ class PostgresWorkflowStore(WorkflowStore):
                 "end_time": stage.end_time,
                 "start_time_expiry": stage.start_time_expiry,
                 "scheduled_time": stage.scheduled_time,
+                "version": stage.version,
             },
         )
 
@@ -1030,6 +1048,7 @@ class PostgresWorkflowStore(WorkflowStore):
             end_time=row["end_time"],
             start_time_expiry=row["start_time_expiry"],
             scheduled_time=row["scheduled_time"],
+            version=row.get("version", 0) or 0,
         )
 
     def _row_to_task(self, row: dict[str, Any]) -> TaskExecution:

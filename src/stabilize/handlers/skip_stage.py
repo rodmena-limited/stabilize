@@ -45,9 +45,11 @@ class SkipStageHandler(StabilizeHandler[SkipStage]):
 
         def on_stage(stage: StageExecution) -> None:
             # Check if stage is still in a skippable state
-            if stage.status not in {WorkflowStatus.NOT_STARTED, WorkflowStatus.RUNNING}:
+            # Only NOT_STARTED stages can be skipped - RUNNING stages should be CANCELED
+            # (VALID_TRANSITIONS doesn't allow RUNNING -> SKIPPED)
+            if stage.status != WorkflowStatus.NOT_STARTED:
                 logger.debug(
-                    "Ignoring SkipStage for %s (%s) - already %s",
+                    "Ignoring SkipStage for %s (%s) - already %s (only NOT_STARTED can be skipped)",
                     stage.name,
                     stage.id,
                     stage.status,

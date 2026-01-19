@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.stage import SyntheticStageOwner
-from stabilize.models.status import CONTINUABLE_STATUSES, WorkflowStatus
+from stabilize.models.status import CONTINUABLE_STATUSES, HALT_STATUSES, WorkflowStatus
 from stabilize.queue.messages import (
     CompleteStage,
     ContinueParentStage,
@@ -25,8 +25,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Statuses that indicate a halt condition - parent stage should not proceed
-HALT_STATUSES = {WorkflowStatus.TERMINAL, WorkflowStatus.CANCELED, WorkflowStatus.STOPPED}
+# Maximum number of times to re-queue ContinueParentStage before giving up
+# With a 15-second retry delay, 240 retries = 1 hour maximum wait
+MAX_CONTINUE_PARENT_RETRIES = 240
 
 
 class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
@@ -106,12 +107,49 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
             return
 
         if not all_complete:
-            # Not all before-stages complete yet - wait
+            # Not all before-stages complete yet - check retry count
+            retry_count = message.retry_count or 0
+
+            if retry_count >= MAX_CONTINUE_PARENT_RETRIES:
+                logger.error(
+                    "ContinueParentStage for %s (%s) exceeded max retries (%d). "
+                    "Before-stages may be stuck. Marking parent as TERMINAL.",
+                    stage.name,
+                    stage.id,
+                    MAX_CONTINUE_PARENT_RETRIES,
+                )
+                stage.status = WorkflowStatus.TERMINAL
+                stage.end_time = self.current_time_millis()
+                stage.context["exception"] = {
+                    "details": {"error": "Exceeded max retries waiting for before-stages"},
+                }
+                with self.repository.transaction(self.queue) as txn:
+                    txn.store_stage(stage)
+                    txn.push_message(
+                        CompleteStage(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=stage.id,
+                        )
+                    )
+                return
+
+            # Re-queue with incremented retry count
             logger.debug(
-                "Waiting for before-stages to complete for parent %s (%s)",
+                "Re-queuing ContinueParentStage for %s (%s) (retry %d/%d) - before-stages not complete",
                 stage.name,
                 stage.id,
+                retry_count + 1,
+                MAX_CONTINUE_PARENT_RETRIES,
             )
+            new_message = ContinueParentStage(
+                execution_type=message.execution_type,
+                execution_id=message.execution_id,
+                stage_id=message.stage_id,
+                phase=message.phase,
+                retry_count=retry_count + 1,
+            )
+            self.queue.push(new_message, self.retry_delay)
             return
 
         # All before-stages complete - start parent's first task
@@ -137,15 +175,20 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
             # No tasks - check for after-stages or complete
             after_stages = stage.first_after_stages()
             if after_stages:
-                with self.repository.transaction(self.queue) as txn:
-                    for after in after_stages:
-                        txn.push_message(
-                            StartStage(
-                                execution_type=message.execution_type,
-                                execution_id=message.execution_id,
-                                stage_id=after.id,
+                # Only push StartStage for after-stages that are NOT_STARTED to prevent duplicates
+                not_started_after = [s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED]
+                if not_started_after:
+                    with self.repository.transaction(self.queue) as txn:
+                        for after in not_started_after:
+                            txn.push_message(
+                                StartStage(
+                                    execution_type=message.execution_type,
+                                    execution_id=message.execution_id,
+                                    stage_id=after.id,
+                                )
                             )
-                        )
+                # If after-stages exist but are already running/complete, don't complete stage yet
+                # They will trigger ContinueParentStage when done
             else:
                 # No tasks, no after-stages - complete stage
                 with self.repository.transaction(self.queue) as txn:
@@ -193,12 +236,49 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
             return
 
         if not all_complete:
-            # Not all after-stages complete yet - wait
+            # Not all after-stages complete yet - check retry count
+            retry_count = message.retry_count or 0
+
+            if retry_count >= MAX_CONTINUE_PARENT_RETRIES:
+                logger.error(
+                    "ContinueParentStage for %s (%s) exceeded max retries (%d). "
+                    "After-stages may be stuck. Marking parent as TERMINAL.",
+                    stage.name,
+                    stage.id,
+                    MAX_CONTINUE_PARENT_RETRIES,
+                )
+                stage.status = WorkflowStatus.TERMINAL
+                stage.end_time = self.current_time_millis()
+                stage.context["exception"] = {
+                    "details": {"error": "Exceeded max retries waiting for after-stages"},
+                }
+                with self.repository.transaction(self.queue) as txn:
+                    txn.store_stage(stage)
+                    txn.push_message(
+                        CompleteStage(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=stage.id,
+                        )
+                    )
+                return
+
+            # Re-queue with incremented retry count
             logger.debug(
-                "Waiting for after-stages to complete for parent %s (%s)",
+                "Re-queuing ContinueParentStage for %s (%s) (retry %d/%d) - after-stages not complete",
                 stage.name,
                 stage.id,
+                retry_count + 1,
+                MAX_CONTINUE_PARENT_RETRIES,
             )
+            new_message = ContinueParentStage(
+                execution_type=message.execution_type,
+                execution_id=message.execution_id,
+                stage_id=message.stage_id,
+                phase=message.phase,
+                retry_count=retry_count + 1,
+            )
+            self.queue.push(new_message, self.retry_delay)
             return
 
         # All after-stages complete successfully - complete the parent stage
