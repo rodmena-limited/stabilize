@@ -242,12 +242,18 @@ class WorkflowRecovery:
         stages_to_requeue = []
 
         for stage in full_workflow.stages:
-            # Stage is in-progress but not complete
-            if stage.status in {WorkflowStatus.RUNNING, WorkflowStatus.NOT_STARTED}:
+            # Stage was actively running when crash occurred
+            if stage.status == WorkflowStatus.RUNNING:
                 stages_to_requeue.append(stage)
-            # Stage has STARTED status but no completion
-            elif stage.status == WorkflowStatus.NOT_STARTED and self._has_started(stage):
-                stages_to_requeue.append(stage)
+            # Stage is NOT_STARTED - check if it actually started execution
+            elif stage.status == WorkflowStatus.NOT_STARTED:
+                if self._has_started(stage):
+                    # Stage started but crashed before status was updated to RUNNING
+                    # Need to requeue for recovery
+                    stages_to_requeue.append(stage)
+                else:
+                    # Stage never started - requeue to begin execution
+                    stages_to_requeue.append(stage)
 
         if not stages_to_requeue:
             # No stages to requeue, but workflow isn't complete

@@ -28,6 +28,10 @@ class Message:
     attempts: int = field(default=0, repr=False)
     max_attempts: int = field(default=10, repr=False)
 
+    # Error tracking for retries - stores context from previous failures
+    last_error: str | None = field(default=None, repr=False)
+    last_error_type: str | None = field(default=None, repr=False)
+
     def copy_with_attempts(self, attempts: int) -> Message:
         """Create a copy with updated attempt count."""
         import copy
@@ -35,6 +39,15 @@ class Message:
         new_msg = copy.copy(self)
         new_msg.attempts = attempts
         return new_msg
+
+    def set_error_context(self, error: Exception) -> None:
+        """Store error context from a failed attempt.
+
+        This context is preserved across reschedules to help debugging
+        and provide visibility into why messages are being retried.
+        """
+        self.last_error = str(error)
+        self.last_error_type = type(error).__name__
 
 
 # ============================================================================

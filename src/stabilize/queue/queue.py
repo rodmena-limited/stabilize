@@ -266,15 +266,41 @@ class InMemoryQueue(Queue):
         message: Message,
         delay: timedelta,
     ) -> None:
-        """Reschedule a message with a new delay."""
-        with self._lock:
-            message_id = message.message_id
-            if message_id and message_id in self._pending:
-                # Remove from pending
-                del self._pending[message_id]
+        """Reschedule a message with a new delay.
 
-        # Push with new delay
-        self.push(message, delay)
+        Preserves the original message_id to maintain idempotency tracking.
+        """
+        original_id = message.message_id
+
+        with self._lock:
+            if original_id and original_id in self._pending:
+                # Remove from pending
+                del self._pending[original_id]
+
+            # Calculate new delivery time
+            deliver_at = time.time() + delay.total_seconds()
+
+            # Reuse original ID or generate new one
+            if original_id:
+                message_id = original_id
+            else:
+                message_id = self._generate_message_id()
+
+            message.message_id = message_id
+
+            queued = QueuedMessage(
+                deliver_at=deliver_at,
+                message=message,
+                message_id=message_id,
+            )
+
+            heapq.heappush(self._queue, queued)
+            self._message_index[message_id] = queued
+
+            logger.debug(
+                f"Rescheduled {get_message_type_name(message)} "
+                f"(id={message_id}, deliver_at={datetime.fromtimestamp(deliver_at)})"
+            )
 
     def size(self) -> int:
         """Get the number of messages in the queue."""
@@ -502,14 +528,12 @@ class PostgresQueue(Queue):
 
                 message = self._deserialize_message(msg_type, payload)
                 if message is None:
-                    # Corrupted message - delete it to prevent infinite retry
-                    logger.warning("Deleting corrupted message %s (type: %s)", msg_id, msg_type)
-                    with conn.cursor() as del_cur:
-                        del_cur.execute(
-                            f"DELETE FROM {self.table_name} WHERE id = %(id)s",
-                            {"id": msg_id},
-                        )
-                    conn.commit()
+                    # Corrupted message - move to DLQ for audit instead of deleting
+                    logger.warning("Moving corrupted message %s (type: %s) to DLQ", msg_id, msg_type)
+                    self.move_to_dlq(
+                        msg_id,
+                        error=f"Deserialization failed for message type: {msg_type}",
+                    )
                     return None
 
                 message.message_id = str(msg_id)

@@ -47,6 +47,9 @@ class InMemoryWorkflowStore(WorkflowStore):
             if execution.id not in self._executions and len(self._executions) >= self.max_entries:
                 # Evict oldest (FIFO)
                 oldest_id = next(iter(self._executions))
+                oldest = self._executions[oldest_id]
+                # Clean up circular references before eviction
+                oldest.cleanup()
                 del self._executions[oldest_id]
 
             # Deep copy to prevent external modifications

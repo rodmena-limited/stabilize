@@ -317,13 +317,12 @@ class SqliteQueue(Queue):
         # Step 4: Successfully claimed - deserialize and return
         message = self._deserialize_message(msg_type, payload)
         if message is None:
-            # Corrupted message - delete it to prevent infinite retry
-            logger.warning("Deleting corrupted message %s (type: %s)", msg_id, msg_type)
-            conn.execute(
-                f"DELETE FROM {self.table_name} WHERE id = :id",
-                {"id": msg_id},
+            # Corrupted message - move to DLQ for audit instead of deleting
+            logger.warning("Moving corrupted message %s (type: %s) to DLQ", msg_id, msg_type)
+            self.move_to_dlq(
+                msg_id,
+                error=f"Deserialization failed for message type: {msg_type}",
             )
-            conn.commit()
             return None
 
         message.message_id = str(msg_id)

@@ -275,7 +275,9 @@ class LifecycleManager:
         self._shutdown_in_progress.set()
         logger.info("Starting graceful shutdown (timeout=%ss)", self.shutdown_timeout)
 
-        start_time = time.time()
+        # Use monotonic time for elapsed time calculations to avoid
+        # issues with clock drift, NTP adjustments, or leap seconds
+        start_time = time.monotonic()
         remaining = self.shutdown_timeout
 
         # Step 1: Stop accepting new work
@@ -299,7 +301,7 @@ class LifecycleManager:
         logger.info("Waiting for active tasks to complete...")
         for processor in processors:
             try:
-                elapsed = time.time() - start_time
+                elapsed = time.monotonic() - start_time
                 remaining = max(0, self.shutdown_timeout - elapsed)
 
                 if remaining > 0:
@@ -331,15 +333,16 @@ class LifecycleManager:
             except Exception as e:
                 logger.warning("Error in shutdown callback: %s", e)
 
-        elapsed = time.time() - start_time
+        elapsed = time.monotonic() - start_time
         logger.info("Graceful shutdown completed in %.2fs", elapsed)
 
     def _wait_for_processor(self, processor: QueueProcessor, timeout: float) -> None:
         """Wait for a processor's active tasks to complete."""
-        deadline = time.time() + timeout
+        # Use monotonic time for elapsed time calculations
+        deadline = time.monotonic() + timeout
         poll_interval = 0.1
 
-        while time.time() < deadline:
+        while time.monotonic() < deadline:
             active = getattr(processor, "active_count", 0)
             if active == 0:
                 return

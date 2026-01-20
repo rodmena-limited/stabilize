@@ -137,12 +137,34 @@ class TaskBulkheadManager:
         """
         Shutdown all bulkheads.
 
+        Distributes timeout budget across bulkheads. If a bulkhead finishes
+        quickly, remaining time is redistributed to subsequent bulkheads.
+
         Args:
             wait: Whether to wait for pending tasks to complete
-            timeout: Maximum time to wait for shutdown
+            timeout: Maximum time to wait for shutdown (total across all bulkheads)
         """
+        import time
+
+        start = time.monotonic()
+        remaining = timeout
+
         for name, bulkhead in self._bulkheads.items():
             logger.debug(f"Shutting down bulkhead '{name}'")
-            bulkhead.shutdown(wait=wait, timeout=timeout)
-        self._default_bulkhead.shutdown(wait=wait, timeout=timeout)
+            if remaining is not None and remaining <= 0:
+                # No time left - force immediate shutdown
+                bulkhead.shutdown(wait=False)
+            else:
+                bulkhead.shutdown(wait=wait, timeout=remaining)
+
+            if timeout is not None:
+                elapsed = time.monotonic() - start
+                remaining = timeout - elapsed
+
+        # Shutdown default bulkhead with remaining time
+        if remaining is not None and remaining <= 0:
+            self._default_bulkhead.shutdown(wait=False)
+        else:
+            self._default_bulkhead.shutdown(wait=wait, timeout=remaining)
+
         logger.info("All bulkheads shut down")

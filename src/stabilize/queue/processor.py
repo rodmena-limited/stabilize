@@ -231,27 +231,36 @@ class QueueProcessor:
         return self._stopping and self._running
 
     def _poll_loop(self) -> None:
-        """Main polling loop."""
+        """Main polling loop.
+
+        Uses a lock to prevent race condition between stopping flag check
+        and message polling. This ensures no messages are submitted after
+        shutdown is requested.
+        """
         poll_interval = self.config.poll_frequency_ms / 1000.0
 
         while self._running:
             try:
-                # Check if stopping - don't accept new work
-                if self._stopping:
-                    time.sleep(poll_interval)
-                    continue
-
-                # Check if we have capacity
+                # Hold lock while checking stopping flag AND polling to prevent race
+                # condition where a message could be submitted after stop is requested
+                message = None
                 with self._lock:
-                    if self._active_count >= self.config.max_workers:
-                        time.sleep(poll_interval)
-                        continue
-
-                # Try to get a message
-                message = self.queue.poll_one()
+                    # Check if stopping - don't accept new work
+                    if self._stopping:
+                        pass  # Will sleep outside lock
+                    # Check if we have capacity
+                    elif self._active_count >= self.config.max_workers:
+                        pass  # Will sleep outside lock
+                    else:
+                        # Poll under lock to prevent race
+                        message = self.queue.poll_one()
+                        if message:
+                            # Increment count while still holding lock
+                            self._active_count += 1
 
                 if message:
-                    self._submit_message(message)
+                    # Submit outside lock (submit doesn't need lock protection)
+                    self._submit_message_internal(message)
                 else:
                     time.sleep(poll_interval)
 
@@ -263,9 +272,19 @@ class QueueProcessor:
                 time.sleep(poll_interval)
 
     def _submit_message(self, message: Message) -> None:
-        """Submit a message to the thread pool for processing."""
+        """Submit a message to the thread pool for processing.
+
+        Increments active_count before submitting. Used for external callers.
+        """
         with self._lock:
             self._active_count += 1
+        self._submit_message_internal(message)
+
+    def _submit_message_internal(self, message: Message) -> None:
+        """Submit a message without incrementing active_count.
+
+        Used by _poll_loop which already incremented the count under lock.
+        """
 
         def process_and_ack() -> None:
             try:
@@ -276,6 +295,9 @@ class QueueProcessor:
                     f"Error handling {get_message_type_name(message)}: {e}",
                     exc_info=True,
                 )
+                # Store error context for debugging and auditing
+                # This allows tracking of failure patterns across retries
+                message.set_error_context(e)
                 # Message will be reprocessed after lock expires or reschedule
                 self.queue.reschedule(message, self.config.retry_delay)
             finally:
@@ -337,6 +359,8 @@ class QueueProcessor:
                 return True
             except Exception as e:
                 logger.error(f"Error handling message: {e}", exc_info=True)
+                # Store error context for debugging and auditing
+                message.set_error_context(e)
                 self.queue.reschedule(message, self.config.retry_delay)
                 raise
         return False
@@ -363,14 +387,16 @@ class QueueProcessor:
 
         try:
             count = 0
-            start = time.time()
+            # Use monotonic time for elapsed time calculations to avoid
+            # issues with clock drift, NTP adjustments, or leap seconds
+            start = time.monotonic()
 
             # Periodic DLQ check (every 30 seconds)
-            if time.time() - self._last_dlq_check > 30.0:
+            if time.monotonic() - self._last_dlq_check > 30.0:
                 self._check_dlq()
-                self._last_dlq_check = time.time()
+                self._last_dlq_check = time.monotonic()
 
-            while time.time() - start < timeout:
+            while time.monotonic() - start < timeout:
                 if self.queue.size() == 0:
                     break
                 if self.process_one():

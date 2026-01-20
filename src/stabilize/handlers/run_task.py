@@ -268,6 +268,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         # Prepare a temporary stage with merged outputs for verification
         # We don't want to modify the actual stage object yet
         import copy
+
         temp_stage = copy.copy(stage)
         temp_stage.outputs = stage.outputs.copy()
         if result.outputs and isinstance(result.outputs, dict):
@@ -285,12 +286,18 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
 
             # Convert string type names to types
             type_map = {
-                "str": str, "string": str,
-                "int": int, "integer": int,
-                "float": float, "number": float,
-                "bool": bool, "boolean": bool,
-                "list": list, "array": list,
-                "dict": dict, "object": dict
+                "str": str,
+                "string": str,
+                "int": int,
+                "integer": int,
+                "float": float,
+                "number": float,
+                "bool": bool,
+                "boolean": bool,
+                "list": list,
+                "array": list,
+                "dict": dict,
+                "object": dict,
             }
             type_checks: dict[str, type] = {}
             for k, v in type_checks_config.items():

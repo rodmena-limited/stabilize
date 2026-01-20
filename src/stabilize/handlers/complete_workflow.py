@@ -95,6 +95,10 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
             if status != WorkflowStatus.SUCCEEDED:
                 running_stages = [s for s in execution.top_level_stages() if s.status == WorkflowStatus.RUNNING]
 
+            # Save pipeline_config_id before cleanup
+            pipeline_config_id = execution.pipeline_config_id
+            keep_waiting_pipelines = execution.keep_waiting_pipelines
+
             # Atomic: update execution status + cancel stages + start waiting workflows
             with self.repository.transaction(self.queue) as txn:
                 txn.update_workflow_status(execution)
@@ -118,13 +122,17 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
                     )
 
                 # Start waiting executions if configured
-                if execution.pipeline_config_id:
+                if pipeline_config_id:
                     txn.push_message(
                         StartWaitingWorkflows(
-                            pipeline_config_id=execution.pipeline_config_id,
-                            purge_queue=not execution.keep_waiting_pipelines,
+                            pipeline_config_id=pipeline_config_id,
+                            purge_queue=not keep_waiting_pipelines,
                         )
                     )
+
+            # Clean up memory references after workflow completes
+            # This breaks circular references to help garbage collection
+            execution.cleanup()
 
         self.with_execution(message, on_execution)
 
