@@ -29,6 +29,7 @@ from stabilize.stages.builder import get_default_factory
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
+    from stabilize.queue.messages import Message
     from stabilize.queue.queue import Queue
 
 logger = logging.getLogger(__name__)
@@ -296,14 +297,12 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         self,
         stage: StageExecution,
         message: StartStage,
-    ) -> list:
+    ) -> list[Message]:
         """Collect messages needed to start the stage.
 
         This method queries the repository but doesn't push any messages.
         The caller is responsible for pushing the returned messages atomically.
         """
-        from stabilize.queue.messages import Message
-
         messages: list[Message] = []
 
         # Fetch synthetic stages (returns empty list if none)

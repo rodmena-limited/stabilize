@@ -19,6 +19,7 @@ from resilient_circuit import ExponentialDelay
 
 from stabilize.errors import TaskTimeoutError, is_transient
 from stabilize.handlers.base import StabilizeHandler
+from stabilize.metrics import Timer
 from stabilize.models.status import WorkflowStatus
 from stabilize.persistence.transaction import TransactionHelper
 from stabilize.queue.messages import (
@@ -31,6 +32,7 @@ from stabilize.resilience.circuits import WorkflowCircuitFactory
 from stabilize.resilience.config import HandlerConfig, ResilienceConfig
 from stabilize.resilience.executor import execute_with_resilience
 from stabilize.resilience.process_executor import ProcessIsolatedTaskExecutor
+from stabilize.resilience.timeouts import TimeoutManager
 from stabilize.tasks.interface import RetryableTask, Task
 from stabilize.tasks.registry import TaskNotFoundError, TaskRegistry
 from stabilize.tasks.result import TaskResult
@@ -69,12 +71,13 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         super().__init__(queue, repository, retry_delay, handler_config)
         self.task_registry = task_registry
         self.txn_helper = TransactionHelper(repository, queue)
+        self.timeout_manager = TimeoutManager(self.handler_config.default_task_timeout_seconds)
 
         # Create backoff calculator from config
         self._task_backoff = ExponentialDelay(
             min_delay=timedelta(milliseconds=self.handler_config.task_backoff_min_delay_ms),
             max_delay=timedelta(milliseconds=self.handler_config.task_backoff_max_delay_ms),
-            factor=self.handler_config.concurrency_backoff_factor,
+            factor=int(self.handler_config.concurrency_backoff_factor),
             jitter=self.handler_config.concurrency_jitter,
         )
 
@@ -177,22 +180,33 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             # Execute the task with timeout enforcement
             try:
                 timeout = self._get_task_timeout(stage, task)
-                result = self._execute_with_timeout(task, stage, timeout, message)
-                self._process_result(stage, task_model, result, message)
+                with Timer("task_execution_seconds", task_type=message.task_type, task_name=task_model.name):
+                    result = self._execute_with_timeout(task, stage, timeout, message)
+
+                self._process_result_safely(message.stage_id, message.task_id, result, message)
             except TaskTimeoutError as e:
                 logger.info("Task %s timed out: %s", task_model.name, e)
                 timeout_result: TaskResult | None = task.on_timeout(stage) if hasattr(task, "on_timeout") else None
                 if timeout_result is None:
                     self._complete_with_error(stage, task_model, message, str(e))
                 else:
-                    self._process_result(stage, task_model, timeout_result, message)
+                    self._process_result_safely(message.stage_id, message.task_id, timeout_result, message)
             except Exception as e:
-                logger.error(
-                    "Error executing task %s: %s",
-                    task_model.name,
-                    e,
-                    exc_info=True,
-                )
+                if is_transient(e):
+                    # Transient error - log at debug level and let _handle_exception manage retry logging
+                    logger.debug(
+                        "Transient error executing task %s: %s",
+                        task_model.name,
+                        e,
+                    )
+                else:
+                    # Permanent error - log with full traceback
+                    logger.error(
+                        "Error executing task %s: %s",
+                        task_model.name,
+                        e,
+                        exc_info=True,
+                    )
                 self._handle_exception(stage, task_model, task, message, e)
 
         self.with_task(message, on_task)
@@ -219,12 +233,9 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
     ) -> timedelta:
         """Get the timeout for a task.
 
-        Returns the dynamic timeout for RetryableTask or configured default for others.
-        The default is configurable via STABILIZE_DEFAULT_TASK_TIMEOUT_S env var.
+        Delegates to TimeoutManager for consistent logic.
         """
-        if isinstance(task, RetryableTask):
-            return task.get_dynamic_timeout(stage)
-        return timedelta(seconds=self.handler_config.default_task_timeout_seconds)
+        return self.timeout_manager.get_task_timeout(stage, task)
 
     def _execute_with_timeout(
         self,
@@ -280,6 +291,31 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             stage_id=stage.id,
             execution_id=execution_id,
         )
+
+    def _process_result_safely(
+        self,
+        stage_id: str,
+        task_id: str,
+        result: TaskResult,
+        message: RunTask,
+    ) -> None:
+        """Process result with retry on concurrency error."""
+        def do_process() -> None:
+            # Always reload stage to get latest version
+            stage = self.repository.retrieve_stage(stage_id)
+            if not stage:
+                logger.error("Stage %s not found processing result", stage_id)
+                return
+
+            # Find task model
+            task_model = next((t for t in stage.tasks if t.id == task_id), None)
+            if not task_model:
+                logger.error("Task %s not found in stage %s", task_id, stage_id)
+                return
+
+            self._process_result(stage, task_model, result, message)
+
+        self.retry_on_concurrency_error(do_process, f"processing result for task {task_id}")
 
     def _process_result(
         self,

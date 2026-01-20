@@ -7,6 +7,7 @@ in handlers.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -27,7 +28,7 @@ class TransactionHelper:
         self,
         stage: StageExecution | None = None,
         source_message: Message | None = None,
-        messages_to_push: list[tuple[Message, int | None]] | None = None,
+        messages_to_push: Sequence[tuple[Message, int | None]] | None = None,
         handler_name: str = "UnknownHandler",
     ) -> None:
         """
@@ -46,10 +47,11 @@ class TransactionHelper:
                 txn.store_stage(stage)
 
             if source_message and source_message.message_id:
+                execution_id = getattr(source_message, "execution_id", None)
                 txn.mark_message_processed(
                     message_id=source_message.message_id,
                     handler_type=handler_name,
-                    execution_id=source_message.execution_id,
+                    execution_id=execution_id,
                 )
 
             for msg, delay in messages_to_push:

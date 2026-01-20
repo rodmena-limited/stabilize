@@ -1224,7 +1224,7 @@ class AtomicTransaction(StoreTransaction):
         self._conn = conn
         self._store = store
         # Track stage objects and their original versions for rollback
-        self._staged_objects: list[tuple[StageExecution, int]] = []
+        self._staged_objects: list[tuple[StageExecution | TaskExecution, int]] = []
 
     def rollback_versions(self) -> None:
         """Restore original versions on rollback.

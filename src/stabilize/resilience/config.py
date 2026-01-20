@@ -191,6 +191,7 @@ class ResilienceConfig:
     )
     circuit_failure_threshold: Fraction = field(default_factory=lambda: Fraction(5, 10))
     circuit_cooldown_seconds: float = 30.0
+    circuit_cache_size: int = 1000
     database_url: str | None = None
 
     @classmethod
@@ -227,5 +228,6 @@ class ResilienceConfig:
             bulkheads=bulkheads,
             circuit_failure_threshold=circuit_failure_threshold,
             circuit_cooldown_seconds=float(os.environ.get("STABILIZE_CIRCUIT_COOLDOWN_SECONDS", "30")),
+            circuit_cache_size=int(os.environ.get("STABILIZE_CIRCUIT_CACHE_SIZE", "1000")),
             database_url=os.environ.get("MG_DATABASE_URL"),
         )

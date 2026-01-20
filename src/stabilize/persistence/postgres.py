@@ -1059,7 +1059,7 @@ class PostgresWorkflowStore(WorkflowStore):
         # - dict -> use directly (JSONB auto-parsed)
         raw_exception = row["task_exception_details"]
         if raw_exception is None:
-            exception_details = {}
+            exception_details: dict[str, Any] = {}
         elif isinstance(raw_exception, str):
             exception_details = json.loads(raw_exception) if raw_exception else {}
         else:

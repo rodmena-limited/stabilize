@@ -97,7 +97,7 @@ def execute_with_resilience(
 
     except BulkheadFullError as e:
         # Bulkhead is at capacity - retry later when capacity available
-        logger.warning(f"Bulkhead full for task type '{task_type}': {e}")
+        logger.debug(f"Bulkhead full for task type '{task_type}': {e}")
         raise TransientError(
             f"Bulkhead full for {task_type}: {e}",
             retry_after=5,  # Suggest retry after 5 seconds
@@ -106,7 +106,7 @@ def execute_with_resilience(
 
     except (BulkheadCircuitOpenError, ProtectedCallError) as e:
         # Circuit breaker is open - retry after cooldown
-        logger.warning(f"Circuit breaker open for task type '{task_type}': {e}")
+        logger.debug(f"Circuit breaker open for task type '{task_type}': {e}")
         raise TransientError(
             f"Circuit breaker open for {task_type}: {e}",
             retry_after=30,  # Suggest retry after cooldown period

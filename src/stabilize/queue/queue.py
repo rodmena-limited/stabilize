@@ -28,6 +28,11 @@ from stabilize.queue.messages import (
 logger = logging.getLogger(__name__)
 
 
+class QueueFullError(Exception):
+    """Raised when the queue is full and overflow policy is 'raise'."""
+    pass
+
+
 class Queue(ABC):
     """
     Abstract queue interface for message handling.
@@ -150,13 +155,14 @@ class InMemoryQueue(Queue):
     Messages are ordered by delivery time.
     """
 
-    def __init__(self, max_size: int = 10000) -> None:
+    def __init__(self, max_size: int = 10000, overflow_policy: str = "drop") -> None:
         self._queue: list[QueuedMessage] = []
         self._lock = threading.Lock()
         self._message_id_counter = 0
         self._pending: dict[str, QueuedMessage] = {}  # Messages being processed
         self._message_index: dict[str, QueuedMessage] = {}  # For ensure/reschedule
         self.max_size = max_size
+        self.overflow_policy = overflow_policy
 
     def _generate_message_id(self) -> str:
         """Generate a unique message ID."""
@@ -174,6 +180,9 @@ class InMemoryQueue(Queue):
             # Check size limit (queue + pending)
             current_size = len(self._queue) + len(self._pending)
             if current_size >= self.max_size:
+                if self.overflow_policy == "raise":
+                    raise QueueFullError(f"Queue full (size={current_size})")
+
                 logger.warning(
                     "Queue full (size=%d), dropping message type %s",
                     current_size,
@@ -320,6 +329,10 @@ class PostgresQueue(Queue):
         self.max_attempts = max_attempts
         self._manager = get_connection_manager()
         self._pending: dict[int, dict[str, Any]] = {}
+        # Size caching
+        self._size_cache: int | None = None
+        self._last_size_check: float = 0
+        self._size_cache_ttl: float = 5.0  # seconds
 
     def _get_pool(self) -> Any:
         """Get the shared connection pool from ConnectionManager."""
@@ -434,6 +447,9 @@ class PostgresQueue(Queue):
                     )
                 conn.commit()
 
+        # Invalidate size cache
+        self._size_cache = None
+
     def poll(self, callback: Callable[[Message], None]) -> None:
         """Poll for a message and process it with the callback."""
         message = self.poll_one()
@@ -527,6 +543,8 @@ class PostgresQueue(Queue):
             conn.commit()
 
         self._pending.pop(msg_id, None)
+        # Invalidate size cache
+        self._size_cache = None
 
     def ensure(
         self,
@@ -567,14 +585,23 @@ class PostgresQueue(Queue):
         self._pending.pop(msg_id, None)
 
     def size(self) -> int:
-        """Get the number of messages in the queue."""
+        """Get the number of messages in the queue (cached)."""
+        now = time.time()
+        if self._size_cache is not None and now - self._last_size_check < self._size_cache_ttl:
+            return self._size_cache
+
         pool = self._get_pool()
         with pool.connection() as conn:
             with conn.cursor() as cur:
+                # Use approximate count if available? No, exact count is better for small queues.
+                # But for performance, caching is key.
                 cur.execute(f"SELECT COUNT(*) as cnt FROM {self.table_name}")
                 row = cur.fetchone()
-                return row["cnt"] if row else 0
+                count = row["cnt"] if row else 0
 
+        self._size_cache = count
+        self._last_size_check = now
+        return count
     def clear(self) -> None:
         """Clear all messages from the queue."""
         pool = self._get_pool()
@@ -584,6 +611,8 @@ class PostgresQueue(Queue):
             conn.commit()
 
         self._pending.clear()
+        # Invalidate size cache
+        self._size_cache = None
 
     # ========== Dead Letter Queue Methods ==========
 

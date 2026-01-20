@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import shlex
 import subprocess
 from typing import TYPE_CHECKING, Any
 
@@ -136,9 +137,15 @@ class ShellTask(Task):
                 placeholder = "{" + key + "}"
                 if placeholder in command:
                     if isinstance(value, str):
-                        command = command.replace(placeholder, value)
+                        # Quote value to prevent injection
+                        quoted_value = shlex.quote(value)
+                        command = command.replace(placeholder, quoted_value)
                     elif value is not None:
-                        command = command.replace(placeholder, str(value))
+                        # Non-strings are converted but also quoted if they might contain dangerous chars?
+                        # Generally numbers are safe, but objects str() repr might not be.
+                        # Safer to quote everything.
+                        quoted_value = shlex.quote(str(value))
+                        command = command.replace(placeholder, quoted_value)
 
         # Build full environment (inherit + custom)
         full_env = os.environ.copy()
