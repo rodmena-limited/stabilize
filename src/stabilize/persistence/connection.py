@@ -130,10 +130,18 @@ class ConnectionManager(metaclass=SingletonMeta):
                 check_same_thread=False,
             )
             conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA foreign_keys = ON")
-            if db_path != ":memory:":
-                conn.execute("PRAGMA journal_mode = WAL")
-                conn.execute("PRAGMA busy_timeout = 30000")
+
+            if db_path == ":memory:":
+                # In-memory databases: only foreign keys needed
+                conn.execute("PRAGMA foreign_keys = ON")
+            else:
+                # File-based databases: apply full optimization config
+                from stabilize.persistence.sqlite_config import get_sqlite_config
+
+                config = get_sqlite_config()
+                for statement in config.get_pragma_statements():
+                    conn.execute(statement)
+
             connections[db_path] = conn
 
         return connections[db_path]
