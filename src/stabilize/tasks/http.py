@@ -25,10 +25,14 @@ import re
 import ssl
 import time
 import uuid
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
+from resilient_circuit.exceptions import RetryLimitReached
 
 from stabilize.tasks.interface import Task
 from stabilize.tasks.result import TaskResult
@@ -193,14 +197,48 @@ class HTTPTask(Task):
         log_url = self._mask_secrets(url, context, secrets)
         logger.debug("HTTPTask %s %s", method, log_url)
 
-        # Execute with retries
+        # Execute with retries using resilient-circuit
         start_time = time.time()
         last_error: Exception | None = None
         last_response: HTTPResponse | HTTPError | None = None
 
-        for attempt in range(retries + 1):
+        # Create retry configuration with exponential backoff
+        http_backoff = ExponentialDelay(
+            min_delay=timedelta(seconds=retry_delay),
+            max_delay=timedelta(seconds=retry_delay * 10),
+            factor=2,
+            jitter=0.1,
+        )
+
+        # Custom exception for retryable status codes
+        class RetryableStatusError(Exception):
+            """Raised when response has a retryable status code."""
+
+            def __init__(self, response: HTTPResponse) -> None:
+                self.response = response
+                super().__init__(f"Retryable status: {response.status}")
+
+        def should_retry(e: Exception) -> bool:
+            """Check if error should trigger retry."""
+            if isinstance(e, RetryableStatusError):
+                return True
+            if isinstance(e, HTTPError) and e.code in retry_on_status:
+                return True
+            if isinstance(e, (URLError, TimeoutError, OSError)):
+                return True
+            return False
+
+        http_retry_policy = RetryWithBackoffPolicy(
+            max_retries=retries,
+            backoff=http_backoff,
+            should_handle=should_retry,
+        )
+
+        @http_retry_policy
+        def make_request() -> HTTPResponse | HTTPError:
+            nonlocal last_error
             try:
-                response = urlopen(
+                resp: HTTPResponse = urlopen(
                     request,
                     data=body_bytes,
                     timeout=timeout,
@@ -208,47 +246,56 @@ class HTTPTask(Task):
                 )
 
                 # Check if we should retry based on status
-                if response.status in retry_on_status and attempt < retries:
-                    logger.debug("HTTPTask got %s, retrying (%d/%d)", response.status, attempt + 1, retries)
-                    time.sleep(retry_delay)
-                    continue
+                if resp.status in retry_on_status:
+                    logger.debug("HTTPTask got %s, will retry", resp.status)
+                    raise RetryableStatusError(resp)
 
-                last_response = response
-                break
+                return resp
 
             except HTTPError as e:
                 last_error = e
-                if e.code in retry_on_status and attempt < retries:
-                    logger.debug("HTTPTask got HTTP %s, retrying (%d/%d)", e.code, attempt + 1, retries)
-                    time.sleep(retry_delay)
-                    continue
-                # Store response for output extraction
+                if e.code in retry_on_status:
+                    logger.debug("HTTPTask got HTTP %s, will retry", e.code)
+                    raise  # Let retry policy handle it
+                # Non-retryable HTTP error - return it for processing
+                return e
+
+            except (URLError, TimeoutError, OSError) as e:
+                last_error = e
+                logger.debug("HTTPTask error: %s, will retry", e)
+                raise
+
+        # Execute with retry
+        if retries > 0:
+            try:
+                last_response = make_request()
+            except RetryLimitReached as e:
+                # Max retries exceeded - use last error or response
+                cause = e.__cause__
+                if cause is not None:
+                    if isinstance(cause, RetryableStatusError):
+                        last_response = cause.response
+                    elif isinstance(cause, HTTPError):
+                        last_response = cause
+                    elif isinstance(cause, Exception):
+                        last_error = cause
+            except RetryableStatusError as e:
+                # Shouldn't happen, but handle gracefully
+                last_response = e.response
+        else:
+            # No retries configured - single attempt
+            try:
+                response = urlopen(
+                    request,
+                    data=body_bytes,
+                    timeout=timeout,
+                    context=ssl_context,
+                )
+                last_response = response
+            except HTTPError as e:
                 last_response = e
-                break
-
-            except URLError as e:
+            except (URLError, TimeoutError, OSError) as e:
                 last_error = e
-                if attempt < retries:
-                    logger.debug("HTTPTask URL error: %s, retrying (%d/%d)", e.reason, attempt + 1, retries)
-                    time.sleep(retry_delay)
-                    continue
-                break
-
-            except TimeoutError as e:
-                last_error = e
-                if attempt < retries:
-                    logger.debug("HTTPTask timeout, retrying (%d/%d)", attempt + 1, retries)
-                    time.sleep(retry_delay)
-                    continue
-                break
-
-            except OSError as e:
-                last_error = e
-                if attempt < retries:
-                    logger.debug("HTTPTask OS error: %s, retrying (%d/%d)", e, attempt + 1, retries)
-                    time.sleep(retry_delay)
-                    continue
-                break
 
         elapsed_ms = int((time.time() - start_time) * 1000)
 

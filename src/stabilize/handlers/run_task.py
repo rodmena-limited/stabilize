@@ -17,7 +17,12 @@ from typing import TYPE_CHECKING
 
 from resilient_circuit import ExponentialDelay
 
-from stabilize.errors import TaskTimeoutError, is_transient
+from stabilize.errors import (
+    TaskTimeoutError,
+    TransientVerificationError,
+    VerificationError,
+    is_transient,
+)
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.metrics import Timer
 from stabilize.models.status import WorkflowStatus
@@ -36,6 +41,13 @@ from stabilize.resilience.timeouts import TimeoutManager
 from stabilize.tasks.interface import RetryableTask, Task
 from stabilize.tasks.registry import TaskNotFoundError, TaskRegistry
 from stabilize.tasks.result import TaskResult
+from stabilize.verification import (
+    CallableVerifier,
+    OutputVerifier,
+    Verifier,
+    VerifyResult,
+    VerifyStatus,
+)
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -183,6 +195,9 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 with Timer("task_execution_seconds", task_type=message.task_type, task_name=task_model.name):
                     result = self._execute_with_timeout(task, stage, timeout, message)
 
+                # Verify outputs before processing/persisting
+                self._verify_task_outputs(stage, result)
+
                 self._process_result_safely(message.stage_id, message.task_id, result, message)
             except TaskTimeoutError as e:
                 logger.info("Task %s timed out: %s", task_model.name, e)
@@ -191,6 +206,18 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                     self._complete_with_error(stage, task_model, message, str(e))
                 else:
                     self._process_result_safely(message.stage_id, message.task_id, timeout_result, message)
+            except TransientVerificationError as e:
+                # Transient verification failure - use standard retry mechanism
+                logger.info(
+                    "Verification pending for task %s, will retry: %s",
+                    task_model.name,
+                    e,
+                )
+                self._handle_exception(stage, task_model, task, message, e)
+            except VerificationError as e:
+                logger.error("Verification failed for task %s: %s", task_model.name, e)
+                # Permanent verification failure - treat as terminal error
+                self._complete_with_error(stage, task_model, message, str(e))
             except Exception as e:
                 if is_transient(e):
                     # Transient error - log at debug level and let _handle_exception manage retry logging
@@ -210,6 +237,150 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 self._handle_exception(stage, task_model, task, message, e)
 
         self.with_task(message, on_task)
+
+    def _verify_task_outputs(self, stage: StageExecution, result: TaskResult) -> None:
+        """Verify task outputs against configured schema.
+
+        Verification can return three terminal states:
+        - OK: Verification passed, continue processing
+        - FAILED: Permanent failure, raise VerificationError (terminal)
+        - RETRY: Transient failure, raise TransientVerificationError (will be retried)
+
+        The verifier's max_retries and retry_delay_seconds are used to configure
+        retry behavior through the message processing system.
+
+        Args:
+            stage: The stage execution
+            result: The task result containing outputs to verify
+
+        Raises:
+            VerificationError: If verification fails permanently
+            TransientVerificationError: If verification fails transiently (will retry)
+        """
+        # Only verify success results
+        if result.status != WorkflowStatus.SUCCEEDED:
+            return
+
+        verification_config = stage.context.get("verification")
+        if not verification_config or not isinstance(verification_config, dict):
+            return
+
+        # Prepare a temporary stage with merged outputs for verification
+        # We don't want to modify the actual stage object yet
+        import copy
+        temp_stage = copy.copy(stage)
+        temp_stage.outputs = stage.outputs.copy()
+        if result.outputs and isinstance(result.outputs, dict):
+            temp_stage.outputs.update(result.outputs)
+
+        verifier_type = verification_config.get("type", "output")
+
+        # Get retry configuration from config (with defaults)
+        max_retries = verification_config.get("max_retries", 3)
+        retry_delay = verification_config.get("retry_delay_seconds", 1.0)
+
+        if verifier_type == "output":
+            required_keys = verification_config.get("required_keys", [])
+            type_checks_config = verification_config.get("type_checks", {})
+
+            # Convert string type names to types
+            type_map = {
+                "str": str, "string": str,
+                "int": int, "integer": int,
+                "float": float, "number": float,
+                "bool": bool, "boolean": bool,
+                "list": list, "array": list,
+                "dict": dict, "object": dict
+            }
+            type_checks: dict[str, type] = {}
+            for k, v in type_checks_config.items():
+                if v in type_map:
+                    type_checks[k] = type_map[v]
+
+            output_verifier = OutputVerifier(required_keys=required_keys, type_checks=type_checks)
+            verify_result = output_verifier.verify(temp_stage)
+
+            self._handle_verify_result(verify_result, max_retries, retry_delay)
+
+        elif verifier_type == "callable":
+            # Support for custom callable verifiers registered by name
+            callable_name = verification_config.get("callable")
+            if callable_name:
+                # Try to get the verifier from the task registry
+                try:
+                    verifier_or_callable = self.task_registry.get_verifier(callable_name)
+
+                    # Check if it's already a Verifier instance with its own retry settings
+                    if isinstance(verifier_or_callable, Verifier):
+                        # Use the verifier directly with its own retry settings
+                        verifier_instance = verifier_or_callable
+                        verify_result = verifier_instance.verify(temp_stage)
+                        self._handle_verify_result(
+                            verify_result,
+                            verifier_instance.max_retries,
+                            verifier_instance.retry_delay_seconds,
+                        )
+                    else:
+                        # Wrap callable with config defaults
+                        callable_verifier = CallableVerifier(
+                            verifier_or_callable,
+                            max_retries=max_retries,
+                            retry_delay=retry_delay,
+                        )
+                        verify_result = callable_verifier.verify(temp_stage)
+                        self._handle_verify_result(
+                            verify_result,
+                            callable_verifier.max_retries,
+                            callable_verifier.retry_delay_seconds,
+                        )
+                except (TaskNotFoundError, AttributeError):
+                    # Verifier not found - log warning but don't fail
+                    logger.warning(
+                        "Callable verifier '%s' not found, skipping verification",
+                        callable_name,
+                    )
+
+    def _handle_verify_result(
+        self,
+        verify_result: VerifyResult,
+        max_retries: int,
+        retry_delay: float,
+    ) -> None:
+        """Handle verification result, raising appropriate exception if needed.
+
+        Args:
+            verify_result: The result from the verifier
+            max_retries: Maximum retries for transient failures
+            retry_delay: Delay between retries in seconds
+
+        Raises:
+            VerificationError: If verification failed permanently
+            TransientVerificationError: If verification failed transiently
+        """
+        if verify_result.is_ok:
+            return
+
+        if verify_result.status == VerifyStatus.SKIPPED:
+            # Verification was skipped - this is OK
+            return
+
+        if verify_result.is_retry:
+            # Transient failure - raise retryable error
+            # Include retry configuration in details for the handler
+            details = verify_result.details.copy()
+            details["max_retries"] = max_retries
+            details["retry_delay_seconds"] = retry_delay
+            raise TransientVerificationError(
+                f"Verification pending retry: {verify_result.message}",
+                details=details,
+                retry_after=retry_delay,
+            )
+
+        # Permanent failure
+        raise VerificationError(
+            f"Output verification failed: {verify_result.message}",
+            details=verify_result.details,
+        )
 
     def _resolve_task(
         self,

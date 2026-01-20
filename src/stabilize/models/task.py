@@ -86,6 +86,22 @@ class TaskExecution:
         """Set the parent stage for this task as a strong reference."""
         self._stage = value
 
+    def has_stage(self) -> bool:
+        """Check if this task is attached to a stage.
+
+        Returns True if the task has a valid stage reference that hasn't
+        been garbage collected. This is useful for safely checking before
+        accessing stage data when using weak references.
+
+        Returns:
+            True if stage reference is valid, False otherwise.
+        """
+        if self._stage is None:
+            return False
+        if isinstance(self._stage, weakref.ReferenceType):
+            return self._stage() is not None
+        return True
+
     @property
     def is_stage_start(self) -> bool:
         """Check if this task starts the stage."""

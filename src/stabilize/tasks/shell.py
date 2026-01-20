@@ -20,6 +20,7 @@ import base64
 import logging
 import os
 import shlex
+import signal
 import subprocess
 from typing import TYPE_CHECKING, Any
 
@@ -162,83 +163,110 @@ class ShellTask(Task):
         logger.debug(f"ShellTask executing: {log_command}")
 
         try:
-            # Build subprocess arguments
-            run_kwargs: dict[str, Any] = {
-                "capture_output": True,
-                "timeout": timeout,
-                "text": not binary,
+            # Build subprocess arguments for Popen
+            popen_kwargs: dict[str, Any] = {
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.PIPE,
                 "start_new_session": True,  # Enable process group for cleanup
             }
 
             # Handle shell option
             if isinstance(shell, str):
                 # Custom shell path
-                run_kwargs["shell"] = True
-                run_kwargs["executable"] = shell
+                popen_kwargs["shell"] = True
+                popen_kwargs["executable"] = shell
             else:
-                run_kwargs["shell"] = shell
+                popen_kwargs["shell"] = shell
+
+            # Handle stdin - must use PIPE for input
+            if stdin_input is not None:
+                popen_kwargs["stdin"] = subprocess.PIPE
 
             # Optional arguments
             if cwd:
-                run_kwargs["cwd"] = cwd
+                popen_kwargs["cwd"] = cwd
             if full_env:
-                run_kwargs["env"] = full_env
-            if stdin_input is not None:
-                run_kwargs["input"] = stdin_input if not binary else stdin_input.encode()
+                popen_kwargs["env"] = full_env
 
-            # Execute command
-            result = subprocess.run(command, **run_kwargs)
+            # Execute command using Popen for process group management
+            proc = subprocess.Popen(command, **popen_kwargs)
+
+            try:
+                # Communicate with timeout
+                stdin_bytes = None
+                if stdin_input is not None:
+                    stdin_bytes = stdin_input if binary else stdin_input.encode()
+
+                stdout_bytes, stderr_bytes = proc.communicate(input=stdin_bytes, timeout=timeout)
+
+            except subprocess.TimeoutExpired:
+                # Kill entire process group on timeout
+                self._kill_process_group(proc)
+                # Collect any partial output
+                try:
+                    stdout_bytes, stderr_bytes = proc.communicate(timeout=2)
+                except subprocess.TimeoutExpired:
+                    stdout_bytes = b""
+                    stderr_bytes = b""
+                    proc.kill()
+                    proc.wait()
+
+                timeout_outputs: dict[str, Any] = {"returncode": -1, "truncated": False}
+                if stdout_bytes:
+                    if len(stdout_bytes) > max_output_size:
+                        stdout_bytes = stdout_bytes[:max_output_size]
+                    if binary:
+                        timeout_outputs["stdout"] = stdout_bytes
+                    else:
+                        timeout_outputs["stdout"] = stdout_bytes.decode("utf-8", errors="replace").strip()
+                if stderr_bytes:
+                    if len(stderr_bytes) > max_output_size:
+                        stderr_bytes = stderr_bytes[:max_output_size]
+                    if binary:
+                        timeout_outputs["stderr"] = stderr_bytes
+                    else:
+                        timeout_outputs["stderr"] = stderr_bytes.decode("utf-8", errors="replace").strip()
+
+                error_msg = f"Command timed out after {timeout}s"
+                if continue_on_failure:
+                    return TaskResult.failed_continue(error=error_msg, outputs=timeout_outputs)
+                return TaskResult.terminal(error=error_msg, context=timeout_outputs)
 
             # Process output with size limits
-            stdout = result.stdout
-            stderr = result.stderr
             truncated = False
 
-            if len(stdout) > max_output_size:
-                stdout = stdout[:max_output_size]
+            if len(stdout_bytes) > max_output_size:
+                stdout_bytes = stdout_bytes[:max_output_size]
                 truncated = True
-            if len(stderr) > max_output_size:
-                stderr = stderr[:max_output_size]
+            if len(stderr_bytes) > max_output_size:
+                stderr_bytes = stderr_bytes[:max_output_size]
                 truncated = True
 
             # Build outputs
             outputs: dict[str, Any] = {
-                "returncode": result.returncode,
+                "returncode": proc.returncode,
                 "truncated": truncated,
             }
 
             if binary:
-                outputs["stdout"] = stdout
-                outputs["stderr"] = stderr
-                outputs["stdout_b64"] = base64.b64encode(stdout).decode("ascii")
+                outputs["stdout"] = stdout_bytes
+                outputs["stderr"] = stderr_bytes
+                outputs["stdout_b64"] = base64.b64encode(stdout_bytes).decode("ascii")
             else:
-                outputs["stdout"] = stdout.strip() if stdout else ""
-                outputs["stderr"] = stderr.strip() if stderr else ""
+                outputs["stdout"] = stdout_bytes.decode("utf-8", errors="replace").strip() if stdout_bytes else ""
+                outputs["stderr"] = stderr_bytes.decode("utf-8", errors="replace").strip() if stderr_bytes else ""
 
             # Check exit code
-            if result.returncode in expected_codes:
+            if proc.returncode in expected_codes:
                 return TaskResult.success(outputs=outputs)
             else:
-                error_msg = f"Command exited with code {result.returncode} (expected: {expected_codes})"
-                if stderr:
+                error_msg = f"Command exited with code {proc.returncode} (expected: {expected_codes})"
+                if outputs.get("stderr"):
                     error_msg += f": {outputs['stderr'][:200]}"
 
                 if continue_on_failure:
                     return TaskResult.failed_continue(error=error_msg, outputs=outputs)
                 return TaskResult.terminal(error=error_msg, context=outputs)
-
-        except subprocess.TimeoutExpired as e:
-            # Collect any partial output
-            timeout_outputs: dict[str, Any] = {"returncode": -1, "truncated": False}
-            if e.stdout:
-                timeout_outputs["stdout"] = e.stdout[:max_output_size] if len(e.stdout) > max_output_size else e.stdout
-            if e.stderr:
-                timeout_outputs["stderr"] = e.stderr[:max_output_size] if len(e.stderr) > max_output_size else e.stderr
-
-            error_msg = f"Command timed out after {timeout}s"
-            if continue_on_failure:
-                return TaskResult.failed_continue(error=error_msg, outputs=timeout_outputs)
-            return TaskResult.terminal(error=error_msg, context=timeout_outputs)
 
         except FileNotFoundError as e:
             return TaskResult.terminal(error=f"Command or shell not found: {e}")
@@ -251,3 +279,34 @@ class ShellTask(Task):
 
         except Exception as e:
             return TaskResult.terminal(error=f"Unexpected error: {e}")
+
+    def _kill_process_group(self, proc: subprocess.Popen[Any]) -> None:
+        """Kill the entire process group for cleanup on timeout.
+
+        Uses SIGTERM first, then SIGKILL if processes don't exit gracefully.
+        This ensures child processes spawned by the shell command are also killed.
+
+        Args:
+            proc: The Popen process object
+        """
+        try:
+            # Get the process group ID (same as PID since we used start_new_session=True)
+            pgid = os.getpgid(proc.pid)
+
+            # Send SIGTERM to the process group
+            os.killpg(pgid, signal.SIGTERM)
+
+            # Give processes time to exit gracefully
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                # Force kill with SIGKILL if still running
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                    proc.wait(timeout=2)
+                except (ProcessLookupError, OSError):
+                    pass  # Process already dead
+
+        except (ProcessLookupError, OSError):
+            # Process or process group already dead
+            pass

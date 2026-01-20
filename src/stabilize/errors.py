@@ -342,6 +342,57 @@ class DeadLetterError(QueueError):
     code: int = 501
 
 
+class VerificationError(StabilizeError):
+    """Verification failed.
+
+    Raised when verification of stage outputs fails.
+    This is the base class for verification errors and is treated as permanent (terminal).
+
+    For transient verification failures that should be retried, use TransientVerificationError.
+    """
+
+    code: int = 600
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: int | None = None,
+        cause: Exception | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, code=code, cause=cause)
+        self.details = details or {}
+
+
+class TransientVerificationError(VerificationError, TransientError):
+    """Transient verification failure that should be retried.
+
+    Raised when verification cannot complete yet but may succeed later:
+    - External service temporarily unavailable
+    - Resource not yet propagated
+    - Timing-dependent validation
+
+    The message processor will automatically retry these errors with backoff.
+    """
+
+    code: int = 601
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: int | None = None,
+        cause: Exception | None = None,
+        details: dict[str, Any] | None = None,
+        retry_after: float | None = None,
+    ) -> None:
+        # Call VerificationError.__init__ for details
+        VerificationError.__init__(self, message, code=code, cause=cause, details=details)
+        # Store retry_after from TransientError
+        self.retry_after = retry_after
+
+
 def is_transient(error: Exception) -> bool:
     """Check if an error is transient and should be retried.
 

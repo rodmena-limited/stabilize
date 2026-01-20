@@ -1540,7 +1540,7 @@ def load_config() -> dict[str, Any]:
     mg_yaml = Path("mg.yaml")
     if mg_yaml.exists():
         try:
-            import yaml  # type: ignore[import-untyped]
+            import yaml
 
             with open(mg_yaml) as f:
                 config = yaml.safe_load(f)

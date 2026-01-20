@@ -138,6 +138,7 @@ class QueueProcessor:
         self._store = store
         self._handlers: dict[type[Message], MessageHandler[Any]] = {}
         self._running = False
+        self._stopping = False  # Flag for graceful stop (stop accepting new work)
         self._executor: ThreadPoolExecutor | None = None
         self._poll_thread: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -196,6 +197,7 @@ class QueueProcessor:
         Args:
             wait: Whether to wait for pending messages to complete
         """
+        self._stopping = True
         self._running = False
 
         if self._poll_thread:
@@ -206,12 +208,39 @@ class QueueProcessor:
 
         logger.info("Queue processor stopped")
 
+    def request_stop(self) -> None:
+        """
+        Request graceful stop without blocking.
+
+        Sets the stopping flag to stop accepting new messages,
+        but doesn't wait for active tasks to complete.
+        Use the active_count property to monitor progress.
+
+        Example:
+            processor.request_stop()
+            while processor.active_count > 0:
+                time.sleep(0.1)
+            processor.stop()
+        """
+        self._stopping = True
+        logger.info("Queue processor stop requested (active=%d)", self.active_count)
+
+    @property
+    def is_stopping(self) -> bool:
+        """Check if stop has been requested but not yet completed."""
+        return self._stopping and self._running
+
     def _poll_loop(self) -> None:
         """Main polling loop."""
         poll_interval = self.config.poll_frequency_ms / 1000.0
 
         while self._running:
             try:
+                # Check if stopping - don't accept new work
+                if self._stopping:
+                    time.sleep(poll_interval)
+                    continue
+
                 # Check if we have capacity
                 with self._lock:
                     if self._active_count >= self.config.max_workers:

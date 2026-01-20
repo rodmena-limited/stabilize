@@ -66,6 +66,7 @@ from stabilize.errors import (
     RecoveryError,
     TaskError,
     TransientError,
+    TransientVerificationError,
     is_permanent,
     is_transient,
 )
@@ -84,6 +85,14 @@ from stabilize.handlers import (
     StartTaskHandler,
     StartWaitingWorkflowsHandler,
     StartWorkflowHandler,
+)
+
+# Lifecycle management
+from stabilize.lifecycle import (
+    LifecycleManager,
+    get_lifecycle_manager,
+    install_shutdown_handlers,
+    set_lifecycle_manager,
 )
 
 # Observability (optional - graceful degradation if not installed)
@@ -126,7 +135,12 @@ from stabilize.tasks.highway import HighwayTask
 from stabilize.tasks.http import HTTPTask
 from stabilize.tasks.interface import RetryableTask, Task
 from stabilize.tasks.python import PythonTask
-from stabilize.tasks.registry import TaskRegistry
+from stabilize.tasks.registry import (
+    TaskRegistry,
+    get_verifier,
+    register_verifier,
+    verifier,
+)
 from stabilize.tasks.result import TaskResult
 from stabilize.tasks.shell import ShellTask
 from stabilize.tasks.ssh import SSHTask
@@ -190,6 +204,10 @@ __all__ = [
     "SSHTask",
     "HighwayTask",
     "PythonTask",
+    # Verifier registry
+    "register_verifier",
+    "get_verifier",
+    "verifier",
     # Verification
     "Verifier",
     "VerifyResult",
@@ -251,6 +269,7 @@ __all__ = [
     "set_attribute",
     # Error hierarchy
     "TransientError",
+    "TransientVerificationError",
     "PermanentError",
     "TaskError",
     "RecoveryError",
@@ -260,4 +279,9 @@ __all__ = [
     "WorkflowRecovery",
     "RecoveryResult",
     "recover_on_startup",
+    # Lifecycle management
+    "LifecycleManager",
+    "get_lifecycle_manager",
+    "set_lifecycle_manager",
+    "install_shutdown_handlers",
 ]

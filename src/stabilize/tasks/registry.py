@@ -15,11 +15,18 @@ from stabilize.tasks.result import TaskResult
 
 if False:  # TYPE_CHECKING
     from stabilize.models.stage import StageExecution
+    from stabilize.verification import Verifier, VerifyResult
 
 logger = logging.getLogger(__name__)
 
 # Type for task callable
 TaskCallable = Callable[["StageExecution"], TaskResult]
+
+# Type for verifier callable
+VerifierCallable = Callable[["StageExecution"], "VerifyResult"]
+
+# Type for verifier implementation - can be a Verifier instance or callable
+VerifierImplementation = "Verifier | VerifierCallable"
 
 # Type for task implementation - can be a Task class or callable
 TaskImplementation = type[Task] | Task | TaskCallable
@@ -65,6 +72,8 @@ class TaskRegistry:
     def __init__(self) -> None:
         self._tasks: dict[str, TaskImplementation] = {}
         self._aliases: dict[str, str] = {}
+        # Stores either Verifier instances or callable functions
+        self._verifiers: dict[str, Verifier | VerifierCallable] = {}
 
     def register(
         self,
@@ -222,6 +231,113 @@ class TaskRegistry:
         """Clear all registrations."""
         self._tasks.clear()
         self._aliases.clear()
+        self._verifiers.clear()
+
+    # ========== Verifier Registry Methods ==========
+
+    def register_verifier(
+        self,
+        name: str,
+        verifier: Verifier | VerifierCallable,
+    ) -> None:
+        """
+        Register a verifier function or Verifier instance.
+
+        Verifiers validate stage outputs after task completion.
+        They can be referenced in stage context verification config.
+
+        When registering a Verifier instance, its own max_retries and
+        retry_delay_seconds properties will be used instead of config defaults.
+
+        Args:
+            name: The verifier name
+            verifier: Verifier instance or callable that takes StageExecution
+                     and returns VerifyResult
+
+        Example:
+            # Register a simple callable
+            def check_url(stage):
+                url = stage.outputs.get("url")
+                if not url:
+                    return VerifyResult.failed("No URL")
+                return VerifyResult.ok()
+
+            registry.register_verifier("check_url", check_url)
+
+            # Register a Verifier instance with custom retry settings
+            class URLVerifier(Verifier):
+                @property
+                def max_retries(self) -> int:
+                    return 5  # Custom retry count
+
+                def verify(self, stage):
+                    ...
+
+            registry.register_verifier("url_verifier", URLVerifier())
+        """
+        if name in self._verifiers:
+            logger.warning(f"Overwriting existing verifier registration: {name}")
+
+        self._verifiers[name] = verifier
+        logger.debug(f"Registered verifier: {name}")
+
+    def verifier(
+        self,
+        name: str,
+    ) -> Callable[[VerifierCallable], VerifierCallable]:
+        """
+        Decorator to register a function as a verifier.
+
+        Args:
+            name: The verifier name
+
+        Returns:
+            Decorator function
+
+        Example:
+            @registry.verifier("check_url")
+            def check_url(stage):
+                url = stage.outputs.get("url")
+                return VerifyResult.ok() if url else VerifyResult.failed("No URL")
+        """
+
+        def decorator(func: VerifierCallable) -> VerifierCallable:
+            self.register_verifier(name, func)
+            return func
+
+        return decorator
+
+    def get_verifier(self, name: str) -> Verifier | VerifierCallable:
+        """
+        Get a verifier by name.
+
+        Args:
+            name: The verifier name
+
+        Returns:
+            The verifier (either a Verifier instance or a callable)
+
+        Raises:
+            TaskNotFoundError: If verifier not found
+
+        Note:
+            If a Verifier instance is returned, its max_retries and
+            retry_delay_seconds properties should be used for retry config.
+            If a callable is returned, it should be wrapped in CallableVerifier
+            with config defaults.
+        """
+        if name not in self._verifiers:
+            raise TaskNotFoundError(f"verifier:{name}")
+
+        return self._verifiers[name]
+
+    def has_verifier(self, name: str) -> bool:
+        """Check if a verifier is registered."""
+        return name in self._verifiers
+
+    def list_verifiers(self) -> list[str]:
+        """Get all registered verifier names."""
+        return list(self._verifiers.keys())
 
 
 # Global registry instance
@@ -253,3 +369,18 @@ def get_task(name: str) -> Task:
 def task(name: str, aliases: list[str] | None = None) -> Callable[[TaskCallable], TaskCallable]:
     """Decorator to register a task in the default registry."""
     return get_default_registry().task(name, aliases)
+
+
+def register_verifier(name: str, verifier: Verifier | VerifierCallable) -> None:
+    """Register a verifier in the default registry."""
+    get_default_registry().register_verifier(name, verifier)
+
+
+def get_verifier(name: str) -> Verifier | VerifierCallable:
+    """Get a verifier from the default registry."""
+    return get_default_registry().get_verifier(name)
+
+
+def verifier(name: str) -> Callable[[VerifierCallable], VerifierCallable]:
+    """Decorator to register a verifier in the default registry."""
+    return get_default_registry().verifier(name)

@@ -8,12 +8,14 @@ pipeline execution engine.
 from __future__ import annotations
 
 import logging
-import random
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import timedelta
 from typing import TYPE_CHECKING, Generic, TypeVar
+
+from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
+from resilient_circuit.exceptions import RetryLimitReached
 
 from stabilize.errors import ConcurrencyError
 from stabilize.models.stage import StageExecution
@@ -285,7 +287,8 @@ class StabilizeHandler(MessageHandler[M], ABC):
     ) -> None:
         """Execute a function with retry on ConcurrencyError.
 
-        Uses the handler_config settings for max retries and backoff.
+        Uses resilient-circuit's RetryWithBackoffPolicy for consistent retry behavior.
+        Configuration comes from handler_config settings.
         Set concurrency_max_retries to 0 to disable retries entirely.
 
         Args:
@@ -302,41 +305,37 @@ class StabilizeHandler(MessageHandler[M], ABC):
             func()
             return
 
-        for attempt in range(max_retries + 1):
-            try:
-                func()
-                return
-            except ConcurrencyError:
-                if attempt == max_retries:
-                    logger.error(
-                        "Failed %s after %d attempts due to contention",
-                        context,
-                        max_retries,
-                    )
-                    raise
+        # Create backoff configuration from handler_config
+        concurrency_backoff = ExponentialDelay(
+            min_delay=timedelta(milliseconds=self.handler_config.concurrency_min_delay_ms),
+            max_delay=timedelta(milliseconds=self.handler_config.concurrency_max_delay_ms),
+            factor=int(self.handler_config.concurrency_backoff_factor),
+            jitter=self.handler_config.concurrency_jitter,
+        )
 
-                # Calculate backoff with jitter
-                min_delay = self.handler_config.concurrency_min_delay_ms / 1000.0
-                max_delay = self.handler_config.concurrency_max_delay_ms / 1000.0
-                factor = self.handler_config.concurrency_backoff_factor
-                jitter = self.handler_config.concurrency_jitter
+        # Create retry policy with ConcurrencyError handling
+        retry_policy = RetryWithBackoffPolicy(
+            max_retries=max_retries,
+            backoff=concurrency_backoff,
+            should_handle=lambda e: isinstance(e, ConcurrencyError),
+        )
 
-                # Exponential backoff: min_delay * factor^attempt
-                base_delay = min_delay * (factor**attempt)
-                # Cap at max_delay
-                base_delay = min(base_delay, max_delay)
-                # Add jitter
-                jitter_amount = base_delay * jitter * random.random()
-                backoff = base_delay + jitter_amount
+        @retry_policy
+        def with_retry() -> None:
+            func()
 
-                logger.warning(
-                    "Concurrency error %s, retrying in %.2fs (attempt %d/%d)",
-                    context,
-                    backoff,
-                    attempt + 1,
-                    max_retries,
-                )
-                time.sleep(backoff)
+        try:
+            with_retry()
+        except RetryLimitReached as e:
+            logger.error(
+                "Failed %s after %d attempts due to contention",
+                context,
+                max_retries,
+            )
+            # Re-raise the original ConcurrencyError
+            if e.__cause__ and isinstance(e.__cause__, ConcurrencyError):
+                raise e.__cause__ from e
+            raise ConcurrencyError(f"Max retries exceeded for {context}") from e
 
     # ========== State Transition Helpers ==========
 
