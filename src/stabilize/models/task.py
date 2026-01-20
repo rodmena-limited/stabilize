@@ -7,6 +7,7 @@ one or more tasks that execute sequentially.
 
 from __future__ import annotations
 
+import weakref
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -62,16 +63,27 @@ class TaskExecution:
     version: int = 0
 
     # Back-reference to parent stage (set after construction)
-    _stage: StageExecution | None = field(default=None, repr=False)
+    # Can be weakref (default) or strong ref (for standalone tasks)
+    _stage: weakref.ReferenceType[StageExecution] | StageExecution | None = field(default=None, repr=False)
 
     @property
     def stage(self) -> StageExecution | None:
         """Get the parent stage for this task."""
+        if self._stage is None:
+            return None
+
+        if isinstance(self._stage, weakref.ReferenceType):
+            return self._stage()
+
         return self._stage
 
     @stage.setter
     def stage(self, value: StageExecution) -> None:
-        """Set the parent stage for this task."""
+        """Set the parent stage for this task (weakref by default)."""
+        self._stage = weakref.ref(value)
+
+    def set_stage_strong(self, value: StageExecution) -> None:
+        """Set the parent stage for this task as a strong reference."""
         self._stage = value
 
     @property

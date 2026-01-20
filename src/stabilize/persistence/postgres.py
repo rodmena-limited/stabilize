@@ -127,7 +127,7 @@ class PostgresWorkflowStore(WorkflowStore):
                 stages: list[StageExecution] = []
                 for stage_row in cur.fetchall():
                     stage = self._row_to_stage(cast(dict[str, Any], stage_row))
-                    stage._execution = execution
+                    stage.execution = execution
                     stages_by_id[stage.id] = stage
                     stages.append(stage)
 
@@ -148,7 +148,7 @@ class PostgresWorkflowStore(WorkflowStore):
                         task = self._row_to_task(task_row)
                         stage_ref = stages_by_id.get(task_row["stage_id"])
                         if stage_ref:
-                            task._stage = stage_ref
+                            task.stage = stage_ref
                             stage_ref.tasks.append(task)
 
                 execution.stages = stages
@@ -392,7 +392,7 @@ class PostgresWorkflowStore(WorkflowStore):
                 exec_row = cur.fetchone()
                 if exec_row:
                     execution = self._row_to_execution(cast(dict[str, Any], exec_row))
-                    stage._execution = execution
+                    stage.set_execution_strong(execution)
 
                     # Load current stage AND its upstream stages so upstream_stages() works
                     # This is critical for tasks that need to access upstream stage outputs
@@ -411,7 +411,7 @@ class PostgresWorkflowStore(WorkflowStore):
                         )
                         for us_row in cur.fetchall():
                             us = self._row_to_stage(cast(dict[str, Any], us_row))
-                            us._execution = execution
+                            us.set_execution_strong(execution)
                             all_stages.append(us)
 
                     execution.stages = all_stages
@@ -426,7 +426,7 @@ class PostgresWorkflowStore(WorkflowStore):
                 )
                 for task_row in cur.fetchall():
                     task = self._row_to_task(cast(dict[str, Any], task_row))
-                    task._stage = stage
+                    task.stage = stage
                     stage.tasks.append(task)
 
                 return stage
@@ -457,7 +457,7 @@ class PostgresWorkflowStore(WorkflowStore):
             task = self._row_to_task(task_row)
             stage_ref = stage_map.get(task_row["stage_id"])
             if stage_ref:
-                task._stage = stage_ref
+                task.stage = stage_ref
                 stage_ref.tasks.append(task)
 
     def _set_execution_reference(
@@ -478,7 +478,7 @@ class PostgresWorkflowStore(WorkflowStore):
         if exec_row:
             execution = self._row_to_execution(cast(dict[str, Any], exec_row))
             for stage in stages:
-                stage._execution = execution
+                stage.execution = execution
 
     def get_upstream_stages(
         self,

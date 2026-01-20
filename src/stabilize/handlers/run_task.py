@@ -300,6 +300,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         message: RunTask,
     ) -> None:
         """Process result with retry on concurrency error."""
+
         def do_process() -> None:
             # Always reload stage to get latest version
             stage = self.repository.retrieve_stage(stage_id)

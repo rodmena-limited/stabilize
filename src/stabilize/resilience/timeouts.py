@@ -35,6 +35,7 @@ class TimeoutManager:
             # We assume it's the source of truth if present
             # But we need to cast to RetryableTask to be safe or just call it
             from stabilize.tasks.interface import RetryableTask
+
             if isinstance(task, RetryableTask):
                 return task.get_dynamic_timeout(stage)
             # Fallback if hasattr but not instance (duck typing)

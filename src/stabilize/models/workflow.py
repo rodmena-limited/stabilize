@@ -145,11 +145,11 @@ class Workflow:
     def __post_init__(self) -> None:
         """Set execution reference on all stages after construction."""
         for stage in self.stages:
-            stage._execution = self
+            stage.execution = self
 
     def add_stage(self, stage: StageExecution) -> None:
         """Add a stage to this execution."""
-        stage._execution = self
+        stage.execution = self
         self.stages.append(stage)
 
     def remove_stage(self, stage_id: str) -> None:

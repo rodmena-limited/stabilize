@@ -12,6 +12,7 @@ the ref_ids of all stages this stage depends on.
 
 from __future__ import annotations
 
+import weakref
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -91,23 +92,40 @@ class StageExecution:
     version: int = 0
 
     # Back-reference to parent execution (set after construction)
-    _execution: Workflow | None = field(default=None, repr=False)
+    # Can be weakref (default) or strong ref (for standalone stages)
+    _execution: weakref.ReferenceType[Workflow] | Workflow | None = field(default=None, repr=False)
 
     @property
     def execution(self) -> Workflow:
         """Get the parent pipeline execution."""
         if self._execution is None:
             raise ValueError("Stage is not attached to an execution")
+
+        if isinstance(self._execution, weakref.ReferenceType):
+            exe = self._execution()
+            if exe is None:
+                raise ValueError("Execution has been garbage collected")
+            return exe
+
+        # Strong reference
         return self._execution
 
     @execution.setter
     def execution(self, value: Workflow) -> None:
-        """Set the parent pipeline execution."""
+        """Set the parent pipeline execution (weakref by default)."""
+        self._execution = weakref.ref(value)
+
+    def set_execution_strong(self, value: Workflow) -> None:
+        """Set the parent pipeline execution as a strong reference."""
         self._execution = value
 
     def has_execution(self) -> bool:
         """Check if this stage is attached to an execution."""
-        return self._execution is not None
+        if self._execution is None:
+            return False
+        if isinstance(self._execution, weakref.ReferenceType):
+            return self._execution() is not None
+        return True
 
     def cleanup(self) -> None:
         """Explicitly break circular references."""

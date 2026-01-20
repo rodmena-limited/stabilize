@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 class QueueFullError(Exception):
     """Raised when the queue is full and overflow policy is 'raise'."""
+
     pass
 
 
@@ -593,8 +594,6 @@ class PostgresQueue(Queue):
         pool = self._get_pool()
         with pool.connection() as conn:
             with conn.cursor() as cur:
-                # Use approximate count if available? No, exact count is better for small queues.
-                # But for performance, caching is key.
                 cur.execute(f"SELECT COUNT(*) as cnt FROM {self.table_name}")
                 row = cur.fetchone()
                 count = row["cnt"] if row else 0
@@ -602,6 +601,7 @@ class PostgresQueue(Queue):
         self._size_cache = count
         self._last_size_check = now
         return count
+
     def clear(self) -> None:
         """Clear all messages from the queue."""
         pool = self._get_pool()

@@ -58,7 +58,13 @@ class InMemoryWorkflowStore(WorkflowStore):
             if execution_id not in self._executions:
                 raise WorkflowNotFoundError(execution_id)
             # Return a deep copy to prevent external modifications
-            return copy.deepcopy(self._executions[execution_id])
+            execution = copy.deepcopy(self._executions[execution_id])
+            # Fixup weakrefs after deepcopy
+            for stage in execution.stages:
+                stage.execution = execution
+                for task in stage.tasks:
+                    task.stage = stage
+            return execution
 
     def retrieve_execution_summary(self, execution_id: str) -> Workflow:
         """Retrieve execution metadata without stages."""
@@ -106,12 +112,12 @@ class InMemoryWorkflowStore(WorkflowStore):
                 if s.id == stage.id:
                     # Update existing stage
                     execution.stages[i] = copy.deepcopy(stage)
-                    execution.stages[i]._execution = execution
+                    execution.stages[i].execution = execution
                     return
 
             # Add new stage
             new_stage = copy.deepcopy(stage)
-            new_stage._execution = execution
+            new_stage.execution = execution
             execution.stages.append(new_stage)
 
     def add_stage(self, stage: StageExecution) -> None:
@@ -142,7 +148,9 @@ class InMemoryWorkflowStore(WorkflowStore):
 
                         exec_copy = copy.deepcopy(execution)
                         exec_copy.stages = [stage_copy]  # Only include this stage
-                        stage_copy._execution = exec_copy
+                        # Use strong reference because we are returning the stage,
+                        # and the partial execution is owned by the stage in this context.
+                        stage_copy.set_execution_strong(exec_copy)
 
                         return stage_copy
 
@@ -263,6 +271,13 @@ class InMemoryWorkflowStore(WorkflowStore):
                 copy.deepcopy(e) for e in self._executions.values() if e.pipeline_config_id == pipeline_config_id
             ]
 
+        # Fixup weakrefs
+        for execution in executions:
+            for stage in execution.stages:
+                stage.execution = execution
+                for task in stage.tasks:
+                    task.stage = stage
+
         # Apply criteria
         executions = self._apply_criteria(executions, criteria)
 
@@ -276,6 +291,13 @@ class InMemoryWorkflowStore(WorkflowStore):
         """Retrieve executions by application."""
         with self._lock:
             executions = [copy.deepcopy(e) for e in self._executions.values() if e.application == application]
+
+        # Fixup weakrefs
+        for execution in executions:
+            for stage in execution.stages:
+                stage.execution = execution
+                for task in stage.tasks:
+                    task.stage = stage
 
         # Apply criteria
         executions = self._apply_criteria(executions, criteria)
@@ -430,7 +452,7 @@ class InMemoryTransaction(StoreTransaction):
                 # Update workflows
                 for workflow in self._workflows:
                     if workflow.id not in self._store._executions:
-                        continue # Should raise?
+                        continue  # Should raise?
                     stored = self._store._executions[workflow.id]
                     stored.status = workflow.status
                     stored.start_time = workflow.start_time
@@ -444,7 +466,7 @@ class InMemoryTransaction(StoreTransaction):
                 for stage in self._stages:
                     execution_id = stage.execution.id
                     if execution_id not in self._store._executions:
-                        continue # Should raise?
+                        continue  # Should raise?
 
                     execution = self._store._executions[execution_id]
 
@@ -453,15 +475,14 @@ class InMemoryTransaction(StoreTransaction):
                     for i, s in enumerate(execution.stages):
                         if s.id == stage.id:
                             execution.stages[i] = copy.deepcopy(stage)
-                            execution.stages[i]._execution = execution
+                            execution.stages[i].execution = execution
                             found = True
                             break
 
                     if not found:
                         new_stage = copy.deepcopy(stage)
-                        new_stage._execution = execution
+                        new_stage.execution = execution
                         execution.stages.append(new_stage)
-
                 # 3. Push messages (can fail if queue full)
                 if self._queue and self._messages:
                     for message, delay in self._messages:

@@ -263,7 +263,7 @@ class SqliteWorkflowStore(WorkflowStore):
         stages = []
         for stage_row in result.fetchall():
             stage = self._row_to_stage(stage_row)
-            stage._execution = execution
+            stage.execution = execution
 
             # Get tasks for stage
             task_result = conn.execute(
@@ -275,7 +275,7 @@ class SqliteWorkflowStore(WorkflowStore):
             )
             for task_row in task_result.fetchall():
                 task = self._row_to_task(task_row)
-                task._stage = stage
+                task.stage = stage
                 stage.tasks.append(task)
 
             stages.append(stage)
@@ -422,14 +422,16 @@ class SqliteWorkflowStore(WorkflowStore):
         exec_row = exec_result.fetchone()
         if exec_row:
             execution = self._row_to_execution(exec_row)
-            stage._execution = execution
+            # Use strong reference because we are returning the stage
+            stage.set_execution_strong(execution)
 
             # Load current stage AND its upstream stages so upstream_stages() works
             # This is critical for tasks that need to access upstream stage outputs
             all_stages = [stage]
             upstream_stages = self.get_upstream_stages(execution.id, stage.ref_id)
             for us in upstream_stages:
-                us._execution = execution
+                # Upstream stages should also hold strong ref to this partial execution context
+                us.set_execution_strong(execution)
                 all_stages.append(us)
             execution.stages = all_stages
 
@@ -443,7 +445,7 @@ class SqliteWorkflowStore(WorkflowStore):
         )
         for task_row in task_result.fetchall():
             task = self._row_to_task(task_row)
-            task._stage = stage
+            task.stage = stage
             stage.tasks.append(task)
 
         return stage
@@ -479,7 +481,7 @@ class SqliteWorkflowStore(WorkflowStore):
             task = self._row_to_task(row)
             stage_ref = stage_map.get(row["stage_id"])
             if stage_ref:
-                task._stage = stage_ref
+                task.stage = stage_ref
                 stage_ref.tasks.append(task)
 
     def _set_execution_reference(
@@ -500,7 +502,7 @@ class SqliteWorkflowStore(WorkflowStore):
         if exec_row:
             execution = self._row_to_execution(exec_row)
             for stage in stages:
-                stage._execution = execution
+                stage.execution = execution
 
     def get_upstream_stages(
         self,
