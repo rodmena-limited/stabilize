@@ -1216,6 +1216,11 @@ class AtomicTransaction(StoreTransaction):
     and commit only when both succeed.
     """
 
+    @property
+    def is_atomic(self) -> bool:
+        """SQLite transactions provide true database-level atomicity."""
+        return True
+
     def __init__(self, conn: sqlite3.Connection, store: SqliteWorkflowStore) -> None:
         """Initialize atomic transaction.
 

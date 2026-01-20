@@ -11,6 +11,7 @@ Enterprise Features:
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -18,6 +19,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from stabilize.models.status import WorkflowStatus
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -441,6 +444,17 @@ class StoreTransaction(ABC):
     are committed atomically - either both succeed or both are rolled back.
     """
 
+    @property
+    def is_atomic(self) -> bool:
+        """Whether this transaction provides true database-level atomicity.
+
+        Returns True if all operations within this transaction are guaranteed
+        to either all succeed or all fail atomically (no partial state).
+
+        Override this in subclasses. Default is False for safety.
+        """
+        return False
+
     @abstractmethod
     def store_stage(self, stage: StageExecution) -> None:
         """Store or update a stage within the transaction."""
@@ -475,16 +489,30 @@ class StoreTransaction(ABC):
 class NoOpTransaction(StoreTransaction):
     """Default transaction that buffers operations and flushes on commit.
 
-    This is used when the storage backend doesn't support atomic transactions.
-    Operations are buffered and flushed together when the context manager
-    exits successfully. While not truly atomic (a crash during flush can
-    leave partial state), this is safer than committing immediately.
+    WARNING: This implementation is NOT truly atomic. A crash during flush
+    can leave partial state in the database. This is only suitable for:
+    - Testing environments
+    - Non-critical workloads where eventual consistency is acceptable
 
-    For production with strict consistency requirements, use SqliteWorkflowStore
-    or PostgresWorkflowStore which provide true atomic transactions.
+    For production critical systems requiring 100% atomicity, use:
+    - SqliteWorkflowStore (provides true atomic transactions)
+    - PostgresWorkflowStore (provides true atomic transactions)
+
+    Operations are buffered and flushed in careful order to minimize
+    inconsistency windows, but true atomicity is impossible without
+    database-level transaction support.
     """
 
+    # Class-level flag to suppress warnings (e.g., in tests)
+    _suppress_warning: bool = False
+
     def __init__(self, store: WorkflowStore, queue: Queue | None = None) -> None:
+        if not NoOpTransaction._suppress_warning:
+            logger.warning(
+                "NoOpTransaction is being used. This is NOT truly atomic and "
+                "should not be used in production critical systems. Use "
+                "SqliteWorkflowStore or PostgresWorkflowStore for true atomicity."
+            )
         self._store = store
         self._queue = queue
         self._pending_stages: list[StageExecution] = []

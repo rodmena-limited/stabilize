@@ -1096,21 +1096,17 @@ class PostgresWorkflowStore(WorkflowStore):
         """
         Create an atomic transaction for store + queue operations.
 
+        Even when queue is None, this uses PostgreSQL transaction semantics
+        to ensure store operations are atomic. This avoids falling back to
+        the non-atomic NoOpTransaction.
+
         Args:
-            queue: The queue for pushing messages.
+            queue: The queue for pushing messages. If None, push_message()
+                   will raise RuntimeError if called.
 
         Yields:
             PostgresTransaction: An atomic transaction context.
         """
-        if queue is None:
-            # Fallback to no-op if no queue provided (though type hint implies it might be needed)
-            # But realistically for PostgresWorkflowStore, we need the queue to be passed
-            # or we need to know how to push to the queue table if it's in the same DB.
-            # Here we assume the caller provides the queue (like RunTaskHandler does).
-            with super().transaction(queue) as txn:
-                yield txn
-            return
-
         with self._pool.connection() as conn:
             txn = PostgresTransaction(conn, self, queue)
             try:
@@ -1124,10 +1120,27 @@ class PostgresWorkflowStore(WorkflowStore):
 
 
 class PostgresTransaction(StoreTransaction):
-    """Atomic transaction spanning store and queue operations for PostgreSQL."""
+    """Atomic transaction spanning store and queue operations for PostgreSQL.
 
-    def __init__(self, conn: Any, store: PostgresWorkflowStore, queue: Queue) -> None:
-        """Initialize atomic transaction."""
+    This transaction ensures true database-level atomicity for all operations.
+    All store operations and message pushes within this transaction will either
+    all succeed (on commit) or all fail (on rollback).
+    """
+
+    @property
+    def is_atomic(self) -> bool:
+        """PostgreSQL transactions provide true database-level atomicity."""
+        return True
+
+    def __init__(self, conn: Any, store: PostgresWorkflowStore, queue: Queue | None) -> None:
+        """Initialize atomic transaction.
+
+        Args:
+            conn: PostgreSQL connection for the transaction
+            store: The PostgresWorkflowStore for store operations
+            queue: The queue for message operations. If None, push_message()
+                   will raise RuntimeError if called.
+        """
         self._conn = conn
         self._store = store
         self._queue = queue
@@ -1176,7 +1189,16 @@ class PostgresTransaction(StoreTransaction):
             )
 
     def push_message(self, message: Message, delay: int = 0) -> None:
-        """Push a message to the queue within the transaction."""
+        """Push a message to the queue within the transaction.
+
+        Raises:
+            RuntimeError: If no queue was configured for this transaction.
+        """
+        if self._queue is None:
+            raise RuntimeError(
+                "Cannot push message: no queue configured for this transaction. "
+                "Pass a queue to repository.transaction(queue) for message operations."
+            )
         from datetime import timedelta
 
         # Use the connection to push, ensuring atomicity

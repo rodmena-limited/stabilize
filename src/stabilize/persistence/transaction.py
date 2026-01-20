@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING
 from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
 from resilient_circuit.exceptions import RetryLimitReached
 
+from stabilize.persistence.store import StoreTransaction
+
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
@@ -112,6 +114,7 @@ class TransactionHelper:
         source_message: Message | None = None,
         messages_to_push: Sequence[tuple[Message, int | None]] | None = None,
         handler_name: str = "UnknownHandler",
+        require_atomic: bool = False,
     ) -> None:
         """
         Execute an atomic transaction to update state and queue messages.
@@ -124,8 +127,13 @@ class TransactionHelper:
             source_message: Optional message to mark as processed
             messages_to_push: List of (message, delay_seconds) tuples to push
             handler_name: Name of the handler for logging/metrics
+            require_atomic: If True, raises RuntimeError if the transaction
+                           does not provide true database-level atomicity.
+                           Use this for critical operations that must not
+                           leave partial state on failure.
 
         Raises:
+            RuntimeError: If require_atomic=True and transaction is not atomic
             Exception: If the transaction fails after all retries
         """
         messages_to_push = messages_to_push or []
@@ -133,6 +141,15 @@ class TransactionHelper:
         @DEADLOCK_RETRY_POLICY
         def _execute() -> None:
             with self.repository.transaction(self.queue) as txn:
+                # Validate atomicity if required
+                if require_atomic and not txn.is_atomic:
+                    raise RuntimeError(
+                        f"Atomic transaction required for {handler_name} but the "
+                        "configured storage backend does not provide true atomicity. "
+                        "Use SqliteWorkflowStore or PostgresWorkflowStore for "
+                        "production critical systems."
+                    )
+
                 if stage:
                     txn.store_stage(stage)
 
@@ -156,3 +173,31 @@ class TransactionHelper:
             )
             # Re-raise the original exception
             raise e.__cause__ if e.__cause__ else e from e
+
+
+def require_atomic_transaction(txn: StoreTransaction, context: str = "operation") -> None:
+    """Validate that a transaction provides true atomicity.
+
+    Call this at the start of critical operations to ensure the configured
+    storage backend provides database-level atomicity guarantees.
+
+    Args:
+        txn: The transaction to validate
+        context: Description of the operation for error messages
+
+    Raises:
+        RuntimeError: If the transaction does not provide true atomicity
+
+    Example:
+        with repository.transaction(queue) as txn:
+            require_atomic_transaction(txn, "workflow completion")
+            txn.store_stage(stage)
+            txn.push_message(message)
+    """
+    if not txn.is_atomic:
+        raise RuntimeError(
+            f"Atomic transaction required for {context} but the configured "
+            "storage backend does not provide true atomicity. Use "
+            "SqliteWorkflowStore or PostgresWorkflowStore for production "
+            "critical systems."
+        )
