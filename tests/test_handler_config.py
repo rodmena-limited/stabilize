@@ -60,8 +60,8 @@ class TestHandlerConfig:
         # Long-running retry defaults
         assert config.max_stage_wait_retries == 240
 
-        # Task execution defaults
-        assert config.default_task_timeout_seconds == 300.0
+        # Task execution defaults (4 hours for long-running workflows)
+        assert config.default_task_timeout_seconds == 14400.0
         assert config.task_backoff_min_delay_ms == 1000
         assert config.task_backoff_max_delay_ms == 60000
 

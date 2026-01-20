@@ -9,7 +9,7 @@ This protects the main worker process from:
 4. Stuck tasks (force kill capability)
 
 Usage:
-    executor = ProcessIsolatedTaskExecutor(timeout_seconds=300)
+    executor = ProcessIsolatedTaskExecutor(timeout_seconds=14400)
     result = executor.execute(task, stage)
 """
 
@@ -77,7 +77,12 @@ def _worker_wrapper(
 class ProcessIsolatedTaskExecutor:
     """Executes tasks in isolated processes."""
 
-    def __init__(self, timeout_seconds: float = 300.0) -> None:
+    def __init__(self, timeout_seconds: float = 14400.0) -> None:
+        """Initialize executor with timeout.
+
+        Args:
+            timeout_seconds: Default timeout for task execution (4 hours for long-running workflows)
+        """
         self.timeout_seconds = timeout_seconds
 
     def execute(self, task: Task, stage: StageExecution, timeout_seconds: float | None = None) -> TaskResult:

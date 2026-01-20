@@ -17,7 +17,12 @@ if TYPE_CHECKING:
 class TimeoutManager:
     """Manages timeout calculations."""
 
-    def __init__(self, default_task_timeout_seconds: float = 300.0) -> None:
+    def __init__(self, default_task_timeout_seconds: float = 14400.0) -> None:
+        """Initialize timeout manager.
+
+        Args:
+            default_task_timeout_seconds: Default timeout for tasks (4 hours for long-running workflows)
+        """
         self.default_task_timeout_seconds = default_task_timeout_seconds
 
     def get_task_timeout(self, stage: StageExecution, task: Task) -> timedelta:

@@ -90,7 +90,7 @@ class DockerTask(Task):
             no_cache (bool): Disable build cache (default: False)
 
         Common:
-            timeout (int): Command timeout in seconds (default: 300)
+            timeout (int): Command timeout in seconds (default: 14400 = 4 hours)
             continue_on_failure (bool): Return failed_continue on error
 
     Outputs:
@@ -142,7 +142,7 @@ class DockerTask(Task):
     def execute(self, stage: StageExecution) -> TaskResult:
         """Execute Docker command."""
         action = stage.context.get("action", "run")
-        timeout = stage.context.get("timeout", 300)
+        timeout = stage.context.get("timeout", 14400)  # 4 hours for long-running workflows
         continue_on_failure = stage.context.get("continue_on_failure", False)
 
         if action not in self.SUPPORTED_ACTIONS:

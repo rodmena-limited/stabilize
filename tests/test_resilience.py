@@ -230,7 +230,7 @@ class TestResilienceConfig:
 
         assert config.max_concurrent == 5
         assert config.max_queue_size == 20
-        assert config.timeout_seconds == 300.0
+        assert config.timeout_seconds == 14400.0  # 4 hours for long-running workflows
 
     def test_config_from_env(self) -> None:
         """Config loads from environment variables."""

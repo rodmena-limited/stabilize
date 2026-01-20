@@ -45,7 +45,7 @@ class HandlerConfig:
         STABILIZE_HANDLER_JITTER: Backoff jitter factor (default: 0.25)
 
         STABILIZE_MAX_STAGE_WAIT_RETRIES: Max retries waiting for stages (default: 240)
-        STABILIZE_DEFAULT_TASK_TIMEOUT_S: Default task timeout in seconds (default: 300)
+        STABILIZE_DEFAULT_TASK_TIMEOUT_S: Default task timeout in seconds (default: 14400 = 4 hours)
         STABILIZE_TASK_BACKOFF_MIN_MS: Task retry min delay in ms (default: 1000)
         STABILIZE_TASK_BACKOFF_MAX_MS: Task retry max delay in ms (default: 60000)
         STABILIZE_HANDLER_RETRY_DELAY_S: Re-queue delay in seconds (default: 15)
@@ -84,7 +84,9 @@ class HandlerConfig:
     max_stage_wait_retries: int = 240  # With 15s delay = 1 hour
 
     # Task execution
-    default_task_timeout_seconds: float = 300.0  # 5 minutes
+    # Default timeout for task execution (4 hours for long-running workflows)
+    # Override with STABILIZE_DEFAULT_TASK_TIMEOUT_S environment variable
+    default_task_timeout_seconds: float = 14400.0  # 4 hours
     task_backoff_min_delay_ms: int = 1000
     task_backoff_max_delay_ms: int = 60000
 
@@ -115,8 +117,8 @@ class HandlerConfig:
             concurrency_jitter=float(os.getenv("STABILIZE_HANDLER_JITTER", "0.25")),
             # Stage wait retry settings
             max_stage_wait_retries=int(os.getenv("STABILIZE_MAX_STAGE_WAIT_RETRIES", "240")),
-            # Task execution settings
-            default_task_timeout_seconds=float(os.getenv("STABILIZE_DEFAULT_TASK_TIMEOUT_S", "300")),
+            # Task execution settings (4 hours default for long-running workflows)
+            default_task_timeout_seconds=float(os.getenv("STABILIZE_DEFAULT_TASK_TIMEOUT_S", "14400")),
             task_backoff_min_delay_ms=int(os.getenv("STABILIZE_TASK_BACKOFF_MIN_MS", "1000")),
             task_backoff_max_delay_ms=int(os.getenv("STABILIZE_TASK_BACKOFF_MAX_MS", "60000")),
             # Handler retry delay
@@ -161,11 +163,17 @@ def reset_handler_config() -> None:
 
 @dataclass
 class BulkheadConfig:
-    """Configuration for a single bulkhead."""
+    """Configuration for a single bulkhead.
+
+    Attributes:
+        max_concurrent: Maximum concurrent executions in this bulkhead
+        max_queue_size: Maximum queued tasks waiting for execution
+        timeout_seconds: Default timeout for bulkhead execution (4 hours)
+    """
 
     max_concurrent: int = 5
     max_queue_size: int = 20
-    timeout_seconds: float = 300.0
+    timeout_seconds: float = 14400.0  # 4 hours for long-running workflows
 
 
 @dataclass

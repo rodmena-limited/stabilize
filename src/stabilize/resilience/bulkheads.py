@@ -78,7 +78,7 @@ class TaskBulkheadManager:
                 name="stabilize_default",
                 max_concurrent_calls=5,
                 max_queue_size=20,
-                timeout_seconds=300.0,
+                timeout_seconds=14400.0,  # 4 hours for long-running workflows
                 circuit_breaker_enabled=False,
             )
         )
