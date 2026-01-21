@@ -154,7 +154,7 @@ class QueueProcessor:
             handler: The handler to register
         """
         self._handlers[handler.message_type] = handler
-        logger.debug(f"Registered handler for {handler.message_type.__name__}")
+        logger.debug("Registered handler for %s", handler.message_type.__name__)
 
     def register_handler_func(
         self,
@@ -265,7 +265,7 @@ class QueueProcessor:
                     time.sleep(poll_interval)
 
             except Exception as e:
-                logger.error(f"Error in poll loop: {e}", exc_info=True)
+                logger.error("Error in poll loop: %s", e, exc_info=True)
                 if self.config.stop_on_error:
                     self._running = False
                     break
@@ -292,7 +292,9 @@ class QueueProcessor:
                 self.queue.ack(message)
             except Exception as e:
                 logger.error(
-                    f"Error handling {get_message_type_name(message)}: {e}",
+                    "Error handling %s: %s",
+                    get_message_type_name(message),
+                    e,
                     exc_info=True,
                 )
                 # Store error context for debugging and auditing
@@ -318,7 +320,7 @@ class QueueProcessor:
         handler = self._handlers.get(message_type)
 
         if handler is None:
-            logger.warning(f"No handler registered for {get_message_type_name(message)}")
+            logger.warning("No handler registered for %s", get_message_type_name(message))
             return
 
         # Check for duplicate message (idempotency)
@@ -327,10 +329,10 @@ class QueueProcessor:
 
         if self.config.enable_deduplication and self._store is not None and message_id is not None:
             if self._store.is_message_processed(message_id):
-                logger.info(f"Skipping duplicate message {message_id} ({get_message_type_name(message)})")
+                logger.info("Skipping duplicate message %s (%s)", message_id, get_message_type_name(message))
                 return
 
-        logger.debug(f"Handling {get_message_type_name(message)} (execution={execution_id or 'N/A'})")
+        logger.debug("Handling %s (execution=%s)", get_message_type_name(message), execution_id or "N/A")
 
         handler.handle(message)
 
@@ -358,7 +360,7 @@ class QueueProcessor:
                 self.queue.ack(message)
                 return True
             except Exception as e:
-                logger.error(f"Error handling message: {e}", exc_info=True)
+                logger.error("Error handling message: %s", e, exc_info=True)
                 # Store error context for debugging and auditing
                 message.set_error_context(e)
                 self.queue.reschedule(message, self.config.retry_delay)
@@ -418,9 +420,9 @@ class QueueProcessor:
             try:
                 moved = self.queue.check_and_move_expired()
                 if moved > 0:
-                    logger.info(f"Moved {moved} expired messages to DLQ")
+                    logger.info("Moved %d expired messages to DLQ", moved)
             except Exception as e:
-                logger.warning(f"Error checking DLQ: {e}")
+                logger.warning("Error checking DLQ: %s", e)
 
     @property
     def is_running(self) -> bool:

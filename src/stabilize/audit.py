@@ -59,7 +59,7 @@ class FileAuditLogger:
         # implementation would likely use a rotating file handler in production
         # ensuring permission bits are restricted (600)
         entry = event.to_json()
-        logger.info(f"AUDIT: {entry}")  # For now, bridge to main log with AUDIT prefix
+        logger.info("AUDIT: %s", entry)  # For now, bridge to main log with AUDIT prefix
 
 
 # Global audit logger instance

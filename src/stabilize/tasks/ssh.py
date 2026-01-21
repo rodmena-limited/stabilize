@@ -130,7 +130,7 @@ class SSHTask(Task):
         # Command
         ssh_cmd.append(command)
 
-        logger.debug(f"SSHTask executing: {user}@{host}: {command}")
+        logger.debug("SSHTask executing: %s@%s: %s", user, host, command)
 
         try:
             result = subprocess.run(
@@ -149,7 +149,7 @@ class SSHTask(Task):
             }
 
             if result.returncode == 0:
-                logger.debug(f"SSHTask success on {host}")
+                logger.debug("SSHTask success on %s", host)
                 return TaskResult.success(outputs=outputs)
             elif result.returncode == 255:
                 # SSH connection error

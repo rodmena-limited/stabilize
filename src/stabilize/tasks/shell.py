@@ -160,7 +160,7 @@ class ShellTask(Task):
             if secret_value is not None:
                 log_command = log_command.replace(str(secret_value), "***")
 
-        logger.debug(f"ShellTask executing: {log_command}")
+        logger.debug("ShellTask executing: %s", log_command)
 
         try:
             # Build subprocess arguments for Popen

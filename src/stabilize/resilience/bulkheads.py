@@ -150,7 +150,7 @@ class TaskBulkheadManager:
         remaining = timeout
 
         for name, bulkhead in self._bulkheads.items():
-            logger.debug(f"Shutting down bulkhead '{name}'")
+            logger.debug("Shutting down bulkhead '%s'", name)
             if remaining is not None and remaining <= 0:
                 # No time left - force immediate shutdown
                 bulkhead.shutdown(wait=False)

@@ -281,10 +281,7 @@ def create_release_workflow(
         # Use -p no:cacheprovider to avoid cache-related hangs
         # Use --no-header to reduce terminal output
         # Skip postgres tests as they require libpq which may not be installed
-        test_cmd = (
-            f".venv/bin/python -m pytest tests/ {pytest_args} "
-            "-p no:cacheprovider --no-header -k 'not postgres'"
-        )
+        test_cmd = f".venv/bin/python -m pytest tests/ {pytest_args} -p no:cacheprovider --no-header -k 'not postgres'"
         stages.append(
             StageExecution(
                 ref_id="test",

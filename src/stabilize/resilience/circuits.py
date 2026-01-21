@@ -72,7 +72,7 @@ def _create_storage(database_url: str | None) -> CircuitBreakerStorage:
             logger.warning("psycopg not available, falling back to in-memory circuit breaker storage")
             return InMemoryStorage()
         except Exception as e:
-            logger.warning(f"Failed to create PostgreSQL storage: {e}, falling back to in-memory storage")
+            logger.warning("Failed to create PostgreSQL storage: %s, falling back to in-memory storage", e)
             return InMemoryStorage()
     else:
         # SQLite or no database: use in-memory storage
@@ -154,7 +154,7 @@ class WorkflowCircuitFactory:
             cooldown=timedelta(seconds=self.config.circuit_cooldown_seconds),
         )
         self._circuits[key] = circuit
-        logger.debug(f"Created circuit breaker for workflow={workflow_execution_id}, task_type={task_type}")
+        logger.debug("Created circuit breaker for workflow=%s, task_type=%s", workflow_execution_id, task_type)
 
         return circuit
 
@@ -172,4 +172,4 @@ class WorkflowCircuitFactory:
             del self._circuits[key]
 
         if keys_to_remove:
-            logger.debug(f"Cleared {len(keys_to_remove)} circuit(s) for workflow={workflow_execution_id}")
+            logger.debug("Cleared %d circuit(s) for workflow=%s", len(keys_to_remove), workflow_execution_id)

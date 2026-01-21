@@ -208,8 +208,10 @@ class InMemoryQueue(Queue):
             self._message_index[message_id] = queued
 
             logger.debug(
-                f"Pushed {get_message_type_name(message)} "
-                f"(id={message_id}, deliver_at={datetime.fromtimestamp(deliver_at)})"
+                "Pushed %s (id=%s, deliver_at=%s)",
+                get_message_type_name(message),
+                message_id,
+                datetime.fromtimestamp(deliver_at),
             )
 
     def poll(self, callback: Callable[[Message], None]) -> None:
@@ -237,7 +239,7 @@ class InMemoryQueue(Queue):
                 # Add to pending
                 self._pending[message_id] = queued
 
-                logger.debug(f"Polled {get_message_type_name(queued.message)} (id={message_id})")
+                logger.debug("Polled %s (id=%s)", get_message_type_name(queued.message), message_id)
 
                 return queued.message
 
@@ -249,7 +251,7 @@ class InMemoryQueue(Queue):
             message_id = message.message_id
             if message_id and message_id in self._pending:
                 del self._pending[message_id]
-                logger.debug(f"Acked {get_message_type_name(message)} (id={message_id})")
+                logger.debug("Acked %s (id=%s)", get_message_type_name(message), message_id)
 
     def ensure(
         self,
@@ -298,8 +300,10 @@ class InMemoryQueue(Queue):
             self._message_index[message_id] = queued
 
             logger.debug(
-                f"Rescheduled {get_message_type_name(message)} "
-                f"(id={message_id}, deliver_at={datetime.fromtimestamp(deliver_at)})"
+                "Rescheduled %s (id=%s, deliver_at=%s)",
+                get_message_type_name(message),
+                message_id,
+                datetime.fromtimestamp(deliver_at),
             )
 
     def size(self) -> int:
@@ -668,7 +672,7 @@ class PostgresQueue(Queue):
                 row = cur.fetchone()
 
                 if not row:
-                    logger.warning(f"Message {msg_id} not found for DLQ move")
+                    logger.warning("Message %s not found for DLQ move", msg_id)
                     return
 
                 # Insert into DLQ
@@ -702,7 +706,11 @@ class PostgresQueue(Queue):
 
         self._pending.pop(msg_id, None)
         logger.warning(
-            f"Moved message to DLQ (id={msg_id}, type={row['message_type']}, attempts={row['attempts']}, error={error})"
+            "Moved message to DLQ (id=%s, type=%s, attempts=%s, error=%s)",
+            msg_id,
+            row["message_type"],
+            row["attempts"],
+            error,
         )
 
     def list_dlq(
@@ -766,7 +774,7 @@ class PostgresQueue(Queue):
                 row = cur.fetchone()
 
                 if not row:
-                    logger.warning(f"DLQ entry {dlq_id} not found for replay")
+                    logger.warning("DLQ entry %s not found for replay", dlq_id)
                     return False
 
                 # Insert back into main queue with reset attempts
@@ -792,7 +800,7 @@ class PostgresQueue(Queue):
                 )
             conn.commit()
 
-        logger.info(f"Replayed DLQ entry {dlq_id} (type={row['message_type']})")
+        logger.info("Replayed DLQ entry %s (type=%s)", dlq_id, row["message_type"])
         return True
 
     def dlq_size(self) -> int:
@@ -816,7 +824,7 @@ class PostgresQueue(Queue):
             with conn.cursor() as cur:
                 cur.execute(f"DELETE FROM {self.table_name}_dlq")
             conn.commit()
-        logger.info(f"Cleared {count} messages from DLQ")
+        logger.info("Cleared %d messages from DLQ", count)
         return count
 
     def check_and_move_expired(self) -> int:
@@ -849,6 +857,6 @@ class PostgresQueue(Queue):
             moved_count += 1
 
         if moved_count > 0:
-            logger.info(f"Moved {moved_count} expired messages to DLQ")
+            logger.info("Moved %d expired messages to DLQ", moved_count)
 
         return moved_count

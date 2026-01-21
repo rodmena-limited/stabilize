@@ -147,9 +147,7 @@ class TestSqliteConfigFromEnv:
         config = SqliteConfig.from_env()
         assert config.tier == SqliteOptimizationTier.AGGRESSIVE
 
-    def test_invalid_tier_falls_back_to_safe(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_invalid_tier_falls_back_to_safe(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Invalid tier should fall back to SAFE."""
         monkeypatch.setenv("STABILIZE_SQLITE_TIER", "invalid_tier")
         config = SqliteConfig.from_env()
@@ -267,9 +265,7 @@ class TestSqliteConfigIntegration:
         manager.close_all()
         SingletonMeta.reset(ConnectionManager)
 
-    def test_custom_tier_from_env(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_custom_tier_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify custom tier is applied from environment."""
         from stabilize.persistence.connection import (
             ConnectionManager,

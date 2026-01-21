@@ -226,7 +226,7 @@ print("__PYTHONTASK_RESULT_END__")
             env = os.environ.copy()
             env.update(env_vars)
 
-            logger.debug(f"PythonTask executing: {' '.join(cmd)}")
+            logger.debug("PythonTask executing: %s", " ".join(cmd))
 
             # Execute
             result = subprocess.run(
@@ -259,7 +259,7 @@ print("__PYTHONTASK_RESULT_END__")
                 outputs["result"] = script_result
 
             if exit_code == 0:
-                logger.debug(f"PythonTask success, result: {str(script_result)[:100]}")
+                logger.debug("PythonTask success, result: %s", str(script_result)[:100])
                 return TaskResult.success(outputs=outputs)
             else:
                 error_msg = f"Python script failed with exit code {exit_code}"

@@ -76,7 +76,7 @@ class WorkflowLauncher:
         # Start it
         self.runner.start(execution)
 
-        logger.info(f"Launched execution {execution.id} for pipeline {execution.name}")
+        logger.info("Launched execution %s for pipeline %s", execution.id, execution.name)
 
         return execution
 

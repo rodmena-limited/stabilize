@@ -167,7 +167,7 @@ class DockerTask(Task):
         except ValueError as e:
             return TaskResult.terminal(error=str(e))
 
-        logger.debug(f"DockerTask executing: {' '.join(cmd)}")
+        logger.debug("DockerTask executing: %s", " ".join(cmd))
 
         try:
             result = subprocess.run(

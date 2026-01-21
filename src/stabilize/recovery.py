@@ -349,7 +349,7 @@ def recover_on_startup(
         results = recover_on_startup(store, queue, application="my-app")
         for r in results:
             if r.status == "failed":
-                logger.error(f"Failed to recover {r.workflow_id}: {r.message}")
+                logger.error("Failed to recover %s: %s", r.workflow_id, r.message)
     """
     recovery = WorkflowRecovery(
         store=store,

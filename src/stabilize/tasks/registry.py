@@ -93,7 +93,7 @@ class TaskRegistry:
             ValueError: If name is already registered
         """
         if name in self._tasks:
-            logger.warning(f"Overwriting existing task registration: {name}")
+            logger.warning("Overwriting existing task registration: %s", name)
 
         self._tasks[name] = task
 
@@ -111,7 +111,7 @@ class TaskRegistry:
             for alias in task.aliases:
                 self._aliases[alias] = name
 
-        logger.debug(f"Registered task: {name}")
+        logger.debug("Registered task: %s", name)
 
     def register_class(
         self,
@@ -276,10 +276,10 @@ class TaskRegistry:
             registry.register_verifier("url_verifier", URLVerifier())
         """
         if name in self._verifiers:
-            logger.warning(f"Overwriting existing verifier registration: {name}")
+            logger.warning("Overwriting existing verifier registration: %s", name)
 
         self._verifiers[name] = verifier
-        logger.debug(f"Registered verifier: {name}")
+        logger.debug("Registered verifier: %s", name)
 
     def verifier(
         self,

@@ -236,7 +236,7 @@ class SqliteQueue(Queue):
         )
         conn.commit()
 
-        logger.debug(f"Pushed {message_type} (id={message_id}, deliver_at={deliver_at})")
+        logger.debug("Pushed %s (id=%s, deliver_at=%s)", message_type, message_id, deliver_at)
 
     def poll(self, callback: Callable[[Message], None]) -> None:
         """Poll for a message and process it with the callback."""
@@ -311,7 +311,7 @@ class SqliteQueue(Queue):
         # Step 3: Check if we won the race
         if cursor.rowcount == 0:
             # Another worker grabbed it
-            logger.debug(f"Lost race for message {msg_id}, will retry")
+            logger.debug("Lost race for message %s, will retry", msg_id)
             return None
 
         # Step 4: Successfully claimed - deserialize and return
@@ -333,7 +333,7 @@ class SqliteQueue(Queue):
             "type": msg_type,
         }
 
-        logger.debug(f"Polled {msg_type} (id={msg_id}, attempts={attempts + 1})")
+        logger.debug("Polled %s (id=%s, attempts=%d)", msg_type, msg_id, attempts + 1)
         return message
 
     def ack(self, message: Message) -> None:
@@ -356,7 +356,7 @@ class SqliteQueue(Queue):
         conn.commit()
 
         self._pending.pop(msg_id, None)
-        logger.debug(f"Acked message (id={msg_id})")
+        logger.debug("Acked message (id=%s)", msg_id)
 
     def ensure(
         self,
@@ -393,7 +393,7 @@ class SqliteQueue(Queue):
         conn.commit()
 
         self._pending.pop(msg_id, None)
-        logger.debug(f"Rescheduled message (id={msg_id}, deliver_at={deliver_at})")
+        logger.debug("Rescheduled message (id=%s, deliver_at=%s)", msg_id, deliver_at)
 
     def size(self) -> int:
         """Get the number of messages in the queue."""
@@ -442,7 +442,7 @@ class SqliteQueue(Queue):
         row = result.fetchone()
 
         if not row:
-            logger.warning(f"Message {msg_id} not found for DLQ move")
+            logger.warning("Message %s not found for DLQ move", msg_id)
             return
 
         # Insert into DLQ
@@ -476,7 +476,11 @@ class SqliteQueue(Queue):
 
         self._pending.pop(msg_id, None)
         logger.warning(
-            f"Moved message to DLQ (id={msg_id}, type={row['message_type']}, attempts={row['attempts']}, error={error})"
+            "Moved message to DLQ (id=%s, type=%s, attempts=%s, error=%s)",
+            msg_id,
+            row["message_type"],
+            row["attempts"],
+            error,
         )
 
     def list_dlq(
@@ -538,7 +542,7 @@ class SqliteQueue(Queue):
         row = result.fetchone()
 
         if not row:
-            logger.warning(f"DLQ entry {dlq_id} not found for replay")
+            logger.warning("DLQ entry %s not found for replay", dlq_id)
             return False
 
         # Insert back into main queue with reset attempts
@@ -564,7 +568,7 @@ class SqliteQueue(Queue):
         )
         conn.commit()
 
-        logger.info(f"Replayed DLQ entry {dlq_id} (type={row['message_type']})")
+        logger.info("Replayed DLQ entry %s (type=%s)", dlq_id, row["message_type"])
         return True
 
     def dlq_size(self) -> int:
@@ -584,7 +588,7 @@ class SqliteQueue(Queue):
         count = self.dlq_size()
         conn.execute(f"DELETE FROM {self.table_name}_dlq")
         conn.commit()
-        logger.info(f"Cleared {count} messages from DLQ")
+        logger.info("Cleared %d messages from DLQ", count)
         return count
 
     def check_and_move_expired(self) -> int:
@@ -616,6 +620,6 @@ class SqliteQueue(Queue):
             moved_count += 1
 
         if moved_count > 0:
-            logger.info(f"Moved {moved_count} expired messages to DLQ")
+            logger.info("Moved %d expired messages to DLQ", moved_count)
 
         return moved_count

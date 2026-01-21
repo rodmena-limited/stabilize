@@ -49,13 +49,13 @@ class LogMetricsProvider(MetricsProvider):
     """Simple provider that logs metrics (useful for development/debugging)."""
 
     def increment(self, name: str, value: float = 1.0, tags: dict[str, str] | None = None) -> None:
-        logger.debug(f"METRIC INC {name}: {value} tags={tags}")
+        logger.debug("METRIC INC %s: %s tags=%s", name, value, tags)
 
     def gauge(self, name: str, value: float, tags: dict[str, str] | None = None) -> None:
-        logger.debug(f"METRIC GAUGE {name}: {value} tags={tags}")
+        logger.debug("METRIC GAUGE %s: %s tags=%s", name, value, tags)
 
     def histogram(self, name: str, value: float, tags: dict[str, str] | None = None) -> None:
-        logger.debug(f"METRIC HIST {name}: {value} tags={tags}")
+        logger.debug("METRIC HIST %s: %s tags=%s", name, value, tags)
 
 
 class NoOpMetricsProvider(MetricsProvider):

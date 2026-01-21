@@ -153,7 +153,7 @@ class ProcessIsolatedTaskExecutor:
             else:
                 # Exception in task execution
                 error_msg = result_wrapper.error or "Unknown error"
-                logger.error(f"Task process failed: {error_msg}\n{result_wrapper.traceback}")
+                logger.error("Task process failed: %s\n%s", error_msg, result_wrapper.traceback)
                 # We return terminal, but handlers might convert to retry if transient
                 # For now, let's wrap it in a logic that allows the handler to decide?
                 # Actually, RunTaskHandler catches exceptions. We should re-raise
