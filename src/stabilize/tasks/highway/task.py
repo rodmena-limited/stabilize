@@ -200,7 +200,8 @@ class HighwayTask(RetryableTask):
             run_id = None
             if isinstance(response_data, dict):
                 data = response_data.get("data", response_data)
-                run_id = data.get("workflow_run_id") or data.get("run_id")
+                if isinstance(data, dict):
+                    run_id = data.get("workflow_run_id") or data.get("run_id")
 
             if not run_id:
                 logger.error(
@@ -325,7 +326,13 @@ class HighwayTask(RetryableTask):
 
             # Extract status from response
             # Highway API returns: {"data": {"state": "...", "result": ...}}
+            if not isinstance(response_data, dict):
+                logger.error(f"Unexpected response type: {type(response_data)}")
+                return TaskResult.terminal(error="Invalid Highway response format")
+
             data = response_data.get("data", response_data)
+            if not isinstance(data, dict):
+                data = {}
             state = data.get("state", data.get("status", "unknown"))
             result = data.get("result")
             current_step = data.get("current_step", data.get("current_task"))

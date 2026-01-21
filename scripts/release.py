@@ -13,16 +13,16 @@ This script uses stabilize itself to orchestrate the release pipeline:
 
 Usage:
     # Dry run - test, build, validate but don't upload
-    python scripts/release.py --dry-run
+    .venv/bin/python scripts/release.py --dry-run
 
     # Upload to TestPyPI first
-    python scripts/release.py --test-pypi
+    .venv/bin/python scripts/release.py --test-pypi
 
     # Full release to PyPI
-    python scripts/release.py
+    .venv/bin/python scripts/release.py
 
     # Skip tests (for re-uploading after failed upload)
-    python scripts/release.py --skip-tests
+    .venv/bin/python scripts/release.py --skip-tests
 
 Requirements:
     - twine: pip install twine
@@ -38,10 +38,23 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Add src to path for development
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# Ensure we're running from the project's virtualenv
+_PROJECT_ROOT = Path(__file__).parent.parent
+_VENV_PATH = _PROJECT_ROOT / ".venv"
+if _VENV_PATH.exists():
+    _expected_prefix = str(_VENV_PATH.resolve())
+    _current_prefix = getattr(sys, "prefix", "")
+    if not _current_prefix.startswith(_expected_prefix):
+        print("Error: This script must be run using the project's virtualenv.")
+        print(f"  Expected: {_VENV_PATH}/bin/python")
+        print(f"  Current:  {sys.executable}")
+        print("\nRun with: .venv/bin/python scripts/release.py")
+        sys.exit(1)
 
-from stabilize import (
+# Add src to path for development
+sys.path.insert(0, str(_PROJECT_ROOT / "src"))
+
+from stabilize import (  # noqa: E402
     CompleteStageHandler,
     CompleteTaskHandler,
     CompleteWorkflowHandler,
@@ -64,7 +77,7 @@ from stabilize import (
     Workflow,
     WorkflowStatus,
 )
-from stabilize.queue.messages import CancelStage
+from stabilize.queue.messages import CancelStage  # noqa: E402
 
 # =============================================================================
 # Project paths
@@ -267,7 +280,11 @@ def create_release_workflow(
     else:
         # Use -p no:cacheprovider to avoid cache-related hangs
         # Use --no-header to reduce terminal output
-        test_cmd = f"python -m pytest tests/ {pytest_args} -p no:cacheprovider --no-header"
+        # Skip postgres tests as they require libpq which may not be installed
+        test_cmd = (
+            f".venv/bin/python -m pytest tests/ {pytest_args} "
+            "-p no:cacheprovider --no-header -k 'not postgres'"
+        )
         stages.append(
             StageExecution(
                 ref_id="test",
@@ -325,13 +342,13 @@ def create_release_workflow(
             name="Build Package",
             requisite_stage_ref_ids={"clean"},
             context={
-                "command": "python -m build",
+                "command": ".venv/bin/python -m build",
                 "cwd": project_root,
                 "timeout": 120,  # 2 minutes
             },
             tasks=[
                 TaskExecution.create(
-                    name="python -m build",
+                    name="build package",
                     implementing_class="shell",
                     stage_start=True,
                     stage_end=True,
@@ -348,13 +365,13 @@ def create_release_workflow(
             name="Validate Package",
             requisite_stage_ref_ids={"build"},
             context={
-                "command": "twine check dist/*",
+                "command": ".venv/bin/twine check dist/*",
                 "cwd": project_root,
                 "timeout": 60,
             },
             tasks=[
                 TaskExecution.create(
-                    name="twine check",
+                    name="validate package",
                     implementing_class="shell",
                     stage_start=True,
                     stage_end=True,
@@ -383,7 +400,7 @@ def create_release_workflow(
             )
         )
     else:
-        upload_cmd = "twine upload"
+        upload_cmd = ".venv/bin/twine upload"
         if test_pypi:
             upload_cmd += " --repository testpypi"
         upload_cmd += " dist/*"
@@ -401,7 +418,7 @@ def create_release_workflow(
                 },
                 tasks=[
                     TaskExecution.create(
-                        name="twine upload",
+                        name="upload package",
                         implementing_class="shell",
                         stage_start=True,
                         stage_end=True,
@@ -593,16 +610,16 @@ def main() -> None:
         epilog="""
 Examples:
     # Dry run - test, build, validate without uploading
-    python scripts/release.py --dry-run
+    .venv/bin/python scripts/release.py --dry-run
 
     # Upload to TestPyPI first
-    python scripts/release.py --test-pypi
+    .venv/bin/python scripts/release.py --test-pypi
 
     # Full release to PyPI
-    python scripts/release.py
+    .venv/bin/python scripts/release.py
 
     # Skip tests (for re-uploading)
-    python scripts/release.py --skip-tests
+    .venv/bin/python scripts/release.py --skip-tests
 
 Environment Variables:
     TWINE_USERNAME  - PyPI username (or __token__ for API tokens)
