@@ -185,6 +185,13 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                                 execution_id=message.execution_id,
                             )
 
+                        logger.debug(
+                            "CompleteStage decision for %s: downstream=%d, phase=%s, parent=%s",
+                            stage.name,
+                            len(downstream_stages),
+                            phase,
+                            stage.parent_stage_id,
+                        )
                         if downstream_stages:
                             # Start all downstream stages
                             for downstream in downstream_stages:
@@ -198,6 +205,11 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                         elif phase is not None:
                             # Synthetic stage - notify parent
                             parent_id = stage.parent_stage_id
+                            logger.info(
+                                "Pushing ContinueParentStage for parent %s from child %s",
+                                parent_id,
+                                stage.name,
+                            )
                             if parent_id:
                                 txn.push_message(
                                     ContinueParentStage(
@@ -283,6 +295,7 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
 
         for s in graph.build():
             s.execution = stage.execution
+            stage.execution.stages.append(s)  # Add to in-memory list for first_after_stages()
             self.repository.add_stage(s)
 
     def _plan_on_failure_stages(self, stage: StageExecution) -> bool:
@@ -302,6 +315,7 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
 
         for s in new_stages:
             s.execution = stage.execution
+            stage.execution.stages.append(s)  # Add to in-memory list for first_after_stages()
             self.repository.add_stage(s)
 
         return True

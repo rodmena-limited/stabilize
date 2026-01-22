@@ -13,6 +13,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.dag.graph import StageGraphBuilder
+from stabilize.errors import ConcurrencyError
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.stage import SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
@@ -277,19 +278,29 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         messages_to_push = self._collect_start_messages(stage, message)
 
         # Atomic: store stage + push all start messages together
-        with self.repository.transaction(self.queue) as txn:
-            txn.store_stage(stage)
+        try:
+            with self.repository.transaction(self.queue) as txn:
+                txn.store_stage(stage)
 
-            # Message deduplication
-            if message.message_id:
-                txn.mark_message_processed(
-                    message_id=message.message_id,
-                    handler_type="StartStage",
-                    execution_id=message.execution_id,
-                )
+                # Message deduplication
+                if message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="StartStage",
+                        execution_id=message.execution_id,
+                    )
 
-            for msg in messages_to_push:
-                txn.push_message(msg)
+                for msg in messages_to_push:
+                    txn.push_message(msg)
+        except ConcurrencyError:
+            # Another handler already started this stage (race condition with
+            # multiple upstream stages completing simultaneously). This is safe
+            # to ignore - the stage is already being processed.
+            logger.debug(
+                "Ignoring StartStage for %s - another handler already started it (concurrent update)",
+                stage.name,
+            )
+            return
 
         logger.info("Started stage %s (%s)", stage.name, stage.id)
 

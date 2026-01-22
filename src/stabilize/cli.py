@@ -1522,6 +1522,163 @@ Recovery automatically:
 - Uses idempotency to prevent duplicate work
 
 ===============================================================================
+16. SYNTHETIC STAGES
+===============================================================================
+
+Synthetic stages are dynamically injected stages that run before, after, or on
+failure of a parent stage. Use them for setup, cleanup, validation, or rollback.
+
+16.1 SyntheticStageOwner Enum
+-----------------------------
+from stabilize.models.stage import SyntheticStageOwner
+
+SyntheticStageOwner.STAGE_BEFORE  # Runs before parent's tasks
+SyntheticStageOwner.STAGE_AFTER   # Runs after parent completes successfully
+
+16.2 StageDefinitionBuilder
+---------------------------
+Create custom builders to define synthetic stages for your stage types:
+
+from stabilize import StageExecution, TaskExecution
+from stabilize.stages.builder import StageDefinitionBuilder
+from stabilize.dag.graph import StageGraphBuilder
+from stabilize.models.stage import SyntheticStageOwner
+
+class DeployStageBuilder(StageDefinitionBuilder):
+    @property
+    def type(self) -> str:
+        return "deploy"
+
+    def build_tasks(self, stage: StageExecution) -> list[TaskExecution]:
+        return [
+            TaskExecution.create(
+                name="Deploy Application",
+                implementing_class="shell",
+                stage_start=True,
+                stage_end=True,
+            ),
+        ]
+
+    def before_stages(self, stage: StageExecution, graph: StageGraphBuilder) -> None:
+        # Validation runs BEFORE the deploy tasks
+        validation = StageExecution.create_synthetic(
+            type="shell",
+            name="Validate Configuration",
+            parent=stage,
+            owner=SyntheticStageOwner.STAGE_BEFORE,
+            context={"command": "validate-config.sh"},
+            tasks=[TaskExecution.create("Validate", "shell", stage_start=True, stage_end=True)],
+        )
+        graph.add(validation)
+
+    def after_stages(self, stage: StageExecution, graph: StageGraphBuilder) -> None:
+        # Notification runs AFTER deploy completes successfully
+        notify = StageExecution.create_synthetic(
+            type="http",
+            name="Send Notification",
+            parent=stage,
+            owner=SyntheticStageOwner.STAGE_AFTER,
+            context={"url": "https://hooks.slack.com/...", "method": "POST"},
+            tasks=[TaskExecution.create("Notify", "http", stage_start=True, stage_end=True)],
+        )
+        graph.add(notify)
+
+    def on_failure_stages(self, stage: StageExecution, graph: StageGraphBuilder) -> None:
+        # Rollback runs ONLY if deploy fails
+        rollback = StageExecution.create_synthetic(
+            type="shell",
+            name="Rollback Deployment",
+            parent=stage,
+            owner=SyntheticStageOwner.STAGE_AFTER,  # After stages handle both success/failure
+            context={"command": "rollback.sh"},
+            tasks=[TaskExecution.create("Rollback", "shell", stage_start=True, stage_end=True)],
+        )
+        graph.add(rollback)
+
+16.3 Registering Custom Builders
+--------------------------------
+from stabilize.stages.builder import register_builder, StageDefinitionBuilderFactory
+
+# Option 1: Use global factory
+register_builder(DeployStageBuilder())
+
+# Option 2: Create custom factory
+factory = StageDefinitionBuilderFactory()
+factory.register(DeployStageBuilder())
+
+16.4 Execution Order
+--------------------
+1. before_stages() synthetic stages execute first (in dependency order)
+2. Parent stage's tasks execute
+3. after_stages() synthetic stages execute (success path)
+4. on_failure_stages() synthetic stages execute (failure path only)
+
+The ContinueParentStageHandler manages transitions between synthetic stages
+and notifies the parent when all children complete.
+
+===============================================================================
+17. CONCURRENCY & RACE CONDITIONS
+===============================================================================
+
+Stabilize handles concurrent execution safely through optimistic locking and
+idempotent message processing.
+
+17.1 Optimistic Locking
+-----------------------
+Every stage and task has a `version` column. Updates check the version:
+
+UPDATE stage_executions SET
+    status = :status,
+    version = version + 1
+WHERE id = :id AND version = :expected_version
+
+If another process modified the row, the WHERE clause fails and raises:
+
+from stabilize.errors import ConcurrencyError
+
+try:
+    repository.store_stage(stage)
+except ConcurrencyError:
+    # Another process modified this stage - handle accordingly
+    pass
+
+17.2 StartStage Race Condition
+------------------------------
+When multiple upstream stages complete simultaneously, each may try to start
+the same downstream stage:
+
+    A         B
+     \       /
+      \     /
+       \   /
+         C    <- Both A and B complete, both try to start C
+
+The StartStageHandler safely handles this race:
+
+from stabilize.errors import ConcurrencyError
+
+try:
+    with self.repository.transaction(self.queue) as txn:
+        txn.store_stage(stage)  # First caller wins, second gets ConcurrencyError
+        txn.push_message(StartTask(...))
+except ConcurrencyError:
+    # Another handler already started this stage - safe to ignore
+    logger.debug("Stage %s already started by another handler", stage.name)
+    return
+
+This is safe because:
+- The stage is already being processed by another handler
+- No work is lost - the first handler will complete the stage
+- Message deduplication prevents duplicate task execution
+
+17.3 Best Practices
+-------------------
+1. Always use transactions for state + message atomicity
+2. Catch ConcurrencyError only when you can safely retry or ignore
+3. Use message deduplication for idempotent processing
+4. Let the engine handle retries for transient failures
+
+===============================================================================
 END OF REFERENCE
 ===============================================================================
 '''

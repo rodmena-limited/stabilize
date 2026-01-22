@@ -414,6 +414,13 @@ class PostgresWorkflowStore(WorkflowStore):
                             us.set_execution_strong(execution)
                             all_stages.append(us)
 
+                    # Also load synthetic stages (children) so after_stages() works
+                    # This is critical for ContinueParentStageHandler to find after-stages
+                    synthetic_stages = self.get_synthetic_stages(execution.id, stage.id)
+                    for ss in synthetic_stages:
+                        ss.set_execution_strong(execution)
+                        all_stages.append(ss)
+
                     execution.stages = all_stages
 
                 # Get tasks
@@ -466,7 +473,11 @@ class PostgresWorkflowStore(WorkflowStore):
         stages: list[StageExecution],
         execution_id: str,
     ) -> None:
-        """Set the _execution reference for stages by loading execution summary."""
+        """Set the _execution reference for stages by loading execution summary.
+
+        Also loads all stages for the execution to populate execution.stages,
+        which is required for methods like synthetic_stages() and after_stages().
+        """
         if not stages:
             return
 
@@ -477,6 +488,21 @@ class PostgresWorkflowStore(WorkflowStore):
         exec_row = cur.fetchone()
         if exec_row:
             execution = self._row_to_execution(cast(dict[str, Any], exec_row))
+
+            # Load all stages for this execution to populate execution.stages
+            # This is required for synthetic_stages() and after_stages() to work
+            cur.execute(
+                "SELECT * FROM stage_executions WHERE execution_id = %(id)s",
+                {"id": execution_id},
+            )
+            all_stages = [self._row_to_stage(cast(dict[str, Any], row)) for row in cur.fetchall()]
+            execution.stages = all_stages
+
+            # Set execution reference for all loaded stages
+            for s in all_stages:
+                s.execution = execution
+
+            # Also set for the originally requested stages (they may be the same objects)
             for stage in stages:
                 stage.execution = execution
 
