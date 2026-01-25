@@ -40,6 +40,7 @@ def _should_trip_circuit(error: Exception | None) -> bool:
         return True  # No error info means unexpected failure
     return not is_transient(error)
 
+
 logger = logging.getLogger(__name__)
 
 
