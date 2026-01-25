@@ -15,10 +15,30 @@ from typing import TYPE_CHECKING
 from resilient_circuit import CircuitProtectorPolicy
 from resilient_circuit.storage import CircuitBreakerStorage, InMemoryStorage
 
+from stabilize.errors import is_transient
 from stabilize.resilience.config import ResilienceConfig
 
 if TYPE_CHECKING:
     pass
+
+
+def _should_trip_circuit(error: Exception | None) -> bool:
+    """Determine if an error should count towards circuit breaker failure threshold.
+
+    TransientErrors are expected (retryable) failures and should NOT trip the circuit.
+    Only permanent/unexpected errors should trip the circuit breaker.
+
+    Also handles BulkheadError wrapping where the original TransientError is in __cause__.
+
+    Args:
+        error: The exception to check (may be None)
+
+    Returns:
+        True if this error should count as a circuit breaker failure
+    """
+    if error is None:
+        return True  # No error info means unexpected failure
+    return not is_transient(error)
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +172,8 @@ class WorkflowCircuitFactory:
             namespace=workflow_execution_id,
             failure_limit=self.config.circuit_failure_threshold,
             cooldown=timedelta(seconds=self.config.circuit_cooldown_seconds),
+            # Don't trip circuit on TransientErrors - they're expected retryable failures
+            should_handle=_should_trip_circuit,
         )
         self._circuits[key] = circuit
         logger.debug("Created circuit breaker for workflow=%s, task_type=%s", workflow_execution_id, task_type)
