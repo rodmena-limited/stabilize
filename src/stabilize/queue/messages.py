@@ -225,6 +225,25 @@ class ContinueParentStage(StageLevel):
     phase: SyntheticStageOwner = SyntheticStageOwner.STAGE_AFTER
 
 
+@dataclass
+class JumpToStage(StageLevel):
+    """
+    Message to jump to a different stage (dynamic routing).
+
+    Resets the target stage to NOT_STARTED and starts it with merged context.
+    Used by TaskResult.jump_to() for dynamic flow control.
+
+    Attributes:
+        target_stage_ref_id: The ref_id of the stage to jump to
+        jump_context: Context to merge into target stage
+        jump_outputs: Outputs to make available to target stage
+    """
+
+    target_stage_ref_id: str = ""
+    jump_context: dict[str, Any] = field(default_factory=dict)
+    jump_outputs: dict[str, Any] = field(default_factory=dict)
+
+
 # ============================================================================
 # Task-level messages
 # ============================================================================
@@ -363,6 +382,7 @@ MESSAGE_TYPES: dict[str, type[Message]] = {
     "RestartStage": RestartStage,
     "ResumeStage": ResumeStage,
     "ContinueParentStage": ContinueParentStage,
+    "JumpToStage": JumpToStage,
     "StartTask": StartTask,
     "RunTask": RunTask,
     "CompleteTask": CompleteTask,

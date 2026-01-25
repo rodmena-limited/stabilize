@@ -128,6 +128,7 @@ class Workflow:
     name: str = ""
     status: WorkflowStatus = WorkflowStatus.NOT_STARTED
     stages: list[StageExecution] = field(default_factory=list)
+    context: dict[str, Any] = field(default_factory=dict)  # Execution-level context
     trigger: Trigger = field(default_factory=Trigger)
     start_time: int | None = None
     end_time: int | None = None
@@ -294,6 +295,7 @@ class Workflow:
         stages: list[StageExecution],
         trigger: Trigger | None = None,
         pipeline_config_id: str | None = None,
+        context: dict[str, Any] | None = None,
     ) -> Workflow:
         """
         Factory method to create a new pipeline execution.
@@ -304,6 +306,7 @@ class Workflow:
             stages: List of stages
             trigger: Optional trigger info
             pipeline_config_id: Optional config ID
+            context: Optional execution-level context (for jump tracking, etc.)
 
         Returns:
             A new Workflow instance
@@ -312,6 +315,7 @@ class Workflow:
             application=application,
             name=name,
             stages=stages,
+            context=context or {},
             trigger=trigger or Trigger(),
             pipeline_config_id=pipeline_config_id,
         )

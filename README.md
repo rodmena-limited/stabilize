@@ -31,10 +31,10 @@ from stabilize import (
     Workflow, StageExecution, TaskExecution,
     SqliteWorkflowStore, SqliteQueue, QueueProcessor, Orchestrator,
     Task, TaskResult, TaskRegistry,
-    # All 11 handlers are required
+    # All 12 handlers are required
     StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
     SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
-    StartTaskHandler, RunTaskHandler, CompleteTaskHandler,
+    JumpToStageHandler, StartTaskHandler, RunTaskHandler, CompleteTaskHandler,
     CompleteStageHandler, CompleteWorkflowHandler,
 )
 
@@ -84,6 +84,7 @@ for handler in [
     SkipStageHandler(queue, store),
     CancelStageHandler(queue, store),
     ContinueParentStageHandler(queue, store),
+    JumpToStageHandler(queue, store),
     StartTaskHandler(queue, store, registry),
     RunTaskHandler(queue, store, registry),
     CompleteTaskHandler(queue, store),
@@ -172,6 +173,49 @@ workflow = Workflow.create(
     ],
 )
 ```
+
+## Dynamic Routing
+
+Stabilize supports dynamic flow control with `TaskResult.jump_to()` for conditional branching and retry loops:
+
+```python
+from stabilize import Task, TaskResult, TransientError
+
+class RouterTask(Task):
+    """Route to different stages based on conditions."""
+    def execute(self, stage: StageExecution) -> TaskResult:
+        if stage.context.get("tests_passed"):
+            return TaskResult.success()
+        else:
+            # Jump to another stage with context
+            return TaskResult.jump_to(
+                "retry_stage",
+                context={"retry_reason": "tests failed"}
+            )
+```
+
+### Stateful Retries
+
+Preserve progress across transient error retries with `context_update`:
+
+```python
+class ProgressTask(Task):
+    def execute(self, stage: StageExecution) -> TaskResult:
+        processed = stage.context.get("processed_items", 0)
+        try:
+            # Process next batch
+            new_processed = process_batch(processed)
+            return TaskResult.success(outputs={"total": new_processed})
+        except RateLimitError:
+            # Preserve progress for next retry
+            raise TransientError(
+                "Rate limited",
+                retry_after=30,
+                context_update={"processed_items": processed + 10}
+            )
+```
+
+The `context_update` is merged into the stage context before the retry, allowing tasks to resume from where they left off.
 
 ## Database Setup
 

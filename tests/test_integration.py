@@ -20,7 +20,7 @@ class TestPipelineIntegration:
         queue: Queue,
     ) -> None:
         """Test a simple pipeline with one stage."""
-        processor, runner = setup_stabilize(repository, queue)
+        processor, runner, _ = setup_stabilize(repository, queue)
 
         execution = Workflow.create(
             application="test",
@@ -62,7 +62,7 @@ class TestPipelineIntegration:
         queue: Queue,
     ) -> None:
         """Test a linear pipeline: A -> B -> C."""
-        processor, runner = setup_stabilize(repository, queue)
+        processor, runner, _ = setup_stabilize(repository, queue)
         CounterTask.counter = 0
 
         execution = Workflow.create(
@@ -130,7 +130,7 @@ class TestPipelineIntegration:
         queue: Queue,
     ) -> None:
         """Test parallel execution: A -> [B, C] -> D."""
-        processor, runner = setup_stabilize(repository, queue)
+        processor, runner, _ = setup_stabilize(repository, queue)
         CounterTask.counter = 0
 
         execution = Workflow.create(
@@ -212,7 +212,7 @@ class TestPipelineIntegration:
         queue: Queue,
     ) -> None:
         """Test that stage failure terminates the pipeline."""
-        processor, runner = setup_stabilize(repository, queue)
+        processor, runner, _ = setup_stabilize(repository, queue)
 
         execution = Workflow.create(
             application="test",

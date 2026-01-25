@@ -13,7 +13,7 @@ workflows with full support for:
 - Configuration validation with JSON Schema
 """
 
-__version__ = "0.14.4"
+__version__ = "0.14.5"
 
 # Assertion helpers
 from stabilize.assertions import (
@@ -78,6 +78,7 @@ from stabilize.handlers import (
     CompleteTaskHandler,
     CompleteWorkflowHandler,
     ContinueParentStageHandler,
+    JumpToStageHandler,
     RunTaskHandler,
     SkipStageHandler,
     StabilizeHandler,
@@ -187,6 +188,7 @@ __all__ = [
     "SkipStageHandler",
     "CancelStageHandler",
     "ContinueParentStageHandler",
+    "JumpToStageHandler",
     "StartTaskHandler",
     "StartWaitingWorkflowsHandler",
     "RunTaskHandler",

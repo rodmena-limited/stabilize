@@ -29,6 +29,7 @@ from stabilize.models.status import WorkflowStatus
 from stabilize.persistence.transaction import TransactionHelper
 from stabilize.queue.messages import (
     CompleteTask,
+    JumpToStage,
     PauseTask,
     RunTask,
 )
@@ -533,6 +534,44 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 delay,
             )
 
+        elif result.status == WorkflowStatus.REDIRECT and result.target_stage_ref_id:
+            # Dynamic routing: jump to a different stage
+            logger.info(
+                "Task %s requested jump to stage %s",
+                task_model.name,
+                result.target_stage_ref_id,
+            )
+
+            # Atomic: store stage + mark processed + push JumpToStage + CompleteTask
+            self.txn_helper.execute_atomic(
+                stage=stage,
+                source_message=message,
+                messages_to_push=[
+                    (
+                        JumpToStage(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                            target_stage_ref_id=result.target_stage_ref_id,
+                            jump_context=result.context or {},
+                            jump_outputs=result.outputs or {},
+                        ),
+                        None,
+                    ),
+                    (
+                        CompleteTask(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                            task_id=message.task_id,
+                            status=result.status,
+                        ),
+                        None,
+                    ),
+                ],
+                handler_name="RunTask",
+            )
+
         elif result.status in {
             WorkflowStatus.SUCCEEDED,
             WorkflowStatus.REDIRECT,
@@ -797,11 +836,31 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 # Create new message with incremented attempt count
                 retry_message = message.copy_with_attempts(next_attempt)
 
-                # Atomic: push retry message
-                self.txn_helper.execute_atomic(
-                    messages_to_push=[(retry_message, int(delay.total_seconds()))],
-                    handler_name="RunTask",
-                )
+                # Check for context_update from TransientError (stateful retries)
+                # Note: bulkman wraps exceptions in BulkheadError, so we need to
+                # check __cause__ chain to find the original TransientError
+                context_update = getattr(exception, "context_update", None)
+                if context_update is None and exception.__cause__ is not None:
+                    context_update = getattr(exception.__cause__, "context_update", None)
+                if context_update:
+                    stage.context.update(context_update)
+                    logger.debug(
+                        "Task %s applying context_update on retry: %s",
+                        task_model.name,
+                        list(context_update.keys()),
+                    )
+                    # Atomic: store stage with context update + push retry message
+                    self.txn_helper.execute_atomic(
+                        stage=stage,
+                        messages_to_push=[(retry_message, int(delay.total_seconds()))],
+                        handler_name="RunTask",
+                    )
+                else:
+                    # Atomic: push retry message (no stage update needed)
+                    self.txn_helper.execute_atomic(
+                        messages_to_push=[(retry_message, int(delay.total_seconds()))],
+                        handler_name="RunTask",
+                    )
 
                 logger.debug(
                     "Task %s rescheduled for retry %d/%d with delay %s",

@@ -80,10 +80,38 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
             # Check if already complete
             if stage.status not in {WorkflowStatus.RUNNING, WorkflowStatus.NOT_STARTED}:
                 logger.debug(
-                    "Stage %s already has status %s, ignoring CompleteStage",
+                    "Stage %s already has status %s",
                     stage.name,
                     stage.status,
                 )
+                # Stage was already completed (e.g., by JumpToStageHandler marking it TERMINAL)
+                # We still need to trigger workflow completion if this is a terminal stage
+                if stage.status.is_halt:
+                    # Terminal status - complete workflow
+                    execution = stage.execution
+                    with self.repository.transaction(self.queue) as txn:
+                        if message.message_id:
+                            txn.mark_message_processed(
+                                message_id=message.message_id,
+                                handler_type="CompleteStage",
+                                execution_id=message.execution_id,
+                            )
+                        if stage.synthetic_stage_owner is None or stage.parent_stage_id is None:
+                            txn.push_message(
+                                CompleteWorkflow(
+                                    execution_type=execution.type.value,
+                                    execution_id=execution.id,
+                                )
+                            )
+                        else:
+                            # Propagate to parent
+                            txn.push_message(
+                                CompleteStage(
+                                    execution_type=message.execution_type,
+                                    execution_id=message.execution_id,
+                                    stage_id=stage.parent_stage_id,
+                                )
+                            )
                 return
 
             try:

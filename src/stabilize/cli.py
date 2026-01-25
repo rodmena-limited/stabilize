@@ -573,6 +573,30 @@ REDIRECT - Indicates decision branch redirect:
     Parameters:
       context: dict  - Context for the redirect
 
+JUMP_TO - Dynamic routing to another stage:
+    TaskResult.jump_to(target_stage_ref_id, context=None, outputs=None)
+    Parameters:
+      target_stage_ref_id: str  - ref_id of stage to jump to (REQUIRED)
+      context: dict            - Context to merge into target stage
+      outputs: dict            - Outputs to preserve
+
+    Use for dynamic flow control, retry loops, and conditional branching.
+    The target stage is reset and re-executed with merged context.
+
+    Example - Router Task:
+        class RouterTask(Task):
+            def execute(self, stage: StageExecution) -> TaskResult:
+                if stage.context.get("tests_passed"):
+                    return TaskResult.success()
+                else:
+                    return TaskResult.jump_to(
+                        "implement_stage",
+                        context={"retry_reason": "tests failed"}
+                    )
+
+    Jump count is tracked in execution.context["_jump_count"] to prevent
+    infinite loops (default max: 10, configurable via _max_jumps context key).
+
 Builder Pattern (for complex results):
     TaskResult.builder(status).context({...}).outputs({...}).build()
 
@@ -810,10 +834,10 @@ RIGHT:
 
 MISTAKE 5: Missing handlers
 ----------------------------
-All 11 handlers are REQUIRED for the engine to work:
+All 12 handlers are REQUIRED for the engine to work:
     StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
     SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
-    StartTaskHandler, RunTaskHandler, CompleteTaskHandler,
+    JumpToStageHandler, StartTaskHandler, RunTaskHandler, CompleteTaskHandler,
     CompleteStageHandler, CompleteWorkflowHandler
 
 
@@ -1449,6 +1473,36 @@ Transient errors are retried with exponential backoff:
   - ±25% jitter added to prevent thundering herd
 
 Maximum 10 retry attempts before marking as terminal.
+
+15.2.1 Stateful Retries with context_update (NEW)
+-------------------------------------------------
+TransientError now supports preserving state across retries:
+
+from stabilize.errors import TransientError
+
+class ProgressTask(Task):
+    def execute(self, stage: StageExecution) -> TaskResult:
+        processed = stage.context.get("processed_items", 0)
+        try:
+            new_processed = process_batch(processed)
+            return TaskResult.success(outputs={"total": new_processed})
+        except RateLimitError:
+            # Preserve progress for next retry
+            raise TransientError(
+                "Rate limited",
+                retry_after=30,
+                context_update={"processed_items": processed + 10}
+            )
+
+Parameters for TransientError:
+  message: str             - Error message (required)
+  code: int               - Optional error code
+  cause: Exception        - Optional original exception
+  retry_after: float      - Seconds to wait before retry
+  context_update: dict    - Dict to merge into stage.context on retry (NEW)
+
+The context_update is merged into stage.context before rescheduling,
+allowing tasks to track progress and resume from where they left off.
 
 15.3 Message Deduplication (Idempotency)
 ----------------------------------------

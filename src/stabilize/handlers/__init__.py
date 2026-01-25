@@ -8,6 +8,7 @@ from stabilize.handlers.complete_stage import CompleteStageHandler
 from stabilize.handlers.complete_task import CompleteTaskHandler
 from stabilize.handlers.complete_workflow import CompleteWorkflowHandler
 from stabilize.handlers.continue_parent_stage import ContinueParentStageHandler
+from stabilize.handlers.jump_to_stage import JumpToStageHandler
 from stabilize.handlers.run_task import RunTaskHandler
 from stabilize.handlers.skip_stage import SkipStageHandler
 from stabilize.handlers.start_stage import StartStageHandler
@@ -29,6 +30,7 @@ __all__ = [
     "SkipStageHandler",
     "CancelStageHandler",
     "ContinueParentStageHandler",
+    "JumpToStageHandler",
 ]
 
 
@@ -54,6 +56,7 @@ def register_all_handlers(
         SkipStageHandler(queue, repository),
         CancelStageHandler(queue, repository),
         ContinueParentStageHandler(queue, repository),
+        JumpToStageHandler(queue, repository),
         StartTaskHandler(queue, repository, task_registry),
         RunTaskHandler(queue, repository, task_registry),
         CompleteTaskHandler(queue, repository),

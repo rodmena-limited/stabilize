@@ -25,11 +25,13 @@ class TaskResult:
         status: The execution status after the task runs
         context: Data scoped to the current stage (merged into stage.context)
         outputs: Data available to downstream stages (merged into stage.outputs)
+        target_stage_ref_id: For jump_to results, the ref_id of the stage to jump to
     """
 
     status: WorkflowStatus
     context: dict[str, Any] = field(default_factory=dict)
     outputs: dict[str, Any] = field(default_factory=dict)
+    target_stage_ref_id: str | None = field(default=None)
 
     # ========== Factory Methods ==========
 
@@ -197,6 +199,48 @@ class TaskResult:
         return cls(
             status=WorkflowStatus.REDIRECT,
             context=context or {},
+        )
+
+    @classmethod
+    def jump_to(
+        cls,
+        target_stage_ref_id: str,
+        context: dict[str, Any] | None = None,
+        outputs: dict[str, Any] | None = None,
+    ) -> TaskResult:
+        """
+        Create a jump result to redirect flow to a different stage.
+
+        The target stage will be reset to NOT_STARTED and re-executed
+        with the provided context merged into its existing context.
+
+        This enables dynamic routing patterns like retry loops, conditional
+        branching, and error recovery flows.
+
+        Args:
+            target_stage_ref_id: The ref_id of the stage to jump to
+            context: Context to merge into target stage
+            outputs: Outputs to preserve (available to target stage)
+
+        Returns:
+            A TaskResult with REDIRECT status and target_stage_ref_id set
+
+        Example:
+            class RouterTask(Task):
+                def execute(self, stage: StageExecution) -> TaskResult:
+                    if stage.context.get("tests_passed"):
+                        return TaskResult.success()
+                    else:
+                        return TaskResult.jump_to(
+                            "implement_stage",
+                            context={"retry_reason": "tests failed"}
+                        )
+        """
+        return cls(
+            status=WorkflowStatus.REDIRECT,
+            context=context or {},
+            outputs=outputs or {},
+            target_stage_ref_id=target_stage_ref_id,
         )
 
     # ========== Builder Pattern ==========

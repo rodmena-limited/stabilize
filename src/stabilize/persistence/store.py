@@ -12,6 +12,7 @@ Enterprise Features:
 from __future__ import annotations
 
 import logging
+import os
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -507,6 +508,13 @@ class NoOpTransaction(StoreTransaction):
     _suppress_warning: bool = False
 
     def __init__(self, store: WorkflowStore, queue: Queue | None = None) -> None:
+        # Block usage in production mode - NoOpTransaction is not atomic
+        if os.getenv("STABILIZE_PRODUCTION", "false").lower() == "true":
+            raise RuntimeError(
+                "NoOpTransaction cannot be used in production mode "
+                "(STABILIZE_PRODUCTION=true). Use SqliteWorkflowStore or "
+                "PostgresWorkflowStore for atomic transactions."
+            )
         if not NoOpTransaction._suppress_warning:
             logger.warning(
                 "NoOpTransaction is being used. This is NOT truly atomic and "

@@ -177,10 +177,82 @@ Limit concurrent executions for a specific pipeline configuration.
 
 If the limit is reached, new executions enter ``BUFFERED`` state and are started automatically when slots free up.
 
+Dynamic Routing
+---------------
+
+Dynamic routing allows tasks to redirect execution to a different stage based on runtime conditions. This enables patterns like retry loops, conditional branching, and error recovery flows.
+
+TaskResult.jump_to()
+~~~~~~~~~~~~~~~~~~~~
+
+Use ``TaskResult.jump_to()`` to redirect execution to another stage:
+
+.. code-block:: python
+
+    from stabilize import Task, TaskResult, StageExecution
+
+    class RouterTask(Task):
+        def execute(self, stage: StageExecution) -> TaskResult:
+            if stage.context.get("tests_passed"):
+                return TaskResult.success()
+            else:
+                # Jump to another stage with context
+                return TaskResult.jump_to(
+                    "implement_stage",
+                    context={"retry_reason": "tests failed"}
+                )
+
+The target stage is reset to ``NOT_STARTED`` and re-executed with the merged context.
+
+Jump Count Limiting
+~~~~~~~~~~~~~~~~~~~
+
+To prevent infinite loops, jump count is tracked and limited:
+
+- Default maximum: 10 jumps per execution
+- Configurable via ``_max_jumps`` in execution context
+- Jump history recorded in ``_jump_history`` for debugging
+
+.. code-block:: python
+
+    # Set custom max jumps
+    execution = Workflow.create(
+        ...,
+        context={"_max_jumps": 5}
+    )
+
+Stateful Retries
+~~~~~~~~~~~~~~~~
+
+``TransientError`` supports preserving state across retry attempts with ``context_update``:
+
+.. code-block:: python
+
+    from stabilize import Task, TaskResult, TransientError
+
+    class ProgressTask(Task):
+        def execute(self, stage: StageExecution) -> TaskResult:
+            processed = stage.context.get("processed_items", 0)
+            try:
+                new_processed = process_batch(processed)
+                return TaskResult.success(outputs={"total": new_processed})
+            except RateLimitError:
+                # Preserve progress for next retry
+                raise TransientError(
+                    "Rate limited",
+                    retry_after=30,
+                    context_update={"processed_items": processed + 10}
+                )
+
+The ``context_update`` dict is merged into ``stage.context`` before the retry, allowing tasks to resume from where they left off.
+
 Key Files
 ---------
 
 *   ``src/stabilize/stages/builder.py`` - StageDefinitionBuilder and factory
 *   ``src/stabilize/dag/graph.py`` - StageGraphBuilder
 *   ``src/stabilize/handlers/continue_parent_stage.py`` - ContinueParentStageHandler
+*   ``src/stabilize/handlers/jump_to_stage.py`` - JumpToStageHandler for dynamic routing
 *   ``src/stabilize/models/stage.py`` - SyntheticStageOwner enum
+*   ``src/stabilize/tasks/result.py`` - TaskResult with jump_to() factory method
+*   ``src/stabilize/errors.py`` - TransientError with context_update parameter

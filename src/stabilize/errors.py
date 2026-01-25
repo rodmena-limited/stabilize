@@ -103,6 +103,17 @@ class TransientError(StabilizeError):
     - Database lock contention
 
     The message processor will automatically retry these errors with backoff.
+
+    The optional context_update parameter allows preserving state across retry
+    attempts. When provided, the context will be merged into the stage context
+    before the retry, allowing tasks to track progress across failures.
+
+    Example:
+        raise TransientError(
+            "Rate limited",
+            retry_after=30,
+            context_update={"processed_items": 50}
+        )
     """
 
     code: int = 101
@@ -114,6 +125,7 @@ class TransientError(StabilizeError):
         code: int | None = None,
         cause: Exception | None = None,
         retry_after: float | None = None,
+        context_update: dict[str, Any] | None = None,
     ) -> None:
         """Initialize transient error.
 
@@ -122,9 +134,12 @@ class TransientError(StabilizeError):
             code: Optional error code
             cause: Optional original exception
             retry_after: Optional seconds to wait before retry
+            context_update: Optional dict to merge into stage context on retry.
+                           Allows preserving progress across transient failures.
         """
         super().__init__(message, code=code, cause=cause)
         self.retry_after = retry_after
+        self.context_update = context_update or {}
 
 
 class PermanentError(StabilizeError):

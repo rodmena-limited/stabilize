@@ -1187,6 +1187,9 @@ class SqliteWorkflowStore(WorkflowStore):
             AtomicTransaction with store_stage() and push_message() methods
         """
         conn = self._get_connection()
+        # Use IMMEDIATE to acquire write lock upfront, preventing SQLITE_BUSY
+        # deadlocks when multiple threads try to upgrade from read to write locks
+        conn.execute("BEGIN IMMEDIATE")
         txn = AtomicTransaction(conn, self)
         try:
             yield txn
@@ -1195,6 +1198,8 @@ class SqliteWorkflowStore(WorkflowStore):
             conn.rollback()
             # Restore in-memory versions to match rolled-back database state
             txn.rollback_versions()
+            # Reload state from DB to prevent version drift on retry
+            txn.refresh_staged_objects()
             raise
 
     def list_workflows(
@@ -1265,9 +1270,42 @@ class AtomicTransaction(StoreTransaction):
 
         Called by the transaction context manager when rolling back to ensure
         in-memory stage versions match the database state.
+
+        Note: Does not clear _staged_objects - refresh_staged_objects() will
+        use this list then clear it.
         """
         for stage, original_version in self._staged_objects:
             stage.version = original_version
+
+    def refresh_staged_objects(self) -> None:
+        """Reload staged objects from database after rollback.
+
+        This prevents version drift where in-memory objects have stale versions
+        after another thread successfully committed changes. Without refresh,
+        retrying with a stale object causes repeated ConcurrencyError.
+
+        Called after rollback_versions() to ensure objects reflect actual DB state.
+        """
+        for obj, _original_version in self._staged_objects:
+            if isinstance(obj, StageExecution):
+                # Reload stage from database
+                fresh = self._store.retrieve_stage(obj.id)
+                if fresh:
+                    obj.version = fresh.version
+                    obj.status = fresh.status
+                    obj.context = fresh.context
+                    obj.outputs = fresh.outputs
+                    obj.start_time = fresh.start_time
+                    obj.end_time = fresh.end_time
+            elif isinstance(obj, TaskExecution):
+                # Reload task from parent stage
+                parent = self._store.retrieve_stage(obj.stage_id)
+                if parent:
+                    for task in parent.tasks:
+                        if task.id == obj.id:
+                            obj.version = task.version
+                            obj.status = task.status
+                            break
         self._staged_objects.clear()
 
     def store_stage(self, stage: StageExecution) -> None:

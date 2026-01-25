@@ -94,6 +94,25 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
 
             logger.debug("Task %s completed with status %s", task.name, message.status)
 
+            # For REDIRECT status, the task initiated a jump to another stage.
+            # JumpToStageHandler handles the flow control, so we just complete
+            # the task and don't start the next task or complete the stage.
+            if message.status == WorkflowStatus.REDIRECT:
+                logger.debug(
+                    "Task %s completed with REDIRECT - flow handled by JumpToStageHandler",
+                    task.name,
+                )
+                # Atomic: store stage only (no next message)
+                with self.repository.transaction(self.queue) as txn:
+                    txn.store_stage(stage)
+                    if message.message_id:
+                        txn.mark_message_processed(
+                            message_id=message.message_id,
+                            handler_type="CompleteTask",
+                            execution_id=message.execution_id,
+                        )
+                return
+
             # Check for next task
             next_task = stage.next_task(task)
 

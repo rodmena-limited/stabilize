@@ -77,6 +77,19 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                 if upstream_stages is None:
                     upstream_stages = []
 
+                # Check for jump bypass - if set, skip prerequisite checks
+                # This is set by JumpToStageHandler for dynamic routing
+                if stage.context.get("_jump_bypass"):
+                    logger.debug(
+                        "Stage %s (%s) has _jump_bypass, skipping prerequisite checks",
+                        stage.name,
+                        stage.id,
+                    )
+                    # Clear the bypass flag so it doesn't persist
+                    del stage.context["_jump_bypass"]
+                    self._start_if_ready(stage, message)
+                    return
+
                 # Check if any upstream stages failed
                 # We check for terminal statuses in direct dependencies
                 halt_statuses = {

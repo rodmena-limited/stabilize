@@ -13,6 +13,7 @@ from stabilize import (
     CompleteTaskHandler,
     CompleteWorkflowHandler,
     ContinueParentStageHandler,
+    JumpToStageHandler,
     Orchestrator,
     QueueProcessor,
     RunTaskHandler,
@@ -220,12 +221,27 @@ def queue(
 def setup_stabilize(
     repository: WorkflowStore,
     queue: Queue,
-) -> tuple[Any, Any]:
-    """Set up a complete pipeline runner with all handlers."""
+    extra_tasks: dict[str, type] | None = None,
+) -> tuple[Any, Any, TaskRegistry]:
+    """Set up a complete pipeline runner with all handlers.
+
+    Args:
+        repository: The workflow store
+        queue: The message queue
+        extra_tasks: Optional dict of task_name -> task_class to register
+
+    Returns:
+        Tuple of (processor, orchestrator, task_registry)
+    """
     task_registry = TaskRegistry()
     task_registry.register("success", SuccessTask)
     task_registry.register("fail", FailTask)
     task_registry.register("counter", CounterTask)
+
+    # Register any extra tasks
+    if extra_tasks:
+        for name, task_class in extra_tasks.items():
+            task_registry.register(name, task_class)
 
     processor = QueueProcessor(queue)
 
@@ -236,6 +252,7 @@ def setup_stabilize(
         SkipStageHandler(queue, repository),
         CancelStageHandler(queue, repository),
         ContinueParentStageHandler(queue, repository),
+        JumpToStageHandler(queue, repository),
         StartTaskHandler(queue, repository, task_registry),
         RunTaskHandler(queue, repository, task_registry),
         CompleteTaskHandler(queue, repository),
@@ -247,4 +264,4 @@ def setup_stabilize(
         processor.register_handler(handler)
 
     runner = Orchestrator(queue)
-    return processor, runner
+    return processor, runner, task_registry

@@ -323,7 +323,7 @@ class TestGoldenStandard:
         RetryTask._attempts = {}
 
         # Setup with custom tasks
-        processor, runner = setup_stabilize(repository, queue)
+        processor, runner, _ = setup_stabilize(repository, queue)
 
         # Get the task registry from the RunTaskHandler
         for handler in processor._handlers.values():
