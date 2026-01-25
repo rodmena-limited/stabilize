@@ -40,13 +40,11 @@ from stabilize import (
     TaskRegistry,
     TaskResult,
     Workflow,
-    WorkflowStatus,
     WorkflowStore,
 )
 from stabilize.errors import TransientError
 from stabilize.models.stage import StageExecution as StageModel
 from stabilize.tasks.interface import Task
-
 
 # =============================================================================
 # Custom Tasks demonstrating the features
@@ -73,11 +71,13 @@ class QualityLoopTask(Task):
 
         if quality >= self.QUALITY_THRESHOLD:
             logger.info(f"[QualityLoop] PASSED! Quality {quality} meets threshold.")
-            return TaskResult.success(outputs={
-                "final_quality": quality,
-                "attempts_needed": attempt,
-                "status": "PASSED",
-            })
+            return TaskResult.success(
+                outputs={
+                    "final_quality": quality,
+                    "attempts_needed": attempt,
+                    "status": "PASSED",
+                }
+            )
         else:
             logger.info(f"[QualityLoop] Quality {quality} < {self.QUALITY_THRESHOLD}, jumping back to retry...")
             # Jump back to same stage with incremented attempt (self-loop)
@@ -128,11 +128,13 @@ class BatchProcessTask(Task):
         if new_processed >= self.TOTAL_ITEMS:
             new_processed = self.TOTAL_ITEMS
             logger.info(f"[Batch] Complete! Processed all {self.TOTAL_ITEMS} items.")
-            return TaskResult.success(outputs={
-                "total_processed": new_processed,
-                "status": "complete",
-                "checkpoint_used": stage.context.get("_checkpoint_saved", False),
-            })
+            return TaskResult.success(
+                outputs={
+                    "total_processed": new_processed,
+                    "status": "complete",
+                    "checkpoint_used": stage.context.get("_checkpoint_saved", False),
+                }
+            )
         else:
             # More to process - fail again to show multiple retries
             logger.warning(f"[Batch] Another transient error at {new_processed} items! Checkpointing...")
@@ -230,19 +232,19 @@ Flow: quality_loop (65) -> quality_loop (80, pass!)
     processor.process_all(timeout=60.0)
 
     result = store.retrieve(workflow.id)
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"RESULT: Workflow Status = {result.status}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     stage = result.stage_by_ref_id("quality_loop")
     if stage:
-        print(f"\nQuality Loop Stage Final State:")
+        print("\nQuality Loop Stage Final State:")
         print(f"  Status: {stage.status}")
         print(f"  Outputs: {stage.outputs}")
 
         jump_count = stage.context.get("_jump_count", 0)
         if jump_count > 0:
-            print(f"\n  Jump tracking (self-loops):")
+            print("\n  Jump tracking (self-loops):")
             print(f"    Total jumps: {jump_count}")
             for i, jump in enumerate(stage.context.get("_jump_history", []), 1):
                 print(f"    {i}. {jump['from_stage']} -> {jump['to_stage']} (context: {jump['context_keys']})")
@@ -300,16 +302,16 @@ Expected: 3 runs (33 + 33 + 34 = 100 items)
     processor.process_all(timeout=60.0)
 
     result = store.retrieve(workflow.id)
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"RESULT: Workflow Status = {result.status}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     stage = result.stages[0]
-    print(f"\nBatch Stage Final State:")
+    print("\nBatch Stage Final State:")
     print(f"  Status: {stage.status}")
     print(f"  Outputs: {stage.outputs}")
 
-    print(f"\n  Context (checkpoint data preserved across retries):")
+    print("\n  Context (checkpoint data preserved across retries):")
     print(f"    processed_count: {stage.context.get('processed_count', 'N/A')}")
     print(f"    _batch_attempt: {stage.context.get('_batch_attempt', 'N/A')}")
     print(f"    _checkpoint_saved: {stage.context.get('_checkpoint_saved', False)}")
