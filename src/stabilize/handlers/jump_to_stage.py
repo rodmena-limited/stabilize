@@ -168,12 +168,75 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             target_stage.status = WorkflowStatus.NOT_STARTED
             target_stage.start_time = None
             target_stage.end_time = None
+            target_stage.outputs = {}  # Clear cached outputs
             # Reset all tasks to NOT_STARTED so they run again
             for task in target_stage.tasks:
                 task.status = WorkflowStatus.NOT_STARTED
                 task.start_time = None
                 task.end_time = None
                 task.task_exception_details = {}
+
+            # Reset all downstream stages that depend on target (for retry loops)
+            # This ensures verification/aggregation stages re-run after implementation retry
+            downstream_stages = self._get_downstream_stages(execution, target_stage.ref_id)
+            for stage in downstream_stages:
+                if stage.id != source_stage.id:  # Don't reset source yet
+                    logger.debug("Resetting downstream stage: %s", stage.ref_id)
+                    stage.status = WorkflowStatus.NOT_STARTED
+                    stage.start_time = None
+                    stage.end_time = None
+                    stage.outputs = {}
+                    for task in stage.tasks:
+                        task.status = WorkflowStatus.NOT_STARTED
+                        task.start_time = None
+                        task.end_time = None
+                        task.task_exception_details = {}
+                    self.repository.store_stage(stage)
+
+            # Determine if this is a forward or backward jump
+            # Forward jump: source is NOT downstream of target (e.g., skip to execution)
+            # Backward jump: source IS downstream of target (e.g., retry loop)
+            is_backward_jump = source_stage in downstream_stages
+            logger.info(
+                "Jump direction: %s (source=%s, target=%s, downstream=%s)",
+                "backward" if is_backward_jump else "forward",
+                source_stage.ref_id,
+                target_stage.ref_id,
+                [s.ref_id for s in downstream_stages],
+            )
+
+            if is_backward_jump:
+                # Backward jump (retry loop): reset source so it can run again
+                source_stage.status = WorkflowStatus.NOT_STARTED
+                source_stage.start_time = None
+                source_stage.end_time = None
+                source_stage.outputs = {}
+                for task in source_stage.tasks:
+                    task.status = WorkflowStatus.NOT_STARTED
+                    task.start_time = None
+                    task.end_time = None
+                    task.task_exception_details = {}
+            else:
+                # Forward jump (skip ahead): mark source as succeeded
+                source_stage.status = WorkflowStatus.SUCCEEDED
+                source_stage.end_time = self.current_time_millis()
+                for task in source_stage.tasks:
+                    if task.status == WorkflowStatus.RUNNING:
+                        task.status = WorkflowStatus.SUCCEEDED
+                        task.end_time = self.current_time_millis()
+
+                # Mark all stages between source and target as SKIPPED
+                # These are stages that would normally run but are being bypassed
+                skipped_stages = self._get_skipped_stages(execution, source_stage, target_stage)
+                for stage in skipped_stages:
+                    if stage.status == WorkflowStatus.NOT_STARTED:
+                        logger.debug("Marking skipped stage: %s", stage.ref_id)
+                        stage.status = WorkflowStatus.SKIPPED
+                        stage.end_time = self.current_time_millis()
+                        for task in stage.tasks:
+                            task.status = WorkflowStatus.SKIPPED
+                            task.end_time = self.current_time_millis()
+                        self.repository.store_stage(stage)
 
             # Merge jump context into target stage
             if message.jump_context:
@@ -238,3 +301,64 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             )
 
         self.with_stage(message, on_stage)
+
+    def _get_downstream_stages(self, execution: object, target_ref_id: str) -> list:
+        """Get all stages that depend on the target stage (directly or transitively).
+
+        This is used to reset downstream stages when jumping back to an earlier
+        stage in a retry loop, ensuring verification/aggregation stages re-run.
+
+        Args:
+            execution: The workflow execution containing all stages
+            target_ref_id: The ref_id of the target stage
+
+        Returns:
+            List of stages that depend on the target (directly or transitively)
+        """
+        downstream: list[StageExecution] = []
+        visited: set[str] = set()
+
+        def find_dependents(ref_id: str) -> None:
+            for stage in execution.stages:
+                if stage.ref_id in visited:
+                    continue
+                prereqs = stage.requisite_stage_ref_ids or []
+                if ref_id in prereqs:
+                    visited.add(stage.ref_id)
+                    downstream.append(stage)
+                    find_dependents(stage.ref_id)
+
+        find_dependents(target_ref_id)
+        return downstream
+
+    def _get_skipped_stages(
+        self,
+        execution: object,
+        source_stage: StageExecution,
+        target_stage: StageExecution,
+    ) -> list:
+        """Get stages that should be skipped when jumping forward.
+
+        These are stages that depend on the source (directly or transitively)
+        but are NOT the target or in the target's downstream chain.
+
+        Args:
+            execution: The workflow execution containing all stages
+            source_stage: The stage jumping from
+            target_stage: The stage jumping to
+
+        Returns:
+            List of stages to mark as SKIPPED
+        """
+        # Get all stages downstream of source (depend on source)
+        source_downstream = set(s.ref_id for s in self._get_downstream_stages(execution, source_stage.ref_id))
+
+        # Get target and all stages downstream of target
+        target_chain = {target_stage.ref_id}
+        for s in self._get_downstream_stages(execution, target_stage.ref_id):
+            target_chain.add(s.ref_id)
+
+        # Skipped = downstream of source BUT NOT in target chain
+        skipped_ref_ids = source_downstream - target_chain
+
+        return [s for s in execution.stages if s.ref_id in skipped_ref_ids]
