@@ -13,7 +13,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.dag.graph import StageGraphBuilder
-from stabilize.errors import ConcurrencyError
+from stabilize.errors import ConcurrencyError, is_transient
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.stage import SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
@@ -183,6 +183,10 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                     self.queue.push(new_message, self.retry_delay)
 
             except Exception as e:
+                if is_transient(e):
+                    # Transient error - re-raise to allow retry by QueueProcessor
+                    raise
+
                 logger.error(
                     "Error starting stage %s (%s): %s",
                     stage.name,

@@ -22,6 +22,7 @@ from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus, validate_transition
 from stabilize.models.task import TaskExecution
 from stabilize.models.workflow import Workflow
+from stabilize.persistence.store import WorkflowNotFoundError
 from stabilize.queue.messages import (
     CompleteWorkflow,
     ContinueParentStage,
@@ -107,9 +108,8 @@ class StabilizeHandler(MessageHandler[M], ABC):
         """
         try:
             execution = self.repository.retrieve(message.execution_id)
-            block(execution)
-        except Exception as e:
-            logger.error("Failed to retrieve execution %s: %s", message.execution_id, e)
+        except WorkflowNotFoundError:
+            logger.error("Execution not found: %s", message.execution_id)
             # Use atomic transaction with deduplication to prevent infinite retries
             with self.repository.transaction(self.queue) as txn:
                 if hasattr(message, "message_id") and message.message_id:
@@ -124,6 +124,12 @@ class StabilizeHandler(MessageHandler[M], ABC):
                         execution_id=message.execution_id,
                     )
                 )
+            return
+        except Exception as e:
+            logger.error("Failed to retrieve execution %s: %s", message.execution_id, e)
+            raise
+
+        block(execution)
 
     def with_stage(
         self,
@@ -139,7 +145,6 @@ class StabilizeHandler(MessageHandler[M], ABC):
         """
         try:
             stage = self.repository.retrieve_stage(message.stage_id)
-            block(stage)
         except ValueError:
             logger.error("Stage not found: %s", message.stage_id)
             # Use atomic transaction with deduplication to prevent infinite retries
@@ -157,9 +162,12 @@ class StabilizeHandler(MessageHandler[M], ABC):
                         stage_id=message.stage_id,
                     )
                 )
+            return
         except Exception as e:
             logger.error("Failed to retrieve stage %s: %s", message.stage_id, e)
             raise
+
+        block(stage)
 
     def with_task(
         self,

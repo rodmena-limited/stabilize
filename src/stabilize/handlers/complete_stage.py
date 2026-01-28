@@ -15,6 +15,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.dag.graph import StageGraphBuilder
+from stabilize.errors import is_transient
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
@@ -284,6 +285,11 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                             )
 
             except Exception as e:
+                if is_transient(e):
+                    # Transient error - re-raise to allow retry by QueueProcessor
+                    # or retry_on_concurrency_error wrapper
+                    raise
+
                 logger.error(
                     "Error completing stage %s: %s",
                     stage.name,
