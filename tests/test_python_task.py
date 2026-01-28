@@ -1,5 +1,6 @@
 """Tests for PythonTask."""
 
+import os
 import tempfile
 from pathlib import Path
 
@@ -332,7 +333,8 @@ RESULT = os.getcwd()
         result = task.execute(stage)
 
         assert result.status == WorkflowStatus.SUCCEEDED
-        assert result.outputs["result"] == "/tmp"
+        # On macOS, /tmp is a symlink to /private/tmp
+        assert result.outputs["result"] == os.path.realpath("/tmp")
 
     def test_command_args(self) -> None:
         """Test passing command line arguments."""

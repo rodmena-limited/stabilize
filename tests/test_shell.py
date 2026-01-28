@@ -46,7 +46,8 @@ class TestShellTaskBasic:
 
     def test_command_with_args(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
         """Test command with multiple arguments."""
-        mock_stage.context = {"command": "echo -n hello world"}
+        # Use printf instead of echo -n for cross-platform compatibility
+        mock_stage.context = {"command": "printf '%s' 'hello world'"}
         result = shell_task.execute(mock_stage)
 
         assert result.status == WorkflowStatus.SUCCEEDED
@@ -70,7 +71,8 @@ class TestShellTaskCwd:
         result = shell_task.execute(mock_stage)
 
         assert result.status == WorkflowStatus.SUCCEEDED
-        assert result.outputs["stdout"] == "/tmp"
+        # On macOS, /tmp is a symlink to /private/tmp
+        assert result.outputs["stdout"] == os.path.realpath("/tmp")
 
     def test_cwd_with_file_operations(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
         """Test file operations in specific directory."""
@@ -258,7 +260,8 @@ class TestShellTaskBinary:
 
     def test_binary_output(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
         """Test binary output mode."""
-        mock_stage.context = {"command": "echo -n hello", "binary": True}
+        # Use printf instead of echo -n for cross-platform compatibility
+        mock_stage.context = {"command": "printf '%s' hello", "binary": True}
         result = shell_task.execute(mock_stage)
 
         assert result.status == WorkflowStatus.SUCCEEDED
@@ -267,7 +270,8 @@ class TestShellTaskBinary:
 
     def test_binary_base64(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
         """Test binary output includes base64 encoding."""
-        mock_stage.context = {"command": "echo -n hello", "binary": True}
+        # Use printf instead of echo -n for cross-platform compatibility
+        mock_stage.context = {"command": "printf '%s' hello", "binary": True}
         result = shell_task.execute(mock_stage)
 
         assert result.status == WorkflowStatus.SUCCEEDED

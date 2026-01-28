@@ -196,7 +196,9 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             # Determine if this is a forward or backward jump
             # Forward jump: source is NOT downstream of target (e.g., skip to execution)
             # Backward jump: source IS downstream of target (e.g., retry loop)
-            is_backward_jump = source_stage in downstream_stages
+            # Special case: self-loop (jumping to yourself) is always a backward jump
+            is_self_loop = source_stage.id == target_stage.id
+            is_backward_jump = is_self_loop or source_stage in downstream_stages
             logger.info(
                 "Jump direction: %s (source=%s, target=%s, downstream=%s)",
                 "backward" if is_backward_jump else "forward",
@@ -280,7 +282,6 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
 
             # When jumping to a different stage, store source separately
             # When jumping to same stage (self-loop), they're the same object
-            is_self_loop = source_stage.id == target_stage.id
             if not is_self_loop:
                 self.repository.store_stage(source_stage)
 

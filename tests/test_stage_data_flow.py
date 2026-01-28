@@ -199,7 +199,7 @@ RESULT = {"result": f"5! = {factorial}"}
                     ref_id="root",
                     type="shell",
                     name="Root",
-                    context={"command": "echo -n '10'"},
+                    context={"command": "printf '%s' '10'"},
                     tasks=[TaskExecution.create("Run", "shell", stage_start=True, stage_end=True)],
                 ),
                 # Three parallel branches - each outputs unique values
@@ -402,7 +402,7 @@ RESULT = {"sum": sum(numbers), "count": len(numbers)}
                     ref_id="stage1",
                     type="shell",
                     name="Generate",
-                    context={"command": "echo -n hello"},
+                    context={"command": "printf '%s' hello"},
                     tasks=[TaskExecution.create("Run", "shell", stage_start=True, stage_end=True)],
                 ),
                 StageExecution(
@@ -532,7 +532,7 @@ class TestDockerTaskDataFlow:
                         ref_id="shell_stage",
                         type="shell",
                         name="Generate Value",
-                        context={"command": "echo -n test_data"},
+                        context={"command": "printf '%s' test_data"},
                         tasks=[TaskExecution.create("Run", "shell", stage_start=True, stage_end=True)],
                     ),
                     StageExecution(
@@ -640,7 +640,7 @@ class TestHTTPTaskDataFlow:
                     ref_id="shell_stage",
                     type="shell",
                     name="Generate Path",
-                    context={"command": "echo -n status"},
+                    context={"command": "printf '%s' status"},
                     tasks=[TaskExecution.create("Run", "shell", stage_start=True, stage_end=True)],
                 ),
                 StageExecution(
@@ -681,7 +681,7 @@ class TestMixedTaskDataFlow:
                     ref_id="shell1",
                     type="shell",
                     name="Generate",
-                    context={"command": "echo -n '42'"},
+                    context={"command": "printf '%s' '42'"},
                     tasks=[TaskExecution.create("Run", "shell", stage_start=True, stage_end=True)],
                 ),
                 # Stage 2: Python processes shell output
