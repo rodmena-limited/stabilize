@@ -191,7 +191,11 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                         task.start_time = None
                         task.end_time = None
                         task.task_exception_details = {}
-                    self.repository.store_stage(stage)
+                    # Wrap in retry to handle concurrent updates to downstream stages
+                    self.retry_on_concurrency_error(
+                        lambda s=stage: self.repository.store_stage(s),
+                        f"storing downstream stage {stage.ref_id}",
+                    )
 
             # Determine if this is a forward or backward jump
             # Forward jump: source is NOT downstream of target (e.g., skip to execution)
@@ -238,7 +242,11 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                         for task in stage.tasks:
                             task.status = WorkflowStatus.SKIPPED
                             task.end_time = self.current_time_millis()
-                        self.repository.store_stage(stage)
+                        # Wrap in retry to handle concurrent updates to skipped stages
+                        self.retry_on_concurrency_error(
+                            lambda s=stage: self.repository.store_stage(s),
+                            f"storing skipped stage {stage.ref_id}",
+                        )
 
             # Merge jump context into target stage
             if message.jump_context:
@@ -283,7 +291,11 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             # When jumping to a different stage, store source separately
             # When jumping to same stage (self-loop), they're the same object
             if not is_self_loop:
-                self.repository.store_stage(source_stage)
+                # Wrap in retry to handle concurrent updates to source stage
+                self.retry_on_concurrency_error(
+                    lambda: self.repository.store_stage(source_stage),
+                    f"storing source stage {source_stage.ref_id}",
+                )
 
             self.txn_helper.execute_atomic(
                 stage=target_stage,

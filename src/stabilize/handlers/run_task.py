@@ -896,7 +896,8 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             if fresh_stage is None:
                 logger.error("Stage %s not found during exception handling", message.stage_id)
                 # Mark message processed and push CompleteTask to prevent workflow hang
-                self.txn_helper.execute_atomic(
+                # Use critical retry for error path - more aggressive retry for high contention
+                self.txn_helper.execute_atomic_critical(
                     source_message=message,
                     messages_to_push=[
                         (
@@ -910,7 +911,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                             None,
                         )
                     ],
-                    handler_name="RunTask",
+                    handler_name="RunTask_ErrorHandling",
                 )
                 return
 
@@ -918,7 +919,8 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             status = fresh_stage.failure_status(default=WorkflowStatus.TERMINAL)
 
             # Atomic: store stage + mark processed + push CompleteTask together
-            self.txn_helper.execute_atomic(
+            # Use critical retry for error path - more aggressive retry for high contention
+            self.txn_helper.execute_atomic_critical(
                 stage=fresh_stage,
                 source_message=message,
                 messages_to_push=[
@@ -934,7 +936,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                         None,
                     )
                 ],
-                handler_name="RunTask",
+                handler_name="RunTask_ErrorHandling",
             )
 
         self.retry_on_concurrency_error(do_mark_terminal, f"marking task {message.task_id} terminal")
@@ -958,7 +960,8 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             if fresh_stage is None:
                 logger.error("Stage %s not found during error completion", message.stage_id)
                 # Mark message processed and push CompleteTask to prevent workflow hang
-                self.txn_helper.execute_atomic(
+                # Use critical retry for error path - more aggressive retry for high contention
+                self.txn_helper.execute_atomic_critical(
                     source_message=message,
                     messages_to_push=[
                         (
@@ -972,7 +975,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                             None,
                         )
                     ],
-                    handler_name="RunTask",
+                    handler_name="RunTask_ErrorHandling",
                 )
                 return
 
@@ -981,7 +984,8 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             }
 
             # Atomic: store stage + mark processed + push CompleteTask together
-            self.txn_helper.execute_atomic(
+            # Use critical retry for error path - more aggressive retry for high contention
+            self.txn_helper.execute_atomic_critical(
                 stage=fresh_stage,
                 source_message=message,
                 messages_to_push=[
@@ -996,7 +1000,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                         None,
                     )
                 ],
-                handler_name="RunTask",
+                handler_name="RunTask_ErrorHandling",
             )
 
         self.retry_on_concurrency_error(do_complete, f"completing task {message.task_id} with error")

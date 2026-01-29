@@ -96,6 +96,22 @@ DEADLOCK_RETRY_POLICY = RetryWithBackoffPolicy(
     should_handle=is_deadlock_error,
 )
 
+# More aggressive retry policy for critical error handling paths.
+# Error recording is critical - we should try harder to persist errors
+# even under high contention (e.g., multiple tasks failing simultaneously).
+ERROR_HANDLING_BACKOFF = ExponentialDelay(
+    min_delay=timedelta(milliseconds=25),  # Start faster
+    max_delay=timedelta(seconds=10),  # Allow longer max delay
+    factor=2,
+    jitter=0.3,  # More jitter to reduce thundering herd
+)
+
+ERROR_HANDLING_RETRY_POLICY = RetryWithBackoffPolicy(
+    max_retries=10,  # 2x normal retries for critical error paths
+    backoff=ERROR_HANDLING_BACKOFF,
+    should_handle=is_deadlock_error,
+)
+
 
 class TransactionHelper:
     """Helper for executing atomic transactions with common patterns.
@@ -169,6 +185,73 @@ class TransactionHelper:
         except RetryLimitReached as e:
             logger.error(
                 "Transaction failed after max retries due to lock contention: %s",
+                handler_name,
+            )
+            # Re-raise the original exception
+            raise e.__cause__ if e.__cause__ else e from e
+
+    def execute_atomic_critical(
+        self,
+        stage: StageExecution | None = None,
+        source_message: Message | None = None,
+        messages_to_push: Sequence[tuple[Message, int | None]] | None = None,
+        handler_name: str = "UnknownHandler",
+        require_atomic: bool = False,
+    ) -> None:
+        """
+        Execute an atomic transaction with more aggressive retry for critical paths.
+
+        Use this for error handling and other critical paths where failure to
+        persist state could leave the system in an inconsistent state or lose
+        important error information.
+
+        Uses ERROR_HANDLING_RETRY_POLICY with 10 retries (vs 5 for normal operations)
+        and more aggressive backoff settings.
+
+        Args:
+            stage: Optional stage to store/update
+            source_message: Optional message to mark as processed
+            messages_to_push: List of (message, delay_seconds) tuples to push
+            handler_name: Name of the handler for logging/metrics
+            require_atomic: If True, raises RuntimeError if the transaction
+                           does not provide true database-level atomicity.
+
+        Raises:
+            RuntimeError: If require_atomic=True and transaction is not atomic
+            Exception: If the transaction fails after all retries
+        """
+        messages_to_push = messages_to_push or []
+
+        @ERROR_HANDLING_RETRY_POLICY
+        def _execute() -> None:
+            with self.repository.transaction(self.queue) as txn:
+                if require_atomic and not txn.is_atomic:
+                    raise RuntimeError(
+                        f"Atomic transaction required for {handler_name} but the "
+                        "configured storage backend does not provide true atomicity. "
+                        "Use SqliteWorkflowStore or PostgresWorkflowStore for "
+                        "production critical systems."
+                    )
+
+                if stage:
+                    txn.store_stage(stage)
+
+                if source_message and source_message.message_id:
+                    execution_id = getattr(source_message, "execution_id", None)
+                    txn.mark_message_processed(
+                        message_id=source_message.message_id,
+                        handler_type=handler_name,
+                        execution_id=execution_id,
+                    )
+
+                for msg, delay in messages_to_push:
+                    txn.push_message(msg, delay or 0)
+
+        try:
+            _execute()
+        except RetryLimitReached as e:
+            logger.critical(
+                "CRITICAL: Transaction failed after max retries in error handling path: %s",
                 handler_name,
             )
             # Re-raise the original exception

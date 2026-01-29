@@ -44,6 +44,12 @@ class HandlerConfig:
         STABILIZE_HANDLER_BACKOFF_FACTOR: Backoff multiplication factor (default: 2.0)
         STABILIZE_HANDLER_JITTER: Backoff jitter factor (default: 0.25)
 
+        STABILIZE_ERROR_MAX_RETRIES: Max retries for error handling paths (default: 10)
+        STABILIZE_ERROR_MIN_DELAY_MS: Min backoff for error handling (default: 25)
+        STABILIZE_ERROR_MAX_DELAY_MS: Max backoff for error handling (default: 10000)
+        STABILIZE_ERROR_BACKOFF_FACTOR: Backoff factor for error handling (default: 2.0)
+        STABILIZE_ERROR_JITTER: Jitter for error handling (default: 0.3)
+
         STABILIZE_MAX_STAGE_WAIT_RETRIES: Max retries waiting for stages (default: 240)
         STABILIZE_DEFAULT_TASK_TIMEOUT_S: Default task timeout in seconds (default: 14400 = 4 hours)
         STABILIZE_TASK_BACKOFF_MIN_MS: Task retry min delay in ms (default: 1000)
@@ -60,6 +66,12 @@ class HandlerConfig:
         concurrency_max_delay_ms: Max backoff delay for concurrency retries
         concurrency_backoff_factor: Exponential backoff factor
         concurrency_jitter: Jitter factor to prevent thundering herd
+
+        error_handling_max_retries: Max retries for error handling paths (more aggressive)
+        error_handling_min_delay_ms: Min backoff for error handling (starts faster)
+        error_handling_max_delay_ms: Max backoff for error handling (allows longer)
+        error_handling_backoff_factor: Backoff factor for error handling
+        error_handling_jitter: Higher jitter to reduce thundering herd
 
         max_stage_wait_retries: Max retries waiting for upstream stages
             (with 15s delay, 240 retries = 1 hour)
@@ -79,6 +91,14 @@ class HandlerConfig:
     concurrency_max_delay_ms: int = 1000
     concurrency_backoff_factor: float = 2.0
     concurrency_jitter: float = 0.25
+
+    # Error handling retry (more aggressive for critical paths)
+    # Used when recording errors - we should try harder to persist error info
+    error_handling_max_retries: int = 10  # 2x normal for critical paths
+    error_handling_min_delay_ms: int = 25  # Start faster
+    error_handling_max_delay_ms: int = 10000  # Allow longer backoff
+    error_handling_backoff_factor: float = 2.0
+    error_handling_jitter: float = 0.3  # More jitter to reduce thundering herd
 
     # Long-running retry limits
     max_stage_wait_retries: int = 240  # With 15s delay = 1 hour
@@ -115,6 +135,12 @@ class HandlerConfig:
             concurrency_max_delay_ms=int(os.getenv("STABILIZE_HANDLER_MAX_DELAY_MS", "1000")),
             concurrency_backoff_factor=float(os.getenv("STABILIZE_HANDLER_BACKOFF_FACTOR", "2.0")),
             concurrency_jitter=float(os.getenv("STABILIZE_HANDLER_JITTER", "0.25")),
+            # Error handling retry settings (more aggressive for critical paths)
+            error_handling_max_retries=int(os.getenv("STABILIZE_ERROR_MAX_RETRIES", "10")),
+            error_handling_min_delay_ms=int(os.getenv("STABILIZE_ERROR_MIN_DELAY_MS", "25")),
+            error_handling_max_delay_ms=int(os.getenv("STABILIZE_ERROR_MAX_DELAY_MS", "10000")),
+            error_handling_backoff_factor=float(os.getenv("STABILIZE_ERROR_BACKOFF_FACTOR", "2.0")),
+            error_handling_jitter=float(os.getenv("STABILIZE_ERROR_JITTER", "0.3")),
             # Stage wait retry settings
             max_stage_wait_retries=int(os.getenv("STABILIZE_MAX_STAGE_WAIT_RETRIES", "240")),
             # Task execution settings (4 hours default for long-running workflows)
@@ -136,6 +162,15 @@ class HandlerConfig:
             max_delay_ms=self.concurrency_max_delay_ms,
             factor=self.concurrency_backoff_factor,
             jitter=self.concurrency_jitter,
+        )
+
+    def get_error_handling_backoff_config(self) -> BackoffConfig:
+        """Get BackoffConfig for error handling retries (more aggressive)."""
+        return BackoffConfig(
+            min_delay_ms=self.error_handling_min_delay_ms,
+            max_delay_ms=self.error_handling_max_delay_ms,
+            factor=self.error_handling_backoff_factor,
+            jitter=self.error_handling_jitter,
         )
 
 
