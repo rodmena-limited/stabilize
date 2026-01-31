@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from functools import partial
 from typing import TYPE_CHECKING
 
 from stabilize.handlers.base import StabilizeHandler
@@ -32,6 +33,7 @@ from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
+    from stabilize.models.workflow import Workflow
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue.queue import Queue
 
@@ -193,7 +195,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                         task.task_exception_details = {}
                     # Wrap in retry to handle concurrent updates to downstream stages
                     self.retry_on_concurrency_error(
-                        lambda s=stage: self.repository.store_stage(s),
+                        partial(self.repository.store_stage, stage),
                         f"storing downstream stage {stage.ref_id}",
                     )
 
@@ -244,7 +246,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                             task.end_time = self.current_time_millis()
                         # Wrap in retry to handle concurrent updates to skipped stages
                         self.retry_on_concurrency_error(
-                            lambda s=stage: self.repository.store_stage(s),
+                            partial(self.repository.store_stage, stage),
                             f"storing skipped stage {stage.ref_id}",
                         )
 
@@ -315,7 +317,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
 
         self.with_stage(message, on_stage)
 
-    def _get_downstream_stages(self, execution: object, target_ref_id: str) -> list:
+    def _get_downstream_stages(self, execution: Workflow, target_ref_id: str) -> list[StageExecution]:
         """Get all stages that depend on the target stage (directly or transitively).
 
         This is used to reset downstream stages when jumping back to an earlier
@@ -335,7 +337,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             for stage in execution.stages:
                 if stage.ref_id in visited:
                     continue
-                prereqs = stage.requisite_stage_ref_ids or []
+                prereqs = stage.requisite_stage_ref_ids
                 if ref_id in prereqs:
                     visited.add(stage.ref_id)
                     downstream.append(stage)
@@ -346,10 +348,10 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
 
     def _get_skipped_stages(
         self,
-        execution: object,
+        execution: Workflow,
         source_stage: StageExecution,
         target_stage: StageExecution,
-    ) -> list:
+    ) -> list[StageExecution]:
         """Get stages that should be skipped when jumping forward.
 
         These are stages that depend on the source (directly or transitively)

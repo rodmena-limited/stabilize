@@ -231,7 +231,7 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         """Start the stage if it's ready to run."""
         # Check if already processed
         if stage.status != WorkflowStatus.NOT_STARTED:
-            logger.warning(
+            logger.debug(
                 "Ignoring StartStage for %s - already %s",
                 stage.name,
                 stage.status,
@@ -276,8 +276,27 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                 )
             return
 
-        # Plan the stage (this modifies stage state but doesn't persist yet)
+        # CRITICAL FIX: Claim the stage atomically BEFORE doing expensive planning.
+        # This prevents race conditions where multiple handlers both pass the
+        # in-memory status check and then both call _plan_stage() (which emits
+        # callbacks like "PHASE START") before optimistic locking kicks in.
         stage.start_time = self.current_time_millis()
+        self.set_stage_status(stage, WorkflowStatus.RUNNING)
+
+        try:
+            with self.repository.transaction(self.queue) as txn:
+                txn.store_stage(stage)
+        except ConcurrencyError:
+            # Another handler already claimed this stage (race condition with
+            # multiple upstream stages completing simultaneously). This is safe
+            # to ignore - the stage is already being processed.
+            logger.debug(
+                "Ignoring duplicate StartStage for %s (concurrent claim)",
+                stage.name,
+            )
+            return
+
+        # Now we have exclusive ownership - safe to do expensive planning
         try:
             self._plan_stage(stage)
         except Exception as e:
@@ -289,12 +308,11 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                 e,
             )
             raise
-        self.set_stage_status(stage, WorkflowStatus.RUNNING)
 
         # Collect messages to push BEFORE starting the transaction
         messages_to_push = self._collect_start_messages(stage, message)
 
-        # Atomic: store stage + push all start messages together
+        # Atomic: store planned stage + push all start messages together
         try:
             with self.repository.transaction(self.queue) as txn:
                 txn.store_stage(stage)
@@ -310,11 +328,10 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                 for msg in messages_to_push:
                     txn.push_message(msg)
         except ConcurrencyError:
-            # Another handler already started this stage (race condition with
-            # multiple upstream stages completing simultaneously). This is safe
-            # to ignore - the stage is already being processed.
-            logger.debug(
-                "Ignoring StartStage for %s - another handler already started it (concurrent update)",
+            # This shouldn't happen since we already claimed the stage,
+            # but handle it gracefully just in case.
+            logger.warning(
+                "Unexpected ConcurrencyError after claiming stage %s",
                 stage.name,
             )
             return
