@@ -690,7 +690,7 @@ class PostgresQueue(Queue):
                         "original_id": row["id"],
                         "message_id": row["message_id"],
                         "message_type": row["message_type"],
-                        "payload": json.dumps(row["payload"]) if isinstance(row["payload"], dict) else row["payload"],
+                        "payload": (json.dumps(row["payload"]) if isinstance(row["payload"], dict) else row["payload"]),
                         "attempts": row["attempts"],
                         "error": error or "Max attempts exceeded",
                         "created_at": row["created_at"],
@@ -789,7 +789,7 @@ class PostgresQueue(Queue):
                     {
                         "message_id": row["message_id"] + "-replay",
                         "message_type": row["message_type"],
-                        "payload": json.dumps(row["payload"]) if isinstance(row["payload"], dict) else row["payload"],
+                        "payload": (json.dumps(row["payload"]) if isinstance(row["payload"], dict) else row["payload"]),
                     },
                 )
 

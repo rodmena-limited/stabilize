@@ -97,8 +97,7 @@ class SqliteQueue(Queue):
         conn = self._get_connection()
 
         # Main queue table
-        conn.execute(
-            f"""
+        conn.execute(f"""
             CREATE TABLE IF NOT EXISTS {self.table_name} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 message_id TEXT NOT NULL UNIQUE,
@@ -111,24 +110,18 @@ class SqliteQueue(Queue):
                 version INTEGER DEFAULT 0,
                 created_at TEXT DEFAULT (datetime('now', 'utc'))
             )
-        """
-        )
-        conn.execute(
-            f"""
+        """)
+        conn.execute(f"""
             CREATE INDEX IF NOT EXISTS idx_{self.table_name}_deliver
             ON {self.table_name}(deliver_at)
-        """
-        )
-        conn.execute(
-            f"""
+        """)
+        conn.execute(f"""
             CREATE INDEX IF NOT EXISTS idx_{self.table_name}_locked
             ON {self.table_name}(locked_until)
-        """
-        )
+        """)
 
         # Dead Letter Queue table
-        conn.execute(
-            f"""
+        conn.execute(f"""
             CREATE TABLE IF NOT EXISTS {self.table_name}_dlq (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 original_id INTEGER,
@@ -141,14 +134,11 @@ class SqliteQueue(Queue):
                 created_at TEXT DEFAULT (datetime('now', 'utc')),
                 moved_at TEXT DEFAULT (datetime('now', 'utc'))
             )
-        """
-        )
-        conn.execute(
-            f"""
+        """)
+        conn.execute(f"""
             CREATE INDEX IF NOT EXISTS idx_{self.table_name}_dlq_type
             ON {self.table_name}_dlq(message_type)
-        """
-        )
+        """)
         conn.commit()
 
     def _serialize_message(self, message: Message) -> str:

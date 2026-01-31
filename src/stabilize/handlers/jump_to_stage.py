@@ -43,6 +43,22 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_JUMPS = 10
 
 
+def _reset_stage_for_retry(stage: StageExecution) -> None:
+    """Reset a stage and its tasks to NOT_STARTED for retry.
+
+    This modifies the stage in place. Used when reloading fresh from DB.
+    """
+    stage.status = WorkflowStatus.NOT_STARTED
+    stage.start_time = None
+    stage.end_time = None
+    stage.outputs = {}
+    for task in stage.tasks:
+        task.status = WorkflowStatus.NOT_STARTED
+        task.start_time = None
+        task.end_time = None
+        task.task_exception_details = {}
+
+
 class JumpToStageHandler(StabilizeHandler[JumpToStage]):
     """
     Handler for JumpToStage messages.
@@ -69,6 +85,51 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
     @property
     def message_type(self) -> type[JumpToStage]:
         return JumpToStage
+
+    def _reload_reset_and_store(
+        self,
+        stage_id: str,
+        context_updates: dict | None = None,
+        target_status: WorkflowStatus = WorkflowStatus.NOT_STARTED,
+    ) -> None:
+        """Reload a stage from DB, apply status change, and store it.
+
+        This pattern ensures we always have the latest version number before
+        storing, preventing optimistic locking failures due to stale versions.
+
+        Args:
+            stage_id: The stage ID to reload and update
+            context_updates: Optional context updates to apply
+            target_status: The status to set (NOT_STARTED, SUCCEEDED, SKIPPED)
+        """
+        # Reload fresh from DB to get current version
+        fresh_stage = self.repository.retrieve_stage(stage_id)
+        if fresh_stage is None:
+            logger.warning("Stage %s not found during reload", stage_id)
+            return
+
+        if target_status == WorkflowStatus.NOT_STARTED:
+            _reset_stage_for_retry(fresh_stage)
+        elif target_status == WorkflowStatus.SUCCEEDED:
+            fresh_stage.status = WorkflowStatus.SUCCEEDED
+            fresh_stage.end_time = self.current_time_millis()
+            for task in fresh_stage.tasks:
+                if task.status == WorkflowStatus.RUNNING:
+                    task.status = WorkflowStatus.SUCCEEDED
+                    task.end_time = self.current_time_millis()
+        elif target_status == WorkflowStatus.SKIPPED:
+            fresh_stage.status = WorkflowStatus.SKIPPED
+            fresh_stage.end_time = self.current_time_millis()
+            for task in fresh_stage.tasks:
+                task.status = WorkflowStatus.SKIPPED
+                task.end_time = self.current_time_millis()
+        else:
+            fresh_stage.status = target_status
+
+        if context_updates:
+            fresh_stage.context.update(context_updates)
+
+        self.repository.store_stage(fresh_stage)
 
     def handle(self, message: JumpToStage) -> None:
         """Handle the JumpToStage message."""
@@ -184,18 +245,11 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             for stage in downstream_stages:
                 if stage.id != source_stage.id:  # Don't reset source yet
                     logger.debug("Resetting downstream stage: %s", stage.ref_id)
-                    stage.status = WorkflowStatus.NOT_STARTED
-                    stage.start_time = None
-                    stage.end_time = None
-                    stage.outputs = {}
-                    for task in stage.tasks:
-                        task.status = WorkflowStatus.NOT_STARTED
-                        task.start_time = None
-                        task.end_time = None
-                        task.task_exception_details = {}
-                    # Wrap in retry to handle concurrent updates to downstream stages
+                    # CRITICAL FIX: Reload stage from DB before storing to get latest version.
+                    # This prevents ConcurrencyError due to stale version numbers when
+                    # multiple handlers are processing stages concurrently.
                     self.retry_on_concurrency_error(
-                        partial(self.repository.store_stage, stage),
+                        partial(self._reload_reset_and_store, stage.id),
                         f"storing downstream stage {stage.ref_id}",
                     )
 
@@ -239,14 +293,14 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                 for stage in skipped_stages:
                     if stage.status == WorkflowStatus.NOT_STARTED:
                         logger.debug("Marking skipped stage: %s", stage.ref_id)
-                        stage.status = WorkflowStatus.SKIPPED
-                        stage.end_time = self.current_time_millis()
-                        for task in stage.tasks:
-                            task.status = WorkflowStatus.SKIPPED
-                            task.end_time = self.current_time_millis()
-                        # Wrap in retry to handle concurrent updates to skipped stages
+                        # CRITICAL FIX: Reload stage from DB before storing to get latest version.
                         self.retry_on_concurrency_error(
-                            partial(self.repository.store_stage, stage),
+                            partial(
+                                self._reload_reset_and_store,
+                                stage.id,
+                                None,
+                                WorkflowStatus.SKIPPED,
+                            ),
                             f"storing skipped stage {stage.ref_id}",
                         )
 
@@ -273,7 +327,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                     "from_stage": source_stage.ref_id,
                     "to_stage": message.target_stage_ref_id,
                     "jump_number": new_jump_count,
-                    "context_keys": list(message.jump_context.keys()) if message.jump_context else [],
+                    "context_keys": (list(message.jump_context.keys()) if message.jump_context else []),
                 }
             )
             source_stage.context["_jump_history"] = jump_history
@@ -293,14 +347,47 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             # When jumping to a different stage, store source separately
             # When jumping to same stage (self-loop), they're the same object
             if not is_self_loop:
-                # Wrap in retry to handle concurrent updates to source stage
+                # Build context updates for source stage
+                source_context_updates = {
+                    "_jump_count": new_jump_count,
+                    "_jump_history": jump_history,
+                }
+
+                # CRITICAL FIX: Reload stage from DB before storing to get latest version.
+                # Use the appropriate target status based on jump direction.
+                source_target_status = WorkflowStatus.NOT_STARTED if is_backward_jump else WorkflowStatus.SUCCEEDED
                 self.retry_on_concurrency_error(
-                    lambda: self.repository.store_stage(source_stage),
+                    partial(
+                        self._reload_reset_and_store,
+                        source_stage.id,
+                        source_context_updates,
+                        source_target_status,
+                    ),
                     f"storing source stage {source_stage.ref_id}",
                 )
 
+            # CRITICAL FIX: Reload target stage and store separately to get latest version.
+            # Then use execute_atomic only for message processing and StartStage push.
+            # This ensures we don't fail due to stale version in target_stage.
+            target_context_updates = dict(target_stage.context)  # Copy all context updates
+
+            def reload_and_store_target() -> None:
+                fresh_target = self.repository.retrieve_stage(target_stage.id)
+                if fresh_target is None:
+                    logger.error("Target stage %s not found during reload", target_stage.id)
+                    return
+                _reset_stage_for_retry(fresh_target)
+                fresh_target.context.update(target_context_updates)
+                self.repository.store_stage(fresh_target)
+
+            self.retry_on_concurrency_error(
+                reload_and_store_target,
+                f"storing target stage {target_stage.ref_id}",
+            )
+
+            # Now push StartStage message atomically with message deduplication
             self.txn_helper.execute_atomic(
-                stage=target_stage,
+                stage=None,  # Don't store stage again - already done above
                 source_message=message,
                 messages_to_push=[
                     (

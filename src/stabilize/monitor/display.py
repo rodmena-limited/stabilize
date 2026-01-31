@@ -382,10 +382,10 @@ class MonitorDisplay:
                         "id": wf.id,
                         "status": wf.status.name,
                         "context": wf.trigger.payload if wf.trigger else {},
-                        "start_time": datetime.fromtimestamp(wf.start_time / 1000).isoformat()
-                        if wf.start_time
-                        else None,
-                        "end_time": datetime.fromtimestamp(wf.end_time / 1000).isoformat() if wf.end_time else None,
+                        "start_time": (
+                            datetime.fromtimestamp(wf.start_time / 1000).isoformat() if wf.start_time else None
+                        ),
+                        "end_time": (datetime.fromtimestamp(wf.end_time / 1000).isoformat() if wf.end_time else None),
                         "paused": wf.paused.__dict__ if wf.paused else None,
                         "cancellation_reason": wf.cancellation_reason,
                     },
@@ -405,12 +405,14 @@ class MonitorDisplay:
                             "status": stage.status.name,
                             "context": stage.context,
                             "outputs": stage.outputs,
-                            "start_time": datetime.fromtimestamp(stage.start_time / 1000).isoformat()
-                            if stage.start_time
-                            else None,
-                            "end_time": datetime.fromtimestamp(stage.end_time / 1000).isoformat()
-                            if stage.end_time
-                            else None,
+                            "start_time": (
+                                datetime.fromtimestamp(stage.start_time / 1000).isoformat()
+                                if stage.start_time
+                                else None
+                            ),
+                            "end_time": (
+                                datetime.fromtimestamp(stage.end_time / 1000).isoformat() if stage.end_time else None
+                            ),
                         },
                         indent=2,
                         default=str,
@@ -428,9 +430,11 @@ class MonitorDisplay:
                         "status": task_view.status.name,
                         "implementing_class": task_view.implementing_class,
                         "error": task_view.error,
-                        "start_time": datetime.fromtimestamp(task_view.start_time / 1000).isoformat()
-                        if task_view.start_time
-                        else None,
+                        "start_time": (
+                            datetime.fromtimestamp(task_view.start_time / 1000).isoformat()
+                            if task_view.start_time
+                            else None
+                        ),
                     },
                     indent=2,
                     default=str,
@@ -576,7 +580,12 @@ class MonitorDisplay:
                 for j, task in enumerate(stage.tasks):
                     is_last_task = j == len(stage.tasks) - 1
                     lines.append(
-                        {"type": "task", "data": task, "is_last_stage": is_last_stage, "is_last_task": is_last_task}
+                        {
+                            "type": "task",
+                            "data": task,
+                            "is_last_stage": is_last_stage,
+                            "is_last_task": is_last_task,
+                        }
                     )
 
             lines.append({"type": "blank"})
@@ -655,7 +664,12 @@ class MonitorDisplay:
             status_attr = status_attr | curses.A_REVERSE
 
         self._addstr(y, pos_status, f"{status:>10}", status_attr)
-        self._addstr(y, pos_duration, f"{duration:>7}", base_attr | (curses.A_DIM if wf.status.is_complete else 0))
+        self._addstr(
+            y,
+            pos_duration,
+            f"{duration:>7}",
+            base_attr | (curses.A_DIM if wf.status.is_complete else 0),
+        )
         self._addstr(y, pos_progress, f"{progress:>5}", base_attr)
 
     def _render_stage_line(self, y: int, width: int, stage: StageView, is_last: bool, base_attr: int) -> None:
@@ -694,7 +708,12 @@ class MonitorDisplay:
             status_attr = status_attr | curses.A_REVERSE
 
         self._addstr(y, pos_status, f"{status:>10}", status_attr)
-        self._addstr(y, pos_duration, f"{duration:>7}", base_attr | (curses.A_DIM if stage.status.is_complete else 0))
+        self._addstr(
+            y,
+            pos_duration,
+            f"{duration:>7}",
+            base_attr | (curses.A_DIM if stage.status.is_complete else 0),
+        )
 
     def _render_task_line(
         self,
@@ -745,7 +764,12 @@ class MonitorDisplay:
             status_attr = status_attr | curses.A_REVERSE
 
         self._addstr(y, pos_status, f"{status:>10}", status_attr)
-        self._addstr(y, pos_duration, f"{duration:>7}", base_attr | (curses.A_DIM if task.status.is_complete else 0))
+        self._addstr(
+            y,
+            pos_duration,
+            f"{duration:>7}",
+            base_attr | (curses.A_DIM if task.status.is_complete else 0),
+        )
 
     def _render_footer(self, data: MonitorData, height: int, width: int) -> None:
         """Render footer with stats."""

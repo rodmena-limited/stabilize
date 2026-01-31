@@ -1844,16 +1844,14 @@ def mg_up(db_url: str | None = None) -> None:
         with psycopg.connect(conninfo) as conn:
             with conn.cursor() as cur:
                 # Ensure migration tracking table exists
-                cur.execute(
-                    f"""
+                cur.execute(f"""
                     CREATE TABLE IF NOT EXISTS {MIGRATION_TABLE} (
                         id SERIAL PRIMARY KEY,
                         name VARCHAR(255) NOT NULL UNIQUE,
                         checksum VARCHAR(32) NOT NULL,
                         applied_at TIMESTAMP DEFAULT NOW()
                     )
-                """
-                )
+                """)
                 conn.commit()
 
                 # Get applied migrations

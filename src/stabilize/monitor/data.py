@@ -305,7 +305,8 @@ class MonitorDataFetcher:
         # Sort stages and tasks just in case DB didn't
         # And convert dictionary to list
         sorted_workflows = sorted(
-            workflows_map.values(), key=lambda w: (0 if w.status == WorkflowStatus.RUNNING else 1, w.start_time or 0)
+            workflows_map.values(),
+            key=lambda w: (0 if w.status == WorkflowStatus.RUNNING else 1, w.start_time or 0),
         )
         return sorted_workflows
 

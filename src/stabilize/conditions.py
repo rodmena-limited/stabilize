@@ -230,7 +230,7 @@ class Condition:
         return {
             "type": self.type.value if isinstance(self.type, ConditionType) else self.type,
             "status": self.status,
-            "reason": self.reason.value if isinstance(self.reason, ConditionReason) else self.reason,
+            "reason": (self.reason.value if isinstance(self.reason, ConditionReason) else self.reason),
             "message": self.message,
             "lastTransitionTime": self.last_transition_time.isoformat(),
             "observedGeneration": self.observed_generation,

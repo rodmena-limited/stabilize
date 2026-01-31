@@ -329,7 +329,11 @@ class QueueProcessor:
 
         if self.config.enable_deduplication and self._store is not None and message_id is not None:
             if self._store.is_message_processed(message_id):
-                logger.info("Skipping duplicate message %s (%s)", message_id, get_message_type_name(message))
+                logger.info(
+                    "Skipping duplicate message %s (%s)",
+                    message_id,
+                    get_message_type_name(message),
+                )
                 return
 
         logger.debug("Handling %s (execution=%s)", get_message_type_name(message), execution_id or "N/A")

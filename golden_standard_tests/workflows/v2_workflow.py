@@ -107,7 +107,10 @@ class RetryTask(RetryableTask):
 
         # Second attempt: append token to file
         result = subprocess.run(
-            f"printf '::PHASE2A_RETRY_SUCCESS' >> '{output_file}'", shell=True, capture_output=True, text=True
+            f"printf '::PHASE2A_RETRY_SUCCESS' >> '{output_file}'",
+            shell=True,
+            capture_output=True,
+            text=True,
         )
 
         if result.returncode == 0:
@@ -153,11 +156,17 @@ class CompensationTask(Task):
         if not timeout_occurred:
             # Timeout didn't occur - this is an engine bug
             result = subprocess.run(
-                f"printf '::ERROR_NO_TIMEOUT' >> '{output_file}'", shell=True, capture_output=True, text=True
+                f"printf '::ERROR_NO_TIMEOUT' >> '{output_file}'",
+                shell=True,
+                capture_output=True,
+                text=True,
             )
         else:
             result = subprocess.run(
-                f"printf '::PHASE2B_TIMEOUT_COMPENSATED' >> '{output_file}'", shell=True, capture_output=True, text=True
+                f"printf '::PHASE2B_TIMEOUT_COMPENSATED' >> '{output_file}'",
+                shell=True,
+                capture_output=True,
+                text=True,
             )
 
         if result.returncode == 0:
@@ -233,7 +242,10 @@ class JoinGateTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         result = subprocess.run(
-            f"printf '::PHASE4_SYNC_GATE_PASSED' >> '{output_file}'", shell=True, capture_output=True, text=True
+            f"printf '::PHASE4_SYNC_GATE_PASSED' >> '{output_file}'",
+            shell=True,
+            capture_output=True,
+            text=True,
         )
 
         if result.returncode == 0:

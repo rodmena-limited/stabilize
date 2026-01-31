@@ -117,6 +117,31 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         def on_task(stage: StageExecution, task_model: TaskExecution) -> None:
             execution = stage.execution
 
+            # IDEMPOTENCY CHECK: Only run tasks that are in RUNNING state
+            # This prevents duplicate executions when multiple RunTask messages
+            # are processed for the same task (e.g., due to retries or race conditions).
+            # StartTaskHandler sets status to RUNNING before pushing RunTask,
+            # so a task that is NOT_STARTED means we received a stale/duplicate message.
+            # A task that is already completed should also be skipped.
+            if task_model.status != WorkflowStatus.RUNNING:
+                if task_model.status.is_complete:
+                    logger.debug(
+                        "Ignoring RunTask for %s - already completed with status %s",
+                        task_model.name,
+                        task_model.status,
+                    )
+                else:
+                    logger.warning(
+                        "Ignoring RunTask for %s - unexpected status %s (expected RUNNING)",
+                        task_model.name,
+                        task_model.status,
+                    )
+                # Mark message as processed to prevent redelivery
+                if message.message_id:
+                    with self.repository.transaction(self.queue) as txn:
+                        txn.mark_message_processed(message.message_id)
+                return
+
             # Resolve task implementation
             try:
                 task = self._resolve_task(message.task_type, task_model)
@@ -193,7 +218,11 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             # Execute the task with timeout enforcement
             try:
                 timeout = self._get_task_timeout(stage, task)
-                with Timer("task_execution_seconds", task_type=message.task_type, task_name=task_model.name):
+                with Timer(
+                    "task_execution_seconds",
+                    task_type=message.task_type,
+                    task_name=task_model.name,
+                ):
                     result = self._execute_with_timeout(task, stage, timeout, message)
 
                 # Verify outputs before processing/persisting
@@ -843,17 +872,36 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 if context_update is None and exception.__cause__ is not None:
                     context_update = getattr(exception.__cause__, "context_update", None)
                 if context_update:
-                    stage.context.update(context_update)
                     logger.debug(
                         "Task %s applying context_update on retry: %s",
                         task_model.name,
                         list(context_update.keys()),
                     )
-                    # Atomic: store stage with context update + push retry message
-                    self.txn_helper.execute_atomic(
-                        stage=stage,
-                        messages_to_push=[(retry_message, int(delay.total_seconds()))],
-                        handler_name="RunTask",
+
+                    # CRITICAL FIX: Reload stage from DB before storing to get latest version.
+                    # This prevents ConcurrencyError due to stale version numbers when
+                    # multiple handlers are processing concurrently.
+                    def do_update_context() -> None:
+                        fresh_stage = self.repository.retrieve_stage(message.stage_id)
+                        if fresh_stage is None:
+                            logger.warning("Stage %s not found during context update", message.stage_id)
+                            # Still push retry message even if stage not found
+                            self.txn_helper.execute_atomic(
+                                messages_to_push=[(retry_message, int(delay.total_seconds()))],
+                                handler_name="RunTask",
+                            )
+                            return
+                        fresh_stage.context.update(context_update)
+                        # Atomic: store stage with context update + push retry message
+                        self.txn_helper.execute_atomic(
+                            stage=fresh_stage,
+                            messages_to_push=[(retry_message, int(delay.total_seconds()))],
+                            handler_name="RunTask",
+                        )
+
+                    self.retry_on_concurrency_error(
+                        do_update_context,
+                        f"updating context for task {task_model.name}",
                     )
                 else:
                     # Atomic: push retry message (no stage update needed)

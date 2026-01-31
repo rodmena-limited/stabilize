@@ -177,7 +177,11 @@ class WorkflowCircuitFactory:
             should_handle=_should_trip_circuit,
         )
         self._circuits[key] = circuit
-        logger.debug("Created circuit breaker for workflow=%s, task_type=%s", workflow_execution_id, task_type)
+        logger.debug(
+            "Created circuit breaker for workflow=%s, task_type=%s",
+            workflow_execution_id,
+            task_type,
+        )
 
         return circuit
 

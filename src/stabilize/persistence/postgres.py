@@ -639,7 +639,7 @@ class PostgresWorkflowStore(WorkflowStore):
             outputs_raw = row["outputs"]  # type: ignore[call-overload]
             nodes[ref_id] = {
                 "requisites": set(requisites or []),
-                "outputs": outputs_raw if isinstance(outputs_raw, dict) else json.loads(outputs_raw or "{}"),
+                "outputs": (outputs_raw if isinstance(outputs_raw, dict) else json.loads(outputs_raw or "{}")),
             }
 
         if stage_ref_id not in nodes:

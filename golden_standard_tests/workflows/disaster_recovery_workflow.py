@@ -107,7 +107,10 @@ class DRRetryTask(RetryableTask):
             return TaskResult.running()
 
         result = subprocess.run(
-            f"printf '\\n::BRANCH_A_SUCCESS' >> '{output_file}'", shell=True, capture_output=True, text=True
+            f"printf '\\n::BRANCH_A_SUCCESS' >> '{output_file}'",
+            shell=True,
+            capture_output=True,
+            text=True,
         )
 
         if result.returncode == 0:
@@ -223,7 +226,10 @@ class DRSyncGateTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         result = subprocess.run(
-            f"printf '\\n::SYNC_GATE_PASSED' >> '{output_file}'", shell=True, capture_output=True, text=True
+            f"printf '\\n::SYNC_GATE_PASSED' >> '{output_file}'",
+            shell=True,
+            capture_output=True,
+            text=True,
         )
 
         if result.returncode == 0:
@@ -244,7 +250,10 @@ class DRForeachProcessTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         result = subprocess.run(
-            f"printf '\\nProcessing {item}...' >> '{output_file}'", shell=True, capture_output=True, text=True
+            f"printf '\\nProcessing {item}...' >> '{output_file}'",
+            shell=True,
+            capture_output=True,
+            text=True,
         )
 
         if result.returncode == 0:
@@ -265,7 +274,10 @@ class DRForeachValidateTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         result = subprocess.run(
-            f"printf '\\nValidating {item}...' >> '{output_file}'", shell=True, capture_output=True, text=True
+            f"printf '\\nValidating {item}...' >> '{output_file}'",
+            shell=True,
+            capture_output=True,
+            text=True,
         )
 
         if result.returncode == 0:
@@ -285,7 +297,10 @@ class DRSwitchTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         result = subprocess.run(
-            f"printf '\\n::SWITCH_CASE_ANIMALS' >> '{output_file}'", shell=True, capture_output=True, text=True
+            f"printf '\\n::SWITCH_CASE_ANIMALS' >> '{output_file}'",
+            shell=True,
+            capture_output=True,
+            text=True,
         )
 
         if result.returncode == 0:
@@ -305,7 +320,10 @@ class DRSwitchJoinTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         result = subprocess.run(
-            f"printf '\\n::SWITCH_JOINED' >> '{output_file}'", shell=True, capture_output=True, text=True
+            f"printf '\\n::SWITCH_JOINED' >> '{output_file}'",
+            shell=True,
+            capture_output=True,
+            text=True,
         )
 
         if result.returncode == 0:
@@ -326,7 +344,10 @@ class DRWhileLoopTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         result = subprocess.run(
-            f"printf '\\nWhile loop iteration {counter}' >> '{output_file}'", shell=True, capture_output=True, text=True
+            f"printf '\\nWhile loop iteration {counter}' >> '{output_file}'",
+            shell=True,
+            capture_output=True,
+            text=True,
         )
 
         if result.returncode == 0:
@@ -346,7 +367,12 @@ class DRFinalizeTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         # Append final token
-        subprocess.run(f"printf '\\n::WORKFLOW_END' >> '{output_file}'", shell=True, capture_output=True, text=True)
+        subprocess.run(
+            f"printf '\\n::WORKFLOW_END' >> '{output_file}'",
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
 
         # Read the entire file content
         result = subprocess.run(f"cat '{output_file}'", shell=True, capture_output=True, text=True)
