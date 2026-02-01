@@ -1,6 +1,6 @@
 """Tests for the configuration validation module."""
 
-from stabilize.config_validation import (
+from stabilize.validation import (
     SHELL_TASK_SCHEMA,
     WAIT_TASK_SCHEMA,
     SchemaValidator,

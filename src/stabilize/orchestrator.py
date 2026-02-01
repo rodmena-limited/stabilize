@@ -18,7 +18,7 @@ from stabilize.queue.messages import (
 if TYPE_CHECKING:
     from stabilize.models.workflow import Workflow
     from stabilize.persistence.store import WorkflowStore
-    from stabilize.queue.queue import Queue
+    from stabilize.queue import Queue
 
 
 class Orchestrator:

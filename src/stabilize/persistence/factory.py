@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
-    from stabilize.queue.queue import Queue
+    from stabilize.queue import Queue
 
 
 def detect_backend(connection_string: str) -> str:
@@ -121,7 +121,7 @@ def create_queue(
     lock_duration = lock_duration or timedelta(minutes=5)
 
     if backend == "sqlite":
-        from stabilize.queue.sqlite_queue import SqliteQueue
+        from stabilize.queue.sqlite import SqliteQueue
 
         return SqliteQueue(
             connection_string,
@@ -130,7 +130,7 @@ def create_queue(
             max_attempts=max_attempts,
         )
     else:
-        from stabilize.queue.queue import PostgresQueue
+        from stabilize.queue import PostgresQueue
 
         return PostgresQueue(
             connection_string,

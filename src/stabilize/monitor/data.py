@@ -11,7 +11,7 @@ from stabilize.models.status import WorkflowStatus
 
 if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
-    from stabilize.queue.queue import Queue
+    from stabilize.queue import Queue
 
 
 @dataclass

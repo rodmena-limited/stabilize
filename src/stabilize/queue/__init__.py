@@ -1,5 +1,7 @@
 """Message queue system for pipeline execution."""
 
+from stabilize.queue.interface import Queue, QueuedMessage, QueueFullError
+from stabilize.queue.memory import InMemoryQueue
 from stabilize.queue.messages import (
     CancelStage,
     CancelWorkflow,
@@ -24,8 +26,8 @@ from stabilize.queue.messages import (
     TaskLevel,
     WorkflowLevel,
 )
-from stabilize.queue.queue import InMemoryQueue, PostgresQueue, Queue
-from stabilize.queue.sqlite_queue import SqliteQueue
+from stabilize.queue.postgres import PostgresQueue
+from stabilize.queue.sqlite import SqliteQueue
 
 __all__ = [
     # Message types
@@ -53,6 +55,8 @@ __all__ = [
     "InvalidTaskType",
     # Queue implementations
     "Queue",
+    "QueuedMessage",
+    "QueueFullError",
     "InMemoryQueue",
     "PostgresQueue",
     "SqliteQueue",

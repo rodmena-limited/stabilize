@@ -11,7 +11,7 @@ from stabilize import (
 )
 from stabilize.context.stage_context import StageContext
 from stabilize.persistence.store import WorkflowStore
-from stabilize.queue.queue import Queue
+from stabilize.queue import Queue
 from tests.conftest import setup_stabilize
 
 # =============================================================================

@@ -4,7 +4,7 @@ from stabilize.models.status import WorkflowStatus
 from stabilize.models.task import TaskExecution
 from stabilize.models.workflow import Workflow
 from stabilize.persistence.store import WorkflowStore
-from stabilize.queue.queue import Queue
+from stabilize.queue import Queue
 from stabilize.tasks.interface import Task
 from tests.conftest import setup_stabilize
 
@@ -420,7 +420,7 @@ class TestJumpCorrectness:
         # Records: "Record A", "Record Setup", "Record B", ... then jump ... "Record Setup", "Record B"
         # Note: I modified RecordTask to append stage.name, but let's just count refs/names if easier.
         # But wait, I modified RecordTask to append ref_id AND name.
-        # "stage_a", "Stage A", "stage_b" (synthetic has no ref_id? it has generated ULID), "B Setup", "stage_b", "Stage B"
+        # "stage_a", "Stage A", "stage_b", "B Setup", "stage_b", "Stage B"
 
         # Let's just check counts of "Stage B" (name) or "stage_b" (ref_id).
         # B Setup name is "B Setup".

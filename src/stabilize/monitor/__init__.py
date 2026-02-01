@@ -19,7 +19,7 @@ from stabilize.monitor.display import MonitorDisplay, run_display
 
 if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
-    from stabilize.queue.queue import Queue
+    from stabilize.queue import Queue
 
 __all__ = [
     "run_monitor",

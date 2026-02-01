@@ -6,8 +6,8 @@ from stabilize.models.status import WorkflowStatus
 from stabilize.models.task import TaskExecution
 from stabilize.models.workflow import Workflow
 from stabilize.persistence.store import WorkflowStore
+from stabilize.queue import Queue
 from stabilize.queue.messages import JumpToStage
-from stabilize.queue.queue import Queue
 from stabilize.tasks.interface import Task
 from tests.conftest import setup_stabilize
 

@@ -1,22 +1,6 @@
-"""Stabilize CLI for database migrations and developer tools."""
+"""Comprehensive documentation prompt for AI coding agents."""
 
 from __future__ import annotations
-
-import argparse
-import hashlib
-import os
-import re
-import sys
-from importlib.resources import files
-from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from typing import Any
-
-    from stabilize.persistence.store import WorkflowStore
-    from stabilize.queue.queue import Queue
-
 
 # =============================================================================
 # PROMPT - Comprehensive documentation for AI coding agents
@@ -1139,7 +1123,7 @@ from stabilize import (
 
 # Advanced imports (for specialized use cases)
 from stabilize.persistence.store import WorkflowStore      # Abstract base for custom stores
-from stabilize.queue.queue import Queue                    # Abstract base for custom queues
+from stabilize.queue import Queue                    # Abstract base for custom queues
 from stabilize.tasks.interface import (                    # Advanced task types
     SkippableTask, OverridableTimeoutRetryableTask,
     CallableTask, NoOpTask, WaitTask,
@@ -1167,7 +1151,7 @@ from stabilize.assertions import (
 )
 
 # Configuration Validation (NEW)
-from stabilize.config_validation import (
+from stabilize.validation import (
     validate_context, validate_outputs, is_valid,
     SchemaValidator, ValidationError,
     SHELL_TASK_SCHEMA, WAIT_TASK_SCHEMA,
@@ -1387,7 +1371,7 @@ JSON Schema-based validation for stage contexts and configurations.
 
 14.1 Validate Context
 ---------------------
-from stabilize.config_validation import validate_context, ValidationError
+from stabilize.validation import validate_context, ValidationError
 
 DEPLOY_SCHEMA = {
     "type": "object",
@@ -1413,14 +1397,14 @@ class DeployTask(Task):
 
 14.2 Built-in Schemas
 ---------------------
-from stabilize.config_validation import SHELL_TASK_SCHEMA, WAIT_TASK_SCHEMA
+from stabilize.validation import SHELL_TASK_SCHEMA, WAIT_TASK_SCHEMA
 
 # SHELL_TASK_SCHEMA validates: command (required), timeout, cwd, env, etc.
 # WAIT_TASK_SCHEMA validates: waitTime (required, >= 0)
 
 14.3 Quick Validation Check
 ---------------------------
-from stabilize.config_validation import is_valid
+from stabilize.validation import is_valid
 
 if not is_valid(stage.context, DEPLOY_SCHEMA):
     return TaskResult.terminal("Invalid configuration")
@@ -1736,370 +1720,3 @@ This is safe because:
 END OF REFERENCE
 ===============================================================================
 '''
-
-# Migration tracking table
-MIGRATION_TABLE = "stabilize_migrations"
-
-
-def load_config() -> dict[str, Any]:
-    """Load database config from mg.yaml or environment."""
-    db_url = os.environ.get("MG_DATABASE_URL")
-    if db_url:
-        return parse_db_url(db_url)
-
-    # Try to load mg.yaml
-    mg_yaml = Path("mg.yaml")
-    if mg_yaml.exists():
-        try:
-            import yaml
-
-            with open(mg_yaml) as f:
-                config = yaml.safe_load(f)
-                db_config: dict[str, Any] = config.get("database", {}) if config else {}
-                return db_config
-        except ImportError:
-            print("Warning: PyYAML not installed, cannot read mg.yaml")
-            print("Set MG_DATABASE_URL environment variable instead")
-            sys.exit(1)
-
-    print("Error: No database configuration found")
-    print("Either create mg.yaml or set MG_DATABASE_URL environment variable")
-    sys.exit(1)
-
-
-def parse_db_url(url: str) -> dict[str, Any]:
-    """Parse a database URL into connection parameters."""
-    # postgres://user:pass@host:port/dbname
-    pattern = r"postgres(?:ql)?://(?:(?P<user>[^:]+)(?::(?P<password>[^@]+))?@)?(?P<host>[^:/]+)(?::(?P<port>\d+))?/(?P<dbname>[^?]+)"
-    match = re.match(pattern, url)
-    if not match:
-        print(f"Error: Invalid database URL: {url}")
-        sys.exit(1)
-
-    return {
-        "host": match.group("host"),
-        "port": int(match.group("port") or 5432),
-        "user": match.group("user") or "postgres",
-        "password": match.group("password") or "",
-        "dbname": match.group("dbname"),
-    }
-
-
-def get_migrations() -> list[tuple[str, str]]:
-    """Get all migration files from the package."""
-    migrations_pkg = files("stabilize.migrations")
-    migrations = []
-
-    for item in migrations_pkg.iterdir():
-        if item.name.endswith(".sql"):
-            content = item.read_text()
-            migrations.append((item.name, content))
-
-    # Sort by filename (ULID prefix ensures chronological order)
-    migrations.sort(key=lambda x: x[0])
-    return migrations
-
-
-def extract_up_migration(content: str) -> str:
-    """Extract the UP migration from SQL content."""
-    # Find content between "-- migrate: up" and "-- migrate: down"
-    up_match = re.search(
-        r"--\s*migrate:\s*up\s*\n(.*?)(?:--\s*migrate:\s*down|$)",
-        content,
-        re.DOTALL | re.IGNORECASE,
-    )
-    if up_match:
-        return up_match.group(1).strip()
-    return content
-
-
-def compute_checksum(content: str) -> str:
-    """Compute MD5 checksum of migration content."""
-    return hashlib.md5(content.encode()).hexdigest()
-
-
-def mg_up(db_url: str | None = None) -> None:
-    """Apply pending migrations to PostgreSQL database."""
-    try:
-        import psycopg
-    except ImportError:
-        print("Error: psycopg not installed")
-        print("Install with: pip install stabilize[postgres]")
-        sys.exit(1)
-
-    # Load config
-    if db_url:
-        config = parse_db_url(db_url)
-    else:
-        config = load_config()
-
-    # Connect to database
-    conninfo = (
-        f"host={config['host']} port={config.get('port', 5432)} "
-        f"user={config.get('user', 'postgres')} password={config.get('password', '')} "
-        f"dbname={config['dbname']}"
-    )
-
-    try:
-        with psycopg.connect(conninfo) as conn:
-            with conn.cursor() as cur:
-                # Ensure migration tracking table exists
-                cur.execute(f"""
-                    CREATE TABLE IF NOT EXISTS {MIGRATION_TABLE} (
-                        id SERIAL PRIMARY KEY,
-                        name VARCHAR(255) NOT NULL UNIQUE,
-                        checksum VARCHAR(32) NOT NULL,
-                        applied_at TIMESTAMP DEFAULT NOW()
-                    )
-                """)
-                conn.commit()
-
-                # Get applied migrations
-                cur.execute(f"SELECT name, checksum FROM {MIGRATION_TABLE}")
-                applied = {row[0]: row[1] for row in cur.fetchall()}
-
-                # Get available migrations
-                migrations = get_migrations()
-
-                if not migrations:
-                    print("No migrations found in package")
-                    return
-
-                # Apply pending migrations
-                pending = 0
-                for name, content in migrations:
-                    if name in applied:
-                        # Verify checksum
-                        expected = compute_checksum(content)
-                        if applied[name] != expected:
-                            print(f"Warning: Checksum mismatch for {name}")
-                        continue
-
-                    pending += 1
-                    print(f"Applying: {name}")
-
-                    up_sql = extract_up_migration(content)
-                    cur.execute(up_sql)
-
-                    checksum = compute_checksum(content)
-                    cur.execute(
-                        f"INSERT INTO {MIGRATION_TABLE} (name, checksum) VALUES (%s, %s)",
-                        (name, checksum),
-                    )
-                    conn.commit()
-
-                if pending == 0:
-                    print("All migrations already applied")
-                else:
-                    print(f"Applied {pending} migration(s)")
-
-    except psycopg.Error as e:
-        print(f"Database error: {e}")
-        sys.exit(1)
-
-
-def prompt() -> None:
-    """Output comprehensive documentation for AI coding agents."""
-    print(PROMPT_TEXT)
-
-
-def monitor(
-    db_url: str | None,
-    app_filter: str | None,
-    refresh_interval: int,
-    status_filter: str,
-) -> None:
-    """Launch the real-time monitoring dashboard."""
-    from stabilize.monitor import run_monitor
-
-    # Create store based on db_url
-    if db_url is None:
-        # Try to load from config
-        try:
-            config = load_config()
-            db_url = (
-                f"postgres://{config.get('user', 'postgres')}:"
-                f"{config.get('password', '')}@"
-                f"{config.get('host', 'localhost')}:"
-                f"{config.get('port', 5432)}/"
-                f"{config.get('dbname', 'stabilize')}"
-            )
-        except SystemExit:
-            print("Error: No database configuration found.")
-            print("Provide --db-url or set up mg.yaml / MG_DATABASE_URL")
-            sys.exit(1)
-
-    # Determine store type from URL
-    store: WorkflowStore
-    queue: Queue | None = None
-    if db_url.startswith("sqlite"):
-        from stabilize.persistence.sqlite import SqliteWorkflowStore
-        from stabilize.queue.sqlite_queue import SqliteQueue
-
-        store = SqliteWorkflowStore(db_url, create_tables=False)
-        # Try to create queue for stats
-        try:
-            queue = SqliteQueue(db_url, table_name="queue_messages")
-        except Exception:
-            queue = None
-    elif db_url.startswith("postgres"):
-        try:
-            from stabilize.persistence.postgres import PostgresWorkflowStore
-            from stabilize.queue.queue import PostgresQueue
-
-            store = PostgresWorkflowStore(db_url)
-            try:
-                queue = PostgresQueue(db_url)
-            except Exception:
-                queue = None
-        except ImportError:
-            print("Error: psycopg not installed")
-            print("Install with: pip install stabilize[postgres]")
-            sys.exit(1)
-    else:
-        print(f"Error: Unsupported database URL: {db_url}")
-        print("Use sqlite:///path or postgres://...")
-        sys.exit(1)
-
-    print(f"Connecting to {db_url[:50]}...")
-    run_monitor(
-        store=store,
-        queue=queue,
-        app_filter=app_filter,
-        refresh_interval=refresh_interval,
-        status_filter=status_filter,
-    )
-
-
-def mg_status(db_url: str | None = None) -> None:
-    """Show migration status."""
-    try:
-        import psycopg
-    except ImportError:
-        print("Error: psycopg not installed")
-        print("Install with: pip install stabilize[postgres]")
-        sys.exit(1)
-
-    # Load config
-    if db_url:
-        config = parse_db_url(db_url)
-    else:
-        config = load_config()
-
-    conninfo = (
-        f"host={config['host']} port={config.get('port', 5432)} "
-        f"user={config.get('user', 'postgres')} password={config.get('password', '')} "
-        f"dbname={config['dbname']}"
-    )
-
-    try:
-        with psycopg.connect(conninfo) as conn:
-            with conn.cursor() as cur:
-                # Check if tracking table exists
-                cur.execute(
-                    """
-                    SELECT EXISTS (
-                        SELECT FROM information_schema.tables
-                        WHERE table_name = %s
-                    )
-                """,
-                    (MIGRATION_TABLE,),
-                )
-                row = cur.fetchone()
-                table_exists = row[0] if row else False
-
-                applied = {}
-                if table_exists:
-                    cur.execute(f"SELECT name, checksum, applied_at FROM {MIGRATION_TABLE} ORDER BY applied_at")
-                    applied = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
-
-                migrations = get_migrations()
-
-                print(f"{'Status':<10} {'Migration':<50} {'Applied At'}")
-                print("-" * 80)
-
-                for name, content in migrations:
-                    if name in applied:
-                        checksum, applied_at = applied[name]
-                        expected = compute_checksum(content)
-                        status = "applied" if checksum == expected else "MISMATCH"
-                        print(f"{status:<10} {name:<50} {applied_at}")
-                    else:
-                        print(f"{'pending':<10} {name:<50} -")
-
-    except psycopg.Error as e:
-        print(f"Database error: {e}")
-        sys.exit(1)
-
-
-def main() -> None:
-    """Main CLI entry point."""
-    parser = argparse.ArgumentParser(
-        prog="stabilize",
-        description="Stabilize - Workflow Engine CLI",
-    )
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
-
-    # mg-up command
-    up_parser = subparsers.add_parser("mg-up", help="Apply pending PostgreSQL migrations")
-    up_parser.add_argument(
-        "--db-url",
-        help="Database URL (postgres://user:pass@host:port/dbname)",
-    )
-
-    # mg-status command
-    status_parser = subparsers.add_parser("mg-status", help="Show migration status")
-    status_parser.add_argument(
-        "--db-url",
-        help="Database URL (postgres://user:pass@host:port/dbname)",
-    )
-
-    # prompt command
-    subparsers.add_parser(
-        "prompt",
-        help="Output comprehensive documentation for pipeline code generation",
-    )
-
-    # monitor command
-    monitor_parser = subparsers.add_parser(
-        "monitor",
-        help="Real-time workflow monitoring dashboard (htop-like)",
-    )
-    monitor_parser.add_argument(
-        "--app",
-        help="Filter by application name",
-    )
-    monitor_parser.add_argument(
-        "--db-url",
-        help="Database URL (postgres://... or sqlite:///...)",
-    )
-    monitor_parser.add_argument(
-        "--refresh",
-        type=int,
-        default=2,
-        help="Refresh interval in seconds (default: 2)",
-    )
-    monitor_parser.add_argument(
-        "--status",
-        choices=["all", "running", "failed", "recent"],
-        default="all",
-        help="Filter workflows by status (default: all)",
-    )
-
-    args = parser.parse_args()
-
-    if args.command == "mg-up":
-        mg_up(args.db_url)
-    elif args.command == "mg-status":
-        mg_status(args.db_url)
-    elif args.command == "prompt":
-        prompt()
-    elif args.command == "monitor":
-        monitor(args.db_url, args.app, args.refresh, args.status)
-    else:
-        parser.print_help()
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

@@ -31,7 +31,7 @@ from stabilize import (
 )
 from stabilize.persistence.connection import ConnectionManager, SingletonMeta
 from stabilize.persistence.store import WorkflowStore
-from stabilize.queue.queue import Queue
+from stabilize.queue import Queue
 
 # Optional PostgreSQL dependencies - only required for postgres tests
 try:
@@ -44,7 +44,7 @@ except ImportError:
 
 try:
     from stabilize.persistence.postgres import PostgresWorkflowStore
-    from stabilize.queue.queue import PostgresQueue
+    from stabilize.queue import PostgresQueue
 
     HAS_POSTGRES = True
 except ImportError:

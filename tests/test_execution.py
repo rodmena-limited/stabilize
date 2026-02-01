@@ -22,7 +22,7 @@ from stabilize import (
     WorkflowStatus,
 )
 from stabilize.persistence.memory import InMemoryWorkflowStore
-from stabilize.queue.queue import InMemoryQueue
+from stabilize.queue import InMemoryQueue
 
 
 class SuccessTask(Task):

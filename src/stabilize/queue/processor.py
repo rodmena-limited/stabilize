@@ -21,8 +21,8 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
+from stabilize.queue import Queue
 from stabilize.queue.messages import Message, get_message_type_name
-from stabilize.queue.queue import Queue
 from stabilize.resilience.config import HandlerConfig, get_handler_config
 
 if TYPE_CHECKING:

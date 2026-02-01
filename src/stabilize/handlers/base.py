@@ -39,7 +39,7 @@ from stabilize.resilience.config import HandlerConfig, get_handler_config
 
 if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
-    from stabilize.queue.queue import Queue
+    from stabilize.queue import Queue
 
 logger = logging.getLogger(__name__)
 

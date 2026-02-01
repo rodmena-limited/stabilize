@@ -16,8 +16,8 @@ from stabilize import (
 )
 from stabilize.errors import ConcurrencyError
 from stabilize.persistence.memory import InMemoryWorkflowStore
+from stabilize.queue import InMemoryQueue
 from stabilize.queue.messages import StartStage
-from stabilize.queue.queue import InMemoryQueue
 
 
 class TestStartStageConcurrencyHandling:

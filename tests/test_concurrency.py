@@ -25,7 +25,7 @@ from stabilize.persistence.transaction import (
     TransactionHelper,
 )
 from stabilize.queue.messages import CompleteTask
-from stabilize.queue.sqlite_queue import SqliteQueue
+from stabilize.queue.sqlite import SqliteQueue
 
 
 @pytest.fixture

@@ -3,8 +3,8 @@
 from datetime import timedelta
 
 from stabilize.models.status import WorkflowStatus
+from stabilize.queue import Queue
 from stabilize.queue.messages import CompleteTask, StartStage, StartWorkflow
-from stabilize.queue.queue import Queue
 
 
 class TestQueue:

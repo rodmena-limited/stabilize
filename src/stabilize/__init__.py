@@ -13,7 +13,7 @@ workflows with full support for:
 - Configuration validation with JSON Schema
 """
 
-__version__ = "0.15.3"
+__version__ = "0.15.4"
 
 # Assertion helpers
 from stabilize.assertions import (
@@ -46,15 +46,6 @@ from stabilize.conditions import (
     ConditionReason,
     ConditionSet,
     ConditionType,
-)
-
-# Configuration validation
-from stabilize.config_validation import (
-    SchemaValidator,
-    ValidationError,
-    is_valid,
-    validate_context,
-    validate_outputs,
 )
 
 # Context helpers
@@ -119,9 +110,9 @@ from stabilize.orchestrator import Orchestrator
 from stabilize.persistence.postgres import PostgresWorkflowStore
 from stabilize.persistence.sqlite import SqliteWorkflowStore
 from stabilize.persistence.store import WorkflowStore
+from stabilize.queue import PostgresQueue, Queue
 from stabilize.queue.processor import QueueProcessor
-from stabilize.queue.queue import PostgresQueue, Queue
-from stabilize.queue.sqlite_queue import SqliteQueue
+from stabilize.queue.sqlite import SqliteQueue
 
 # Recovery
 from stabilize.recovery import (
@@ -155,6 +146,15 @@ from stabilize.tracing import (
     trace_stage,
     trace_task,
     trace_workflow,
+)
+
+# Configuration validation
+from stabilize.validation import (
+    SchemaValidator,
+    ValidationError,
+    is_valid,
+    validate_context,
+    validate_outputs,
 )
 
 # Verification system

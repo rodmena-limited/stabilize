@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.models.task import TaskExecution
     from stabilize.persistence.store import WorkflowStore
-    from stabilize.queue.queue import Queue
+    from stabilize.queue import Queue
 
 logger = logging.getLogger(__name__)
 

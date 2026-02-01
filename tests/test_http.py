@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from stabilize import HTTPTask, WorkflowStatus
+from stabilize.tasks.http.utils import guess_content_type
 
 
 class MockHTTPHandler(BaseHTTPRequestHandler):
@@ -656,14 +657,14 @@ class TestSSLConfiguration:
 class TestContentTypeGuessing:
     """Test content type guessing."""
 
-    def test_content_type_guessing(self, task: HTTPTask) -> None:
+    def test_content_type_guessing(self) -> None:
         """Test file content type guessing."""
-        assert task._guess_content_type("test.txt") == "text/plain"
-        assert task._guess_content_type("test.json") == "application/json"
-        assert task._guess_content_type("test.pdf") == "application/pdf"
-        assert task._guess_content_type("test.png") == "image/png"
-        assert task._guess_content_type("test.jpg") == "image/jpeg"
-        assert task._guess_content_type("test.unknown") == "application/octet-stream"
+        assert guess_content_type("test.txt") == "text/plain"
+        assert guess_content_type("test.json") == "application/json"
+        assert guess_content_type("test.pdf") == "application/pdf"
+        assert guess_content_type("test.png") == "image/png"
+        assert guess_content_type("test.jpg") == "image/jpeg"
+        assert guess_content_type("test.unknown") == "application/octet-stream"
 
 
 class TestRedirects:

@@ -1,5 +1,5 @@
 """
-Configuration validation for stage contexts and workflow configurations.
+JSON Schema-like validator for configuration dictionaries.
 
 This module provides JSON Schema-based validation for:
 - Stage context dictionaries
@@ -9,7 +9,7 @@ This module provides JSON Schema-based validation for:
 Validation is optional and non-breaking - stages without schemas work as before.
 
 Example:
-    from stabilize.config_validation import validate_context, ValidationError
+    from stabilize.validation import validate_context, ValidationError
 
     # Define a schema for your task's expected context
     DEPLOY_SCHEMA = {
@@ -35,31 +35,9 @@ Example:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
-
-@dataclass
-class ValidationError:
-    """
-    A validation error with path and message.
-
-    Attributes:
-        path: JSON path to the invalid field (e.g., "timeout" or "servers[0].host")
-        message: Description of the validation error
-        value: The invalid value (if available)
-        constraint: The constraint that was violated (if available)
-    """
-
-    path: str
-    message: str
-    value: Any = None
-    constraint: str | None = None
-
-    def __str__(self) -> str:
-        if self.path:
-            return f"{self.path}: {self.message}"
-        return self.message
+from stabilize.validation.errors import ValidationError
 
 
 class SchemaValidator:
@@ -459,110 +437,3 @@ class SchemaValidator:
             )
 
         return errors
-
-
-def validate_context(
-    context: dict[str, Any],
-    schema: dict[str, Any],
-) -> list[ValidationError]:
-    """
-    Validate a stage context against a schema.
-
-    Args:
-        context: The stage context dictionary
-        schema: JSON Schema dictionary
-
-    Returns:
-        List of validation errors (empty if valid)
-
-    Example:
-        errors = validate_context(stage.context, {
-            "type": "object",
-            "required": ["command"],
-            "properties": {
-                "command": {"type": "string", "minLength": 1},
-                "timeout": {"type": "integer", "minimum": 0},
-            },
-        })
-        if errors:
-            return TaskResult.terminal(f"Invalid context: {errors[0]}")
-    """
-    validator = SchemaValidator(schema)
-    return validator.validate(context)
-
-
-def validate_outputs(
-    outputs: dict[str, Any],
-    schema: dict[str, Any],
-) -> list[ValidationError]:
-    """
-    Validate stage outputs against a schema.
-
-    Args:
-        outputs: The stage outputs dictionary
-        schema: JSON Schema dictionary
-
-    Returns:
-        List of validation errors (empty if valid)
-    """
-    validator = SchemaValidator(schema)
-    return validator.validate(outputs)
-
-
-def is_valid(data: Any, schema: dict[str, Any]) -> bool:
-    """
-    Check if data is valid against a schema.
-
-    Args:
-        data: The data to validate
-        schema: JSON Schema dictionary
-
-    Returns:
-        True if valid, False otherwise
-    """
-    validator = SchemaValidator(schema)
-    return len(validator.validate(data)) == 0
-
-
-# ============================================================================
-# Common Schemas
-# ============================================================================
-
-# Schema for shell task context
-SHELL_TASK_SCHEMA = {
-    "type": "object",
-    "required": ["command"],
-    "properties": {
-        "command": {"type": "string", "minLength": 1},
-        "timeout": {"type": "integer", "minimum": 0},
-        "cwd": {"type": "string"},
-        "env": {"type": "object", "additionalProperties": {"type": "string"}},
-        "shell": {"type": ["boolean", "string"]},
-        "stdin": {"type": "string"},
-        "max_output_size": {"type": "integer", "minimum": 0},
-        "expected_codes": {"type": "array", "items": {"type": "integer"}},
-        "secrets": {"type": "array", "items": {"type": "string"}},
-        "binary": {"type": "boolean"},
-        "continue_on_failure": {"type": "boolean"},
-    },
-}
-
-# Schema for wait task context
-WAIT_TASK_SCHEMA = {
-    "type": "object",
-    "required": ["waitTime"],
-    "properties": {
-        "waitTime": {"type": "integer", "minimum": 0},
-    },
-}
-
-# Base stage schema (without specific task requirements)
-BASE_STAGE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "failPipeline": {"type": "boolean"},
-        "continuePipelineOnFailure": {"type": "boolean"},
-        "allowSiblingStagesToContinueOnFailure": {"type": "boolean"},
-        "stageTimeoutMs": {"type": "integer", "minimum": 0},
-    },
-}

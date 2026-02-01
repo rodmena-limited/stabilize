@@ -30,8 +30,8 @@ from stabilize.stages.builder import get_default_factory
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
+    from stabilize.queue import Queue
     from stabilize.queue.messages import Message
-    from stabilize.queue.queue import Queue
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@ from stabilize.models.status import WorkflowStatus
 from stabilize.models.task import TaskExecution
 from stabilize.models.workflow import Workflow
 from stabilize.persistence.store import WorkflowStore
-from stabilize.queue.queue import Queue
+from stabilize.queue import Queue
 
 # Import from conftest - pytest makes these available
 from tests.conftest import CounterTask, setup_stabilize
