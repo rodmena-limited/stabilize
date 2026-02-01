@@ -24,6 +24,25 @@ pip install stabilize[all]       # All features
 - Pluggable task system
 - Retry and timeout support
 
+
+## Comparison to Industry Standards
+
+```txt
+┌───────────────┬────────────────────┬──────────────────────┬───────────────────┐
+│ Feature       │ stabilize          │ Spinnaker (Orca)     │ Airflow           │
+├───────────────┼────────────────────┼──────────────────────┼───────────────────┤
+│ State Storage │ Atomic (DB+Queue)  │ Atomic (Redis/SQL)   │ Atomic (SQL)      │
+│ Concurrency   │ Optimistic Locking │ Distributed Lock     │ Database Row Lock │
+│ Resilience    │ Queue-based (DLQ)  │ Queue-based (DLQ)    │ Scheduler Loop    │
+│ Flow Control  │ Dynamic (Jumps)    │ Rigid DAG            │ Rigid DAG         │
+│ Complexity    │ Low (Library)      │ High (Microservices) │ High (Platform)   │
+└───────────────┴────────────────────┴──────────────────────┴───────────────────┘
+```
+
+- If you are looking for a *strictly atomic* and *highly distributed* system, 
+  please take a look into [Highway](https://highway.solutions).
+
+
 ## Quick Start
 
 ```python

@@ -123,6 +123,13 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             for task in fresh_stage.tasks:
                 task.status = WorkflowStatus.SKIPPED
                 task.end_time = self.current_time_millis()
+        elif target_status == WorkflowStatus.TERMINAL:
+            fresh_stage.status = WorkflowStatus.TERMINAL
+            fresh_stage.end_time = self.current_time_millis()
+            for task in fresh_stage.tasks:
+                if task.status == WorkflowStatus.RUNNING:
+                    task.status = WorkflowStatus.TERMINAL
+                    task.end_time = self.current_time_millis()
         else:
             fresh_stage.status = target_status
 
@@ -130,6 +137,23 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             fresh_stage.context.update(context_updates)
 
         self.repository.store_stage(fresh_stage)
+
+    def _reset_synthetics_for_stage(self, execution_id: str, parent_stage_id: str) -> None:
+        """Reset all synthetic stages for a given parent stage.
+
+        This ensures that when a stage is reset (e.g. for retry), its synthetic
+        stages (setup/teardown) are also reset and re-executed.
+        """
+        synthetics = self.repository.get_synthetic_stages(execution_id, parent_stage_id)
+        if not synthetics:
+            return
+
+        for stage in synthetics:
+            logger.debug("Resetting synthetic stage: %s", stage.ref_id)
+            self.retry_on_concurrency_error(
+                partial(self._reload_reset_and_store, stage.id),
+                f"resetting synthetic stage {stage.ref_id}",
+            )
 
     def handle(self, message: JumpToStage) -> None:
         """Handle the JumpToStage message."""
@@ -168,12 +192,21 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                     message.target_stage_ref_id,
                     message.execution_id,
                 )
-                # Mark stage as terminal and complete it
-                source_stage.context["jump_error"] = f"Target stage not found: {message.target_stage_ref_id}"
-                source_stage.status = WorkflowStatus.TERMINAL
-                source_stage.end_time = self.current_time_millis()
+                # CRITICAL FIX: Use reload pattern to avoid stale version error.
+                context_updates = {"jump_error": f"Target stage not found: {message.target_stage_ref_id}"}
+                self.retry_on_concurrency_error(
+                    partial(
+                        self._reload_reset_and_store,
+                        source_stage.id,
+                        context_updates,
+                        WorkflowStatus.TERMINAL,
+                    ),
+                    f"storing terminal stage {source_stage.ref_id}",
+                )
+
+                # Push CompleteStage atomically (no stage storage needed)
                 self.txn_helper.execute_atomic(
-                    stage=source_stage,
+                    stage=None,  # Already stored above
                     source_message=message,
                     messages_to_push=[
                         (
@@ -204,14 +237,22 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                     max_jumps,
                     message.execution_id,
                 )
-                source_stage.context["jump_error"] = f"Max jump count exceeded: {jump_count}/{max_jumps}"
-                # Mark stage as TERMINAL so workflow completes
-                source_stage.status = WorkflowStatus.TERMINAL
-                source_stage.end_time = self.current_time_millis()
-                # Use CompleteStage to properly handle stage completion flow
-                # which will then trigger CompleteWorkflow
+                # CRITICAL FIX: Reload stage before storing to avoid stale version error.
+                # Store the stage with TERMINAL status using reload pattern.
+                context_updates = {"jump_error": f"Max jump count exceeded: {jump_count}/{max_jumps}"}
+                self.retry_on_concurrency_error(
+                    partial(
+                        self._reload_reset_and_store,
+                        source_stage.id,
+                        context_updates,
+                        WorkflowStatus.TERMINAL,
+                    ),
+                    f"storing max-jump stage {source_stage.ref_id}",
+                )
+
+                # Now push CompleteStage atomically (no stage storage needed)
                 self.txn_helper.execute_atomic(
-                    stage=source_stage,
+                    stage=None,  # Already stored above
                     source_message=message,
                     messages_to_push=[
                         (
@@ -252,6 +293,8 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                         partial(self._reload_reset_and_store, stage.id),
                         f"storing downstream stage {stage.ref_id}",
                     )
+                    # Reset synthetic stages for downstream
+                    self._reset_synthetics_for_stage(message.execution_id, stage.id)
 
             # Determine if this is a forward or backward jump
             # Forward jump: source is NOT downstream of target (e.g., skip to execution)
@@ -303,6 +346,9 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                             ),
                             f"storing skipped stage {stage.ref_id}",
                         )
+                        # Note: We probably should skip synthetic stages of skipped stages too?
+                        # But if parent is skipped, StartStage won't run for it, so synthetics won't run.
+                        # Unless they were already running? Unlikely for forward jump over NOT_STARTED.
 
             # Merge jump context into target stage
             if message.jump_context:
@@ -366,6 +412,10 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                     f"storing source stage {source_stage.ref_id}",
                 )
 
+                # Reset synthetic stages for source if backward jump
+                if is_backward_jump:
+                    self._reset_synthetics_for_stage(message.execution_id, source_stage.id)
+
             # CRITICAL FIX: Reload target stage and store separately to get latest version.
             # Then use execute_atomic only for message processing and StartStage push.
             # This ensures we don't fail due to stale version in target_stage.
@@ -385,7 +435,11 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                 f"storing target stage {target_stage.ref_id}",
             )
 
+            # Reset synthetic stages for target
+            self._reset_synthetics_for_stage(message.execution_id, target_stage.id)
+
             # Now push StartStage message atomically with message deduplication
+
             self.txn_helper.execute_atomic(
                 stage=None,  # Don't store stage again - already done above
                 source_message=message,

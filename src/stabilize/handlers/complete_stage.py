@@ -78,8 +78,27 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
         """Inner handle logic to be retried."""
 
         def on_stage(stage: StageExecution) -> None:
-            # Check if already complete
-            if stage.status not in {WorkflowStatus.RUNNING, WorkflowStatus.NOT_STARTED}:
+            # Check if stage was reset (NOT_STARTED) - this means JumpToStageHandler
+            # reset it for a retry loop, and this CompleteStage message is stale.
+            # We must ignore it to prevent triggering downstream stages from a
+            # previous iteration while a new iteration is starting.
+            if stage.status == WorkflowStatus.NOT_STARTED:
+                logger.debug(
+                    "Ignoring CompleteStage for %s - stage was reset to NOT_STARTED (stale message)",
+                    stage.name,
+                )
+                # Mark message as processed to prevent infinite reprocessing
+                if message.message_id:
+                    with self.repository.transaction(self.queue) as txn:
+                        txn.mark_message_processed(
+                            message_id=message.message_id,
+                            handler_type="CompleteStage",
+                            execution_id=message.execution_id,
+                        )
+                return
+
+            # Check if already complete (SUCCEEDED, FAILED, TERMINAL, etc.)
+            if stage.status not in {WorkflowStatus.RUNNING}:
                 logger.debug(
                     "Stage %s already has status %s",
                     stage.name,
