@@ -16,7 +16,7 @@ from stabilize.dag.graph import StageGraphBuilder
 from stabilize.errors import ConcurrencyError, is_transient
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.stage import SyntheticStageOwner
-from stabilize.models.status import WorkflowStatus
+from stabilize.models.status import ACTIVE_STATUSES, WorkflowStatus
 from stabilize.queue.messages import (
     CompleteStage,
     CompleteWorkflow,
@@ -137,7 +137,28 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                 if all_complete:
                     self._start_if_ready(stage, message)
                 else:
-                    # Upstream not complete - check retry count before re-queuing
+                    # Upstream not complete.
+                    # Check if any upstream stage is active (RUNNING, NOT_STARTED, etc.)
+                    # If so, we can safely stop polling because the upstream stage
+                    # will trigger a new StartStage message when it completes.
+                    any_active = False
+                    for upstream in upstream_stages:
+                        if upstream and upstream.status in ACTIVE_STATUSES:
+                            any_active = True
+                            logger.debug(
+                                "Stage %s (%s) waiting for active upstream stage %s (%s)",
+                                stage.name,
+                                stage.id,
+                                upstream.name,
+                                upstream.status,
+                            )
+                            break
+
+                    if any_active:
+                        # Stop polling - wait for upstream trigger
+                        return
+
+                    # Upstream not complete and not active (stuck?) - check retry count before re-queuing
                     retry_count = getattr(message, "retry_count", 0) or 0
                     max_retries = self.handler_config.max_stage_wait_retries
 
@@ -231,12 +252,35 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         """Start the stage if it's ready to run."""
         # Check if already processed
         if stage.status != WorkflowStatus.NOT_STARTED:
-            logger.debug(
-                "Ignoring StartStage for %s - already %s",
-                stage.name,
-                stage.status,
-            )
-            return
+            # ZOMBIE DETECTION: If stage is RUNNING but has no tasks and no synthetic stages,
+            # it means planning crashed before persisting tasks. We must resume planning.
+            if stage.status == WorkflowStatus.RUNNING:
+                has_tasks = len(stage.tasks) > 0
+                synthetic_stages = self.repository.get_synthetic_stages(stage.execution.id, stage.id)
+                has_synthetic = synthetic_stages is not None and len(synthetic_stages) > 0
+
+                if not has_tasks and not has_synthetic:
+                    logger.warning(
+                        "Detected Zombie Stage %s (%s): RUNNING but no tasks/synthetic stages. Resuming planning.",
+                        stage.name,
+                        stage.id,
+                    )
+                    # Proceed to planning (fall through)
+                    pass
+                else:
+                    logger.debug(
+                        "Ignoring StartStage for %s - already %s",
+                        stage.name,
+                        stage.status,
+                    )
+                    return
+            else:
+                logger.debug(
+                    "Ignoring StartStage for %s - already %s",
+                    stage.name,
+                    stage.status,
+                )
+                return
 
         # Check if should skip - use transaction for atomicity
         if self._should_skip(stage):
