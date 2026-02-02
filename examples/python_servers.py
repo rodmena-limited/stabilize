@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""4 parallel tasks using ShellTask and HTTPTask with recovery support.
+
+This example demonstrates:
+- 4 parallel long-running stages (2 HTTP servers, 1 monitor, 1 fetch)
+- Workflow recovery after interruption (Ctrl+C)
+- Idempotent restart handling
+
+Note: The HTTP fetch stage runs in parallel with servers and may fail initially
+because servers aren't ready yet. This is expected with continue_on_failure=True.
+
+Usage:
+    python examples/python_servers.py    # Start or recover workflow
+    # Press Ctrl+C to stop
+    python examples/python_servers.py    # Automatically recovers
+
+To start fresh:
+    rm ~/workflow.db && python examples/python_servers.py
+"""
+
+import os
+
+from stabilize import (
+    CancelStageHandler,
+    CompleteStageHandler,
+    CompleteTaskHandler,
+    CompleteWorkflowHandler,
+    ContinueParentStageHandler,
+    HTTPTask,
+    JumpToStageHandler,
+    Orchestrator,
+    QueueProcessor,
+    RunTaskHandler,
+    ShellTask,
+    SkipStageHandler,
+    SqliteQueue,
+    SqliteWorkflowStore,
+    StageExecution,
+    StartStageHandler,
+    StartTaskHandler,
+    StartWaitingWorkflowsHandler,
+    StartWorkflowHandler,
+    TaskExecution,
+    TaskRegistry,
+    Workflow,
+)
+from stabilize.queue.processor import QueueProcessorConfig
+from stabilize.recovery import recover_on_startup
+
+# Fixed directories (not tempfile so they persist across restarts)
+DIR1 = "/tmp/server1"
+DIR2 = "/tmp/server2"
+os.makedirs(DIR1, exist_ok=True)
+os.makedirs(DIR2, exist_ok=True)
+open(f"{DIR1}/index.html", "w").write("<h1>Server 1</h1>")
+open(f"{DIR2}/index.html", "w").write("<h1>Server 2</h1>")
+
+WORKFLOW_ID = "my-4-tasks-workflow"
+
+
+def create_workflow_stages():
+    """Create the workflow stage definitions."""
+    return [
+        StageExecution(
+            ref_id="server1",
+            type="shell",
+            name="Server 1",
+            context={
+                "command": f"cd {DIR1} && python3 -m http.server 8001",
+                "timeout": 3600,
+                "continue_on_failure": True,
+            },
+            requisite_stage_ref_ids=set(),
+            tasks=[TaskExecution.create(name="S1", implementing_class="shell", stage_start=True, stage_end=True)],
+        ),
+        StageExecution(
+            ref_id="server2",
+            type="shell",
+            name="Server 2",
+            context={
+                "command": f"cd {DIR2} && python3 -m http.server 8002",
+                "timeout": 3600,
+                "continue_on_failure": True,
+            },
+            requisite_stage_ref_ids=set(),
+            tasks=[TaskExecution.create(name="S2", implementing_class="shell", stage_start=True, stage_end=True)],
+        ),
+        StageExecution(
+            ref_id="monitor",
+            type="shell",
+            name="Monitor",
+            context={
+                "command": "while true; do curl -s localhost:8001 && curl -s localhost:8002; sleep 30; done",
+                "timeout": 3600,
+                "continue_on_failure": True,
+            },
+            requisite_stage_ref_ids=set(),
+            tasks=[TaskExecution.create(name="Mon", implementing_class="shell", stage_start=True, stage_end=True)],
+        ),
+        StageExecution(
+            ref_id="fetch",
+            type="http",
+            name="Fetch",
+            context={
+                "url": "http://localhost:8001/index.html",
+                "method": "GET",
+                "timeout": 30,
+                "continue_on_failure": True,
+            },
+            requisite_stage_ref_ids=set(),
+            tasks=[TaskExecution.create(name="Fetch", implementing_class="http", stage_start=True, stage_end=True)],
+        ),
+    ]
+
+
+def main():
+    import pathlib
+
+    db = pathlib.Path.home() / "workflow.db"
+    store = SqliteWorkflowStore(f"sqlite:///{db}", create_tables=True)
+    queue = SqliteQueue(f"sqlite:///{db}", table_name="queue_messages")
+    queue._create_table()
+
+    reg = TaskRegistry()
+    reg.register("shell", ShellTask)
+    reg.register("http", HTTPTask)
+
+    processor = QueueProcessor(queue, config=QueueProcessorConfig(max_workers=4, poll_frequency_ms=100))
+
+    for h in [
+        StartWorkflowHandler(queue, store),
+        StartWaitingWorkflowsHandler(queue, store),
+        StartStageHandler(queue, store),
+        SkipStageHandler(queue, store),
+        CancelStageHandler(queue, store),
+        ContinueParentStageHandler(queue, store),
+        JumpToStageHandler(queue, store),
+        StartTaskHandler(queue, store, reg),
+        RunTaskHandler(queue, store, reg),
+        CompleteTaskHandler(queue, store),
+        CompleteStageHandler(queue, store),
+        CompleteWorkflowHandler(queue, store),
+    ]:
+        processor.register_handler(h)
+
+    # Check if our workflow already exists
+    existing = None
+    if store.exists(WORKFLOW_ID):
+        existing = store.retrieve(WORKFLOW_ID)
+        print(f"Found existing workflow: {existing.status.name}")
+
+        # Handle different states
+        if existing.status.is_complete:
+            print(f"Previous workflow completed with status: {existing.status.name}")
+            print(f"Delete {db} to start a fresh workflow.")
+            return
+
+        # Workflow is in progress - try to recover
+        print("\nRecovering workflow...")
+        results = recover_on_startup(store, queue, application="demo")
+        if results:
+            for r in results:
+                print(f"  {r.workflow_id}: {r.status} - {r.message}")
+        else:
+            print("  No recovery actions needed")
+    else:
+        print("No existing workflow, creating new one...")
+
+        stages = create_workflow_stages()
+        workflow = Workflow(
+            id=WORKFLOW_ID,
+            application="demo",
+            name="4 Tasks",
+            stages=stages,
+        )
+        store.store(workflow)
+        Orchestrator(queue).start(workflow)
+
+    print(f"\nServer 1: http://localhost:8001 ({DIR1})")
+    print(f"Server 2: http://localhost:8002 ({DIR2})")
+    print("Starting... Ctrl+C to stop\n")
+
+    try:
+        processor.process_all(timeout=3600)
+    except KeyboardInterrupt:
+        print("\nStopped. Run again to recover the workflow.")
+
+
+if __name__ == "__main__":
+    main()
