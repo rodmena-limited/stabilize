@@ -1,6 +1,6 @@
 [project]
 name = "stabilize"
-version = "0.15.6"
+version = "0.15.7"
 description = "Highway Workflow Engine - Stabilize execution layer"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -50,6 +50,7 @@ dev = [
     "pytest>=8.0",
     "pytest-xdist>=3.0",
     "pytest-asyncio>=0.23",
+    "pytest-cov>=4.0",
     "testcontainers>=4.0",
     "ruff>=0.1",
     "mypy>=1.8",
@@ -111,4 +112,9 @@ testpaths = ["tests"]
 filterwarnings = [
     "ignore::DeprecationWarning:testcontainers.*:",
     "ignore::DeprecationWarning:psycopg_pool.*:",
+]
+markers = [
+    "stress: marks tests as stress tests (may take longer to run)",
+    "race_condition: marks tests that test for race conditions",
+    "both_backends: marks tests that explicitly test both SQLite and PostgreSQL backends",
 ]

@@ -2,7 +2,10 @@
 
 import os
 import subprocess
+import threading
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -265,3 +268,109 @@ def setup_stabilize(
 
     runner = Orchestrator(queue)
     return processor, runner, task_registry
+
+
+# =============================================================================
+# Stress Test Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def file_db_path(tmp_path: Path) -> Path:
+    """Provide a file-based SQLite database path for cross-thread tests."""
+    return tmp_path / "test.db"
+
+
+@pytest.fixture
+def file_repository(
+    file_db_path: Path,
+    backend: str,
+    request: pytest.FixtureRequest,
+) -> Generator[WorkflowStore, None, None]:
+    """
+    Create repository using file-based SQLite for thread safety tests.
+
+    For PostgreSQL backend, returns the same repository as the regular fixture.
+    For SQLite backend, uses file-based storage instead of :memory:.
+    """
+    repo: WorkflowStore
+    if backend == "sqlite":
+        connection_string = f"sqlite:///{file_db_path}"
+        repo = SqliteWorkflowStore(
+            connection_string=connection_string,
+            create_tables=True,
+        )
+        yield repo
+        repo.close()
+    else:
+        # PostgreSQL: reuse the regular repository
+        if not HAS_POSTGRES:
+            pytest.skip("psycopg not installed")
+        postgres_url = request.getfixturevalue("postgres_url")
+        repo = PostgresWorkflowStore(connection_string=postgres_url)
+        yield repo
+        repo.close()
+
+
+@pytest.fixture
+def file_queue(
+    file_db_path: Path,
+    backend: str,
+    request: pytest.FixtureRequest,
+) -> Generator[Queue, None, None]:
+    """
+    Create queue using file-based SQLite for thread safety tests.
+
+    For PostgreSQL backend, returns the same queue as the regular fixture.
+    For SQLite backend, uses file-based storage instead of :memory:.
+    """
+    q: Queue
+    if backend == "sqlite":
+        connection_string = f"sqlite:///{file_db_path}"
+        sqlite_q = SqliteQueue(
+            connection_string=connection_string,
+            table_name="queue_messages",
+        )
+        sqlite_q._create_table()
+        q = sqlite_q
+        yield q
+        q.clear()
+        q.close()
+    else:
+        # PostgreSQL: reuse the regular queue
+        if not HAS_POSTGRES:
+            pytest.skip("psycopg not installed")
+        postgres_url = request.getfixturevalue("postgres_url")
+        postgres_q = PostgresQueue(
+            connection_string=postgres_url,
+            table_name="queue_messages",
+        )
+        postgres_q.clear()
+        q = postgres_q
+        yield q
+        q.clear()
+        postgres_q.close()
+
+
+@pytest.fixture
+def thread_pool() -> Generator[ThreadPoolExecutor, None, None]:
+    """Provide a thread pool executor for concurrent tests."""
+    executor = ThreadPoolExecutor(max_workers=20)
+    yield executor
+    executor.shutdown(wait=True)
+
+
+@pytest.fixture
+def timing_barrier() -> threading.Barrier:
+    """Provide a threading barrier for coordinated race condition tests."""
+    return threading.Barrier(2)
+
+
+@pytest.fixture
+def stress_test_config() -> dict[str, Any]:
+    """Configuration for stress tests."""
+    return {
+        "num_workflows": 100,
+        "num_threads": 10,
+        "timeout_seconds": 30,
+    }
