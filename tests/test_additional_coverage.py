@@ -11,11 +11,6 @@ Targets low coverage areas identified in the coverage report:
 
 from __future__ import annotations
 
-import time
-import threading
-from typing import Any
-from unittest.mock import MagicMock, patch, Mock
-
 import pytest
 
 from stabilize import (
@@ -29,7 +24,6 @@ from stabilize.models.workflow import Workflow
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue import Queue
 from tests.conftest import setup_stabilize
-
 
 # =============================================================================
 # Tests for Task Interface Coverage
@@ -166,9 +160,7 @@ class TestTaskResultEdgeCases:
             def execute(self, stage: StageExecution) -> TaskResult:
                 RunningTask.call_count += 1
                 if RunningTask.call_count < 3:
-                    return TaskResult.running(
-                        context={"iteration": RunningTask.call_count}
-                    )
+                    return TaskResult.running(context={"iteration": RunningTask.call_count})
                 return TaskResult.success(outputs={"final": True})
 
         RunningTask.call_count = 0
