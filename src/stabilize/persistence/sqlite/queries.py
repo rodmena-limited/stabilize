@@ -36,7 +36,7 @@ def load_tasks_for_stages(
         f"""
         SELECT * FROM task_executions
         WHERE stage_id IN ({placeholders})
-        ORDER BY start_time ASC
+        ORDER BY id ASC
         """,
         params,
     )

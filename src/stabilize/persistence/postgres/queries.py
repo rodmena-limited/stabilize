@@ -22,11 +22,12 @@ def load_tasks_for_stages(cur: Any, stages: list[StageExecution]) -> None:
     stage_map = {s.id: s for s in stages}
     stage_ids = list(stage_map.keys())
 
+    # ORDER BY id ensures consistent task sequencing (ULID encodes creation time)
     cur.execute(
         """
         SELECT * FROM task_executions
         WHERE stage_id = ANY(%(stage_ids)s)
-        ORDER BY start_time ASC
+        ORDER BY id ASC
         """,
         {"stage_ids": stage_ids},
     )

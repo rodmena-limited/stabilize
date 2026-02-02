@@ -185,11 +185,13 @@ class SqliteWorkflowStore(WorkflowStore):
             stage = row_to_stage(stage_row)
             stage.execution = execution
 
-            # Get tasks for stage
+            # Get tasks for stage (ORDER BY id ensures consistent task sequencing)
+            # Note: id is a ULID that encodes creation time, preserving insertion order
             task_result = conn.execute(
                 """
                 SELECT * FROM task_executions
                 WHERE stage_id = :stage_id
+                ORDER BY id ASC
                 """,
                 {"stage_id": stage.id},
             )
@@ -363,11 +365,13 @@ class SqliteWorkflowStore(WorkflowStore):
 
             execution.stages = all_stages
 
-        # Get tasks
+        # Get tasks (ORDER BY id ensures consistent task sequencing)
+        # Note: id is a ULID that encodes creation time, preserving insertion order
         task_result = conn.execute(
             """
             SELECT * FROM task_executions
             WHERE stage_id = :stage_id
+            ORDER BY id ASC
             """,
             {"stage_id": stage.id},
         )

@@ -199,9 +199,12 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
 
             # Get jump count for context updates
             jump_count = source_stage.context.get("_jump_count", 0)
-            max_jumps = (
-                execution.context.get("_max_jumps") or source_stage.context.get("_max_jumps") or DEFAULT_MAX_JUMPS
-            )
+            # Use explicit None checks to allow max_jumps=0 (disables jumps)
+            max_jumps = execution.context.get("_max_jumps")
+            if max_jumps is None:
+                max_jumps = source_stage.context.get("_max_jumps")
+            if max_jumps is None:
+                max_jumps = DEFAULT_MAX_JUMPS
             new_jump_count = jump_count + 1
 
             # Merge jump context into target stage
@@ -346,7 +349,12 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
         from stabilize.models.workflow import Workflow  # noqa: F401
 
         jump_count = source_stage.context.get("_jump_count", 0)
-        max_jumps = execution.context.get("_max_jumps") or source_stage.context.get("_max_jumps") or DEFAULT_MAX_JUMPS
+        # Use explicit None checks to allow max_jumps=0 (disables jumps)
+        max_jumps = execution.context.get("_max_jumps")
+        if max_jumps is None:
+            max_jumps = source_stage.context.get("_max_jumps")
+        if max_jumps is None:
+            max_jumps = DEFAULT_MAX_JUMPS
 
         if jump_count >= max_jumps:
             logger.error(

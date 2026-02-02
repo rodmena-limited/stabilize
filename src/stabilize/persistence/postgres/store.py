@@ -315,8 +315,9 @@ class PostgresWorkflowStore(WorkflowStore):
 
                     execution.stages = all_stages
 
+                # ORDER BY id ensures consistent task sequencing (ULID encodes creation time)
                 cur.execute(
-                    "SELECT * FROM task_executions WHERE stage_id = %(stage_id)s",
+                    "SELECT * FROM task_executions WHERE stage_id = %(stage_id)s ORDER BY id ASC",
                     {"stage_id": stage.id},
                 )
                 for task_row in cur.fetchall():
