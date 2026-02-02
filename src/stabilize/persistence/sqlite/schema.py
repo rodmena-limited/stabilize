@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS pipeline_executions (
     application TEXT NOT NULL,
     name TEXT,
     status TEXT NOT NULL,
+    context TEXT DEFAULT '{}',
     start_time INTEGER,
     end_time INTEGER,
     start_time_expiry INTEGER,

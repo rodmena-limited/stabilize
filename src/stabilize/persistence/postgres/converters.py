@@ -24,6 +24,7 @@ def execution_to_dict(execution: Workflow) -> dict[str, Any]:
         "application": execution.application,
         "name": execution.name,
         "status": execution.status.name,
+        "context": json.dumps(execution.context),
         "start_time": execution.start_time,
         "end_time": execution.end_time,
         "start_time_expiry": execution.start_time_expiry,
@@ -58,6 +59,14 @@ def row_to_execution(row: dict[str, Any]) -> Workflow:
     paused_data = (
         row["paused"] if isinstance(row["paused"], dict) else json.loads(row["paused"]) if row["paused"] else None
     )
+    # Handle context - may be dict (JSONB auto-parsed), string, or None
+    raw_context = row.get("context")
+    if raw_context is None:
+        context_data: dict[str, Any] = {}
+    elif isinstance(raw_context, dict):
+        context_data = raw_context
+    else:
+        context_data = json.loads(raw_context) if raw_context else {}
 
     paused = None
     if paused_data:
@@ -74,6 +83,7 @@ def row_to_execution(row: dict[str, Any]) -> Workflow:
         application=row["application"],
         name=row["name"] or "",
         status=WorkflowStatus[row["status"]],
+        context=context_data,
         start_time=row["start_time"],
         end_time=row["end_time"],
         start_time_expiry=row["start_time_expiry"],

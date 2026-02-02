@@ -28,6 +28,7 @@ def execution_to_dict(execution: Workflow) -> dict[str, Any]:
         "application": execution.application,
         "name": execution.name,
         "status": execution.status.name,
+        "context": json.dumps(execution.context),
         "start_time": execution.start_time,
         "end_time": execution.end_time,
         "start_time_expiry": execution.start_time_expiry,
@@ -60,6 +61,7 @@ def row_to_execution(row: sqlite3.Row) -> Workflow:
     """Convert database row to Workflow."""
     trigger_data = json.loads(row["trigger"] or "{}")
     paused_data = json.loads(row["paused"]) if row["paused"] else None
+    context_data = json.loads(row["context"] or "{}")
 
     paused = None
     if paused_data:
@@ -76,6 +78,7 @@ def row_to_execution(row: sqlite3.Row) -> Workflow:
         application=row["application"],
         name=row["name"] or "",
         status=WorkflowStatus[row["status"]],
+        context=context_data,
         start_time=row["start_time"],
         end_time=row["end_time"],
         start_time_expiry=row["start_time_expiry"],

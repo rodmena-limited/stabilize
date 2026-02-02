@@ -135,13 +135,13 @@ class SqliteWorkflowStore(WorkflowStore):
         conn.execute(
             """
             INSERT INTO pipeline_executions (
-                id, type, application, name, status, start_time, end_time,
+                id, type, application, name, status, context, start_time, end_time,
                 start_time_expiry, trigger, is_canceled, canceled_by,
                 cancellation_reason, paused, pipeline_config_id,
                 is_limit_concurrent, max_concurrent_executions,
                 keep_waiting_pipelines, origin
             ) VALUES (
-                :id, :type, :application, :name, :status, :start_time, :end_time,
+                :id, :type, :application, :name, :status, :context, :start_time, :end_time,
                 :start_time_expiry, :trigger, :is_canceled, :canceled_by,
                 :cancellation_reason, :paused, :pipeline_config_id,
                 :is_limit_concurrent, :max_concurrent_executions,
