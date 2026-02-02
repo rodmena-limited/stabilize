@@ -31,7 +31,7 @@ def call_ollama(prompt: str, model: str = "glm-4.7:cloud") -> str:
         "stream": False,
         "options": {
             "temperature": 0.3,  # Lower temperature for more consistent code
-        }
+        },
     }
 
     req = urllib.request.Request(
@@ -123,7 +123,7 @@ SCENARIO_PROMPTS = [
 4. Runs the workflow and prints the final status
 
 Include ALL imports, setup code, and the main() function. The script must be self-contained and runnable.
-Output ONLY the Python code in a ```python code block."""
+Output ONLY the Python code in a ```python code block.""",
     },
     {
         "name": "parallel_diamond",
@@ -135,7 +135,7 @@ Output ONLY the Python code in a ```python code block."""
 5. Uses ShellTask for all stages
 
 Include ALL imports and the main() function. The script must be self-contained and runnable.
-Output ONLY the Python code in a ```python code block."""
+Output ONLY the Python code in a ```python code block.""",
     },
     {
         "name": "http_task",
@@ -146,7 +146,7 @@ Output ONLY the Python code in a ```python code block."""
 4. Runs the workflow and prints results
 
 Include ALL imports and the main() function. The script must be self-contained and runnable.
-Output ONLY the Python code in a ```python code block."""
+Output ONLY the Python code in a ```python code block.""",
     },
     {
         "name": "python_task_chained",
@@ -159,7 +159,7 @@ Output ONLY the Python code in a ```python code block."""
 IMPORTANT: Remember that PythonTask RESULT becomes "result" key in outputs, so stage 2 must access INPUT["result"]["sum"]
 
 Include ALL imports and the main() function. The script must be self-contained and runnable.
-Output ONLY the Python code in a ```python code block."""
+Output ONLY the Python code in a ```python code block.""",
     },
     {
         "name": "error_handling",
@@ -170,7 +170,7 @@ Output ONLY the Python code in a ```python code block."""
 4. Runs the workflow and verifies both stages completed
 
 Include ALL imports and the main() function. The script must be self-contained and runnable.
-Output ONLY the Python code in a ```python code block."""
+Output ONLY the Python code in a ```python code block.""",
     },
     {
         "name": "retryable_task",
@@ -181,7 +181,7 @@ Output ONLY the Python code in a ```python code block."""
 4. Runs the workflow and verifies it succeeds after retries
 
 Include ALL imports (including timedelta) and the main() function.
-Output ONLY the Python code in a ```python code block."""
+Output ONLY the Python code in a ```python code block.""",
     },
     {
         "name": "wide_parallel",
@@ -191,7 +191,7 @@ Output ONLY the Python code in a ```python code block."""
 3. Runs the workflow and prints all stage outputs
 
 Include ALL imports and the main() function. The script must be self-contained and runnable.
-Output ONLY the Python code in a ```python code block."""
+Output ONLY the Python code in a ```python code block.""",
     },
     {
         "name": "mixed_tasks",
@@ -203,7 +203,7 @@ Output ONLY the Python code in a ```python code block."""
 2. Runs the workflow and prints final outputs
 
 Include ALL imports and the main() function. The script must be self-contained and runnable.
-Output ONLY the Python code in a ```python code block."""
+Output ONLY the Python code in a ```python code block.""",
     },
     {
         "name": "terminal_error",
@@ -214,7 +214,7 @@ Output ONLY the Python code in a ```python code block."""
 4. Runs the workflow and verifies the final status is TERMINAL and stage 2 did not run
 
 Include ALL imports and the main() function. The script must be self-contained and runnable.
-Output ONLY the Python code in a ```python code block."""
+Output ONLY the Python code in a ```python code block.""",
     },
     {
         "name": "complex_diamond",
@@ -228,7 +228,7 @@ Output ONLY the Python code in a ```python code block."""
 3. Runs the workflow and verifies all stages complete in correct order
 
 Include ALL imports and the main() function. The script must be self-contained and runnable.
-Output ONLY the Python code in a ```python code block."""
+Output ONLY the Python code in a ```python code block.""",
     },
     {
         "name": "shell_with_special_chars",
@@ -239,7 +239,7 @@ Output ONLY the Python code in a ```python code block."""
 4. Runs the workflow and prints the final outputs
 
 Include ALL imports and the main() function. The script must be self-contained and runnable.
-Output ONLY the Python code in a ```python code block."""
+Output ONLY the Python code in a ```python code block.""",
     },
 ]
 
@@ -249,7 +249,7 @@ def main():
     print("=" * 70)
     print("STABILIZE PROMPT VALIDATION TEST")
     print("=" * 70)
-    print(f"\nUsing Ollama model: glm-4.7:cloud")
+    print("\nUsing Ollama model: glm-4.7:cloud")
     print(f"Testing {len(SCENARIO_PROMPTS)} scenarios\n")
 
     results = []
@@ -269,10 +269,10 @@ Here is the complete documentation:
 ---
 
 TASK:
-{scenario['prompt']}
+{scenario["prompt"]}
 
 IMPORTANT RULES:
-- Use disk-based SQLite: sqlite:///./test_{scenario['name']}.db (NEVER use :memory:)
+- Use disk-based SQLite: sqlite:///./test_{scenario["name"]}.db (NEVER use :memory:)
 - Include ALL 12 handlers including JumpToStageHandler
 - Set stage_start=True and stage_end=True on all tasks
 - Use requisite_stage_ref_ids for dependencies
@@ -289,12 +289,14 @@ IMPORTANT RULES:
             if not codes:
                 print("ERROR: No Python code block found in response")
                 print("Response preview:", response[:500])
-                results.append({
-                    "scenario": scenario["name"],
-                    "success": False,
-                    "error": "No code block in response",
-                    "response": response[:1000],
-                })
+                results.append(
+                    {
+                        "scenario": scenario["name"],
+                        "success": False,
+                        "error": "No code block in response",
+                        "response": response[:1000],
+                    }
+                )
                 continue
 
             code = codes[0]
@@ -312,7 +314,7 @@ IMPORTANT RULES:
             results.append(result)
 
             if result["success"]:
-                print(f"✓ SUCCESS")
+                print("✓ SUCCESS")
                 if result["stdout"]:
                     print(f"Output: {result['stdout'][:500]}")
             else:
@@ -323,11 +325,13 @@ IMPORTANT RULES:
         except Exception as e:
             print(f"ERROR: {e}")
             traceback.print_exc()
-            results.append({
-                "scenario": scenario["name"],
-                "success": False,
-                "error": str(e),
-            })
+            results.append(
+                {
+                    "scenario": scenario["name"],
+                    "success": False,
+                    "error": str(e),
+                }
+            )
 
     # Summary
     print("\n" + "=" * 70)
