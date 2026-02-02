@@ -13,7 +13,7 @@ workflows with full support for:
 - Configuration validation with JSON Schema
 """
 
-__version__ = "0.15.4"
+__version__ = "0.15.5"
 
 # Assertion helpers
 from stabilize.assertions import (

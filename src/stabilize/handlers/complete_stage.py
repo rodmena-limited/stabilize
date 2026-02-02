@@ -216,6 +216,42 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                     WorkflowStatus.FAILED_CONTINUE,
                     WorkflowStatus.SKIPPED,
                 }:
+                    # BLOCKING FAILURE CHECK: If stage has _blocking_failure=True and
+                    # status is FAILED_CONTINUE, treat it as a hard failure that blocks
+                    # downstream execution. This prevents false-positive workflow success.
+                    if status == WorkflowStatus.FAILED_CONTINUE and stage.context.get("_blocking_failure", False):
+                        logger.warning(
+                            "Stage %s has _blocking_failure=True, converting FAILED_CONTINUE to FAILED",
+                            stage.name,
+                        )
+                        status = WorkflowStatus.FAILED
+                        self.set_stage_status(stage, status)
+                        # Fall through to failure handling below
+                        with self.repository.transaction(self.queue) as txn:
+                            txn.store_stage(stage)
+                            txn.push_message(
+                                CancelStage(
+                                    execution_type=message.execution_type,
+                                    execution_id=message.execution_id,
+                                    stage_id=message.stage_id,
+                                )
+                            )
+                            if stage.synthetic_stage_owner is None or stage.parent_stage_id is None:
+                                txn.push_message(
+                                    CompleteWorkflow(
+                                        execution_type=message.execution_type,
+                                        execution_id=message.execution_id,
+                                    )
+                                )
+                            else:
+                                txn.push_message(
+                                    CompleteStage(
+                                        execution_type=message.execution_type,
+                                        execution_id=message.execution_id,
+                                        stage_id=stage.parent_stage_id,
+                                    )
+                                )
+                        return
                     # Get downstream stages and parent info BEFORE transaction
                     execution = stage.execution
                     downstream_stages = self.repository.get_downstream_stages(execution.id, stage.ref_id)
