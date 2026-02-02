@@ -15,13 +15,23 @@ Stabilize is a Python DAG-based workflow orchestration engine. Workflows consist
 of Stages (nodes in the DAG) containing Tasks (atomic work units). Stages can
 run sequentially or in parallel based on their dependencies.
 
-CRITICAL RULE FOR SHELL WORKFLOWS:
-For shell/command workflows, import the BUILT-IN ShellTask:
-    from stabilize import ShellTask
-    registry.register("shell", ShellTask)
+CRITICAL RULES:
 
-DO NOT define your own ShellTask class - use the built-in one! It automatically
-substitutes {key} placeholders with upstream outputs (e.g., {stdout} becomes actual output).
+1. NEVER USE IN-MEMORY SQLITE (sqlite:///:memory:)
+   Always use disk-based SQLite with a file path:
+       WRONG:  SqliteWorkflowStore("sqlite:///:memory:", ...)
+       RIGHT:  SqliteWorkflowStore("sqlite:///./stabilize.db", ...)
+
+   In-memory databases lose ALL data on crash/restart, making workflows
+   unrecoverable. For production, use PostgreSQL. For development, use
+   disk-based SQLite with a proper file path.
+
+2. FOR SHELL WORKFLOWS: Import the BUILT-IN ShellTask:
+       from stabilize import ShellTask
+       registry.register("shell", ShellTask)
+
+   DO NOT define your own ShellTask class - use the built-in one! It automatically
+   substitutes {key} placeholders with upstream outputs (e.g., {stdout} becomes actual output).
 
 ===============================================================================
 1. COMPLETE WORKING EXAMPLE - COPY THIS AS YOUR STARTING TEMPLATE
@@ -43,11 +53,11 @@ from stabilize import (
     PythonTask,     # For Python code execution (uses script/INPUT/RESULT)
     DockerTask,     # For Docker container execution
     HTTPTask,       # For HTTP requests
-    # Handlers
-    StartWorkflowHandler, StartStageHandler, SkipStageHandler,
-    CancelStageHandler, ContinueParentStageHandler, StartTaskHandler,
-    RunTaskHandler, CompleteTaskHandler, CompleteStageHandler,
-    CompleteWorkflowHandler, StartWaitingWorkflowsHandler,
+    # Handlers (all 12 required)
+    StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
+    SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
+    JumpToStageHandler, StartTaskHandler, RunTaskHandler,
+    CompleteTaskHandler, CompleteStageHandler, CompleteWorkflowHandler,
 )
 
 
@@ -79,7 +89,7 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
 
     processor = QueueProcessor(queue)
 
-    # Register all handlers in order
+    # Register all 12 handlers in order
     handlers = [
         StartWorkflowHandler(queue, store),
         StartWaitingWorkflowsHandler(queue, store),
@@ -87,6 +97,7 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
         SkipStageHandler(queue, store),
         CancelStageHandler(queue, store),
         ContinueParentStageHandler(queue, store),
+        JumpToStageHandler(queue, store),
         StartTaskHandler(queue, store, task_registry),
         RunTaskHandler(queue, store, task_registry),
         CompleteTaskHandler(queue, store),
@@ -102,9 +113,10 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
 
 # Step 3: Create and run workflow
 def main():
-    # Initialize storage (in-memory SQLite for development)
-    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
-    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    # Initialize storage (disk-based SQLite - ALWAYS use disk, never in-memory)
+    db_path = "./stabilize.db"  # Use appropriate path for your project
+    store = SqliteWorkflowStore(f"sqlite:///{db_path}", create_tables=True)
+    queue = SqliteQueue(f"sqlite:///{db_path}", table_name="queue_messages")
     queue._create_table()
     processor, orchestrator = setup_pipeline_runner(store, queue)
 
@@ -291,11 +303,16 @@ PythonTask Context Parameters:
   continue_on_failure   - Return failed_continue instead of terminal
 
 PythonTask Outputs:
-  stdout, stderr, exit_code, result (value of RESULT variable if set)
+  stdout (str)            - Script stdout
+  stderr (str)            - Script stderr
+  exit_code (int)         - Script exit code
+  result (Any)            - Value of RESULT variable if set (JSON-serializable)
 
 Script Convention:
   - Access inputs via INPUT dict (includes upstream outputs + explicit inputs)
   - Set return value via RESULT variable (must be JSON-serializable)
+  - IMPORTANT: The RESULT variable becomes the 'result' key in outputs!
+    So downstream stages access it as: stage.context['result'] or INPUT['result']
 
 # Example: Inline script with INPUT and RESULT
 stages=[
@@ -309,6 +326,20 @@ RESULT = {"sum": sum(numbers), "avg": sum(numbers) / len(numbers)}
             "inputs": {"values": [1, 2, 3, 4, 5]}
         },
         tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+    ),
+    # Stage 1 outputs: {"result": {"sum": 15, "avg": 3.0}, "stdout": "", ...}
+    # Stage 2 can access the RESULT via INPUT["result"]
+    StageExecution(
+        ref_id="2", type="python", name="UseResult",
+        requisite_stage_ref_ids={"1"},
+        context={
+            "script": """
+# Access upstream RESULT via INPUT["result"]
+prev_result = INPUT["result"]
+RESULT = {"doubled_sum": prev_result["sum"] * 2}
+"""
+        },
+        tasks=[TaskExecution.create("Double", "python", stage_start=True, stage_end=True)],
     ),
 ]
 
@@ -411,6 +442,56 @@ context={
 
 # Example: Build and tag image
 context={"action": "build", "tag": "myapp:latest", "context": "./docker"}
+
+===============================================================================
+1.5 SSH PIPELINE TEMPLATE - USE FOR REMOTE COMMAND EXECUTION
+===============================================================================
+For SSH remote commands, IMPORT the built-in SSHTask (do NOT define your own):
+
+from stabilize import SSHTask, TaskRegistry
+
+registry = TaskRegistry()
+registry.register("ssh", SSHTask)
+
+SSHTask Context Parameters:
+  host (str)              - Remote hostname or IP address (required)
+  command (str)           - Command to execute on remote host (required)
+  user (str)              - SSH username (default: current user)
+  port (int)              - SSH port (default: 22)
+  key_file (str)          - Path to private key file (optional)
+  timeout (int)           - Command timeout in seconds (default: 60)
+  connect_timeout (int)   - SSH connection timeout in seconds (default: 10)
+  strict_host_key (bool)  - Strict host key checking (default: False)
+  continue_on_failure     - Return failed_continue instead of terminal on error
+
+SSHTask Outputs:
+  stdout, stderr, exit_code, host, user
+
+# Example: Simple remote command
+context={"host": "server.example.com", "command": "uptime"}
+
+# Example: With key file authentication
+context={
+    "host": "server.example.com",
+    "user": "deploy",
+    "key_file": "/home/user/.ssh/deploy_key",
+    "command": "systemctl status nginx",
+}
+
+# Example: Health check with continue_on_failure
+context={
+    "host": "server.example.com",
+    "command": "test -f /app/healthcheck",
+    "continue_on_failure": True,
+}
+
+# Example: Non-standard port with longer timeout
+context={
+    "host": "secure.example.com",
+    "port": 2222,
+    "command": "df -h",
+    "timeout": 120,
+}
 
 ===============================================================================
 2. CORE CLASSES API
@@ -859,6 +940,34 @@ RIGHT - Use the built-in ShellTask which handles everything:
     from stabilize import ShellTask
     registry.register("shell", ShellTask)
 
+
+MISTAKE 9: Using in-memory SQLite database
+------------------------------------------
+WRONG - Data is lost on crash/restart, workflows become unrecoverable:
+    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
+    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+
+RIGHT - Always use disk-based SQLite with a file path:
+    db_path = "./stabilize.db"  # Or absolute path like "/var/lib/stabilize/data.db"
+    store = SqliteWorkflowStore(f"sqlite:///{db_path}", create_tables=True)
+    queue = SqliteQueue(f"sqlite:///{db_path}", table_name="queue_messages")
+
+For production deployments, use PostgreSQL for better concurrency and reliability.
+
+
+MISTAKE 10: Accessing PythonTask RESULT incorrectly in downstream stages
+------------------------------------------------------------------------
+WRONG - Accessing RESULT dict keys directly:
+    # Stage 1 sets: RESULT = {"sum": 15}
+    # Stage 2 tries: INPUT["sum"]  <- KeyError! "sum" is not a top-level key
+
+RIGHT - Access via the "result" key:
+    # Stage 1 sets: RESULT = {"sum": 15}
+    # Stage 1 outputs: {"result": {"sum": 15}, "stdout": "", "stderr": "", "exit_code": 0}
+    # Stage 2 accesses: INPUT["result"]["sum"]  <- Correct!
+
+The RESULT variable in PythonTask becomes the "result" key in stage outputs.
+
 ===============================================================================
 8. COMPLETE EXAMPLE: SEQUENTIAL PIPELINE WITH ERROR HANDLING
 ===============================================================================
@@ -868,10 +977,11 @@ from stabilize import (
     Workflow, StageExecution, TaskExecution, WorkflowStatus,
     Orchestrator, QueueProcessor, SqliteQueue, SqliteWorkflowStore,
     Task, TaskResult, TaskRegistry,
+    # All 12 handlers required
     StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
     SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
-    StartTaskHandler, RunTaskHandler, CompleteTaskHandler,
-    CompleteStageHandler, CompleteWorkflowHandler,
+    JumpToStageHandler, StartTaskHandler, RunTaskHandler,
+    CompleteTaskHandler, CompleteStageHandler, CompleteWorkflowHandler,
 )
 
 
@@ -922,6 +1032,7 @@ def setup_pipeline_runner(store, queue):
         SkipStageHandler(queue, store),
         CancelStageHandler(queue, store),
         ContinueParentStageHandler(queue, store),
+        JumpToStageHandler(queue, store),
         StartTaskHandler(queue, store, registry),
         RunTaskHandler(queue, store, registry),
         CompleteTaskHandler(queue, store),
@@ -935,8 +1046,10 @@ def setup_pipeline_runner(store, queue):
 
 
 def main():
-    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
-    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    # ALWAYS use disk-based SQLite, never in-memory (data loss on crash)
+    db_path = "./stabilize.db"
+    store = SqliteWorkflowStore(f"sqlite:///{db_path}", create_tables=True)
+    queue = SqliteQueue(f"sqlite:///{db_path}", table_name="queue_messages")
     queue._create_table()
     processor, orchestrator = setup_pipeline_runner(store, queue)
 
@@ -992,10 +1105,11 @@ from stabilize import (
     Workflow, StageExecution, TaskExecution,
     Orchestrator, QueueProcessor, SqliteQueue, SqliteWorkflowStore,
     Task, TaskResult, TaskRegistry,
+    # All 12 handlers required
     StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
     SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
-    StartTaskHandler, RunTaskHandler, CompleteTaskHandler,
-    CompleteStageHandler, CompleteWorkflowHandler,
+    JumpToStageHandler, StartTaskHandler, RunTaskHandler,
+    CompleteTaskHandler, CompleteStageHandler, CompleteWorkflowHandler,
 )
 
 
@@ -1030,6 +1144,7 @@ def setup_pipeline_runner(store, queue):
         SkipStageHandler(queue, store),
         CancelStageHandler(queue, store),
         ContinueParentStageHandler(queue, store),
+        JumpToStageHandler(queue, store),
         StartTaskHandler(queue, store, registry),
         RunTaskHandler(queue, store, registry),
         CompleteTaskHandler(queue, store),
@@ -1042,8 +1157,10 @@ def setup_pipeline_runner(store, queue):
 
 
 def main():
-    store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
-    queue = SqliteQueue("sqlite:///:memory:", table_name="queue_messages")
+    # ALWAYS use disk-based SQLite, never in-memory (data loss on crash)
+    db_path = "./stabilize.db"
+    store = SqliteWorkflowStore(f"sqlite:///{db_path}", create_tables=True)
+    queue = SqliteQueue(f"sqlite:///{db_path}", table_name="queue_messages")
     queue._create_table()
     processor, orchestrator = setup_pipeline_runner(store, queue)
 
@@ -1113,12 +1230,12 @@ from stabilize import (
     Orchestrator, QueueProcessor, SqliteQueue, SqliteWorkflowStore,
     # Tasks
     Task, RetryableTask, TaskResult, TaskRegistry,
-    ShellTask, HTTPTask, DockerTask, SSHTask, HighwayTask,
-    # Handlers (all 11 required)
+    ShellTask, HTTPTask, DockerTask, SSHTask, PythonTask,
+    # Handlers (all 12 required)
     StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
     SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
-    StartTaskHandler, RunTaskHandler, CompleteTaskHandler,
-    CompleteStageHandler, CompleteWorkflowHandler,
+    JumpToStageHandler, StartTaskHandler, RunTaskHandler,
+    CompleteTaskHandler, CompleteStageHandler, CompleteWorkflowHandler,
 )
 
 # Advanced imports (for specialized use cases)
