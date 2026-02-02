@@ -294,6 +294,9 @@ class TestQueueBackendParity:
 
     def test_message_serialization_parity(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test message serialization and deserialization is identical."""
+        # Clear queue to ensure clean state
+        queue.clear()
+
         msg = StartWorkflow(
             execution_type="PIPELINE",
             execution_id="serial-test",
@@ -334,6 +337,9 @@ class TestQueueBackendParity:
 
     def test_reschedule_parity(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test rescheduling behavior is identical across backends."""
+        # Clear queue to ensure clean state
+        queue.clear()
+
         msg = StartWorkflow(
             execution_type="PIPELINE",
             execution_id="reschedule-parity-test",

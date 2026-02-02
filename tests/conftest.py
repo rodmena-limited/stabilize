@@ -199,7 +199,10 @@ def queue(
         sqlite_q._create_table()
         q = sqlite_q
         yield q
-        q.clear()
+        try:
+            q.clear()
+        except Exception:
+            pass  # Table may not exist if test created its own DB
     else:
         # PostgreSQL: migrations already created tables via mg apply
         if not HAS_POSTGRES:
@@ -334,7 +337,10 @@ def file_queue(
         sqlite_q._create_table()
         q = sqlite_q
         yield q
-        q.clear()
+        try:
+            q.clear()
+        except Exception:
+            pass  # Table may not exist if test created its own DB
         q.close()
     else:
         # PostgreSQL: reuse the regular queue

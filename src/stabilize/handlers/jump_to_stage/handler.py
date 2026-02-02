@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.handlers.jump_to_stage.reset import (
@@ -43,6 +43,7 @@ from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
+    from stabilize.models.workflow import Workflow
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
 
@@ -82,7 +83,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
     def _reload_reset_and_store(
         self,
         stage_id: str,
-        context_updates: dict | None = None,
+        context_updates: dict[str, Any] | None = None,
         target_status: WorkflowStatus = WorkflowStatus.NOT_STARTED,
     ) -> None:
         """Reload a stage from DB, apply status change, and store it.
@@ -342,11 +343,10 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
     def _check_jump_count(
         self,
         message: JumpToStage,
-        execution: Workflow,  # noqa: F821
+        execution: Workflow,
         source_stage: StageExecution,
     ) -> bool:
         """Check if jump count is within limits. Returns False if exceeded."""
-        from stabilize.models.workflow import Workflow  # noqa: F401
 
         jump_count = source_stage.context.get("_jump_count", 0)
         # Use explicit None checks to allow max_jumps=0 (disables jumps)
@@ -394,7 +394,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
     def _reset_downstream_stages(
         self,
         message: JumpToStage,
-        execution: Workflow,  # noqa: F821
+        execution: Workflow,
         source_stage: StageExecution,
         target_stage: StageExecution,
     ) -> None:
@@ -412,7 +412,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
     def _handle_source_stage(
         self,
         message: JumpToStage,
-        execution: Workflow,  # noqa: F821
+        execution: Workflow,
         source_stage: StageExecution,
         target_stage: StageExecution,
         is_backward_jump: bool,

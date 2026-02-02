@@ -110,6 +110,10 @@ def _handle_redirect(
     txn_helper: TransactionHelper,
 ) -> None:
     """Handle REDIRECT status - dynamic routing to a different stage."""
+    # target_stage_ref_id is guaranteed non-None when this function is called
+    # (checked at the call site before invoking _handle_redirect)
+    assert result.target_stage_ref_id is not None
+
     logger.info(
         "Task %s requested jump to stage %s",
         task_model.name,

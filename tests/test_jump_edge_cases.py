@@ -11,8 +11,6 @@ This module tests edge cases in the JumpToStage handler including:
 - Stale CompleteStage messages after jump
 """
 
-
-
 from stabilize import TaskResult
 from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus

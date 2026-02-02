@@ -139,7 +139,32 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                 status = stage.determine_status()
 
                 # Handle after stages
-                if status.is_complete and not status.is_halt:
+                # Note: status may be RUNNING if after-stages exist but are NOT_STARTED
+                # In that case, we still need to start the after-stages if core work is done
+                should_handle_after_stages = status.is_complete and not status.is_halt
+                if status == WorkflowStatus.RUNNING:
+                    # Check if core work (tasks + before-stages) is actually done
+                    # and status is RUNNING only because after-stages are NOT_STARTED
+                    after_stages_check = stage.first_after_stages()
+                    if after_stages_check:
+                        after_statuses = {s.status for s in after_stages_check}
+                        if after_statuses == {WorkflowStatus.NOT_STARTED}:
+                            # All after-stages are NOT_STARTED, check if core work is done
+                            task_statuses = [t.status for t in stage.tasks]
+                            before_statuses = [s.status for s in stage.before_stages()]
+                            all_core = before_statuses + task_statuses
+                            if all_core and all(
+                                s
+                                in {
+                                    WorkflowStatus.SUCCEEDED,
+                                    WorkflowStatus.SKIPPED,
+                                    WorkflowStatus.FAILED_CONTINUE,
+                                }
+                                for s in all_core
+                            ):
+                                should_handle_after_stages = True
+
+                if should_handle_after_stages:
                     after_stages = stage.first_after_stages()
                     if not after_stages:
                         self._plan_after_stages(stage)
@@ -221,10 +246,10 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                     # downstream execution. This prevents false-positive workflow success.
                     if status == WorkflowStatus.FAILED_CONTINUE and stage.context.get("_blocking_failure", False):
                         logger.warning(
-                            "Stage %s has _blocking_failure=True, converting FAILED_CONTINUE to FAILED",
+                            "Stage %s has _blocking_failure=True, converting FAILED_CONTINUE to TERMINAL",
                             stage.name,
                         )
-                        status = WorkflowStatus.FAILED
+                        status = WorkflowStatus.TERMINAL
                         self.set_stage_status(stage, status)
                         # Fall through to failure handling below
                         with self.repository.transaction(self.queue) as txn:

@@ -110,6 +110,9 @@ class TestQueue:
 
     def test_reschedule(self, queue: Queue) -> None:
         """Test rescheduling a message."""
+        # Clear queue to ensure clean state
+        queue.clear()
+
         message = StartWorkflow(
             execution_type="PIPELINE",
             execution_id="reschedule-123",

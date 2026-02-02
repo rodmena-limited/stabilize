@@ -43,14 +43,14 @@ def process_response(
     response_obj: HTTPResponse | HTTPError
     if hasattr(response, "code"):
         # HTTPError
-        status_code = response.code  # type: ignore[union-attr]
-        response_headers = dict(response.headers)  # type: ignore[union-attr]
-        response_obj = response  # type: ignore[assignment]
+        status_code = response.code
+        response_headers = dict(response.headers)
+        response_obj = response
     else:
         # HTTPResponse
-        status_code = response.status  # type: ignore[union-attr]
-        response_headers = dict(response.headers)  # type: ignore[union-attr]
-        response_obj = response  # type: ignore[assignment]
+        status_code = response.status
+        response_headers = dict(response.headers)
+        response_obj = response
 
     content_type = response_headers.get("Content-Type", "")
     content_length = int(response_headers.get("Content-Length", 0))

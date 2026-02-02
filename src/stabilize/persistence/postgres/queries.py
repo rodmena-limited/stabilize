@@ -84,10 +84,10 @@ def get_upstream_stages(pool: Any, execution_id: str, stage_ref_id: str) -> list
                 {"execution_id": execution_id, "ref_id": stage_ref_id},
             )
             row = cur.fetchone()
-            if not row or not row["requisite_stage_ref_ids"]:  # type: ignore[call-overload]
+            if not row or not row["requisite_stage_ref_ids"]:
                 return []
 
-            requisites = list(row["requisite_stage_ref_ids"])  # type: ignore[call-overload]
+            requisites = list(row["requisite_stage_ref_ids"])
 
             # Now fetch those stages
             cur.execute(
@@ -186,9 +186,9 @@ def get_merged_ancestor_outputs(pool: Any, execution_id: str, stage_ref_id: str)
     # Build graph in memory
     nodes: dict[str, dict[str, Any]] = {}
     for row in rows:
-        ref_id = row["ref_id"]  # type: ignore[call-overload]
-        requisites = row["requisite_stage_ref_ids"]  # type: ignore[call-overload]
-        outputs_raw = row["outputs"]  # type: ignore[call-overload]
+        ref_id = row["ref_id"]
+        requisites = row["requisite_stage_ref_ids"]
+        outputs_raw = row["outputs"]
         nodes[ref_id] = {
             "requisites": set(requisites or []),
             "outputs": (outputs_raw if isinstance(outputs_raw, dict) else json.loads(outputs_raw or "{}")),

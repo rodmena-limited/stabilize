@@ -8,8 +8,6 @@ This module tests edge cases in synthetic stage handling including:
 - Orphan synthetic stages (no parent_stage_id)
 """
 
-
-
 from stabilize import TaskResult
 from stabilize.models.stage import StageExecution, SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
