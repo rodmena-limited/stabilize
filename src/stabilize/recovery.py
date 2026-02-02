@@ -225,7 +225,7 @@ class WorkflowRecovery:
         Returns:
             RecoveryResult describing what happened
         """
-        from stabilize.queue.messages import StartStage, StartWorkflow
+        from stabilize.queue.messages import RunTask, StartStage, StartTask, StartWorkflow
 
         # Check if workflow is actually in a state needing recovery
         if workflow.status.is_complete:
@@ -239,21 +239,34 @@ class WorkflowRecovery:
         full_workflow = self.store.retrieve(workflow.id)
 
         # Find stages that need to be re-queued
-        stages_to_requeue = []
+        stages_to_requeue: list[StageExecution] = []
+        messages_queued = 0
 
         for stage in full_workflow.stages:
+            can_start = self._can_start(stage, full_workflow) if stage.status == WorkflowStatus.NOT_STARTED else None
+            logger.debug(
+                "Recovery eval: stage=%s ref_id=%s status=%s has_started=%s can_start=%s tasks=%d",
+                stage.name,
+                stage.ref_id,
+                stage.status,
+                self._has_started(stage),
+                can_start,
+                len(stage.tasks),
+            )
+
             # Stage was actively running when crash occurred
             if stage.status == WorkflowStatus.RUNNING:
                 stages_to_requeue.append(stage)
-            # Stage is NOT_STARTED - check if it actually started execution
+            # Stage is NOT_STARTED - check if it should be re-queued
             elif stage.status == WorkflowStatus.NOT_STARTED:
                 if self._has_started(stage):
                     # Stage started but crashed before status was updated to RUNNING
                     # Need to requeue for recovery
                     stages_to_requeue.append(stage)
-                else:
-                    # Stage never started - requeue to begin execution
+                elif self._can_start(stage, full_workflow):
+                    # Stage's dependencies are met - can start immediately
                     stages_to_requeue.append(stage)
+                # else: dependencies not met, will be triggered by upstream completion
 
         if not stages_to_requeue:
             # No stages to requeue, but workflow isn't complete
@@ -281,24 +294,101 @@ class WorkflowRecovery:
 
         # Re-queue each stage that needs recovery
         for stage in stages_to_requeue:
-            self.queue.push(
-                StartStage(
-                    execution_type=full_workflow.type.value,
-                    execution_id=full_workflow.id,
-                    stage_id=stage.id,
+            if stage.status == WorkflowStatus.RUNNING:
+                # Handle RUNNING stages - need to determine what messages to re-queue
+                running_tasks = [t for t in stage.tasks if t.status == WorkflowStatus.RUNNING]
+                not_started_tasks = [t for t in stage.tasks if t.status == WorkflowStatus.NOT_STARTED]
+
+                if running_tasks:
+                    # Re-queue RunTask for each RUNNING task
+                    for task in running_tasks:
+                        self.queue.push(
+                            RunTask(
+                                execution_type=full_workflow.type.value,
+                                execution_id=full_workflow.id,
+                                stage_id=stage.id,
+                                task_id=task.id,
+                                task_type=stage.type,
+                            )
+                        )
+                        messages_queued += 1
+                        logger.debug(
+                            "Re-queued RunTask for task %s in stage %s (%s)",
+                            task.id,
+                            stage.id,
+                            stage.ref_id,
+                        )
+                elif not_started_tasks and stage.start_time is not None:
+                    # Stage claimed but first task never started - re-queue StartTask
+                    # Find the first task that should run
+                    first_task = not_started_tasks[0]
+                    self.queue.push(
+                        StartTask(
+                            execution_type=full_workflow.type.value,
+                            execution_id=full_workflow.id,
+                            stage_id=stage.id,
+                            task_id=first_task.id,
+                        )
+                    )
+                    messages_queued += 1
+                    logger.debug(
+                        "Re-queued StartTask for task %s in stage %s (%s)",
+                        first_task.id,
+                        stage.id,
+                        stage.ref_id,
+                    )
+                elif not stage.tasks:
+                    # Zombie stage - RUNNING with no tasks, re-queue StartStage for planning
+                    self.queue.push(
+                        StartStage(
+                            execution_type=full_workflow.type.value,
+                            execution_id=full_workflow.id,
+                            stage_id=stage.id,
+                        )
+                    )
+                    messages_queued += 1
+                    logger.debug(
+                        "Re-queued StartStage for zombie stage %s (%s)",
+                        stage.id,
+                        stage.ref_id,
+                    )
+                else:
+                    # All tasks complete but stage still RUNNING - push StartStage
+                    # to trigger stage completion logic
+                    self.queue.push(
+                        StartStage(
+                            execution_type=full_workflow.type.value,
+                            execution_id=full_workflow.id,
+                            stage_id=stage.id,
+                        )
+                    )
+                    messages_queued += 1
+                    logger.debug(
+                        "Re-queued StartStage for stage with all tasks complete %s (%s)",
+                        stage.id,
+                        stage.ref_id,
+                    )
+            else:
+                # For NOT_STARTED stages, push StartStage
+                self.queue.push(
+                    StartStage(
+                        execution_type=full_workflow.type.value,
+                        execution_id=full_workflow.id,
+                        stage_id=stage.id,
+                    )
                 )
-            )
-            logger.debug(
-                "Re-queued stage %s (%s) for workflow %s",
-                stage.id,
-                stage.ref_id,
-                workflow.id,
-            )
+                messages_queued += 1
+                logger.debug(
+                    "Re-queued StartStage for stage %s (%s) in workflow %s",
+                    stage.id,
+                    stage.ref_id,
+                    workflow.id,
+                )
 
         return RecoveryResult(
             workflow_id=workflow.id,
             status="recovered",
-            message=f"Re-queued {len(stages_to_requeue)} stages",
+            message=f"Re-queued {len(stages_to_requeue)} stages ({messages_queued} messages)",
             stages_requeued=len(stages_to_requeue),
         )
 
@@ -323,6 +413,43 @@ class WorkflowRecovery:
                 return True
 
         return False
+
+    def _can_start(self, stage: StageExecution, workflow: Workflow) -> bool:
+        """Check if a stage's dependencies are met and it can start.
+
+        A stage can start if:
+        - It has no dependencies (initial stage), OR
+        - All upstream stages are in CONTINUABLE_STATUSES (SUCCEEDED, FAILED_CONTINUE, SKIPPED, REDIRECT)
+
+        Args:
+            stage: The stage to check
+            workflow: The full workflow containing all stages
+
+        Returns:
+            True if stage dependencies are met
+        """
+        from stabilize.models.status import CONTINUABLE_STATUSES
+
+        # No dependencies - can always start
+        if not stage.requisite_stage_ref_ids:
+            return True
+
+        # Check all upstream stages
+        for ref_id in stage.requisite_stage_ref_ids:
+            upstream = next((s for s in workflow.stages if s.ref_id == ref_id), None)
+            if upstream is None:
+                # Upstream not found - can't start
+                logger.warning(
+                    "Stage %s depends on unknown stage %s",
+                    stage.ref_id,
+                    ref_id,
+                )
+                return False
+            if upstream.status not in CONTINUABLE_STATUSES:
+                # Upstream not complete - can't start
+                return False
+
+        return True
 
 
 def recover_on_startup(

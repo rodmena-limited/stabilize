@@ -379,6 +379,22 @@ class WorkflowStore(ABC):
         """
         return sum(1 for _ in self.retrieve_by_application(application))
 
+    def exists(self, execution_id: str) -> bool:
+        """
+        Check if a workflow exists.
+
+        Args:
+            execution_id: The workflow ID to check
+
+        Returns:
+            True if the workflow exists, False otherwise
+        """
+        try:
+            self.retrieve_execution_summary(execution_id)
+            return True
+        except Exception:
+            return False
+
     @contextmanager
     def transaction(self, queue: Queue | None = None) -> Iterator[StoreTransaction]:
         """

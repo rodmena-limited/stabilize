@@ -128,7 +128,11 @@ class SqliteWorkflowStore(WorkflowStore):
         create_tables(self._get_connection())
 
     def store(self, execution: Workflow) -> None:
-        """Store a complete execution."""
+        """Store a complete execution.
+
+        Note: This will raise an error if the execution ID already exists.
+        Use exists() to check first if needed.
+        """
         conn = self._get_connection()
 
         # Insert execution
@@ -540,3 +544,60 @@ class SqliteWorkflowStore(WorkflowStore):
         for row in result.fetchall():
             workflows.append(row_to_execution(row))
         return workflows
+
+    def exists(self, execution_id: str) -> bool:
+        """Check if a workflow exists.
+
+        Args:
+            execution_id: The workflow ID to check
+
+        Returns:
+            True if the workflow exists, False otherwise
+        """
+        conn = self._get_connection()
+        result = conn.execute(
+            "SELECT 1 FROM pipeline_executions WHERE id = :id",
+            {"id": execution_id},
+        )
+        return result.fetchone() is not None
+
+    def get_all_pending_workflows(
+        self,
+        criteria: WorkflowCriteria | None = None,
+    ) -> Iterator[Workflow]:
+        """Get all workflows matching criteria across all applications.
+
+        This is used by recovery to find workflows that need recovery
+        without filtering by application.
+
+        Args:
+            criteria: Optional criteria for filtering (statuses, start_time, etc.)
+
+        Yields:
+            Workflow objects matching the criteria
+        """
+        conn = self._get_connection()
+        query = "SELECT id FROM pipeline_executions WHERE 1=1"
+        params: dict[str, Any] = {}
+
+        if criteria and criteria.statuses:
+            status_names = [s.name for s in criteria.statuses]
+            placeholders = ", ".join(f":status_{i}" for i in range(len(status_names)))
+            query += f" AND status IN ({placeholders})"
+            for i, name in enumerate(status_names):
+                params[f"status_{i}"] = name
+
+        if criteria and criteria.start_time_after:
+            # Handle both started and not-yet-started workflows
+            # Workflows that haven't started yet have NULL start_time
+            query += " AND (start_time >= :start_time_after OR start_time IS NULL)"
+            params["start_time_after"] = criteria.start_time_after
+
+        query += " ORDER BY start_time DESC NULLS LAST"
+
+        if criteria and criteria.page_size:
+            query += f" LIMIT {criteria.page_size}"
+
+        result = conn.execute(query, params)
+        for row in result.fetchall():
+            yield self.retrieve(row["id"])
