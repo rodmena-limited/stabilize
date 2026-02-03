@@ -27,6 +27,7 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING, Any
 
+from stabilize.errors import TransientError
 from stabilize.tasks.interface import Task
 from stabilize.tasks.result import TaskResult
 
@@ -49,6 +50,7 @@ RESERVED_KEYS = frozenset(
         "secrets",
         "binary",
         "continue_on_failure",
+        "restart_on_failure",
     }
 )
 
@@ -72,6 +74,8 @@ class ShellTask(Task):
         secrets (list[str]): Context keys whose values should be masked in logs
         binary (bool): If True, capture output as bytes (default: False)
         continue_on_failure (bool): If True, return failed_continue instead of terminal
+        restart_on_failure (bool): If True, raise TransientError on failure to trigger
+                                   automatic retry with backoff (for long-running services)
 
     Outputs:
         stdout (str|bytes): Command standard output (stripped if text mode)
@@ -134,6 +138,7 @@ class ShellTask(Task):
         secrets: list[str] = stage.context.get("secrets", [])
         binary: bool = stage.context.get("binary", False)
         continue_on_failure: bool = stage.context.get("continue_on_failure", False)
+        restart_on_failure: bool = stage.context.get("restart_on_failure", False)
 
         # Substitute {key} placeholders with context values (includes upstream outputs)
         for key, value in stage.context.items():
@@ -231,6 +236,8 @@ class ShellTask(Task):
                         timeout_outputs["stderr"] = stderr_bytes.decode("utf-8", errors="replace").strip()
 
                 error_msg = f"Command timed out after {timeout}s"
+                if restart_on_failure:
+                    raise TransientError(error_msg, context_update={"_last_outputs": timeout_outputs})
                 if continue_on_failure:
                     return TaskResult.failed_continue(error=error_msg, outputs=timeout_outputs)
                 return TaskResult.terminal(error=error_msg, context=timeout_outputs)
@@ -267,9 +274,17 @@ class ShellTask(Task):
                 if outputs.get("stderr"):
                     error_msg += f": {outputs['stderr'][:200]}"
 
+                if restart_on_failure:
+                    # Raise TransientError to trigger automatic retry with backoff
+                    raise TransientError(error_msg, context_update={"_last_outputs": outputs})
+
                 if continue_on_failure:
                     return TaskResult.failed_continue(error=error_msg, outputs=outputs)
                 return TaskResult.terminal(error=error_msg, context=outputs)
+
+        except TransientError:
+            # Let TransientError propagate for retry handling
+            raise
 
         except FileNotFoundError as e:
             return TaskResult.terminal(error=f"Command or shell not found: {e}")

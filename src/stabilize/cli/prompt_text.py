@@ -494,6 +494,169 @@ context={
 }
 
 ===============================================================================
+1.6 LONG-RUNNING TASKS - SERVERS AND BACKGROUND SERVICES
+===============================================================================
+For long-running tasks (HTTP servers, background workers, monitors), use the
+`restart_on_failure` option to automatically restart when they crash.
+
+CRITICAL CONCEPTS:
+
+1. restart_on_failure vs continue_on_failure:
+   - continue_on_failure=True: Task fails → marked FAILED_CONTINUE → NEVER retried
+     → workflow continues with dead service (BAD for servers!)
+   - restart_on_failure=True: Task fails → raises TransientError → automatically
+     retried with exponential backoff → service restarts (CORRECT for servers!)
+
+2. Parallel Processing:
+   - process_all() is SYNCHRONOUS - processes ONE message at a time
+   - processor.start() enables PARALLEL thread pool processing
+   - For multiple long-running tasks, you MUST use processor.start()
+
+ShellTask Long-Running Options:
+  restart_on_failure (bool) - If True, raises TransientError on failure to trigger
+                              automatic retry with backoff (up to 10 retries)
+  timeout (int)             - Long timeout for servers (e.g., 3600 for 1 hour)
+
+# Example: Parallel HTTP Servers with Auto-Restart
+#!/usr/bin/env python3
+"""Parallel long-running servers with automatic restart on failure."""
+
+from stabilize import (
+    Workflow, StageExecution, TaskExecution,
+    Orchestrator, QueueProcessor, SqliteQueue, SqliteWorkflowStore,
+    TaskRegistry, ShellTask,
+    StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
+    SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
+    JumpToStageHandler, StartTaskHandler, RunTaskHandler,
+    CompleteTaskHandler, CompleteStageHandler, CompleteWorkflowHandler,
+)
+from stabilize.queue.processor import QueueProcessorConfig
+from stabilize.recovery import recover_on_startup
+import time
+
+
+def main():
+    db_path = "/tmp/servers_workflow.db"
+    store = SqliteWorkflowStore(f"sqlite:///{db_path}", create_tables=True)
+    queue = SqliteQueue(f"sqlite:///{db_path}", table_name="queue_messages")
+    queue._create_table()
+
+    registry = TaskRegistry()
+    registry.register("shell", ShellTask)
+
+    # IMPORTANT: Use QueueProcessorConfig with max_workers for parallel execution
+    processor = QueueProcessor(
+        queue,
+        config=QueueProcessorConfig(max_workers=4, poll_frequency_ms=100),
+        store=store
+    )
+
+    for h in [
+        StartWorkflowHandler(queue, store),
+        StartWaitingWorkflowsHandler(queue, store),
+        StartStageHandler(queue, store),
+        SkipStageHandler(queue, store),
+        CancelStageHandler(queue, store),
+        ContinueParentStageHandler(queue, store),
+        JumpToStageHandler(queue, store),
+        StartTaskHandler(queue, store, registry),
+        RunTaskHandler(queue, store, registry),
+        CompleteTaskHandler(queue, store),
+        CompleteStageHandler(queue, store),
+        CompleteWorkflowHandler(queue, store),
+    ]:
+        processor.register_handler(h)
+
+    WORKFLOW_ID = "my-servers"
+
+    # Check for existing workflow (recovery scenario)
+    if store.exists(WORKFLOW_ID):
+        existing = store.retrieve(WORKFLOW_ID)
+        if existing.status.is_complete:
+            print(f"Previous workflow completed: {existing.status.name}")
+            return
+
+        # Recover in-progress workflow
+        print("Recovering workflow...")
+        recover_on_startup(store, queue, application="demo")
+    else:
+        # Create new workflow with parallel servers
+        workflow = Workflow(
+            id=WORKFLOW_ID,
+            application="demo",
+            name="Parallel Servers",
+            stages=[
+                StageExecution(
+                    ref_id="server1",
+                    type="shell",
+                    name="Server 1 (port 19001)",
+                    context={
+                        "command": "cd /tmp/server1 && python3 -m http.server 19001",
+                        "timeout": 3600,           # 1 hour timeout
+                        "restart_on_failure": True,  # Auto-restart on crash!
+                    },
+                    requisite_stage_ref_ids=set(),  # No dependencies - runs in parallel
+                    tasks=[TaskExecution.create("S1", "shell", stage_start=True, stage_end=True)],
+                ),
+                StageExecution(
+                    ref_id="server2",
+                    type="shell",
+                    name="Server 2 (port 19002)",
+                    context={
+                        "command": "cd /tmp/server2 && python3 -m http.server 19002",
+                        "timeout": 3600,
+                        "restart_on_failure": True,
+                    },
+                    requisite_stage_ref_ids=set(),  # No dependencies - runs in parallel
+                    tasks=[TaskExecution.create("S2", "shell", stage_start=True, stage_end=True)],
+                ),
+                StageExecution(
+                    ref_id="monitor",
+                    type="shell",
+                    name="Health Monitor",
+                    context={
+                        "command": "while true; do curl -s localhost:19001 && curl -s localhost:19002; sleep 30; done",
+                        "timeout": 3600,
+                        "restart_on_failure": True,
+                    },
+                    requisite_stage_ref_ids=set(),  # No dependencies - runs in parallel
+                    tasks=[TaskExecution.create("Mon", "shell", stage_start=True, stage_end=True)],
+                ),
+            ],
+        )
+        store.store(workflow)
+        Orchestrator(queue).start(workflow)
+
+    # IMPORTANT: Use processor.start() for PARALLEL execution, not process_all()!
+    try:
+        processor.start()  # Starts thread pool for parallel processing
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Stopping...")
+        processor.stop()
+        print("Run again to recover the workflow.")
+
+
+if __name__ == "__main__":
+    main()
+
+Key Points for Long-Running Tasks:
+  1. Use restart_on_failure=True for services that must stay running
+  2. Use processor.start() not process_all() for parallel execution
+  3. Set long timeout values (3600+ seconds)
+  4. Use recover_on_startup() to resume after crashes
+  5. All parallel stages should have requisite_stage_ref_ids=set()
+  6. Kill a server by PID to test restart: kill <PID>, then verify new PID appears
+
+Testing Auto-Restart:
+  1. Start the workflow
+  2. Find server PID: ps aux | grep "http.server 19001"
+  3. Kill it: kill <PID>
+  4. Watch logs - server should restart automatically within seconds
+  5. Verify new PID: ps aux | grep "http.server 19001"
+
+===============================================================================
 2. CORE CLASSES API
 ===============================================================================
 
@@ -967,6 +1130,45 @@ RIGHT - Access via the "result" key:
     # Stage 2 accesses: INPUT["result"]["sum"]  <- Correct!
 
 The RESULT variable in PythonTask becomes the "result" key in stage outputs.
+
+
+MISTAKE 11: Using continue_on_failure for long-running servers
+--------------------------------------------------------------
+WRONG - Server dies and never restarts:
+    context={
+        "command": "python3 -m http.server 8000",
+        "timeout": 3600,
+        "continue_on_failure": True,  # BAD: Server crashes → marked FAILED_CONTINUE → dead forever
+    }
+
+RIGHT - Server auto-restarts on crash:
+    context={
+        "command": "python3 -m http.server 8000",
+        "timeout": 3600,
+        "restart_on_failure": True,  # GOOD: Server crashes → TransientError → retry with backoff
+    }
+
+continue_on_failure: Task fails → FAILED_CONTINUE (terminal) → workflow continues, service dead
+restart_on_failure: Task fails → TransientError → exponential backoff retry → service restarts
+
+
+MISTAKE 12: Using process_all() for parallel long-running tasks
+---------------------------------------------------------------
+WRONG - Server 1 blocks, Server 2 never starts:
+    # Server 1 runs for 3600 seconds, process_all waits, Server 2 never gets a turn
+    processor.process_all(timeout=3600)
+
+RIGHT - All servers run in parallel:
+    processor.start()  # Starts thread pool, processes messages in parallel
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        processor.stop()
+
+process_all() is SYNCHRONOUS - processes ONE message at a time.
+processor.start() uses thread pool for PARALLEL processing.
+See section 1.6 for complete long-running tasks example.
 
 ===============================================================================
 8. COMPLETE EXAMPLE: SEQUENTIAL PIPELINE WITH ERROR HANDLING
