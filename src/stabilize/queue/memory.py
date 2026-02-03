@@ -195,3 +195,23 @@ class InMemoryQueue(Queue):
             self._queue.clear()
             self._pending.clear()
             self._message_index.clear()
+
+    def has_pending_message_for_task(self, task_id: str) -> bool:
+        """Check if there's already a pending message for a specific task.
+
+        Used by recovery to prevent creating duplicate messages.
+
+        Args:
+            task_id: The task ID to check for
+
+        Returns:
+            True if a pending message exists for this task
+        """
+        with self._lock:
+            for qm in self._queue:
+                if hasattr(qm.message, "task_id") and qm.message.task_id == task_id:
+                    return True
+            for qm in self._pending.values():
+                if hasattr(qm.message, "task_id") and qm.message.task_id == task_id:
+                    return True
+        return False

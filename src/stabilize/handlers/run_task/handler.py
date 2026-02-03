@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -64,6 +65,10 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
     4. Executes the task
     5. Processes the result
     """
+
+    # Class-level lock to track tasks currently being executed (prevents duplicate execution)
+    _executing_tasks: set[str] = set()
+    _executing_lock = threading.Lock()
 
     def __init__(
         self,
@@ -220,6 +225,18 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 )
                 return
 
+            # CONCURRENT EXECUTION CHECK: Prevent duplicate execution of same task
+            with RunTaskHandler._executing_lock:
+                if task_model.id in RunTaskHandler._executing_tasks:
+                    logger.debug(
+                        "Ignoring duplicate RunTask for %s - already executing",
+                        task_model.name,
+                    )
+                    # Don't mark as processed - let the original execution handle completion
+                    return
+                # Claim this task for execution
+                RunTaskHandler._executing_tasks.add(task_model.id)
+
             # Execute the task with timeout enforcement
             try:
                 timeout = self.timeout_manager.get_task_timeout(stage, task)
@@ -310,6 +327,10 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                     self._get_backoff_period,
                     self.retry_on_concurrency_error,
                 )
+            finally:
+                # Release the execution lock so other messages can be processed
+                with RunTaskHandler._executing_lock:
+                    RunTaskHandler._executing_tasks.discard(task_model.id)
 
         self.with_task(message, on_task)
 

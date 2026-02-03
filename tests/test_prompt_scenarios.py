@@ -151,14 +151,16 @@ Output ONLY the Python code in a ```python code block.""",
     {
         "name": "python_task_chained",
         "prompt": """Based on the Stabilize documentation above, create a COMPLETE, RUNNABLE Python script that:
-1. Creates a 2-stage workflow using PythonTask
-2. Stage 1 uses PythonTask with an inline script that calculates sum of [1,2,3,4,5] and sets RESULT={"sum": 15}
-3. Stage 2 uses PythonTask to read the RESULT from stage 1 (remember: access via INPUT["result"]) and double the sum
-4. Runs the workflow and prints final outputs showing the doubled value
+1. Creates a 2-stage workflow using PythonTask 2. Stage 1 uses PythonTask with an inline
+script that calculates sum of [1,2,3,4,5] and sets RESULT={"sum": 15} 3. Stage 2 uses
+PythonTask to read the RESULT from stage 1 (remember: access via INPUT["result"]) and
+double the sum 4. Runs the workflow and prints final outputs showing the doubled value
 
-IMPORTANT: Remember that PythonTask RESULT becomes "result" key in outputs, so stage 2 must access INPUT["result"]["sum"]
+IMPORTANT: Remember that PythonTask RESULT becomes "result" key in outputs, so stage 2
+must access INPUT["result"]["sum"]
 
-Include ALL imports and the main() function. The script must be self-contained and runnable.
+Include ALL imports and the main() function. The script must be self-contained and
+runnable.
 Output ONLY the Python code in a ```python code block.""",
     },
     {

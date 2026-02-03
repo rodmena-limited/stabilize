@@ -138,7 +138,8 @@ class SqliteConfig:
 
         # Always set these (existing behavior)
         statements.append("PRAGMA foreign_keys = ON")
-        statements.append("PRAGMA journal_mode = WAL")
+        # WAL mode disabled - use DELETE journal for simpler locking
+        statements.append("PRAGMA journal_mode = DELETE")
         statements.append(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
 
         # Optimization pragmas
@@ -158,8 +159,9 @@ class SqliteConfig:
         temp_value = 2 if temp == "memory" else 0
         statements.append(f"PRAGMA temp_store = {temp_value}")
 
-        wal_cp = self.get_effective_value("wal_autocheckpoint")
-        statements.append(f"PRAGMA wal_autocheckpoint = {wal_cp}")
+        # wal_autocheckpoint only applies to WAL mode, skip when using DELETE journal
+        # wal_cp = self.get_effective_value("wal_autocheckpoint")
+        # statements.append(f"PRAGMA wal_autocheckpoint = {wal_cp}")
 
         return statements
 

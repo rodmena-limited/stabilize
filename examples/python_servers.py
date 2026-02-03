@@ -66,7 +66,7 @@ def create_workflow_stages():
             type="shell",
             name="Server 1",
             context={
-                "command": f"cd {DIR1} && python3 -m http.server 8001",
+                "command": f"cd {DIR1} && python3 -m http.server 19001",
                 "timeout": 3600,
                 "continue_on_failure": True,
             },
@@ -78,7 +78,7 @@ def create_workflow_stages():
             type="shell",
             name="Server 2",
             context={
-                "command": f"cd {DIR2} && python3 -m http.server 8002",
+                "command": f"cd {DIR2} && python3 -m http.server 19002",
                 "timeout": 3600,
                 "continue_on_failure": True,
             },
@@ -90,7 +90,7 @@ def create_workflow_stages():
             type="shell",
             name="Monitor",
             context={
-                "command": "while true; do curl -s localhost:8001 && curl -s localhost:8002; sleep 30; done",
+                "command": "while true; do curl -s localhost:19001 && curl -s localhost:19002; sleep 30; done",
                 "timeout": 3600,
                 "continue_on_failure": True,
             },
@@ -102,7 +102,7 @@ def create_workflow_stages():
             type="http",
             name="Fetch",
             context={
-                "url": "http://localhost:8001/index.html",
+                "url": "http://localhost:19001/index.html",
                 "method": "GET",
                 "timeout": 30,
                 "continue_on_failure": True,
@@ -116,7 +116,7 @@ def create_workflow_stages():
 def main():
     import pathlib
 
-    db = pathlib.Path.home() / "workflow.db"
+    db = pathlib.Path("/tmp/workflow_test.db")
     store = SqliteWorkflowStore(f"sqlite:///{db}", create_tables=True)
     queue = SqliteQueue(f"sqlite:///{db}", table_name="queue_messages")
     queue._create_table()
@@ -125,7 +125,7 @@ def main():
     reg.register("shell", ShellTask)
     reg.register("http", HTTPTask)
 
-    processor = QueueProcessor(queue, config=QueueProcessorConfig(max_workers=4, poll_frequency_ms=100))
+    processor = QueueProcessor(queue, config=QueueProcessorConfig(max_workers=4, poll_frequency_ms=100), store=store)
 
     for h in [
         StartWorkflowHandler(queue, store),
@@ -176,8 +176,8 @@ def main():
         store.store(workflow)
         Orchestrator(queue).start(workflow)
 
-    print(f"\nServer 1: http://localhost:8001 ({DIR1})")
-    print(f"Server 2: http://localhost:8002 ({DIR2})")
+    print(f"\nServer 1: http://localhost:19001 ({DIR1})")
+    print(f"Server 2: http://localhost:19002 ({DIR2})")
     print("Starting... Ctrl+C to stop\n")
 
     try:

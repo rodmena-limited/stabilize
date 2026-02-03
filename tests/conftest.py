@@ -121,11 +121,13 @@ def postgres_url(postgres_container: Any) -> str:
 
     # Run migrations using mg command
     # mg needs to run from project root where mg.yaml and migrations/ exist
+    # Use the venv's mg, not the system mg (which might be a text editor)
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    venv_mg = os.path.join(project_root, ".venv", "bin", "mg")
     env = os.environ.copy()
     env["MG_DATABASE_URL"] = url
     result = subprocess.run(
-        ["mg", "apply"],
+        [venv_mg, "apply", "--yes"],
         env=env,
         cwd=project_root,
         capture_output=True,
@@ -177,6 +179,17 @@ def repository(
             pytest.skip("psycopg not installed")
         postgres_url = request.getfixturevalue("postgres_url")
         repo = PostgresWorkflowStore(connection_string=postgres_url)
+        # Clear all test data to ensure isolation between tests
+        # Use the internal pool to run cleanup queries
+        pool = repo._pool  # Access internal pool for cleanup
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                # Clear in correct order due to foreign keys (children first)
+                cur.execute("DELETE FROM task_executions")
+                cur.execute("DELETE FROM stage_executions")
+                cur.execute("DELETE FROM pipeline_executions")
+                cur.execute("DELETE FROM processed_messages")
+            conn.commit()
         yield repo
         repo.close()
 

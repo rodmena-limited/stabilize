@@ -342,6 +342,30 @@ class PostgresQueue(Queue):
         # Invalidate size cache
         self._size_cache = None
 
+    def has_pending_message_for_task(self, task_id: str) -> bool:
+        """Check if there's already a pending message for a specific task.
+
+        Used by recovery to prevent creating duplicate messages.
+
+        Args:
+            task_id: The task ID to check for
+
+        Returns:
+            True if a pending message exists for this task
+        """
+        pool = self._get_pool()
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT 1 FROM {self.table_name}
+                    WHERE payload::text LIKE %s
+                    LIMIT 1
+                    """,
+                    (f'%"task_id": "{task_id}"%',),
+                )
+                return cur.fetchone() is not None
+
     # ========== Dead Letter Queue Methods ==========
 
     def move_to_dlq(

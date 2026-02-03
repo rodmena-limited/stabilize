@@ -300,8 +300,16 @@ class WorkflowRecovery:
                 not_started_tasks = [t for t in stage.tasks if t.status == WorkflowStatus.NOT_STARTED]
 
                 if running_tasks:
-                    # Re-queue RunTask for each RUNNING task
+                    # Re-queue RunTask for each RUNNING task (if not already queued)
                     for task in running_tasks:
+                        # Always check for existing messages to prevent duplicates
+                        if self.queue.has_pending_message_for_task(task.id):
+                            logger.debug(
+                                "Skipping recovery for task %s - message already in queue",
+                                task.id,
+                            )
+                            continue
+
                         self.queue.push(
                             RunTask(
                                 execution_type=full_workflow.type.value,

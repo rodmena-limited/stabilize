@@ -87,7 +87,7 @@ class TestSqliteConfigPragmaStatements:
         statements = config.get_pragma_statements()
 
         assert "PRAGMA foreign_keys = ON" in statements
-        assert "PRAGMA journal_mode = WAL" in statements
+        assert "PRAGMA journal_mode = DELETE" in statements
         assert "PRAGMA busy_timeout = 30000" in statements
 
     def test_pragma_statements_include_optimizations(self) -> None:
@@ -99,7 +99,7 @@ class TestSqliteConfigPragmaStatements:
         assert "PRAGMA cache_size = -32000" in statements
         assert "PRAGMA mmap_size = 268435456" in statements  # 256MB
         assert "PRAGMA temp_store = 2" in statements  # MEMORY
-        assert "PRAGMA wal_autocheckpoint = 2000" in statements
+        # wal_autocheckpoint not used with DELETE journal mode
 
     def test_pragma_mmap_zero_not_included(self) -> None:
         """mmap_size should not be included when set to 0."""
@@ -222,7 +222,7 @@ class TestSqliteConfigIntegration:
 
         # Verify essential pragmas
         result = conn.execute("PRAGMA journal_mode").fetchone()
-        assert result[0].upper() == "WAL"
+        assert result[0].upper() == "DELETE"
 
         result = conn.execute("PRAGMA foreign_keys").fetchone()
         assert result[0] == 1  # ON

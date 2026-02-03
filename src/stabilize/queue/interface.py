@@ -126,6 +126,21 @@ class Queue(ABC):
         """Clear all messages from the queue."""
         pass
 
+    def has_pending_message_for_task(self, task_id: str) -> bool:
+        """Check if there's already a pending message for a specific task.
+
+        Used by recovery to prevent creating duplicate messages.
+        Default implementation returns False (no deduplication).
+        Queue implementations should override this for proper recovery behavior.
+
+        Args:
+            task_id: The task ID to check for
+
+        Returns:
+            True if a pending message exists for this task
+        """
+        return False
+
 
 @dataclass(order=True)
 class QueuedMessage:

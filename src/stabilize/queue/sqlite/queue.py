@@ -301,3 +301,25 @@ class SqliteQueue(SqliteDLQMixin, Queue):
 
         self._pending.clear()
         logger.debug("Cleared queue")
+
+    def has_pending_message_for_task(self, task_id: str) -> bool:
+        """Check if there's already a pending message for a specific task.
+
+        Used by recovery to prevent creating duplicate messages.
+
+        Args:
+            task_id: The task ID to check for
+
+        Returns:
+            True if a pending message exists for this task
+        """
+        conn = self._get_connection()
+        result = conn.execute(
+            f"""
+            SELECT 1 FROM {self.table_name}
+            WHERE payload LIKE :pattern
+            LIMIT 1
+            """,
+            {"pattern": f'%"task_id": "{task_id}"%'},
+        )
+        return result.fetchone() is not None

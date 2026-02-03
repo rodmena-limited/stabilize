@@ -136,6 +136,13 @@ class QueueProcessor:
         else:
             self.config = QueueProcessorConfig.from_handler_config(handler_config)
         self._store = store
+
+        # Warn if deduplication is enabled but no store provided
+        if self.config.enable_deduplication and store is None:
+            logger.warning(
+                "QueueProcessor created with enable_deduplication=True but no store provided. "
+                "Message deduplication will NOT work. Pass store=store to enable."
+            )
         self._handlers: dict[type[Message], MessageHandler[Any]] = {}
         self._running = False
         self._stopping = False  # Flag for graceful stop (stop accepting new work)
