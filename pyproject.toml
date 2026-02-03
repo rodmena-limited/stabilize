@@ -36,12 +36,16 @@ observability = [
     "opentelemetry-api>=1.20",
     "opentelemetry-sdk>=1.20",
 ]
+process = [
+    "psutil>=5.9",
+]
 all = [
     "psycopg[pool]>=3.0",
     "migretti>=0.3",
     "structlog>=24.0",
     "opentelemetry-api>=1.20",
     "opentelemetry-sdk>=1.20",
+    "psutil>=5.9",
 ]
 dev = [
     "psycopg[pool]>=3.0",
@@ -56,6 +60,7 @@ dev = [
     "structlog>=24.0",
     "opentelemetry-api>=1.20",
     "opentelemetry-sdk>=1.20",
+    "psutil>=5.9",
 ]
 
 [project.scripts]

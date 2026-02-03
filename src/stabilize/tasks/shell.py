@@ -17,11 +17,13 @@ This module provides a production-ready ShellTask with:
 from __future__ import annotations
 
 import base64
+import ctypes
 import logging
 import os
 import shlex
 import signal
 import subprocess
+import sys
 from typing import TYPE_CHECKING, Any
 
 from stabilize.tasks.interface import Task

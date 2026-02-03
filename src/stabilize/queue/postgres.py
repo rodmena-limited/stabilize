@@ -135,13 +135,18 @@ class PostgresQueue(Queue):
     ) -> None:
         """Push a message onto the queue."""
         pool = self._get_pool()
-        deliver_at = datetime.now()
-        if delay:
-            deliver_at += delay
 
         message_type = get_message_type_name(message)
         message_id = str(uuid.uuid4())
         payload = self._serialize_message(message)
+
+        # Use PostgreSQL's NOW() for deliver_at to avoid clock drift between Python and PostgreSQL.
+        # When comparing timestamps, we need to ensure consistency with the poll query which uses NOW().
+        if delay:
+            delay_seconds = delay.total_seconds()
+            deliver_at_sql = f"NOW() + INTERVAL '{delay_seconds} seconds'"
+        else:
+            deliver_at_sql = "NOW()"
 
         # Use provided connection or get one from pool
         # If provided, caller handles commit/rollback
@@ -151,13 +156,12 @@ class PostgresQueue(Queue):
                     f"""
                     INSERT INTO {self.table_name}
                     (message_id, message_type, payload, deliver_at, attempts)
-                    VALUES (%(message_id)s, %(type)s, %(payload)s::jsonb, %(deliver_at)s, 0)
+                    VALUES (%(message_id)s, %(type)s, %(payload)s::jsonb, {deliver_at_sql}, 0)
                     """,
                     {
                         "message_id": message_id,
                         "type": message_type,
                         "payload": payload,
-                        "deliver_at": deliver_at,
                     },
                 )
         else:
@@ -167,13 +171,12 @@ class PostgresQueue(Queue):
                         f"""
                         INSERT INTO {self.table_name}
                         (message_id, message_type, payload, deliver_at, attempts)
-                        VALUES (%(message_id)s, %(type)s, %(payload)s::jsonb, %(deliver_at)s, 0)
+                        VALUES (%(message_id)s, %(type)s, %(payload)s::jsonb, {deliver_at_sql}, 0)
                         """,
                         {
                             "message_id": message_id,
                             "type": message_type,
                             "payload": payload,
-                            "deliver_at": deliver_at,
                         },
                     )
                 conn.commit()

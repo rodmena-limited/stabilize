@@ -64,6 +64,14 @@ def reset_connection_manager() -> Generator[None, None, None]:
     SingletonMeta.reset(ConnectionManager)
 
 
+@pytest.fixture(autouse=True)
+def reset_handler_state() -> Generator[None, None, None]:
+    """Reset RunTaskHandler class-level state between tests."""
+    RunTaskHandler._executing_tasks.clear()
+    yield
+    RunTaskHandler._executing_tasks.clear()
+
+
 # =============================================================================
 # Shared Test Task Implementations
 # =============================================================================
