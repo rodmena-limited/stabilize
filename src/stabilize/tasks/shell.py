@@ -11,7 +11,8 @@ This module provides a production-ready ShellTask with:
 - Secret masking in logs
 - Binary output mode
 - {key} placeholder substitution with upstream outputs
-- Process group cleanup on timeout
+- Cross-platform process tree cleanup (uses psutil when available)
+- Linux-specific PR_SET_PDEATHSIG for auto-cleanup when parent dies
 """
 
 from __future__ import annotations
@@ -169,7 +170,7 @@ class ShellTask(Task):
             popen_kwargs: dict[str, Any] = {
                 "stdout": subprocess.PIPE,
                 "stderr": subprocess.PIPE,
-                "start_new_session": True,  # Enable process group for cleanup
+                "preexec_fn": self._preexec_fn,  # Process isolation + Linux auto-cleanup
             }
 
             # Handle shell option
@@ -202,8 +203,8 @@ class ShellTask(Task):
                 stdout_bytes, stderr_bytes = proc.communicate(input=stdin_bytes, timeout=timeout)
 
             except subprocess.TimeoutExpired:
-                # Kill entire process group on timeout
-                self._kill_process_group(proc)
+                # Kill entire process tree on timeout
+                self._kill_process_tree(proc)
                 # Collect any partial output
                 try:
                     stdout_bytes, stderr_bytes = proc.communicate(timeout=2)
@@ -282,17 +283,82 @@ class ShellTask(Task):
         except Exception as e:
             return TaskResult.terminal(error=f"Unexpected error: {e}")
 
-    def _kill_process_group(self, proc: subprocess.Popen[Any]) -> None:
-        """Kill the entire process group for cleanup on timeout.
+    def _preexec_fn(self) -> None:
+        """Pre-exec function for subprocess to set up process isolation.
 
-        Uses SIGTERM first, then SIGKILL if processes don't exit gracefully.
-        This ensures child processes spawned by the shell command are also killed.
+        Creates a new session (process group) and on Linux, sets PR_SET_PDEATHSIG
+        to automatically kill the process when the parent dies.
+        """
+        os.setsid()  # Create new session (same as start_new_session=True)
+
+        # Linux-only: auto-kill child when parent dies
+        if sys.platform == "linux":
+            try:
+                PR_SET_PDEATHSIG = 1
+                libc = ctypes.CDLL("libc.so.6", use_errno=True)
+                libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
+            except (OSError, AttributeError):
+                pass  # Not available, continue without it
+
+    def _kill_process_tree(self, proc: subprocess.Popen[Any]) -> None:
+        """Kill process and all its descendants using psutil (cross-platform).
+
+        Uses psutil to traverse the entire process tree and kill all descendants,
+        which is more robust than process group killing for processes that escape
+        the process group.
+
+        Falls back to process group killing if psutil is not available.
 
         Args:
             proc: The Popen process object
         """
         try:
-            # Get the process group ID (same as PID since we used start_new_session=True)
+            import psutil
+
+            try:
+                parent = psutil.Process(proc.pid)
+                children = parent.children(recursive=True)
+
+                # Send SIGTERM to all (children first, leaf to root)
+                for child in reversed(children):
+                    try:
+                        child.send_signal(signal.SIGTERM)
+                    except psutil.NoSuchProcess:
+                        pass
+
+                try:
+                    parent.send_signal(signal.SIGTERM)
+                except psutil.NoSuchProcess:
+                    pass
+
+                # Wait for processes to exit, then SIGKILL survivors
+                gone, alive = psutil.wait_procs(children + [parent], timeout=5)
+                for p in alive:
+                    try:
+                        p.kill()
+                    except psutil.NoSuchProcess:
+                        pass
+
+            except psutil.NoSuchProcess:
+                pass  # Process already dead
+
+        except ImportError:
+            # psutil not installed, fall back to process group killing
+            self._kill_process_group_fallback(proc)
+
+    def _kill_process_group_fallback(self, proc: subprocess.Popen[Any]) -> None:
+        """Kill the entire process group for cleanup on timeout (fallback).
+
+        Uses SIGTERM first, then SIGKILL if processes don't exit gracefully.
+        This ensures child processes spawned by the shell command are also killed.
+
+        This is the fallback when psutil is not available.
+
+        Args:
+            proc: The Popen process object
+        """
+        try:
+            # Get the process group ID (same as PID since we used setsid)
             pgid = os.getpgid(proc.pid)
 
             # Send SIGTERM to the process group
