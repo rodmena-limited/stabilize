@@ -18,24 +18,12 @@ To start fresh:
 import os
 
 from stabilize import (
-    CancelStageHandler,
-    CompleteStageHandler,
-    CompleteTaskHandler,
-    CompleteWorkflowHandler,
-    ContinueParentStageHandler,
-    JumpToStageHandler,
     Orchestrator,
     QueueProcessor,
-    RunTaskHandler,
     ShellTask,
-    SkipStageHandler,
     SqliteQueue,
     SqliteWorkflowStore,
     StageExecution,
-    StartStageHandler,
-    StartTaskHandler,
-    StartWaitingWorkflowsHandler,
-    StartWorkflowHandler,
     TaskExecution,
     TaskRegistry,
     Workflow,
@@ -107,23 +95,12 @@ def main():
     reg = TaskRegistry()
     reg.register("shell", ShellTask)
 
-    processor = QueueProcessor(queue, config=QueueProcessorConfig(max_workers=4, poll_frequency_ms=100), store=store)
-
-    for h in [
-        StartWorkflowHandler(queue, store),
-        StartWaitingWorkflowsHandler(queue, store),
-        StartStageHandler(queue, store),
-        SkipStageHandler(queue, store),
-        CancelStageHandler(queue, store),
-        ContinueParentStageHandler(queue, store),
-        JumpToStageHandler(queue, store),
-        StartTaskHandler(queue, store, reg),
-        RunTaskHandler(queue, store, reg),
-        CompleteTaskHandler(queue, store),
-        CompleteStageHandler(queue, store),
-        CompleteWorkflowHandler(queue, store),
-    ]:
-        processor.register_handler(h)
+    processor = QueueProcessor(
+        queue,
+        config=QueueProcessorConfig(max_workers=4, poll_frequency_ms=100),
+        store=store,
+        task_registry=reg,
+    )
 
     # Check if our workflow already exists
     existing = None

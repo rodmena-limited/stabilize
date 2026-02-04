@@ -50,11 +50,6 @@ from stabilize import (
     Workflow, StageExecution, TaskExecution,
     SqliteWorkflowStore, SqliteQueue, QueueProcessor, Orchestrator,
     Task, TaskResult, TaskRegistry,
-    # All 12 handlers are required
-    StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
-    SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
-    JumpToStageHandler, StartTaskHandler, RunTaskHandler, CompleteTaskHandler,
-    CompleteStageHandler, CompleteWorkflowHandler,
 )
 
 # Define a custom task
@@ -94,23 +89,8 @@ queue._create_table()
 registry = TaskRegistry()
 registry.register("hello", HelloTask)
 
-# Create processor and register handlers
-processor = QueueProcessor(queue)
-for handler in [
-    StartWorkflowHandler(queue, store),
-    StartWaitingWorkflowsHandler(queue, store),
-    StartStageHandler(queue, store),
-    SkipStageHandler(queue, store),
-    CancelStageHandler(queue, store),
-    ContinueParentStageHandler(queue, store),
-    JumpToStageHandler(queue, store),
-    StartTaskHandler(queue, store, registry),
-    RunTaskHandler(queue, store, registry),
-    CompleteTaskHandler(queue, store),
-    CompleteStageHandler(queue, store),
-    CompleteWorkflowHandler(queue, store),
-]:
-    processor.register_handler(handler)
+# Create processor (auto-registers all default handlers)
+processor = QueueProcessor(queue, store=store, task_registry=registry)
 
 orchestrator = Orchestrator(queue)
 

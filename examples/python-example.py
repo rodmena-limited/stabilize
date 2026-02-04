@@ -18,25 +18,17 @@ Run with:
 """
 
 import logging
-from typing import Any
 
 logging.basicConfig(level=logging.ERROR)
 
 from stabilize import (
-    CompleteStageHandler,
-    CompleteTaskHandler,
-    CompleteWorkflowHandler,
     Orchestrator,
     PythonTask,
     Queue,
     QueueProcessor,
-    RunTaskHandler,
     SqliteQueue,
     SqliteWorkflowStore,
     StageExecution,
-    StartStageHandler,
-    StartTaskHandler,
-    StartWorkflowHandler,
     TaskExecution,
     TaskRegistry,
     Workflow,
@@ -53,20 +45,7 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
     task_registry = TaskRegistry()
     task_registry.register("python", PythonTask)
 
-    processor = QueueProcessor(queue)
-
-    handlers: list[Any] = [
-        StartWorkflowHandler(queue, store),
-        StartStageHandler(queue, store),
-        StartTaskHandler(queue, store, task_registry),
-        RunTaskHandler(queue, store, task_registry),
-        CompleteTaskHandler(queue, store),
-        CompleteStageHandler(queue, store),
-        CompleteWorkflowHandler(queue, store),
-    ]
-
-    for handler in handlers:
-        processor.register_handler(handler)
+    processor = QueueProcessor(queue, store=store, task_registry=task_registry)
 
     orchestrator = Orchestrator(queue)
     return processor, orchestrator

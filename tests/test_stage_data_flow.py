@@ -14,23 +14,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from stabilize import (
-    CompleteStageHandler,
-    CompleteTaskHandler,
-    CompleteWorkflowHandler,
     DockerTask,
     HTTPTask,
     Orchestrator,
     PythonTask,
     QueueProcessor,
-    RunTaskHandler,
     ShellTask,
     SqliteQueue,
     SqliteWorkflowStore,
     StageExecution,
-    StartStageHandler,
-    StartTaskHandler,
-    StartWaitingWorkflowsHandler,
-    StartWorkflowHandler,
     TaskExecution,
     TaskRegistry,
     Workflow,
@@ -51,19 +43,7 @@ def workflow_engine():
     registry.register("docker", DockerTask)
     registry.register("http", HTTPTask)
 
-    processor = QueueProcessor(queue)
-    handlers = [
-        StartWorkflowHandler(queue, store),
-        StartWaitingWorkflowsHandler(queue, store),
-        StartStageHandler(queue, store),
-        StartTaskHandler(queue, store, registry),
-        RunTaskHandler(queue, store, registry),
-        CompleteTaskHandler(queue, store),
-        CompleteStageHandler(queue, store),
-        CompleteWorkflowHandler(queue, store),
-    ]
-    for h in handlers:
-        processor.register_handler(h)
+    processor = QueueProcessor(queue, store=store, task_registry=registry)
 
     orchestrator = Orchestrator(queue)
 

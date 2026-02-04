@@ -11,23 +11,12 @@ from typing import Any
 import pytest
 
 from stabilize import (
-    CancelStageHandler,
-    CompleteStageHandler,
-    CompleteTaskHandler,
-    CompleteWorkflowHandler,
-    ContinueParentStageHandler,
-    JumpToStageHandler,
     Orchestrator,
     QueueProcessor,
     RunTaskHandler,
-    SkipStageHandler,
     SqliteQueue,
     SqliteWorkflowStore,
     StageExecution,
-    StartStageHandler,
-    StartTaskHandler,
-    StartWaitingWorkflowsHandler,
-    StartWorkflowHandler,
     Task,
     TaskRegistry,
     TaskResult,
@@ -270,25 +259,7 @@ def setup_stabilize(
         for name, task_class in extra_tasks.items():
             task_registry.register(name, task_class)
 
-    processor = QueueProcessor(queue)
-
-    handlers: list[Any] = [
-        StartWorkflowHandler(queue, repository),
-        StartWaitingWorkflowsHandler(queue, repository),
-        StartStageHandler(queue, repository),
-        SkipStageHandler(queue, repository),
-        CancelStageHandler(queue, repository),
-        ContinueParentStageHandler(queue, repository),
-        JumpToStageHandler(queue, repository),
-        StartTaskHandler(queue, repository, task_registry),
-        RunTaskHandler(queue, repository, task_registry),
-        CompleteTaskHandler(queue, repository),
-        CompleteStageHandler(queue, repository),
-        CompleteWorkflowHandler(queue, repository),
-    ]
-
-    for handler in handlers:
-        processor.register_handler(handler)
+    processor = QueueProcessor(queue, store=repository, task_registry=task_registry)
 
     runner = Orchestrator(queue)
     return processor, runner, task_registry

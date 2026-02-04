@@ -25,20 +25,12 @@ from typing import Any
 logging.basicConfig(level=logging.ERROR)
 
 from stabilize import (
-    CompleteStageHandler,
-    CompleteTaskHandler,
-    CompleteWorkflowHandler,
     HTTPTask,
-    JumpToStageHandler,
     Orchestrator,
     QueueProcessor,
-    RunTaskHandler,
     SqliteQueue,
     SqliteWorkflowStore,
     StageExecution,
-    StartStageHandler,
-    StartTaskHandler,
-    StartWorkflowHandler,
     Task,
     TaskExecution,
     TaskRegistry,
@@ -296,18 +288,7 @@ def main():
     registry.register("pytest", PytestTask)
     registry.register("decision", DecisionTask)
 
-    processor = QueueProcessor(queue)
-    for handler in [
-        StartWorkflowHandler(queue, store),
-        StartStageHandler(queue, store),
-        StartTaskHandler(queue, store, registry),
-        RunTaskHandler(queue, store, registry),
-        CompleteTaskHandler(queue, store),
-        CompleteStageHandler(queue, store),
-        CompleteWorkflowHandler(queue, store),
-        JumpToStageHandler(queue, store),
-    ]:
-        processor.register_handler(handler)
+    processor = QueueProcessor(queue, store=store, task_registry=registry)
 
     workflow = Workflow.create(
         application="lats-agent",

@@ -27,6 +27,9 @@ from stabilize.resilience.config import HandlerConfig, get_handler_config
 
 if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
+    from stabilize.resilience.bulkheads import TaskBulkheadManager
+    from stabilize.resilience.circuits import WorkflowCircuitFactory
+    from stabilize.tasks.registry import TaskRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -104,10 +107,14 @@ class QueueProcessor:
     messages to appropriate handlers. Handlers run in a thread pool
     for concurrent processing.
 
+    When ``store`` and ``task_registry`` are both provided, all 12 default
+    handlers are registered automatically — no manual registration needed.
+
     Example:
-        queue = InMemoryQueue()
-        processor = QueueProcessor(queue)
-        processor.register_handler(StartWorkflowHandler(queue, repository))
+        queue = SqliteQueue("sqlite:///workflow.db", table_name="queue_messages")
+        store = SqliteWorkflowStore("sqlite:///workflow.db", create_tables=True)
+        registry = TaskRegistry()
+        processor = QueueProcessor(queue, store=store, task_registry=registry)
         processor.start()
     """
 
@@ -117,6 +124,9 @@ class QueueProcessor:
         config: QueueProcessorConfig | None = None,
         store: WorkflowStore | None = None,
         handler_config: HandlerConfig | None = None,
+        task_registry: TaskRegistry | None = None,
+        bulkhead_manager: TaskBulkheadManager | None = None,
+        circuit_factory: WorkflowCircuitFactory | None = None,
     ) -> None:
         """
         Initialize the queue processor.
@@ -124,10 +134,14 @@ class QueueProcessor:
         Args:
             queue: The queue to process
             config: Optional configuration (takes precedence if provided)
-            store: Optional store for message deduplication (idempotency)
+            store: Optional store for message deduplication and handler setup
             handler_config: Optional HandlerConfig. If config is None, uses this
                            to create QueueProcessorConfig. If both are None,
                            loads from environment.
+            task_registry: Optional task registry. When both store and task_registry
+                          are provided, all default handlers are auto-registered.
+            bulkhead_manager: Optional bulkhead manager for RunTaskHandler concurrency control.
+            circuit_factory: Optional circuit breaker factory for workflow-level circuit breaking.
         """
         self.queue = queue
         # Use explicit config if provided, otherwise create from handler_config
@@ -153,15 +167,111 @@ class QueueProcessor:
         self._active_count = 0
         self._last_dlq_check = 0.0
 
+        # Auto-register default handlers when both store and task_registry are provided
+        if store is not None and task_registry is not None:
+            self._register_default_handlers(
+                queue,
+                store,
+                task_registry,
+                bulkhead_manager,
+                circuit_factory,
+                handler_config,
+            )
+
+    def _register_default_handlers(
+        self,
+        queue: Queue,
+        store: WorkflowStore,
+        task_registry: TaskRegistry,
+        bulkhead_manager: TaskBulkheadManager | None = None,
+        circuit_factory: WorkflowCircuitFactory | None = None,
+        handler_config: HandlerConfig | None = None,
+    ) -> None:
+        """Register all 12 default message handlers.
+
+        Args:
+            queue: The message queue
+            store: The workflow store
+            task_registry: The task registry
+            bulkhead_manager: Optional bulkhead manager for RunTaskHandler
+            circuit_factory: Optional circuit breaker factory
+            handler_config: Optional handler configuration
+        """
+        from stabilize.handlers import (
+            CancelStageHandler,
+            CompleteStageHandler,
+            CompleteTaskHandler,
+            CompleteWorkflowHandler,
+            ContinueParentStageHandler,
+            JumpToStageHandler,
+            RunTaskHandler,
+            SkipStageHandler,
+            StartStageHandler,
+            StartTaskHandler,
+            StartWaitingWorkflowsHandler,
+            StartWorkflowHandler,
+        )
+
+        handlers: list[MessageHandler[Any]] = [
+            StartWorkflowHandler(queue, store),
+            StartWaitingWorkflowsHandler(queue, store),
+            StartStageHandler(queue, store),
+            SkipStageHandler(queue, store),
+            CancelStageHandler(queue, store),
+            ContinueParentStageHandler(queue, store),
+            JumpToStageHandler(queue, store),
+            StartTaskHandler(queue, store, task_registry),
+            RunTaskHandler(
+                queue,
+                store,
+                task_registry,
+                bulkhead_manager=bulkhead_manager,
+                circuit_factory=circuit_factory,
+                handler_config=handler_config,
+            ),
+            CompleteTaskHandler(queue, store),
+            CompleteStageHandler(queue, store),
+            CompleteWorkflowHandler(queue, store),
+        ]
+
+        for handler in handlers:
+            self._handlers[handler.message_type] = handler
+            logger.debug("Registered handler for %s", handler.message_type.__name__)
+
     def register_handler(self, handler: MessageHandler[Any]) -> None:
         """
         Register a message handler.
 
+        Raises ValueError if a handler for the same message type is already
+        registered. Use :meth:`replace_handler` to override an existing handler.
+
         Args:
             handler: The handler to register
+
+        Raises:
+            ValueError: If a handler for this message type is already registered.
         """
+        if handler.message_type in self._handlers:
+            raise ValueError(
+                f"Handler for {handler.message_type.__name__} is already registered. Use replace_handler() to override."
+            )
         self._handlers[handler.message_type] = handler
         logger.debug("Registered handler for %s", handler.message_type.__name__)
+
+    def replace_handler(self, handler: MessageHandler[Any]) -> None:
+        """
+        Replace an existing handler.
+
+        Args:
+            handler: The new handler to use
+
+        Raises:
+            ValueError: If no handler is registered for this message type.
+        """
+        if handler.message_type not in self._handlers:
+            raise ValueError(f"No handler registered for {handler.message_type.__name__}")
+        self._handlers[handler.message_type] = handler
+        logger.debug("Replaced handler for %s", handler.message_type.__name__)
 
     def register_handler_func(
         self,
@@ -452,10 +562,29 @@ class SynchronousQueueProcessor(QueueProcessor):
     A synchronous queue processor that processes messages immediately.
 
     Useful for testing where you want deterministic execution order.
+
+    Accepts the same parameters as :class:`QueueProcessor` for auto-registration.
     """
 
-    def __init__(self, queue: Queue) -> None:
-        super().__init__(queue)
+    def __init__(
+        self,
+        queue: Queue,
+        store: WorkflowStore | None = None,
+        task_registry: TaskRegistry | None = None,
+        config: QueueProcessorConfig | None = None,
+        handler_config: HandlerConfig | None = None,
+        bulkhead_manager: TaskBulkheadManager | None = None,
+        circuit_factory: WorkflowCircuitFactory | None = None,
+    ) -> None:
+        super().__init__(
+            queue,
+            config=config,
+            store=store,
+            handler_config=handler_config,
+            task_registry=task_registry,
+            bulkhead_manager=bulkhead_manager,
+            circuit_factory=circuit_factory,
+        )
         self._running = True
 
     def start(self) -> None:

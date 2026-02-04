@@ -30,7 +30,6 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
 
 # Load .env file from project root
 from dotenv import load_dotenv
@@ -40,20 +39,13 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
 
 from stabilize import (
-    CompleteStageHandler,
-    CompleteTaskHandler,
-    CompleteWorkflowHandler,
     HighwayTask,
     Orchestrator,
     Queue,
     QueueProcessor,
-    RunTaskHandler,
     SqliteQueue,
     SqliteWorkflowStore,
     StageExecution,
-    StartStageHandler,
-    StartTaskHandler,
-    StartWorkflowHandler,
     TaskExecution,
     TaskRegistry,
     Workflow,
@@ -208,20 +200,7 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
     task_registry = TaskRegistry()
     task_registry.register("highway", HighwayTask)
 
-    processor = QueueProcessor(queue)
-
-    handlers: list[Any] = [
-        StartWorkflowHandler(queue, store),
-        StartStageHandler(queue, store),
-        StartTaskHandler(queue, store, task_registry),
-        RunTaskHandler(queue, store, task_registry),
-        CompleteTaskHandler(queue, store),
-        CompleteStageHandler(queue, store),
-        CompleteWorkflowHandler(queue, store),
-    ]
-
-    for handler in handlers:
-        processor.register_handler(handler)
+    processor = QueueProcessor(queue, store=store, task_registry=task_registry)
 
     orchestrator = Orchestrator(queue)
     return processor, orchestrator

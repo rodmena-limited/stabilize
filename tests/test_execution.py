@@ -1,19 +1,9 @@
 """Integration tests for pipeline execution."""
 
-from typing import Any
-
 from stabilize import (
-    CompleteStageHandler,
-    CompleteTaskHandler,
-    CompleteWorkflowHandler,
     Orchestrator,
     QueueProcessor,
-    RunTaskHandler,
     StageExecution,
-    StartStageHandler,
-    StartTaskHandler,
-    StartWaitingWorkflowsHandler,
-    StartWorkflowHandler,
     Task,
     TaskExecution,
     TaskRegistry,
@@ -65,22 +55,8 @@ def setup_stabilize() -> tuple[
     task_registry.register("fail", FailTask)
     task_registry.register("counter", CounterTask)
 
-    # Create processor
-    processor = QueueProcessor(queue)
-
-    handlers: list[Any] = [
-        StartWorkflowHandler(queue, repository),
-        StartWaitingWorkflowsHandler(queue, repository),
-        StartStageHandler(queue, repository),
-        StartTaskHandler(queue, repository, task_registry),
-        RunTaskHandler(queue, repository, task_registry),
-        CompleteTaskHandler(queue, repository),
-        CompleteStageHandler(queue, repository),
-        CompleteWorkflowHandler(queue, repository),
-    ]
-
-    for handler in handlers:
-        processor.register_handler(handler)
+    # Create processor with auto-registered handlers
+    processor = QueueProcessor(queue, store=repository, task_registry=task_registry)
 
     runner = Orchestrator(queue)
 

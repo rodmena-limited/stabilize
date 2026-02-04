@@ -20,25 +20,17 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from stabilize import (
-    CompleteStageHandler,
-    CompleteTaskHandler,
-    CompleteWorkflowHandler,
     Orchestrator,
     QueueProcessor,
-    RunTaskHandler,
     SqliteQueue,
     SqliteWorkflowStore,
     StageContext,
     StageExecution,
-    StartStageHandler,
-    StartTaskHandler,
-    StartWorkflowHandler,
     Task,
     TaskExecution,
     TaskRegistry,
@@ -407,21 +399,8 @@ def setup_runner() -> tuple[SqliteWorkflowStore, SqliteQueue, QueueProcessor, Or
     task_registry.register("loop_iteration", LoopIterationTask)
     task_registry.register("finalize", FinalizeTask)
 
-    # Create processor and register handlers
-    processor = QueueProcessor(queue)
-
-    handlers: list[Any] = [
-        StartWorkflowHandler(queue, repository),
-        StartStageHandler(queue, repository),
-        StartTaskHandler(queue, repository, task_registry),
-        RunTaskHandler(queue, repository, task_registry),
-        CompleteTaskHandler(queue, repository),
-        CompleteStageHandler(queue, repository),
-        CompleteWorkflowHandler(queue, repository),
-    ]
-
-    for handler in handlers:
-        processor.register_handler(handler)
+    # Create processor with auto-registered handlers
+    processor = QueueProcessor(queue, store=repository, task_registry=task_registry)
 
     runner = Orchestrator(queue)
     return repository, queue, processor, runner

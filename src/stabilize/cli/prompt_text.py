@@ -53,11 +53,6 @@ from stabilize import (
     PythonTask,     # For Python code execution (uses script/INPUT/RESULT)
     DockerTask,     # For Docker container execution
     HTTPTask,       # For HTTP requests
-    # Handlers (all 12 required)
-    StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
-    SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
-    JumpToStageHandler, StartTaskHandler, RunTaskHandler,
-    CompleteTaskHandler, CompleteStageHandler, CompleteWorkflowHandler,
 )
 
 
@@ -87,25 +82,7 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
     task_registry.register("docker", DockerTask)
     task_registry.register("http", HTTPTask)
 
-    processor = QueueProcessor(queue)
-
-    # Register all 12 handlers in order
-    handlers = [
-        StartWorkflowHandler(queue, store),
-        StartWaitingWorkflowsHandler(queue, store),
-        StartStageHandler(queue, store),
-        SkipStageHandler(queue, store),
-        CancelStageHandler(queue, store),
-        ContinueParentStageHandler(queue, store),
-        JumpToStageHandler(queue, store),
-        StartTaskHandler(queue, store, task_registry),
-        RunTaskHandler(queue, store, task_registry),
-        CompleteTaskHandler(queue, store),
-        CompleteStageHandler(queue, store),
-        CompleteWorkflowHandler(queue, store),
-    ]
-    for handler in handlers:
-        processor.register_handler(handler)
+    processor = QueueProcessor(queue, store=store, task_registry=task_registry)
 
     orchestrator = Orchestrator(queue)
     return processor, orchestrator
@@ -525,10 +502,6 @@ from stabilize import (
     Workflow, StageExecution, TaskExecution,
     Orchestrator, QueueProcessor, SqliteQueue, SqliteWorkflowStore,
     TaskRegistry, ShellTask,
-    StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
-    SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
-    JumpToStageHandler, StartTaskHandler, RunTaskHandler,
-    CompleteTaskHandler, CompleteStageHandler, CompleteWorkflowHandler,
 )
 from stabilize.queue.processor import QueueProcessorConfig
 from stabilize.recovery import recover_on_startup
@@ -548,24 +521,9 @@ def main():
     processor = QueueProcessor(
         queue,
         config=QueueProcessorConfig(max_workers=4, poll_frequency_ms=100),
-        store=store
+        store=store,
+        task_registry=registry,
     )
-
-    for h in [
-        StartWorkflowHandler(queue, store),
-        StartWaitingWorkflowsHandler(queue, store),
-        StartStageHandler(queue, store),
-        SkipStageHandler(queue, store),
-        CancelStageHandler(queue, store),
-        ContinueParentStageHandler(queue, store),
-        JumpToStageHandler(queue, store),
-        StartTaskHandler(queue, store, registry),
-        RunTaskHandler(queue, store, registry),
-        CompleteTaskHandler(queue, store),
-        CompleteStageHandler(queue, store),
-        CompleteWorkflowHandler(queue, store),
-    ]:
-        processor.register_handler(h)
 
     WORKFLOW_ID = "my-servers"
 
@@ -1060,13 +1018,11 @@ RIGHT:
     StageExecution(ref_id="2", name="Stage B", ...)  # Unique ref_ids
 
 
-MISTAKE 5: Missing handlers
-----------------------------
-All 12 handlers are REQUIRED for the engine to work:
-    StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
-    SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
-    JumpToStageHandler, StartTaskHandler, RunTaskHandler, CompleteTaskHandler,
-    CompleteStageHandler, CompleteWorkflowHandler
+MISTAKE 5: Missing store or task_registry in QueueProcessor
+-------------------------------------------------------------
+Both store and task_registry are REQUIRED for auto-registration of handlers:
+    processor = QueueProcessor(queue, store=store, task_registry=registry)
+Without both, no handlers are registered and the engine won't process messages.
 
 
 MISTAKE 6: Forgetting requisite_stage_ref_ids for sequential stages
@@ -1179,11 +1135,6 @@ from stabilize import (
     Workflow, StageExecution, TaskExecution, WorkflowStatus,
     Orchestrator, QueueProcessor, SqliteQueue, SqliteWorkflowStore,
     Task, TaskResult, TaskRegistry,
-    # All 12 handlers required
-    StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
-    SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
-    JumpToStageHandler, StartTaskHandler, RunTaskHandler,
-    CompleteTaskHandler, CompleteStageHandler, CompleteWorkflowHandler,
 )
 
 
@@ -1226,23 +1177,7 @@ def setup_pipeline_runner(store, queue):
     registry.register("process", ProcessTask)
     registry.register("notify", NotifyTask)
 
-    processor = QueueProcessor(queue)
-    handlers = [
-        StartWorkflowHandler(queue, store),
-        StartWaitingWorkflowsHandler(queue, store),
-        StartStageHandler(queue, store),
-        SkipStageHandler(queue, store),
-        CancelStageHandler(queue, store),
-        ContinueParentStageHandler(queue, store),
-        JumpToStageHandler(queue, store),
-        StartTaskHandler(queue, store, registry),
-        RunTaskHandler(queue, store, registry),
-        CompleteTaskHandler(queue, store),
-        CompleteStageHandler(queue, store),
-        CompleteWorkflowHandler(queue, store),
-    ]
-    for h in handlers:
-        processor.register_handler(h)
+    processor = QueueProcessor(queue, store=store, task_registry=registry)
 
     return processor, Orchestrator(queue)
 
@@ -1307,11 +1242,6 @@ from stabilize import (
     Workflow, StageExecution, TaskExecution,
     Orchestrator, QueueProcessor, SqliteQueue, SqliteWorkflowStore,
     Task, TaskResult, TaskRegistry,
-    # All 12 handlers required
-    StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
-    SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
-    JumpToStageHandler, StartTaskHandler, RunTaskHandler,
-    CompleteTaskHandler, CompleteStageHandler, CompleteWorkflowHandler,
 )
 
 
@@ -1338,22 +1268,7 @@ def setup_pipeline_runner(store, queue):
     registry.register("fetch", FetchDataTask)
     registry.register("aggregate", AggregateTask)
 
-    processor = QueueProcessor(queue)
-    for h in [
-        StartWorkflowHandler(queue, store),
-        StartWaitingWorkflowsHandler(queue, store),
-        StartStageHandler(queue, store),
-        SkipStageHandler(queue, store),
-        CancelStageHandler(queue, store),
-        ContinueParentStageHandler(queue, store),
-        JumpToStageHandler(queue, store),
-        StartTaskHandler(queue, store, registry),
-        RunTaskHandler(queue, store, registry),
-        CompleteTaskHandler(queue, store),
-        CompleteStageHandler(queue, store),
-        CompleteWorkflowHandler(queue, store),
-    ]:
-        processor.register_handler(h)
+    processor = QueueProcessor(queue, store=store, task_registry=registry)
 
     return processor, Orchestrator(queue)
 
@@ -1433,12 +1348,8 @@ from stabilize import (
     # Tasks
     Task, RetryableTask, TaskResult, TaskRegistry,
     ShellTask, HTTPTask, DockerTask, SSHTask, PythonTask,
-    # Handlers (all 12 required)
-    StartWorkflowHandler, StartWaitingWorkflowsHandler, StartStageHandler,
-    SkipStageHandler, CancelStageHandler, ContinueParentStageHandler,
-    JumpToStageHandler, StartTaskHandler, RunTaskHandler,
-    CompleteTaskHandler, CompleteStageHandler, CompleteWorkflowHandler,
 )
+# Note: Handlers are auto-registered by QueueProcessor(queue, store=store, task_registry=registry)
 
 # Advanced imports (for specialized use cases)
 from stabilize.persistence.store import WorkflowStore      # Abstract base for custom stores

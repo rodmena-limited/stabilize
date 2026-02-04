@@ -12,26 +12,18 @@ Run with:
 """
 
 import logging
-from typing import Any
 
 # Configure logging before importing stabilize modules
 logging.basicConfig(level=logging.ERROR)  # Suppress all but errors
 
 from stabilize import (
-    CompleteStageHandler,
-    CompleteTaskHandler,
-    CompleteWorkflowHandler,
     Orchestrator,
     Queue,
     QueueProcessor,
-    RunTaskHandler,
     ShellTask,
     SqliteQueue,
     SqliteWorkflowStore,
     StageExecution,
-    StartStageHandler,
-    StartTaskHandler,
-    StartWorkflowHandler,
     TaskExecution,
     TaskRegistry,
     Workflow,
@@ -50,22 +42,8 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
     task_registry = TaskRegistry()
     task_registry.register("shell", ShellTask)
 
-    # Create message processor
-    processor = QueueProcessor(queue)
-
-    # Register all handlers (this is how the engine processes workflow messages)
-    handlers: list[Any] = [
-        StartWorkflowHandler(queue, store),
-        StartStageHandler(queue, store),
-        StartTaskHandler(queue, store, task_registry),
-        RunTaskHandler(queue, store, task_registry),  # This executes our ShellTask
-        CompleteTaskHandler(queue, store),
-        CompleteStageHandler(queue, store),
-        CompleteWorkflowHandler(queue, store),
-    ]
-
-    for handler in handlers:
-        processor.register_handler(handler)
+    # Create message processor with auto-registered handlers
+    processor = QueueProcessor(queue, store=store, task_registry=task_registry)
 
     # Create orchestrator (starts workflows)
     orchestrator = Orchestrator(queue)

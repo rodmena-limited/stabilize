@@ -11,7 +11,6 @@ Run with:
 """
 
 import logging
-from typing import Any
 
 # Configure logging before importing stabilize modules
 logging.basicConfig(
@@ -22,20 +21,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from stabilize import (
-    CompleteStageHandler,
-    CompleteTaskHandler,
-    CompleteWorkflowHandler,
-    JumpToStageHandler,
     Orchestrator,
     Queue,
     QueueProcessor,
-    RunTaskHandler,
     SqliteQueue,
     SqliteWorkflowStore,
     StageExecution,
-    StartStageHandler,
-    StartTaskHandler,
-    StartWorkflowHandler,
     TaskExecution,
     TaskRegistry,
     TaskResult,
@@ -160,21 +151,7 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
     task_registry.register("quality_loop", QualityLoopTask)
     task_registry.register("batch", BatchProcessTask)
 
-    processor = QueueProcessor(queue)
-
-    handlers: list[Any] = [
-        StartWorkflowHandler(queue, store),
-        StartStageHandler(queue, store),
-        StartTaskHandler(queue, store, task_registry),
-        RunTaskHandler(queue, store, task_registry),
-        CompleteTaskHandler(queue, store),
-        CompleteStageHandler(queue, store),
-        CompleteWorkflowHandler(queue, store),
-        JumpToStageHandler(queue, store),  # Required for jump_to support
-    ]
-
-    for handler in handlers:
-        processor.register_handler(handler)
+    processor = QueueProcessor(queue, store=store, task_registry=task_registry)
 
     orchestrator = Orchestrator(queue)
     return processor, orchestrator

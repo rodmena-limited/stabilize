@@ -195,14 +195,8 @@ class TestStartStageConcurrencyHandling:
         messages when B and C complete around the same time.
         """
         from stabilize import (
-            CompleteStageHandler,
-            CompleteTaskHandler,
-            CompleteWorkflowHandler,
             Orchestrator,
             QueueProcessor,
-            RunTaskHandler,
-            StartTaskHandler,
-            StartWorkflowHandler,
             Task,
             TaskRegistry,
             TaskResult,
@@ -217,17 +211,7 @@ class TestStartStageConcurrencyHandling:
         task_registry = TaskRegistry()
         task_registry.register("success", SuccessTask)
 
-        processor = QueueProcessor(queue)
-        for h in [
-            StartWorkflowHandler(queue, repository),
-            StartStageHandler(queue, repository),
-            StartTaskHandler(queue, repository, task_registry),
-            RunTaskHandler(queue, repository, task_registry),
-            CompleteTaskHandler(queue, repository),
-            CompleteStageHandler(queue, repository),
-            CompleteWorkflowHandler(queue, repository),
-        ]:
-            processor.register_handler(h)
+        processor = QueueProcessor(queue, store=repository, task_registry=task_registry)
 
         runner = Orchestrator(queue)
 

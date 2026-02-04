@@ -43,12 +43,24 @@ def register_all_handlers(
     """
     Register all handlers with a queue processor.
 
+    .. deprecated::
+        Pass ``store`` and ``task_registry`` to :class:`QueueProcessor` instead.
+        Handlers are now auto-registered by the constructor.
+
     Args:
         processor: The queue processor to register with
         repository: The execution repository
         task_registry: The task registry
         queue: The message queue
     """
+    import warnings
+
+    warnings.warn(
+        "register_all_handlers() is deprecated. Pass store and task_registry to QueueProcessor() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     handlers = [
         StartWorkflowHandler(queue, repository),
         StartWaitingWorkflowsHandler(queue, repository),

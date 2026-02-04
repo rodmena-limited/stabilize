@@ -2,7 +2,9 @@ Handlers
 ========
 
 Stabilize uses a message-driven architecture where handlers process different message types
-to drive workflow execution. All 11 handlers are required for complete workflow functionality.
+to drive workflow execution. All 12 default handlers are auto-registered by ``QueueProcessor``
+when ``store`` and ``task_registry`` are provided to the constructor. Manual registration is
+no longer needed for default handlers.
 
 .. automodule:: stabilize.handlers.base
    :members:

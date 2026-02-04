@@ -36,7 +36,6 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import Any
 
 # Ensure we're running from the project's virtualenv
 _PROJECT_ROOT = Path(__file__).parent.parent
@@ -55,21 +54,13 @@ if _VENV_PATH.exists():
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
 from stabilize import (  # noqa: E402
-    CompleteStageHandler,
-    CompleteTaskHandler,
-    CompleteWorkflowHandler,
     Orchestrator,
     QueueProcessor,
-    RunTaskHandler,
     ShellTask,
     SqliteQueue,
     SqliteWorkflowStore,
     StabilizeHandler,
     StageExecution,
-    StartStageHandler,
-    StartTaskHandler,
-    StartWaitingWorkflowsHandler,
-    StartWorkflowHandler,
     Task,
     TaskExecution,
     TaskRegistry,
@@ -503,21 +494,10 @@ def run_release(
     registry.register("version_validator", VersionValidatorTask)
     registry.register("skip", SkipTask)
 
-    # Create processor with handlers
-    processor = QueueProcessor(queue)
-    handlers: list[Any] = [
-        StartWorkflowHandler(queue, store),
-        StartWaitingWorkflowsHandler(queue, store),
-        StartStageHandler(queue, store),
-        StartTaskHandler(queue, store, registry),
-        RunTaskHandler(queue, store, registry),
-        CompleteTaskHandler(queue, store),
-        CompleteStageHandler(queue, store),
-        CompleteWorkflowHandler(queue, store),
-        CancelStageHandler(queue, store),  # Handle stage cancellation
-    ]
-    for handler in handlers:
-        processor.register_handler(handler)
+    # Create processor (auto-registers all default handlers)
+    processor = QueueProcessor(queue, store=store, task_registry=registry)
+    # Replace the default CancelStageHandler with our custom one
+    processor.replace_handler(CancelStageHandler(queue, store))
 
     orchestrator = Orchestrator(queue)
 
