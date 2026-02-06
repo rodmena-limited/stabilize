@@ -326,7 +326,26 @@ class LifecycleManager:
             except Exception as e:
                 logger.warning("Error shutting down bulkhead manager: %s", e)
 
-        # Step 5: Run custom callbacks
+        # Step 5: Execute pending finalizers
+        try:
+            from stabilize.finalizers import get_finalizer_registry
+
+            registry = get_finalizer_registry()
+            pending_count = registry.pending_count()
+            if pending_count > 0:
+                logger.info("Executing %d pending finalizers...", pending_count)
+                results = registry.execute_all_pending(timeout=30.0)
+                failed_count = sum(1 for stage_results in results.values() for r in stage_results if not r.success)
+                if failed_count > 0:
+                    logger.warning(
+                        "Shutdown: %d/%d finalizers failed",
+                        failed_count,
+                        pending_count,
+                    )
+        except Exception as e:
+            logger.warning("Error executing finalizers during shutdown: %s", e)
+
+        # Step 6: Run custom callbacks
         for callback in callbacks:
             try:
                 callback()

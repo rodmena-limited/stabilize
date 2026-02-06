@@ -13,6 +13,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.dag.graph import StageGraphBuilder
+from stabilize.dag.readiness import PredicatePhase, evaluate_readiness
 from stabilize.errors import ConcurrencyError, is_transient
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.stage import SyntheticStageOwner
@@ -77,40 +78,32 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                 if upstream_stages is None:
                     upstream_stages = []
 
-                # Check for jump bypass - if set, skip prerequisite checks
-                # This is set by JumpToStageHandler for dynamic routing
-                if stage.context.get("_jump_bypass"):
-                    logger.debug(
-                        "Stage %s (%s) has _jump_bypass, skipping prerequisite checks",
-                        stage.name,
-                        stage.id,
-                    )
+                # Check for jump bypass flag
+                jump_bypass = bool(stage.context.get("_jump_bypass"))
+                if jump_bypass:
                     # Clear the bypass flag so it doesn't persist
                     del stage.context["_jump_bypass"]
+
+                # Evaluate readiness using pure function
+                readiness = evaluate_readiness(stage, upstream_stages, jump_bypass=jump_bypass)
+
+                # Handle readiness result based on phase
+                if readiness.phase == PredicatePhase.READY:
+                    logger.debug(
+                        "Stage %s (%s) is ready: %s",
+                        stage.name,
+                        stage.id,
+                        readiness.reason,
+                    )
                     self._start_if_ready(stage, message)
                     return
 
-                # Check if any upstream stages failed
-                # We check for terminal statuses in direct dependencies
-                halt_statuses = {
-                    WorkflowStatus.TERMINAL,
-                    WorkflowStatus.STOPPED,
-                    WorkflowStatus.CANCELED,
-                }
-
-                upstream_failed = False
-                for upstream in upstream_stages:
-                    if upstream is None:
-                        continue
-                    if upstream.status in halt_statuses:
-                        upstream_failed = True
-                        break
-
-                if upstream_failed:
+                if readiness.phase == PredicatePhase.SKIP:
                     logger.warning(
-                        "Upstream stage failed for %s (%s), completing execution",
+                        "Upstream stage failed for %s (%s): %s",
                         stage.name,
                         stage.id,
+                        readiness.reason,
                     )
                     self.queue.push(
                         CompleteWorkflow(
@@ -120,27 +113,11 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                     )
                     return
 
-                # Check if all upstream stages are complete
-                # CONTINUABLE_STATUSES = {SUCCEEDED, FAILED_CONTINUE, SKIPPED}
-                # We can't import CONTINUABLE_STATUSES easily inside here without circular imports potentially,
-                # but it is available in models.status
-                from stabilize.models.status import CONTINUABLE_STATUSES
-
-                all_complete = True
-                for upstream in upstream_stages:
-                    if upstream is None:
-                        continue
-                    if upstream.status not in CONTINUABLE_STATUSES:
-                        all_complete = False
-                        break
-
-                if all_complete:
-                    self._start_if_ready(stage, message)
-                else:
-                    # Upstream not complete.
-                    # Check if any upstream stage is active (RUNNING, NOT_STARTED, etc.)
-                    # If so, we can safely stop polling because the upstream stage
-                    # will trigger a new StartStage message when it completes.
+                # NOT_READY or UNDEFINED - need to wait or retry
+                # Check if any upstream stage is active (RUNNING, NOT_STARTED, etc.)
+                # If so, we can safely stop polling because the upstream stage
+                # will trigger a new StartStage message when it completes.
+                if readiness.active_upstream_ids:
                     any_active = False
                     for upstream in upstream_stages:
                         if upstream and upstream.status in ACTIVE_STATUSES:
@@ -158,50 +135,51 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                         # Stop polling - wait for upstream trigger
                         return
 
-                    # Upstream not complete and not active (stuck?) - check retry count before re-queuing
-                    retry_count = getattr(message, "retry_count", 0) or 0
-                    max_retries = self.handler_config.max_stage_wait_retries
+                # Upstream not complete and not active (stuck?) - check retry count before re-queuing
+                retry_count = getattr(message, "retry_count", 0) or 0
+                max_retries = self.handler_config.max_stage_wait_retries
 
-                    if retry_count >= max_retries:
-                        logger.error(
-                            "StartStage for %s (%s) exceeded max retries (%d). "
-                            "Upstream stages may be stuck. Marking as TERMINAL.",
-                            stage.name,
-                            stage.id,
-                            max_retries,
-                        )
-                        self.set_stage_status(stage, WorkflowStatus.TERMINAL)
-                        stage.end_time = self.current_time_millis()
-                        stage.context["exception"] = {
-                            "details": {"error": "Exceeded max retries waiting for upstream stages"},
-                        }
-                        # Use atomic transaction and propagate failure downstream
-                        with self.repository.transaction(self.queue) as txn:
-                            txn.store_stage(stage)
-                            txn.push_message(
-                                CompleteStage(
-                                    execution_type=message.execution_type,
-                                    execution_id=message.execution_id,
-                                    stage_id=stage.id,
-                                )
-                            )
-                        return
-
-                    logger.debug(
-                        "Re-queuing %s (%s) (retry %d/%d) - upstream stages not complete",
+                if retry_count >= max_retries:
+                    logger.error(
+                        "StartStage for %s (%s) exceeded max retries (%d). "
+                        "Upstream stages may be stuck. Marking as TERMINAL.",
                         stage.name,
                         stage.id,
-                        retry_count + 1,
                         max_retries,
                     )
-                    # Create new message with incremented retry count
-                    new_message = StartStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=message.stage_id,
-                        retry_count=retry_count + 1,
-                    )
-                    self.queue.push(new_message, self.retry_delay)
+                    self.set_stage_status(stage, WorkflowStatus.TERMINAL)
+                    stage.end_time = self.current_time_millis()
+                    stage.context["exception"] = {
+                        "details": {"error": "Exceeded max retries waiting for upstream stages"},
+                    }
+                    # Use atomic transaction and propagate failure downstream
+                    with self.repository.transaction(self.queue) as txn:
+                        txn.store_stage(stage)
+                        txn.push_message(
+                            CompleteStage(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=stage.id,
+                            )
+                        )
+                    return
+
+                logger.debug(
+                    "Re-queuing %s (%s) (retry %d/%d) - %s",
+                    stage.name,
+                    stage.id,
+                    retry_count + 1,
+                    max_retries,
+                    readiness.reason,
+                )
+                # Create new message with incremented retry count
+                new_message = StartStage(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
+                    retry_count=retry_count + 1,
+                )
+                self.queue.push(new_message, self.retry_delay)
 
             except Exception as e:
                 if is_transient(e):

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from stabilize.models.status import WorkflowStatus
 
 if TYPE_CHECKING:
+    from stabilize.models.snapshot import TaskStateSnapshot
     from stabilize.models.stage import StageExecution
 
 
@@ -129,6 +130,43 @@ class TaskExecution:
     def set_exception_details(self, exception: dict[str, Any]) -> None:
         """Store exception details for this task."""
         self.task_exception_details["exception"] = exception
+
+    # ========== Phase-Version State Tracking ==========
+
+    @property
+    def phase_version(self) -> tuple[str, int]:
+        """Return (status_name, version) for optimistic locking with phase check.
+
+        This combines the current status and version number into a single
+        tuple for phase-aware optimistic locking.
+
+        Returns:
+            Tuple of (status_name, version) for comparison.
+        """
+        return (self.status.name, self.version)
+
+    def state_snapshot(self) -> TaskStateSnapshot:
+        """Return frozen copy of current state for read-only use.
+
+        Creates an immutable snapshot of the current task state that
+        can be safely passed to external systems, cached, or logged
+        without risk of mutation.
+
+        Returns:
+            Frozen TaskStateSnapshot with current state.
+        """
+        from stabilize.models.snapshot import TaskStateSnapshot, _freeze_dict
+
+        return TaskStateSnapshot(
+            id=self.id,
+            name=self.name,
+            status=self.status,
+            version=self.version,
+            implementing_class=self.implementing_class,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            exception_details=_freeze_dict(self.task_exception_details),
+        )
 
     @classmethod
     def create(

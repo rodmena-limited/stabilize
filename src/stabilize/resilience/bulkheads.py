@@ -7,6 +7,7 @@ Provides per-task-type bulkheads using BulkheadThreading from bulkman.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -56,7 +57,7 @@ class TaskBulkheadManager:
         self._config = config
 
         # Create a bulkhead for each configured task type
-        for task_type, bulkhead_config in config.bulkheads.items():
+        for task_type, bulkhead_config in config.bulkheads:
             self._bulkheads[task_type] = BulkheadThreading(
                 BulkmanConfig(
                     name=f"stabilize_{task_type}",
@@ -144,7 +145,6 @@ class TaskBulkheadManager:
             wait: Whether to wait for pending tasks to complete
             timeout: Maximum time to wait for shutdown (total across all bulkheads)
         """
-        import time
 
         start = time.monotonic()
         remaining = timeout

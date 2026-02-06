@@ -22,6 +22,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from stabilize.queue import Queue
+from stabilize.queue.dedup import get_deduplicator
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.resilience.config import HandlerConfig, get_handler_config
 
@@ -429,9 +430,12 @@ class QueueProcessor:
     def _handle_message(self, message: Message) -> None:
         """Handle a message with the appropriate handler.
 
-        If deduplication is enabled and a store is provided, checks if the
-        message has already been processed and skips if so. Marks the message
-        as processed after successful handling.
+        If deduplication is enabled, uses a two-tier approach:
+        1. Bloom filter for fast probabilistic check (no DB query)
+        2. Database check for bloom filter positives (to confirm)
+
+        This provides O(1) fast-path for new messages while still
+        guaranteeing no duplicate processing.
         """
         message_type = type(message)
         handler = self._handlers.get(message_type)
@@ -444,26 +448,46 @@ class QueueProcessor:
         message_id = getattr(message, "message_id", None)
         execution_id = getattr(message, "execution_id", None)
 
-        if self.config.enable_deduplication and self._store is not None and message_id is not None:
-            if self._store.is_message_processed(message_id):
+        if self.config.enable_deduplication and message_id is not None:
+            dedup = get_deduplicator()
+
+            # Check bloom filter first (fast path)
+            if dedup.maybe_seen(message_id):
+                # Bloom filter positive - need to verify with database
+                if self._store is not None and self._store.is_message_processed(message_id):
+                    logger.info(
+                        "Skipping duplicate message %s (%s)",
+                        message_id,
+                        get_message_type_name(message),
+                    )
+                    return
+            # else: Bloom filter negative - definitely not seen, skip DB check
+
+            # Check if bloom filter needs rotation
+            if dedup.should_reset(threshold=0.7):
                 logger.info(
-                    "Skipping duplicate message %s (%s)",
-                    message_id,
-                    get_message_type_name(message),
+                    "Bloom filter fill ratio %.2f exceeds threshold, resetting",
+                    dedup.fill_ratio,
                 )
-                return
+                dedup.reset()
 
         logger.debug("Handling %s (execution=%s)", get_message_type_name(message), execution_id or "N/A")
 
         handler.handle(message)
 
         # Mark message as processed for deduplication
-        if self.config.enable_deduplication and self._store is not None and message_id is not None:
-            self._store.mark_message_processed(
-                message_id=message_id,
-                handler_type=get_message_type_name(message),
-                execution_id=execution_id,
-            )
+        if self.config.enable_deduplication and message_id is not None:
+            # Mark in bloom filter (fast, in-memory)
+            dedup = get_deduplicator()
+            dedup.mark_seen(message_id)
+
+            # Also mark in database for persistence
+            if self._store is not None:
+                self._store.mark_message_processed(
+                    message_id=message_id,
+                    handler_type=get_message_type_name(message),
+                    execution_id=execution_id,
+                )
 
     def process_one(self) -> bool:
         """

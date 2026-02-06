@@ -88,6 +88,35 @@ class Task(ABC):
         """
         return None
 
+    def on_cleanup(self, stage: StageExecution) -> None:
+        """
+        Called when stage enters terminal state.
+
+        Override to clean up resources when the stage completes, fails,
+        or is canceled. This is called after the stage status is set
+        but before the CompleteStage message is pushed.
+
+        Unlike on_cancel (which is called only on cancellation), on_cleanup
+        is called for all terminal states: TERMINAL, CANCELED, STOPPED,
+        SUCCEEDED, FAILED_CONTINUE, and SKIPPED.
+
+        Use this for:
+        - Releasing external resources (containers, connections)
+        - Cleaning up temporary files
+        - Sending notifications
+        - Recording metrics
+
+        Args:
+            stage: The stage execution context
+
+        Example:
+            def on_cleanup(self, stage: StageExecution) -> None:
+                container_id = stage.context.get("container_id")
+                if container_id:
+                    docker_client.remove(container_id, force=True)
+        """
+        pass
+
     @property
     def aliases(self) -> list[str]:
         """

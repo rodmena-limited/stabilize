@@ -32,7 +32,10 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from stabilize.error_codes import ErrorCode
 
 
 class StabilizeBaseException(Exception):  # noqa: N818 - intentional base exception name
@@ -50,9 +53,15 @@ class StabilizeBaseException(Exception):  # noqa: N818 - intentional base except
     - Critical errors that should crash the process
     - Security violations
     - Invariant violations
+
+    Attributes:
+        code: Numeric error code for programmatic handling
+        error_code: Semantic ErrorCode for categorization and routing
+        cause: Optional original exception that caused this error
     """
 
     code: int = 0
+    _error_code: ErrorCode | None = None
 
     def __init__(
         self,
@@ -60,18 +69,36 @@ class StabilizeBaseException(Exception):  # noqa: N818 - intentional base except
         *,
         code: int | None = None,
         cause: Exception | None = None,
+        error_code: ErrorCode | None = None,
     ) -> None:
         """Initialize the exception.
 
         Args:
             message: Human-readable error message
-            code: Optional error code for programmatic handling
+            code: Optional numeric error code for programmatic handling
             cause: Optional original exception that caused this error
+            error_code: Optional semantic ErrorCode for categorization
         """
         super().__init__(message)
         if code is not None:
             self.code = code
         self.cause = cause
+        if error_code is not None:
+            self._error_code = error_code
+
+    @property
+    def error_code(self) -> ErrorCode:
+        """Get the semantic error code for this exception.
+
+        Returns the explicitly set error_code if available, otherwise
+        returns a default based on the exception class.
+        """
+        if self._error_code is not None:
+            return self._error_code
+        # Import here to avoid circular imports
+        from stabilize.error_codes import ErrorCode
+
+        return ErrorCode.UNKNOWN
 
     def __str__(self) -> str:
         parts = [super().__str__()]
@@ -90,6 +117,15 @@ class StabilizeError(StabilizeBaseException):
     """
 
     code: int = 100
+
+    @property
+    def error_code(self) -> ErrorCode:
+        """Get the semantic error code for this exception."""
+        if self._error_code is not None:
+            return self._error_code
+        from stabilize.error_codes import ErrorCode
+
+        return ErrorCode.SYSTEM_ERROR
 
 
 class TransientError(StabilizeError):
@@ -118,12 +154,22 @@ class TransientError(StabilizeError):
 
     code: int = 101
 
+    @property
+    def error_code(self) -> ErrorCode:
+        """Get the semantic error code for this exception."""
+        if self._error_code is not None:
+            return self._error_code
+        from stabilize.error_codes import ErrorCode
+
+        return ErrorCode.NETWORK_ERROR
+
     def __init__(
         self,
         message: str,
         *,
         code: int | None = None,
         cause: Exception | None = None,
+        error_code: ErrorCode | None = None,
         retry_after: float | None = None,
         context_update: dict[str, Any] | None = None,
     ) -> None:
@@ -133,11 +179,12 @@ class TransientError(StabilizeError):
             message: Human-readable error message
             code: Optional error code
             cause: Optional original exception
+            error_code: Optional semantic ErrorCode for categorization
             retry_after: Optional seconds to wait before retry
             context_update: Optional dict to merge into stage context on retry.
                            Allows preserving progress across transient failures.
         """
-        super().__init__(message, code=code, cause=cause)
+        super().__init__(message, code=code, cause=cause, error_code=error_code)
         self.retry_after = retry_after
         self.context_update = context_update or {}
 
@@ -157,6 +204,15 @@ class PermanentError(StabilizeError):
 
     code: int = 102
 
+    @property
+    def error_code(self) -> ErrorCode:
+        """Get the semantic error code for this exception."""
+        if self._error_code is not None:
+            return self._error_code
+        from stabilize.error_codes import ErrorCode
+
+        return ErrorCode.USER_CODE_ERROR
+
 
 class RecoveryError(StabilizeError):
     """Crash recovery failed.
@@ -170,6 +226,15 @@ class RecoveryError(StabilizeError):
     """
 
     code: int = 103
+
+    @property
+    def error_code(self) -> ErrorCode:
+        """Get the semantic error code for this exception."""
+        if self._error_code is not None:
+            return self._error_code
+        from stabilize.error_codes import ErrorCode
+
+        return ErrorCode.RECOVERY_FAILED
 
 
 class ConfigurationError(StabilizeError):
@@ -185,6 +250,15 @@ class ConfigurationError(StabilizeError):
 
     code: int = 104
 
+    @property
+    def error_code(self) -> ErrorCode:
+        """Get the semantic error code for this exception."""
+        if self._error_code is not None:
+            return self._error_code
+        from stabilize.error_codes import ErrorCode
+
+        return ErrorCode.CONFIGURATION_INVALID
+
 
 class ConcurrencyError(TransientError):
     """Optimistic locking failure.
@@ -194,6 +268,15 @@ class ConcurrencyError(TransientError):
     """
 
     code: int = 105
+
+    @property
+    def error_code(self) -> ErrorCode:
+        """Get the semantic error code for this exception."""
+        if self._error_code is not None:
+            return self._error_code
+        from stabilize.error_codes import ErrorCode
+
+        return ErrorCode.CONCURRENCY_CONFLICT
 
 
 class TaskError(StabilizeError):
@@ -215,6 +298,7 @@ class TaskError(StabilizeError):
         *,
         code: int | None = None,
         cause: Exception | None = None,
+        error_code: ErrorCode | None = None,
         task_name: str | None = None,
         stage_id: str | None = None,
         execution_id: str | None = None,
@@ -226,16 +310,26 @@ class TaskError(StabilizeError):
             message: Human-readable error message
             code: Optional error code
             cause: Optional original exception
+            error_code: Optional semantic ErrorCode for categorization
             task_name: Name of the failed task
             stage_id: ID of the stage containing the task
             execution_id: ID of the workflow execution
             details: Additional error details
         """
-        super().__init__(message, code=code, cause=cause)
+        super().__init__(message, code=code, cause=cause, error_code=error_code)
         self.task_name = task_name
         self.stage_id = stage_id
         self.execution_id = execution_id
         self.details = details or {}
+
+    @property
+    def error_code(self) -> ErrorCode:
+        """Get the semantic error code for this exception."""
+        if self._error_code is not None:
+            return self._error_code
+        from stabilize.error_codes import ErrorCode
+
+        return ErrorCode.USER_CODE_ERROR
 
 
 class TaskTimeoutError(TaskError):
@@ -247,6 +341,15 @@ class TaskTimeoutError(TaskError):
 
     code: int = 201
 
+    @property
+    def error_code(self) -> ErrorCode:
+        """Get the semantic error code for this exception."""
+        if self._error_code is not None:
+            return self._error_code
+        from stabilize.error_codes import ErrorCode
+
+        return ErrorCode.TASK_TIMEOUT
+
 
 class TaskNotFoundError(TaskError):
     """Task implementation not found.
@@ -256,6 +359,15 @@ class TaskNotFoundError(TaskError):
     """
 
     code: int = 202
+
+    @property
+    def error_code(self) -> ErrorCode:
+        """Get the semantic error code for this exception."""
+        if self._error_code is not None:
+            return self._error_code
+        from stabilize.error_codes import ErrorCode
+
+        return ErrorCode.TASK_NOT_FOUND
 
 
 class WorkflowError(StabilizeError):
@@ -374,10 +486,20 @@ class VerificationError(StabilizeError):
         *,
         code: int | None = None,
         cause: Exception | None = None,
+        error_code: ErrorCode | None = None,
         details: dict[str, Any] | None = None,
     ) -> None:
-        super().__init__(message, code=code, cause=cause)
+        super().__init__(message, code=code, cause=cause, error_code=error_code)
         self.details = details or {}
+
+    @property
+    def error_code(self) -> ErrorCode:
+        """Get the semantic error code for this exception."""
+        if self._error_code is not None:
+            return self._error_code
+        from stabilize.error_codes import ErrorCode
+
+        return ErrorCode.VERIFICATION_FAILED
 
 
 class TransientVerificationError(VerificationError, TransientError):
@@ -480,3 +602,62 @@ def is_permanent(error: Exception) -> bool:
         return is_permanent(cause)
 
     return False
+
+
+def truncate_error(message: str, max_bytes: int = 102_400) -> str:
+    """Truncate error message to max_bytes, appending '[TRUNCATED]' marker.
+
+    This prevents oversized error messages from bloating the database
+    or causing memory issues when persisting exception details.
+
+    The truncation is byte-aware to handle UTF-8 encoded strings properly.
+    The '[TRUNCATED]' marker is appended to indicate that the message
+    was shortened.
+
+    Args:
+        message: The error message to truncate
+        max_bytes: Maximum size in bytes (default: 100KB)
+
+    Returns:
+        Original message if within limit, otherwise truncated message
+        with '[TRUNCATED]' marker.
+
+    Example:
+        >>> truncate_error("x" * 200_000)
+        'xxxxxxx...[TRUNCATED]'
+    """
+    if not message:
+        return message
+
+    # Encode to bytes to check actual size
+    encoded = message.encode("utf-8", errors="replace")
+
+    if len(encoded) <= max_bytes:
+        return message
+
+    # Reserve space for the marker
+    marker = " [TRUNCATED]"
+    marker_bytes = len(marker.encode("utf-8"))
+    target_bytes = max_bytes - marker_bytes
+
+    if target_bytes <= 0:
+        return marker.strip()
+
+    # Truncate at byte boundary, being careful not to cut in middle of UTF-8 char
+    truncated_bytes = encoded[:target_bytes]
+
+    # Decode back, replacing any incomplete UTF-8 sequences at the end
+    try:
+        truncated = truncated_bytes.decode("utf-8", errors="ignore")
+    except UnicodeDecodeError:
+        # Fallback: try progressively shorter slices
+        for i in range(1, 5):
+            try:
+                truncated = truncated_bytes[:-i].decode("utf-8")
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            truncated = truncated_bytes.decode("utf-8", errors="replace")
+
+    return truncated + marker

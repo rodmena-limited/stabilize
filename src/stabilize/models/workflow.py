@@ -142,6 +142,7 @@ class Workflow:
     max_concurrent_executions: int = 0
     keep_waiting_pipelines: bool = False
     origin: str = "unknown"
+    config_version: str | None = None  # Fingerprint of config used at workflow start
 
     def __post_init__(self) -> None:
         """Set execution reference on all stages after construction."""

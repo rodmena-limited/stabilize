@@ -11,10 +11,12 @@ Key Features
 ------------
 
 *   **Reliable Execution**: Built on the "Transactional Outbox" pattern with atomic state transitions.
-*   **Concurrency Control**: Optimistic locking prevents "lost updates" in high-throughput environments.
+*   **Concurrency Control**: Optimistic locking with phase-aware updates prevents "lost updates" in high-throughput environments.
 *   **Massive Parallelism**: Supports dynamic forking, parallel branches, and joins.
 *   **Pluggable Backends**: SQLite for development, PostgreSQL for production.
-*   **Resilience**: Built-in retries, timeouts, circuit breakers, and bulkheads.
+*   **Resilience**: Built-in retries, timeouts, circuit breakers, bulkheads, and bloom filter deduplication.
+*   **Structured Errors**: Semantic error codes with chain traversal and automatic classification.
+*   **Configuration Versioning**: Immutable configs with fingerprinting for reproducibility.
 *   **Observability**: Detailed structured logging and audit trails.
 
 .. toctree::
@@ -28,6 +30,7 @@ Key Features
    guide/flow_control
    guide/persistence
    guide/resilience
+   guide/error_handling
 
 .. toctree::
    :maxdepth: 2

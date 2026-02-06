@@ -91,6 +91,18 @@ class WorkflowStatus(Enum):
         """Check if this status is SKIPPED."""
         return self == WorkflowStatus.SKIPPED
 
+    @property
+    def is_dirty(self) -> bool:
+        """True if entity is mid-execution (RUNNING, REDIRECT).
+
+        Dirty states indicate the entity is actively being processed and
+        may have uncommitted changes. Useful for:
+        - Determining if optimistic locking should be used
+        - Identifying stages that need recovery after crash
+        - Phase-aware state transitions
+        """
+        return self in {WorkflowStatus.RUNNING, WorkflowStatus.REDIRECT}
+
     def __str__(self) -> str:
         return self._name
 

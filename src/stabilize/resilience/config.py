@@ -3,16 +3,21 @@ Resilience configuration for Stabilize.
 
 Provides configuration for bulkheads, circuit breakers, and handler behavior,
 with support for loading from environment variables.
+
+Configuration objects are frozen (immutable) to ensure thread safety and
+to enable versioning. Each configuration has a fingerprint that can be
+used to track which version was used for a workflow execution.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass, field
 from fractions import Fraction
 
 
-@dataclass
+@dataclass(frozen=True)
 class BackoffConfig:
     """Configuration for exponential backoff.
 
@@ -28,8 +33,16 @@ class BackoffConfig:
     factor: float = 2.0
     jitter: float = 0.25
 
+    def config_fingerprint(self) -> str:
+        """Return deterministic hash of all field values.
 
-@dataclass
+        Used for tracking which configuration version was used.
+        """
+        content = f"BackoffConfig:{self.min_delay_ms}:{self.max_delay_ms}:{self.factor}:{self.jitter}"
+        return hashlib.sha256(content.encode()).hexdigest()[:16]
+
+
+@dataclass(frozen=True)
 class HandlerConfig:
     """Handler retry and backoff settings.
 
@@ -173,6 +186,27 @@ class HandlerConfig:
             jitter=self.error_handling_jitter,
         )
 
+    def config_fingerprint(self) -> str:
+        """Return deterministic hash of all field values.
+
+        Used for tracking which configuration version was used for a workflow.
+        This enables debugging and auditing of configuration drift.
+        """
+        # Create a deterministic string representation of all fields
+        content = (
+            f"HandlerConfig:"
+            f"{self.concurrency_max_retries}:{self.concurrency_min_delay_ms}:"
+            f"{self.concurrency_max_delay_ms}:{self.concurrency_backoff_factor}:"
+            f"{self.concurrency_jitter}:{self.error_handling_max_retries}:"
+            f"{self.error_handling_min_delay_ms}:{self.error_handling_max_delay_ms}:"
+            f"{self.error_handling_backoff_factor}:{self.error_handling_jitter}:"
+            f"{self.max_stage_wait_retries}:{self.default_task_timeout_seconds}:"
+            f"{self.task_backoff_min_delay_ms}:{self.task_backoff_max_delay_ms}:"
+            f"{self.handler_retry_delay_seconds}:{self.poll_frequency_ms}:"
+            f"{self.max_workers}:{self.default_page_size}"
+        )
+        return hashlib.sha256(content.encode()).hexdigest()[:16]
+
 
 # Singleton for default handler config (loaded lazily)
 _default_handler_config: HandlerConfig | None = None
@@ -196,7 +230,7 @@ def reset_handler_config() -> None:
     _default_handler_config = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class BulkheadConfig:
     """Configuration for a single bulkhead.
 
@@ -210,37 +244,88 @@ class BulkheadConfig:
     max_queue_size: int = 20
     timeout_seconds: float = 14400.0  # 4 hours for long-running workflows
 
+    def config_fingerprint(self) -> str:
+        """Return deterministic hash of all field values."""
+        content = f"BulkheadConfig:{self.max_concurrent}:{self.max_queue_size}:{self.timeout_seconds}"
+        return hashlib.sha256(content.encode()).hexdigest()[:16]
 
-@dataclass
+
+def _default_bulkheads() -> tuple[tuple[str, BulkheadConfig], ...]:
+    """Create default bulkhead configurations as frozen tuple."""
+    return (
+        ("shell", BulkheadConfig(max_concurrent=5)),
+        ("python", BulkheadConfig(max_concurrent=3)),
+        ("http", BulkheadConfig(max_concurrent=10)),
+        ("docker", BulkheadConfig(max_concurrent=3)),
+        ("ssh", BulkheadConfig(max_concurrent=5)),
+    )
+
+
+@dataclass(frozen=True)
 class ResilienceConfig:
     """
     Configuration for resilience patterns.
 
+    This is a frozen (immutable) dataclass to ensure thread safety
+    and enable configuration versioning.
+
     Attributes:
-        bulkheads: Per-task-type bulkhead configurations
+        bulkheads: Per-task-type bulkhead configurations (frozen tuple)
         circuit_failure_threshold: Fraction of failures to trip circuit (e.g., 5/10 = 50%)
         circuit_cooldown_seconds: Seconds to wait before testing recovery
         database_url: Database connection string (from MG_DATABASE_URL)
+        config_version: Auto-generated version from config fingerprint
     """
 
-    bulkheads: dict[str, BulkheadConfig] = field(
-        default_factory=lambda: {
-            "shell": BulkheadConfig(max_concurrent=5),
-            "python": BulkheadConfig(max_concurrent=3),
-            "http": BulkheadConfig(max_concurrent=10),
-            "docker": BulkheadConfig(max_concurrent=3),
-            "ssh": BulkheadConfig(max_concurrent=5),
-        }
-    )
+    bulkheads: tuple[tuple[str, BulkheadConfig], ...] = field(default_factory=_default_bulkheads)
     circuit_failure_threshold: Fraction = field(default_factory=lambda: Fraction(5, 10))
     circuit_cooldown_seconds: float = 30.0
     circuit_cache_size: int = 1000
     database_url: str | None = None
 
+    def get_bulkhead(self, task_type: str) -> BulkheadConfig | None:
+        """Get bulkhead configuration for a task type.
+
+        Args:
+            task_type: The task type (e.g., "shell", "python")
+
+        Returns:
+            BulkheadConfig if configured, None otherwise.
+        """
+        for name, config in self.bulkheads:
+            if name == task_type:
+                return config
+        return None
+
+    def bulkheads_dict(self) -> dict[str, BulkheadConfig]:
+        """Get bulkheads as a mutable dictionary.
+
+        Returns a copy that can be modified without affecting this config.
+        """
+        return dict(self.bulkheads)
+
+    def config_fingerprint(self) -> str:
+        """Return deterministic hash of all field values.
+
+        Used for tracking which configuration version was used for a workflow.
+        """
+        bulkhead_strs = [f"{name}:{cfg.config_fingerprint()}" for name, cfg in self.bulkheads]
+        content = (
+            f"ResilienceConfig:"
+            f"{','.join(bulkhead_strs)}:"
+            f"{self.circuit_failure_threshold}:"
+            f"{self.circuit_cooldown_seconds}:"
+            f"{self.circuit_cache_size}:"
+            f"{self.database_url or 'None'}"
+        )
+        return hashlib.sha256(content.encode()).hexdigest()[:16]
+
     @classmethod
     def from_env(cls) -> ResilienceConfig:
         """
         Load configuration from environment variables.
+
+        Returns a new frozen instance each time (immutable).
 
         Environment variables:
             MG_DATABASE_URL: Database connection string
@@ -249,17 +334,28 @@ class ResilienceConfig:
             STABILIZE_CIRCUIT_COOLDOWN_SECONDS: Cooldown duration
         """
         # Load bulkhead configs from environment
-        bulkheads = {
-            "shell": BulkheadConfig(max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_SHELL_MAX_CONCURRENT", "5"))),
-            "python": BulkheadConfig(
-                max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_PYTHON_MAX_CONCURRENT", "3"))
+        bulkheads = (
+            (
+                "shell",
+                BulkheadConfig(max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_SHELL_MAX_CONCURRENT", "5"))),
             ),
-            "http": BulkheadConfig(max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_HTTP_MAX_CONCURRENT", "10"))),
-            "docker": BulkheadConfig(
-                max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_DOCKER_MAX_CONCURRENT", "3"))
+            (
+                "python",
+                BulkheadConfig(max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_PYTHON_MAX_CONCURRENT", "3"))),
             ),
-            "ssh": BulkheadConfig(max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_SSH_MAX_CONCURRENT", "5"))),
-        }
+            (
+                "http",
+                BulkheadConfig(max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_HTTP_MAX_CONCURRENT", "10"))),
+            ),
+            (
+                "docker",
+                BulkheadConfig(max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_DOCKER_MAX_CONCURRENT", "3"))),
+            ),
+            (
+                "ssh",
+                BulkheadConfig(max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_SSH_MAX_CONCURRENT", "5"))),
+            ),
+        )
 
         # Parse failure threshold as fraction
         threshold_float = float(os.environ.get("STABILIZE_CIRCUIT_FAILURE_THRESHOLD", "0.5"))

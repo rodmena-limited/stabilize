@@ -14,6 +14,7 @@ from stabilize.queue.messages import (
     ResumeStage,
     StartWorkflow,
 )
+from stabilize.resilience.config import HandlerConfig, get_handler_config
 
 if TYPE_CHECKING:
     from stabilize.models.workflow import Workflow
@@ -48,16 +49,29 @@ class Orchestrator:
         self.queue = queue
         self.store = store
 
-    def start(self, execution: Workflow) -> None:
+    def start(
+        self,
+        execution: Workflow,
+        handler_config: HandlerConfig | None = None,
+    ) -> None:
         """
         Start a pipeline execution atomically.
 
         If a store is configured, wraps the queue push in a transaction
         to ensure atomicity with any prior status updates.
 
+        Attaches the configuration fingerprint to the workflow for
+        versioning and auditing purposes.
+
         Args:
             execution: The execution to start
+            handler_config: Optional handler config. If not provided, uses
+                           the global config from environment.
         """
+        # Attach config fingerprint for versioning
+        config = handler_config or get_handler_config()
+        execution.config_version = config.config_fingerprint()
+
         message = StartWorkflow(
             execution_type=execution.type.value,
             execution_id=execution.id,

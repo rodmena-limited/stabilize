@@ -86,3 +86,50 @@ Retryable Tasks
 ~~~~~~~~~~~~~~~
 
 Implement ``RetryableTask`` for polling or unreliable operations. The engine handles backoff and timeouts.
+
+Task Cleanup
+~~~~~~~~~~~~
+
+Implement ``on_cleanup`` to release resources when a stage enters a terminal state:
+
+.. code-block:: python
+
+    class MyTask(Task):
+        def execute(self, stage: StageExecution) -> TaskResult:
+            # Acquire resources
+            temp_file = create_temp_file()
+            stage.context["temp_file"] = temp_file
+
+            # Do work...
+            return TaskResult.success()
+
+        def on_cleanup(self, stage: StageExecution) -> None:
+            """Called automatically on terminal state (success, failure, or cancel)."""
+            temp_file = stage.context.get("temp_file")
+            if temp_file:
+                cleanup_temp_file(temp_file)
+
+The ``on_cleanup`` method is:
+
+*   Called automatically when stage enters terminal state
+*   Called even after process crash (on recovery)
+*   Timeout-protected (30 seconds default)
+
+For more complex cleanup, use the finalizer registry:
+
+.. code-block:: python
+
+    from stabilize.finalizers import get_finalizer_registry
+
+    class MyTask(Task):
+        def execute(self, stage: StageExecution) -> TaskResult:
+            # Register cleanup callback
+            registry = get_finalizer_registry()
+            registry.register(
+                stage.id,
+                "cleanup_external_resource",
+                lambda: cleanup_external_api(stage.context["resource_id"])
+            )
+
+            # Do work...
+            return TaskResult.success()

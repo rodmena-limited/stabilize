@@ -7,7 +7,9 @@ from collections.abc import Callable
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from stabilize.errors import is_transient
+from stabilize.error_codes import classify_error
+from stabilize.errors import is_transient, truncate_error
+from stabilize.finalizers import get_finalizer_registry
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import CompleteTask
 
@@ -282,11 +284,18 @@ def _mark_terminal(
     retry_on_concurrency_error: Callable[[Callable[[], None], str], None],
 ) -> None:
     """Mark task as terminal due to permanent error or max retries exceeded."""
+    # Get error code for classification
+    error_code = classify_error(exception)
+
+    # Truncate error message to prevent oversized storage
+    error_str = truncate_error(str(exception))
+
     exception_details = {
         "details": {
-            "error": str(exception),
-            "errors": [str(exception)],
+            "error": error_str,
+            "errors": [error_str],
             "transient": is_transient(exception),
+            "error_code": error_code.value,
         }
     }
 
@@ -319,6 +328,26 @@ def _mark_terminal(
 
         fresh_stage.context["exception"] = exception_details
         status = fresh_stage.failure_status(default=WorkflowStatus.TERMINAL)
+
+        # Execute any registered finalizers for this stage
+        try:
+            registry = get_finalizer_registry()
+            finalizer_results = registry.execute(fresh_stage.id, timeout=30.0)
+            if finalizer_results:
+                failed_finalizers = [r for r in finalizer_results if not r.success]
+                if failed_finalizers:
+                    logger.warning(
+                        "Stage %s: %d/%d finalizers failed",
+                        fresh_stage.id,
+                        len(failed_finalizers),
+                        len(finalizer_results),
+                    )
+        except Exception as e:
+            logger.warning(
+                "Error executing finalizers for stage %s: %s",
+                fresh_stage.id,
+                e,
+            )
 
         # Atomic: store stage + mark processed + push CompleteTask together
         txn_helper.execute_atomic_critical(
@@ -366,6 +395,8 @@ def complete_with_error(
         txn_helper: Transaction helper for atomic operations
         retry_on_concurrency_error: Function to retry on concurrency errors
     """
+    # Truncate error message to prevent oversized storage
+    truncated_error = truncate_error(error)
 
     def do_complete() -> None:
         # Re-fetch stage to get current version on each retry attempt
@@ -392,7 +423,7 @@ def complete_with_error(
             return
 
         fresh_stage.context["exception"] = {
-            "details": {"error": error},
+            "details": {"error": truncated_error},
         }
 
         # Atomic: store stage + mark processed + push CompleteTask together

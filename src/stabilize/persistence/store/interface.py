@@ -97,12 +97,19 @@ class WorkflowStore(ABC):
     # ========== Stage Operations ==========
 
     @abstractmethod
-    def store_stage(self, stage: StageExecution) -> None:
+    def store_stage(
+        self,
+        stage: StageExecution,
+        expected_phase: str | None = None,
+    ) -> None:
         """
         Store or update a stage.
 
         Args:
             stage: The stage to store
+            expected_phase: If provided, the WHERE clause includes status = expected_phase.
+                           This enables phase-aware optimistic locking where updates only
+                           succeed if the stage is in the expected status.
         """
         pass
 

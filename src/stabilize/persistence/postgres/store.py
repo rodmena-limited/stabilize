@@ -195,18 +195,35 @@ class PostgresWorkflowStore(WorkflowStore):
                 )
             conn.commit()
 
-    def store_stage(self, stage: Any, connection: Any | None = None) -> None:
-        """Store or update a stage."""
+    def store_stage(
+        self,
+        stage: Any,
+        expected_phase: str | None = None,
+        connection: Any | None = None,
+    ) -> None:
+        """Store or update a stage.
+
+        Args:
+            stage: The stage to store
+            expected_phase: If provided, adds status check to WHERE clause for
+                           phase-aware optimistic locking.
+            connection: Optional existing connection to use
+        """
         if connection:
             with connection.cursor() as cur:
-                self._store_stage_impl(cur, stage)
+                self._store_stage_impl(cur, stage, expected_phase)
         else:
             with self._pool.connection() as conn:
                 with conn.cursor() as cur:
-                    self._store_stage_impl(cur, stage)
+                    self._store_stage_impl(cur, stage, expected_phase)
                 conn.commit()
 
-    def _store_stage_impl(self, cur: Any, stage: Any) -> None:
+    def _store_stage_impl(
+        self,
+        cur: Any,
+        stage: Any,
+        expected_phase: str | None = None,
+    ) -> None:
         """Implementation of store_stage using a cursor with optimistic locking."""
         from stabilize.errors import ConcurrencyError
 
@@ -217,34 +234,67 @@ class PostgresWorkflowStore(WorkflowStore):
         exists = cur.fetchone() is not None
 
         if exists:
-            cur.execute(
-                """
-                UPDATE stage_executions SET
-                    status = %(status)s,
-                    context = %(context)s::jsonb,
-                    outputs = %(outputs)s::jsonb,
-                    start_time = %(start_time)s,
-                    end_time = %(end_time)s,
-                    version = version + 1
-                WHERE id = %(id)s AND version = %(version)s
-                RETURNING version
-                """,
-                {
-                    "id": stage.id,
-                    "status": stage.status.name,
-                    "context": json.dumps(stage.context),
-                    "outputs": json.dumps(stage.outputs),
-                    "start_time": stage.start_time,
-                    "end_time": stage.end_time,
-                    "version": stage.version,
-                },
-            )
+            # Build update query with optimistic locking
+            # Optionally include phase check
+            if expected_phase is not None:
+                cur.execute(
+                    """
+                    UPDATE stage_executions SET
+                        status = %(status)s,
+                        context = %(context)s::jsonb,
+                        outputs = %(outputs)s::jsonb,
+                        start_time = %(start_time)s,
+                        end_time = %(end_time)s,
+                        version = version + 1
+                    WHERE id = %(id)s AND version = %(version)s AND status = %(expected_phase)s
+                    RETURNING version
+                    """,
+                    {
+                        "id": stage.id,
+                        "status": stage.status.name,
+                        "context": json.dumps(stage.context),
+                        "outputs": json.dumps(stage.outputs),
+                        "start_time": stage.start_time,
+                        "end_time": stage.end_time,
+                        "version": stage.version,
+                        "expected_phase": expected_phase,
+                    },
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE stage_executions SET
+                        status = %(status)s,
+                        context = %(context)s::jsonb,
+                        outputs = %(outputs)s::jsonb,
+                        start_time = %(start_time)s,
+                        end_time = %(end_time)s,
+                        version = version + 1
+                    WHERE id = %(id)s AND version = %(version)s
+                    RETURNING version
+                    """,
+                    {
+                        "id": stage.id,
+                        "status": stage.status.name,
+                        "context": json.dumps(stage.context),
+                        "outputs": json.dumps(stage.outputs),
+                        "start_time": stage.start_time,
+                        "end_time": stage.end_time,
+                        "version": stage.version,
+                    },
+                )
 
             result = cur.fetchone()
             if result:
                 new_version = result[0] if isinstance(result, tuple) else result.get("version", stage.version + 1)
                 stage.version = new_version
             else:
+                if expected_phase is not None:
+                    raise ConcurrencyError(
+                        f"Optimistic lock failed for stage {stage.id} "
+                        f"(version {stage.version}, expected_phase {expected_phase}). "
+                        f"Another process has modified this stage."
+                    )
                 raise ConcurrencyError(
                     f"Optimistic lock failed for stage {stage.id} (version {stage.version}). "
                     f"Another process has modified this stage."

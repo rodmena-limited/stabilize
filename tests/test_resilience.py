@@ -211,11 +211,11 @@ class TestResilienceConfig:
         """Verify default per-task-type settings."""
         config = ResilienceConfig()
 
-        assert config.bulkheads["shell"].max_concurrent == 5
-        assert config.bulkheads["python"].max_concurrent == 3
-        assert config.bulkheads["http"].max_concurrent == 10
-        assert config.bulkheads["docker"].max_concurrent == 3
-        assert config.bulkheads["ssh"].max_concurrent == 5
+        assert config.get_bulkhead("shell").max_concurrent == 5
+        assert config.get_bulkhead("python").max_concurrent == 3
+        assert config.get_bulkhead("http").max_concurrent == 10
+        assert config.get_bulkhead("docker").max_concurrent == 3
+        assert config.get_bulkhead("ssh").max_concurrent == 5
 
     def test_default_circuit_config(self) -> None:
         """Verify default failure threshold and cooldown."""
@@ -246,7 +246,7 @@ class TestResilienceConfig:
             config = ResilienceConfig.from_env()
 
             assert config.database_url == "postgresql://user:pass@localhost/db"
-            assert config.bulkheads["shell"].max_concurrent == 10
+            assert config.get_bulkhead("shell").max_concurrent == 10
             assert config.circuit_failure_threshold == Fraction(3, 10)
             assert config.circuit_cooldown_seconds == 60.0
 

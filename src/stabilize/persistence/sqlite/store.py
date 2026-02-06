@@ -259,8 +259,18 @@ class SqliteWorkflowStore(WorkflowStore):
         )
         conn.commit()
 
-    def store_stage(self, stage: StageExecution) -> None:
-        """Store or update a stage."""
+    def store_stage(
+        self,
+        stage: StageExecution,
+        expected_phase: str | None = None,
+    ) -> None:
+        """Store or update a stage.
+
+        Args:
+            stage: The stage to store
+            expected_phase: If provided, adds status check to WHERE clause for
+                           phase-aware optimistic locking.
+        """
         conn = self._get_connection()
 
         # Check if stage exists
@@ -271,30 +281,60 @@ class SqliteWorkflowStore(WorkflowStore):
         exists = result.fetchone() is not None
 
         if exists:
-            # Update with optimistic locking
-            cursor = conn.execute(
-                """
-                UPDATE stage_executions SET
-                    status = :status,
-                    context = :context,
-                    outputs = :outputs,
-                    start_time = :start_time,
-                    end_time = :end_time,
-                    version = version + 1
-                WHERE id = :id AND version = :version
-                """,
-                {
-                    "id": stage.id,
-                    "status": stage.status.name,
-                    "context": json.dumps(stage.context),
-                    "outputs": json.dumps(stage.outputs),
-                    "start_time": stage.start_time,
-                    "end_time": stage.end_time,
-                    "version": stage.version,
-                },
-            )
+            # Build update query with optimistic locking
+            # Optionally include phase check
+            if expected_phase is not None:
+                cursor = conn.execute(
+                    """
+                    UPDATE stage_executions SET
+                        status = :status,
+                        context = :context,
+                        outputs = :outputs,
+                        start_time = :start_time,
+                        end_time = :end_time,
+                        version = version + 1
+                    WHERE id = :id AND version = :version AND status = :expected_phase
+                    """,
+                    {
+                        "id": stage.id,
+                        "status": stage.status.name,
+                        "context": json.dumps(stage.context),
+                        "outputs": json.dumps(stage.outputs),
+                        "start_time": stage.start_time,
+                        "end_time": stage.end_time,
+                        "version": stage.version,
+                        "expected_phase": expected_phase,
+                    },
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    UPDATE stage_executions SET
+                        status = :status,
+                        context = :context,
+                        outputs = :outputs,
+                        start_time = :start_time,
+                        end_time = :end_time,
+                        version = version + 1
+                    WHERE id = :id AND version = :version
+                    """,
+                    {
+                        "id": stage.id,
+                        "status": stage.status.name,
+                        "context": json.dumps(stage.context),
+                        "outputs": json.dumps(stage.outputs),
+                        "start_time": stage.start_time,
+                        "end_time": stage.end_time,
+                        "version": stage.version,
+                    },
+                )
 
             if cursor.rowcount == 0:
+                if expected_phase is not None:
+                    raise ConcurrencyError(
+                        f"Optimistic lock failed for stage {stage.id} "
+                        f"(version {stage.version}, expected_phase {expected_phase})"
+                    )
                 raise ConcurrencyError(f"Optimistic lock failed for stage {stage.id} (version {stage.version})")
 
             # Update local version

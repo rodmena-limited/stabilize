@@ -24,6 +24,7 @@ from stabilize.models.status import (
 from stabilize.models.task import TaskExecution
 
 if TYPE_CHECKING:
+    from stabilize.models.snapshot import StageStateSnapshot
     from stabilize.models.workflow import Workflow
 
 
@@ -91,9 +92,58 @@ class StageExecution:
     scheduled_time: int | None = None
     version: int = 0
 
+    # Finalizer support: cleanup on failure and registered finalizer names
+    cleanup_on_failure: bool = False
+    finalizer_names: list[str] = field(default_factory=list)
+
     # Back-reference to parent execution (set after construction)
     # Can be weakref (default) or strong ref (for standalone stages)
     _execution: weakref.ReferenceType[Workflow] | Workflow | None = field(default=None, repr=False)
+
+    # ========== Phase-Version State Tracking ==========
+
+    @property
+    def phase_version(self) -> tuple[str, int]:
+        """Return (status_name, version) for optimistic locking with phase check.
+
+        This combines the current status and version number into a single
+        tuple for phase-aware optimistic locking. When updating a stage,
+        you can pass this to ensure both the version AND the expected
+        status match before the update proceeds.
+
+        Returns:
+            Tuple of (status_name, version) for comparison.
+
+        Example:
+            expected = stage.phase_version
+            # ... some operation ...
+            store.update_status(stage, expected_phase=expected[0])
+        """
+        return (self.status.name, self.version)
+
+    def state_snapshot(self) -> StageStateSnapshot:
+        """Return frozen copy of current state for read-only use.
+
+        Creates an immutable snapshot of the current stage state that
+        can be safely passed to external systems, cached, or logged
+        without risk of mutation.
+
+        Returns:
+            Frozen StageStateSnapshot with current state.
+        """
+        from stabilize.models.snapshot import StageStateSnapshot, _freeze_dict
+
+        return StageStateSnapshot(
+            id=self.id,
+            ref_id=self.ref_id,
+            status=self.status,
+            version=self.version,
+            context=_freeze_dict(self.context),
+            outputs=_freeze_dict(self.outputs),
+            start_time=self.start_time,
+            end_time=self.end_time,
+            parent_stage_id=self.parent_stage_id,
+        )
 
     @property
     def execution(self) -> Workflow:
