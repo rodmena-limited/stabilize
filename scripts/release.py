@@ -269,10 +269,24 @@ def create_release_workflow(
             )
         )
     else:
-        # Use -p no:cacheprovider to avoid cache-related hangs
-        # Use --no-header to reduce terminal output
-        # Skip postgres tests as they require libpq which may not be installed
-        test_cmd = f".venv/bin/python -m pytest tests/ {pytest_args} -p no:cacheprovider --no-header -k 'not postgres'"
+        test_paths = " ".join(
+            [
+                "golden_standard_tests/",
+                "tests/test_workflow_control_flow_patterns.py",
+                "tests/test_diamond_pattern.py",
+                "tests/test_status_edge_cases.py",
+                "tests/test_jump_edge_cases.py",
+                "tests/test_synthetic_stage_edge_cases.py",
+                "tests/test_failure_scenarios.py",
+                "tests/test_dlq_atomicity.py",
+                "tests/test_concurrency.py",
+                "tests/test_stage_data_flow.py",
+                "tests/test_dynamic_routing.py",
+                "tests/test_critical_corner_cases.py",
+                "tests/test_mission_critical_certification.py",
+            ]
+        )
+        test_cmd = f".venv/bin/python -m pytest {test_paths} {pytest_args} -p no:cacheprovider --no-header"
         stages.append(
             StageExecution(
                 ref_id="test",
@@ -282,10 +296,10 @@ def create_release_workflow(
                 context={
                     "command": test_cmd,
                     "cwd": project_root,
-                    "timeout": 300,  # 5 minutes
+                    "timeout": 600,  # 10 minutes (golden+patterns+edges on sqlite+postgres)
                     "env": {
-                        "PYTHONUNBUFFERED": "1",  # Disable output buffering
-                        "CI": "true",  # Signal we're in CI mode
+                        "PYTHONUNBUFFERED": "1",
+                        "CI": "true",
                     },
                 },
                 tasks=[
