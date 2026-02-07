@@ -14,11 +14,11 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from stabilize.dag.graph import StageGraphBuilder
 from stabilize.errors import is_transient
-from stabilize.expressions import ExpressionError, evaluate_expression
 from stabilize.handlers.base import StabilizeHandler
-from stabilize.models.stage import JoinType, SplitType
+from stabilize.handlers.complete_stage.planner import CompleteStagePlannerMixin
+from stabilize.handlers.complete_stage.split_logic import CompleteStagesSplitMixin
+from stabilize.models.stage import SplitType
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
     CancelStage,
@@ -29,7 +29,6 @@ from stabilize.queue.messages import (
     StartStage,
 )
 from stabilize.resilience.config import HandlerConfig
-from stabilize.stages.builder import get_default_factory
 
 if TYPE_CHECKING:
     from stabilize.events.recorder import EventRecorder
@@ -40,7 +39,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class CompleteStageHandler(StabilizeHandler[CompleteStage]):
+class CompleteStageHandler(
+    CompleteStagesSplitMixin,
+    CompleteStagePlannerMixin,
+    StabilizeHandler[CompleteStage],
+):
     """
     Handler for CompleteStage messages.
 
@@ -459,149 +462,3 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                     )
 
         self.with_stage(message, on_stage)
-
-    def _plan_after_stages(self, stage: StageExecution) -> None:
-        """Plan after stages using the stage definition builder."""
-        builder = get_default_factory().get(stage.type)
-        graph = StageGraphBuilder.after_stages(stage)
-        builder.after_stages(stage, graph)
-
-        for s in graph.build():
-            s.execution = stage.execution
-            stage.execution.stages.append(s)  # Add to in-memory list for first_after_stages()
-            self.repository.add_stage(s)
-
-    def _apply_split_logic(
-        self,
-        stage: StageExecution,
-        downstream_stages: list[StageExecution],
-    ) -> tuple[list[StageExecution], list[StageExecution]]:
-        """Apply split logic to determine which downstreams to activate.
-
-        For AND-split (default): activates all downstream stages.
-        For OR-split (WCP-6): evaluates conditions per downstream and only
-        activates matching ones.
-
-        Returns:
-            Tuple of (activated_stages, skipped_stages).
-        """
-        if not downstream_stages:
-            return [], []
-
-        if stage.split_type != SplitType.OR or not stage.split_conditions:
-            # AND-split: activate all
-            return downstream_stages, []
-
-        # OR-split: evaluate conditions per downstream
-        # Merge context and outputs for condition evaluation so that
-        # conditions can reference both stage context and task outputs.
-        eval_context = dict(stage.context)
-        eval_context.update(stage.outputs)
-
-        activated: list[StageExecution] = []
-        skipped: list[StageExecution] = []
-
-        for downstream in downstream_stages:
-            condition = stage.split_conditions.get(downstream.ref_id)
-            if condition is None:
-                # No condition specified for this downstream - activate by default
-                activated.append(downstream)
-                continue
-
-            try:
-                result = evaluate_expression(condition, eval_context)
-                if result:
-                    activated.append(downstream)
-                else:
-                    skipped.append(downstream)
-            except ExpressionError:
-                logger.warning(
-                    "Failed to evaluate split condition '%s' for downstream %s, skipping",
-                    condition,
-                    downstream.ref_id,
-                )
-                skipped.append(downstream)
-
-        # OR-split must activate at least one branch
-        if not activated and downstream_stages:
-            logger.warning(
-                "OR-split for stage %s activated no branches, activating first by default",
-                stage.name,
-            )
-            activated.append(downstream_stages[0])
-            skipped = [d for d in downstream_stages[1:]]
-
-        return activated, skipped
-
-    def _record_activated_branches(
-        self,
-        stage: StageExecution,
-        activated_downstreams: list[StageExecution],
-    ) -> None:
-        """Record activated branch ref_ids for paired OR-join stages (WCP-7).
-
-        Finds downstream stages that have join_type=OR and sets their
-        '_activated_branches' context with the ref_ids of activated branches.
-        """
-        activated_ref_ids = [d.ref_id for d in activated_downstreams]
-
-        # Look for OR-join stages downstream that need branch tracking
-        execution = stage.execution
-        for s in execution.stages:
-            if s.join_type == JoinType.OR:
-                # Check if any of this stage's activated downstreams are upstream of the OR-join
-                if s.requisite_stage_ref_ids & set(activated_ref_ids):
-                    # This OR-join depends on some of our activated branches
-                    existing = s.context.get("_activated_branches", [])
-                    merged = list(set(existing) | set(activated_ref_ids))
-                    s.context["_activated_branches"] = merged
-                    self.repository.store_stage(s)
-
-    def _update_join_tracking(
-        self,
-        stage: StageExecution,
-        downstream_stages: list[StageExecution],
-    ) -> None:
-        """Update join tracking context for discriminator and N-of-M joins.
-
-        When a stage completes, check if any of its downstream stages use
-        special join types that need tracking updates.
-        """
-        for downstream in downstream_stages:
-            if downstream.join_type == JoinType.DISCRIMINATOR:
-                # Track completed branch for discriminator
-                completed = downstream.context.get("_completed_branches", [])
-                if stage.ref_id not in completed:
-                    completed.append(stage.ref_id)
-                    downstream.context["_completed_branches"] = completed
-                    self.repository.store_stage(downstream)
-
-            elif downstream.join_type == JoinType.N_OF_M:
-                # Track completed branch count for N-of-M join
-                completed = downstream.context.get("_completed_branches", [])
-                if stage.ref_id not in completed:
-                    completed.append(stage.ref_id)
-                    downstream.context["_completed_branches"] = completed
-                    self.repository.store_stage(downstream)
-
-    def _plan_on_failure_stages(self, stage: StageExecution) -> bool:
-        """
-        Plan on-failure stages using the stage definition builder.
-
-        Returns:
-            True if on-failure stages were added
-        """
-        builder = get_default_factory().get(stage.type)
-        graph = StageGraphBuilder.after_stages(stage)
-        builder.on_failure_stages(stage, graph)
-
-        new_stages = graph.build()
-        if not new_stages:
-            return False
-
-        for s in new_stages:
-            s.execution = stage.execution
-            stage.execution.stages.append(s)  # Add to in-memory list for first_after_stages()
-            self.repository.add_stage(s)
-
-        return True

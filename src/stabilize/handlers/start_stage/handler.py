@@ -12,11 +12,13 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from stabilize.dag.graph import StageGraphBuilder
 from stabilize.dag.readiness import PredicatePhase, evaluate_readiness
 from stabilize.errors import ConcurrencyError, is_transient
 from stabilize.handlers.base import StabilizeHandler
-from stabilize.models.stage import JoinType, SyntheticStageOwner
+from stabilize.handlers.start_stage.conditions import StartStageConditionsMixin
+from stabilize.handlers.start_stage.orchestration import StartStageOrchestrationMixin
+from stabilize.handlers.start_stage.planner import StartStagePlannerMixin
+from stabilize.models.stage import JoinType
 from stabilize.models.status import ACTIVE_STATUSES, WorkflowStatus
 from stabilize.queue.messages import (
     CancelStage,
@@ -24,22 +26,24 @@ from stabilize.queue.messages import (
     CompleteWorkflow,
     SkipStage,
     StartStage,
-    StartTask,
 )
 from stabilize.resilience.config import HandlerConfig
-from stabilize.stages.builder import get_default_factory
 
 if TYPE_CHECKING:
     from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
-    from stabilize.queue.messages import Message
 
 logger = logging.getLogger(__name__)
 
 
-class StartStageHandler(StabilizeHandler[StartStage]):
+class StartStageHandler(
+    StartStageConditionsMixin,
+    StartStageOrchestrationMixin,
+    StartStagePlannerMixin,
+    StabilizeHandler[StartStage],
+):
     """
     Handler for StartStage messages.
 
@@ -443,259 +447,3 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                 stage,
                 source_handler="StartStageHandler",
             )
-
-    def _collect_start_messages(
-        self,
-        stage: StageExecution,
-        message: StartStage,
-    ) -> list[Message]:
-        """Collect messages needed to start the stage.
-
-        This method queries the repository but doesn't push any messages.
-        The caller is responsible for pushing the returned messages atomically.
-        """
-        messages: list[Message] = []
-
-        # Fetch synthetic stages (returns empty list if none)
-        synthetic_stages = self.repository.get_synthetic_stages(stage.execution.id, stage.id)
-        if synthetic_stages is None:
-            synthetic_stages = []
-
-        # Check for before stages
-        before_stages = [
-            s
-            for s in synthetic_stages
-            if s is not None and s.synthetic_stage_owner == SyntheticStageOwner.STAGE_BEFORE and s.is_initial()
-        ]
-
-        if before_stages:
-            for before in before_stages:
-                messages.append(
-                    StartStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=before.id,
-                    )
-                )
-            return messages
-
-        # No before stages - start first task
-        first_task = stage.first_task()
-        if first_task:
-            messages.append(
-                StartTask(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=message.stage_id,
-                    task_id=first_task.id,
-                )
-            )
-            return messages
-
-        # No tasks - check for after stages
-        after_stages = [
-            s
-            for s in synthetic_stages
-            if s is not None and s.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER and s.is_initial()
-        ]
-
-        if after_stages:
-            for after in after_stages:
-                messages.append(
-                    StartStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=after.id,
-                    )
-                )
-            return messages
-
-        # No tasks or synthetic stages - complete immediately
-        messages.append(
-            CompleteStage(
-                execution_type=message.execution_type,
-                execution_id=message.execution_id,
-                stage_id=message.stage_id,
-            )
-        )
-        return messages
-
-    def _plan_stage(self, stage: StageExecution) -> None:
-        """
-        Plan the stage - build tasks and before stages.
-        """
-        # Hydrate context with ancestor outputs
-        # This ensures tasks have access to upstream data even with partial loading
-        ancestor_outputs = self.repository.get_merged_ancestor_outputs(stage.execution.id, stage.ref_id)
-
-        merged = ancestor_outputs
-        for key, value in stage.context.items():
-            if key in merged and isinstance(merged[key], list) and isinstance(value, list):
-                # Concatenate lists, avoiding duplicates
-                existing = merged[key]
-                for item in value:
-                    if item not in existing:
-                        existing.append(item)
-            else:
-                merged[key] = value
-
-        stage.context = merged
-
-        # Get builder
-        builder = get_default_factory().get(stage.type)
-
-        # Build tasks if none exist
-        if not stage.tasks:
-            stage.tasks = builder.build_tasks(stage)
-
-        # Set task-stage back-references and mark first/last tasks
-        if stage.tasks:
-            for task in stage.tasks:
-                task._stage = stage
-            stage.tasks[0].stage_start = True
-            stage.tasks[-1].stage_end = True
-
-        # Build before stages
-        graph = StageGraphBuilder.before_stages(stage)
-        builder.before_stages(stage, graph)
-
-        # Save any new synthetic stages
-        for s in graph.build():
-            # If not already in repository, add it
-            # (StageGraphBuilder adds to execution.stages, but we need to persist)
-            # Actually StageGraphBuilder usually just modifies the object graph.
-            # We need to explicitly store new stages.
-            # Assuming graph.build() returns new stages.
-            s.execution = stage.execution  # Ensure backref
-            self.repository.add_stage(s)
-
-        # Add context flags
-        builder.add_context_flags(stage)
-
-    def _should_skip(self, stage: StageExecution) -> bool:
-        """
-        Check if stage should be skipped.
-
-        Checks the 'stageEnabled' context for conditional execution.
-        """
-        stage_enabled = stage.context.get("stageEnabled")
-        if stage_enabled is None:
-            return False
-
-        if isinstance(stage_enabled, dict):
-            expr_type = stage_enabled.get("type")
-            if expr_type == "expression":
-                # TODO: Evaluate expression
-                expression = stage_enabled.get("expression", "true")
-                # For now, just check if it's explicitly "false"
-                if isinstance(expression, str):
-                    return expression.lower() == "false"
-
-        return False
-
-    def _is_after_start_time_expiry(self, stage: StageExecution) -> bool:
-        """Check if current time is past start time expiry."""
-        if stage.start_time_expiry is None:
-            return False
-        return self.current_time_millis() > stage.start_time_expiry
-
-    def _is_milestone_expired(self, stage: StageExecution) -> bool:
-        """Check if the milestone condition for this stage has expired (WCP-18).
-
-        A milestone stage must be in the required status. If the milestone
-        stage has already progressed past the required status, the activity
-        can never be enabled and should be skipped.
-        """
-        if not stage.milestone_ref_id or not stage.milestone_status:
-            return False
-
-        all_stages = self.repository.retrieve(stage.execution.id).stages
-        milestone_stage = None
-        for s in all_stages:
-            if s.ref_id == stage.milestone_ref_id:
-                milestone_stage = s
-                break
-
-        if milestone_stage is None:
-            logger.warning(
-                "Milestone stage %s not found for stage %s",
-                stage.milestone_ref_id,
-                stage.name,
-            )
-            return True  # Can't verify milestone, skip
-
-        required_status = WorkflowStatus[stage.milestone_status]
-
-        # If milestone is in the required status, the stage is enabled
-        if milestone_stage.status == required_status:
-            return False
-
-        # If milestone has already completed (progressed past required), expired
-        if milestone_stage.status.is_complete:
-            return True
-
-        # Milestone is still active but not in required status yet
-        # This could mean it hasn't reached the milestone yet - don't skip
-        return False
-
-    def _is_deferred_choice_claimed(self, stage: StageExecution) -> bool:
-        """Check if a sibling in the deferred choice group already started (WCP-16).
-
-        Queries ALL stages of the execution to find siblings in the same group.
-        Returns True if any sibling has progressed past NOT_STARTED.
-        """
-        if not stage.deferred_choice_group:
-            return False
-
-        all_stages = self.repository.retrieve(stage.execution.id).stages
-        for s in all_stages:
-            if s.id == stage.id:
-                continue
-            if s.deferred_choice_group == stage.deferred_choice_group and s.status != WorkflowStatus.NOT_STARTED:
-                return True
-        return False
-
-    def _is_mutex_blocked(self, stage: StageExecution) -> bool:
-        """Check if another stage with the same mutex_key is RUNNING (WCP-17,39,40).
-
-        Queries ALL stages of the execution for mutual exclusion.
-        """
-        if not stage.mutex_key:
-            return False
-
-        all_stages = self.repository.retrieve(stage.execution.id).stages
-        for s in all_stages:
-            if s.id == stage.id:
-                continue
-            if s.mutex_key == stage.mutex_key and s.status == WorkflowStatus.RUNNING:
-                return True
-        return False
-
-    def _cancel_deferred_choice_siblings(
-        self,
-        stage: StageExecution,
-        message: StartStage,
-    ) -> None:
-        """Cancel sibling stages in the same deferred choice group (WCP-16).
-
-        When one branch of a deferred choice is claimed (set to RUNNING),
-        all other branches in the same group are cancelled.
-        """
-        all_stages = self.repository.retrieve(stage.execution.id).stages
-        for s in all_stages:
-            if s.id == stage.id:
-                continue
-            if s.deferred_choice_group == stage.deferred_choice_group and s.status == WorkflowStatus.NOT_STARTED:
-                logger.info(
-                    "Deferred choice: cancelling sibling %s (group=%s) because %s was claimed",
-                    s.name,
-                    stage.deferred_choice_group,
-                    stage.name,
-                )
-                self.queue.push(
-                    CancelStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=s.id,
-                    )
-                )

@@ -8,7 +8,7 @@ Two-tier exception hierarchy following DBOS patterns:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from stabilize.error_codes import ErrorCode

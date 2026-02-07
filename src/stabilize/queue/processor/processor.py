@@ -17,14 +17,14 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
-from datetime import timedelta
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from stabilize.queue import Queue
 from stabilize.queue.dedup import get_deduplicator
 from stabilize.queue.messages import Message, get_message_type_name
-from stabilize.resilience.config import HandlerConfig, get_handler_config
+from stabilize.queue.processor.config import QueueProcessorConfig
+from stabilize.queue.processor.handler_base import MessageHandler
+from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
@@ -35,69 +35,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 M = TypeVar("M", bound=Message)
-
-
-class MessageHandler(Generic[M]):
-    """
-    Base class for message handlers.
-
-    Each handler processes a specific type of message.
-    """
-
-    @property
-    def message_type(self) -> type[M]:
-        """Return the type of message this handler processes."""
-        raise NotImplementedError
-
-    def handle(self, message: M) -> None:
-        """
-        Handle a message.
-
-        Args:
-            message: The message to handle
-        """
-        raise NotImplementedError
-
-
-@dataclass
-class QueueProcessorConfig:
-    """Configuration for the queue processor.
-
-    Values can be loaded from environment variables via HandlerConfig.
-    See HandlerConfig documentation for environment variable names.
-    """
-
-    # How often to poll the queue (milliseconds)
-    poll_frequency_ms: int = 50
-
-    # Maximum number of concurrent message handlers
-    max_workers: int = 10
-
-    # Delay before reprocessing a failed message
-    retry_delay: timedelta = timedelta(seconds=15)
-
-    # Whether to stop on unhandled exceptions
-    stop_on_error: bool = False
-
-    # Enable message deduplication for idempotency
-    enable_deduplication: bool = True
-
-    @classmethod
-    def from_handler_config(cls, handler_config: HandlerConfig | None = None) -> QueueProcessorConfig:
-        """Create QueueProcessorConfig from HandlerConfig.
-
-        Args:
-            handler_config: HandlerConfig to use. If None, loads from environment.
-
-        Returns:
-            QueueProcessorConfig with values from HandlerConfig
-        """
-        config = handler_config or get_handler_config()
-        return cls(
-            poll_frequency_ms=config.poll_frequency_ms,
-            max_workers=config.max_workers,
-            retry_delay=timedelta(seconds=config.handler_retry_delay_seconds),
-        )
 
 
 class QueueProcessor:
@@ -585,52 +522,3 @@ class QueueProcessor:
         """Get the number of actively processing messages."""
         with self._lock:
             return self._active_count
-
-
-class SynchronousQueueProcessor(QueueProcessor):
-    """
-    A synchronous queue processor that processes messages immediately.
-
-    Useful for testing where you want deterministic execution order.
-
-    Accepts the same parameters as :class:`QueueProcessor` for auto-registration.
-    """
-
-    def __init__(
-        self,
-        queue: Queue,
-        store: WorkflowStore | None = None,
-        task_registry: TaskRegistry | None = None,
-        config: QueueProcessorConfig | None = None,
-        handler_config: HandlerConfig | None = None,
-        bulkhead_manager: TaskBulkheadManager | None = None,
-        circuit_factory: WorkflowCircuitFactory | None = None,
-    ) -> None:
-        super().__init__(
-            queue,
-            config=config,
-            store=store,
-            handler_config=handler_config,
-            task_registry=task_registry,
-            bulkhead_manager=bulkhead_manager,
-            circuit_factory=circuit_factory,
-        )
-        self._running = True
-
-    def start(self) -> None:
-        """No-op for synchronous processor."""
-        pass
-
-    def stop(self, wait: bool = True) -> None:
-        """No-op for synchronous processor."""
-        pass
-
-    def push_and_process(self, message: Message) -> None:
-        """
-        Push a message and process it immediately.
-
-        Args:
-            message: The message to push and process
-        """
-        self.queue.push(message)
-        self.process_all(timeout=5.0)
