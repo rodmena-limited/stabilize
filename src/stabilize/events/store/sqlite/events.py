@@ -1,122 +1,26 @@
 """
-SQLite event store implementation.
+Event append, query, and retrieval methods for SQLite event store.
 
-Provides durable, append-only event storage using SQLite.
-Events are stored with auto-incrementing sequence numbers
-for global ordering.
+Provides the SqliteEventStoreMixin with all event-related operations.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
-import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EntityType, Event, EventMetadata, EventType
-from stabilize.events.store.interface import EventQuery, EventStore
-from stabilize.persistence.connection import get_connection_manager
+from stabilize.events.store.interface import EventQuery
 
-# Schema for events table
-EVENTS_SCHEMA = """
-CREATE TABLE IF NOT EXISTS events (
-    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_id TEXT NOT NULL UNIQUE,
-    event_type TEXT NOT NULL,
-    timestamp TEXT NOT NULL,
-    entity_type TEXT NOT NULL,
-    entity_id TEXT NOT NULL,
-    workflow_id TEXT NOT NULL,
-    version INTEGER NOT NULL,
-    data TEXT NOT NULL DEFAULT '{}',
-    correlation_id TEXT NOT NULL,
-    causation_id TEXT,
-    actor TEXT DEFAULT 'system',
-    source_handler TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_events_entity ON events(entity_type, entity_id, sequence);
-CREATE INDEX IF NOT EXISTS idx_events_workflow ON events(workflow_id, sequence);
-CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type, timestamp);
-CREATE INDEX IF NOT EXISTS idx_events_correlation ON events(correlation_id);
-CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
-"""
-
-# Schema for snapshots table
-SNAPSHOTS_SCHEMA = """
-CREATE TABLE IF NOT EXISTS snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entity_type TEXT NOT NULL,
-    entity_id TEXT NOT NULL,
-    workflow_id TEXT NOT NULL,
-    version INTEGER NOT NULL,
-    sequence INTEGER NOT NULL,
-    state TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now', 'utc')),
-    UNIQUE(entity_type, entity_id, version)
-);
-
-CREATE INDEX IF NOT EXISTS idx_snapshots_entity ON snapshots(entity_type, entity_id);
-"""
-
-# Schema for durable subscriptions
-SUBSCRIPTIONS_SCHEMA = """
-CREATE TABLE IF NOT EXISTS event_subscriptions (
-    id TEXT PRIMARY KEY,
-    event_types TEXT,
-    entity_filter TEXT,
-    last_sequence INTEGER DEFAULT 0,
-    webhook_url TEXT,
-    created_at TEXT DEFAULT (datetime('now', 'utc')),
-    updated_at TEXT DEFAULT (datetime('now', 'utc'))
-);
-"""
+if TYPE_CHECKING:
+    pass
 
 
-class SqliteEventStore(EventStore):
-    """
-    SQLite implementation of event store.
-
-    Uses the shared ConnectionManager for thread-local connections.
-    Events are stored in an append-only table with auto-incrementing
-    sequence numbers.
-
-    Thread-safety:
-    - Uses thread-local connections from ConnectionManager
-    - Sequence assignment is atomic via SQLite's AUTOINCREMENT
-    """
-
-    def __init__(
-        self,
-        connection_string: str,
-        create_tables: bool = True,
-    ) -> None:
-        """
-        Initialize SQLite event store.
-
-        Args:
-            connection_string: SQLite connection string (e.g., "sqlite:///./app.db")
-            create_tables: Whether to create tables if they don't exist.
-        """
-        self._connection_string = connection_string
-        self._lock = threading.Lock()
-
-        if create_tables:
-            self._create_tables()
-
-    def _get_connection(self) -> sqlite3.Connection:
-        """Get thread-local connection."""
-        return get_connection_manager().get_sqlite_connection(self._connection_string)
-
-    def _create_tables(self) -> None:
-        """Create event tables if they don't exist."""
-        conn = self._get_connection()
-        conn.executescript(EVENTS_SCHEMA)
-        conn.executescript(SNAPSHOTS_SCHEMA)
-        conn.executescript(SUBSCRIPTIONS_SCHEMA)
-        conn.commit()
+class SqliteEventStoreMixin:
+    """Mixin providing event append, query, and retrieval methods."""
 
     def append(self, event: Event, connection: Any | None = None) -> Event:
         """Append a single event to the store."""
@@ -382,165 +286,3 @@ class SqliteEventStore(EventStore):
                 source_handler=row["source_handler"],
             ),
         )
-
-    # Snapshot methods
-
-    def save_snapshot(
-        self,
-        entity_type: EntityType,
-        entity_id: str,
-        workflow_id: str,
-        version: int,
-        sequence: int,
-        state: dict[str, Any],
-    ) -> None:
-        """Save a snapshot of entity state."""
-        conn = self._get_connection()
-
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO snapshots
-            (entity_type, entity_id, workflow_id, version, sequence, state)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                entity_type.value,
-                entity_id,
-                workflow_id,
-                version,
-                sequence,
-                json.dumps(state),
-            ),
-        )
-        conn.commit()
-
-    def get_latest_snapshot(
-        self,
-        entity_type: EntityType,
-        entity_id: str,
-    ) -> dict[str, Any] | None:
-        """Get the latest snapshot for an entity."""
-        conn = self._get_connection()
-
-        cursor = conn.execute(
-            """
-            SELECT * FROM snapshots
-            WHERE entity_type = ? AND entity_id = ?
-            ORDER BY version DESC
-            LIMIT 1
-            """,
-            (entity_type.value, entity_id),
-        )
-
-        row = cursor.fetchone()
-        if row is None:
-            return None
-
-        try:
-            state = json.loads(row["state"]) if row["state"] else {}
-        except (json.JSONDecodeError, TypeError):
-            state = {}
-
-        return {
-            "entity_type": row["entity_type"],
-            "entity_id": row["entity_id"],
-            "workflow_id": row["workflow_id"],
-            "version": row["version"],
-            "sequence": row["sequence"],
-            "state": state,
-        }
-
-    # Subscription methods
-
-    def save_subscription(
-        self,
-        subscription_id: str,
-        event_types: list[EventType] | None,
-        entity_filter: dict[str, Any] | None,
-        last_sequence: int,
-        webhook_url: str | None = None,
-    ) -> None:
-        """Save or update a durable subscription."""
-        conn = self._get_connection()
-
-        event_types_json = json.dumps([et.value for et in event_types]) if event_types else None
-        entity_filter_json = json.dumps(entity_filter) if entity_filter else None
-
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO event_subscriptions
-            (id, event_types, entity_filter, last_sequence, webhook_url, updated_at)
-            VALUES (?, ?, ?, ?, ?, datetime('now', 'utc'))
-            """,
-            (
-                subscription_id,
-                event_types_json,
-                entity_filter_json,
-                last_sequence,
-                webhook_url,
-            ),
-        )
-        conn.commit()
-
-    def get_subscription(self, subscription_id: str) -> dict[str, Any] | None:
-        """Get a durable subscription by ID."""
-        conn = self._get_connection()
-
-        cursor = conn.execute(
-            "SELECT * FROM event_subscriptions WHERE id = ?",
-            (subscription_id,),
-        )
-
-        row = cursor.fetchone()
-        if row is None:
-            return None
-
-        try:
-            event_types = [EventType(et) for et in json.loads(row["event_types"])] if row["event_types"] else None
-        except (json.JSONDecodeError, TypeError):
-            event_types = None
-
-        try:
-            entity_filter = json.loads(row["entity_filter"]) if row["entity_filter"] else None
-        except (json.JSONDecodeError, TypeError):
-            entity_filter = None
-
-        return {
-            "id": row["id"],
-            "event_types": event_types,
-            "entity_filter": entity_filter,
-            "last_sequence": row["last_sequence"],
-            "webhook_url": row["webhook_url"],
-        }
-
-    def update_subscription_sequence(self, subscription_id: str, last_sequence: int) -> None:
-        """Update the last processed sequence for a subscription."""
-        conn = self._get_connection()
-
-        conn.execute(
-            """
-            UPDATE event_subscriptions
-            SET last_sequence = ?, updated_at = datetime('now', 'utc')
-            WHERE id = ?
-            """,
-            (last_sequence, subscription_id),
-        )
-        conn.commit()
-
-    def delete_subscription(self, subscription_id: str) -> None:
-        """Delete a durable subscription."""
-        conn = self._get_connection()
-
-        conn.execute(
-            "DELETE FROM event_subscriptions WHERE id = ?",
-            (subscription_id,),
-        )
-        conn.commit()
-
-    def list_subscriptions(self) -> list[dict[str, Any]]:
-        """List all durable subscriptions."""
-        conn = self._get_connection()
-
-        cursor = conn.execute("SELECT id, last_sequence FROM event_subscriptions")
-
-        return [{"id": row["id"], "last_sequence": row["last_sequence"]} for row in cursor]

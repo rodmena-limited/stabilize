@@ -24,7 +24,82 @@ pip install stabilize[all]       # All features
 - Pluggable task system
 - Retry and timeout support
 - Event sourcing with full audit trail, replay, and projections
+- **All 43 Workflow Control-Flow Patterns** (van der Aalst et al.)
 
+
+## Advanced Workflow Patterns
+
+Stabilize implements all 43 Workflow Control-Flow Patterns (WCP) from the academic literature:
+
+### Branching & Synchronization
+
+```python
+from stabilize.models.stage import JoinType, SplitType
+
+# OR-Split (WCP-6): Conditional multi-branch activation
+StageExecution(
+    ref_id="triage",
+    split_type=SplitType.OR,
+    split_conditions={
+        "police": "emergency_type == 'crime'",
+        "ambulance": "injury_severity > 0",
+    },
+    ...
+)
+
+# Discriminator Join (WCP-9): Fire on first upstream completion
+StageExecution(
+    ref_id="triage",
+    join_type=JoinType.DISCRIMINATOR,
+    requisite_stage_ref_ids={"check_breathing", "check_pulse"},
+    ...
+)
+
+# N-of-M Join (WCP-30): Fire when 3 of 5 complete
+StageExecution(
+    ref_id="proceed",
+    join_type=JoinType.N_OF_M,
+    join_threshold=3,
+    requisite_stage_ref_ids={"r1", "r2", "r3", "r4", "r5"},
+    ...
+)
+```
+
+### Signals & Suspend/Resume
+
+```python
+from stabilize import Task, TaskResult
+
+class ApprovalTask(Task):
+    def execute(self, stage):
+        if stage.context.get("_signal_name") == "approved":
+            return TaskResult.success()
+        return TaskResult.suspend()  # Wait for external signal
+
+# Send signal to resume
+from stabilize.queue.messages import SignalStage
+queue.push(SignalStage(
+    execution_id=workflow.id, stage_id=stage.id,
+    signal_name="approved", signal_data={"user": "alice"},
+    persistent=True,  # Buffered if stage not yet suspended
+))
+```
+
+### Mutual Exclusion, Milestones, Deferred Choice
+
+```python
+# Mutex (WCP-39): Only one stage with same key runs at a time
+StageExecution(ref_id="update_db", mutex_key="shared_db", ...)
+
+# Milestone (WCP-18): Only enabled while milestone stage is RUNNING
+StageExecution(ref_id="change_route", milestone_ref_id="issue_ticket", milestone_status="RUNNING", ...)
+
+# Deferred Choice (WCP-16): First branch to start wins
+StageExecution(ref_id="agent_contact", deferred_choice_group="response", ...)
+StageExecution(ref_id="escalate", deferred_choice_group="response", ...)
+```
+
+See [Flow Control Guide](docs/guide/flow_control.rst) for complete documentation of all 43 patterns.
 
 ## Comparison to Industry Standards
 
@@ -35,7 +110,7 @@ pip install stabilize[all]       # All features
 │ State Storage │ Atomic (DB+Queue)  │ Atomic (Redis/SQL)   │ Atomic (SQL)      │
 │ Concurrency   │ Optimistic Locking │ Distributed Lock     │ Database Row Lock │
 │ Resilience    │ Queue-based (DLQ)  │ Queue-based (DLQ)    │ Scheduler Loop    │
-│ Flow Control  │ Dynamic (Jumps)    │ Rigid DAG            │ Rigid DAG         │
+│ Flow Control  │ 43 WCP Patterns    │ Rigid DAG            │ Rigid DAG         │
 │ Complexity    │ Low (Library)      │ High (Microservices) │ High (Platform)   │
 └───────────────┴────────────────────┴──────────────────────┴───────────────────┘
 ```

@@ -18,6 +18,7 @@ Key Features
 *   **Structured Errors**: Semantic error codes with chain traversal and automatic classification.
 *   **Configuration Versioning**: Immutable configs with fingerprinting for reproducibility.
 *   **Event Sourcing**: Full audit trail, event replay, projections, and time-travel debugging.
+*   **43 Workflow Patterns**: Complete implementation of all WCP control-flow patterns (van der Aalst et al.) including OR-split/join, discriminator, N-of-M, deferred choice, milestones, mutex, signals, multi-instance, and structured loops.
 *   **Observability**: Detailed structured logging and audit trails.
 
 .. toctree::

@@ -2050,6 +2050,221 @@ State:    status.changed, context.updated, outputs.updated, jump.executed
 - PostgresEventStore("postgresql://...")                       # Production
 
 ===============================================================================
+19. ADVANCED WORKFLOW CONTROL-FLOW PATTERNS (WCP 1-43)
+===============================================================================
+
+Stabilize implements all 43 Workflow Control-Flow Patterns from van der Aalst
+et al. These are configured via fields on StageExecution.
+
+19.1 Join Types
+---------------
+from stabilize.models.stage import JoinType
+
+JoinType.AND           # (Default) Wait for ALL upstreams (WCP-3)
+JoinType.OR            # Wait only for activated branches from OR-split (WCP-7)
+JoinType.MULTI_MERGE   # Fire once per upstream completion, no sync (WCP-8)
+JoinType.DISCRIMINATOR # Fire on first upstream completion, ignore rest (WCP-9)
+JoinType.N_OF_M        # Fire when N of M upstreams complete (WCP-30)
+
+# Example: Discriminator join
+StageExecution(
+    ref_id="triage",
+    join_type=JoinType.DISCRIMINATOR,
+    requisite_stage_ref_ids={"check_breathing", "check_pulse"},
+    ...
+)
+
+# Example: N-of-M join (3 of 5 reviewers)
+StageExecution(
+    ref_id="proceed",
+    join_type=JoinType.N_OF_M,
+    join_threshold=3,
+    requisite_stage_ref_ids={"r1", "r2", "r3", "r4", "r5"},
+    ...
+)
+
+19.2 Split Types (OR-Split / Multi-Choice, WCP-6)
+---------------------------------------------------
+from stabilize.models.stage import SplitType
+
+SplitType.AND  # (Default) Activate ALL downstream stages
+SplitType.OR   # Evaluate conditions per downstream, activate matching ones
+
+# Example: OR-split with conditions
+StageExecution(
+    ref_id="triage",
+    split_type=SplitType.OR,
+    split_conditions={
+        "police": "emergency_type == 'crime' or emergency_type == 'accident'",
+        "ambulance": "injury_severity > 0",
+        "fire": "fire_detected == True",
+    },
+    ...
+)
+
+Conditions are evaluated using a safe expression evaluator. Supported:
+  - Comparisons: ==, !=, <, <=, >, >=, in, not in
+  - Boolean: and, or, not
+  - Literals: strings, numbers, True, False, None
+  - Context lookups: key_name, nested.key, dict["key"]
+Does NOT support: function calls, imports, assignments, arbitrary code.
+
+19.3 Deferred Choice (WCP-16)
+------------------------------
+# Race between branches — first to start wins, others are cancelled
+StageExecution(ref_id="agent_contact", deferred_choice_group="complaint_response", ...)
+StageExecution(ref_id="escalate_to_manager", deferred_choice_group="complaint_response", ...)
+
+19.4 Milestone Gating (WCP-18)
+-------------------------------
+# Stage only enabled while milestone stage is in required status
+StageExecution(
+    ref_id="route_change",
+    milestone_ref_id="issue_ticket",
+    milestone_status="RUNNING",
+    ...
+)
+
+19.5 Mutual Exclusion / Critical Section (WCP-17, 39, 40)
+-----------------------------------------------------------
+# Stages with same mutex_key cannot run simultaneously
+StageExecution(ref_id="update_inventory", mutex_key="shared_db", ...)
+StageExecution(ref_id="update_ledger", mutex_key="shared_db", ...)
+
+19.6 Cancel Region (WCP-25)
+-----------------------------
+from stabilize.queue.messages import CancelRegion
+
+# Tag stages with a region name
+StageExecution(ref_id="access_evidence_1", cancel_region="evidence_access", ...)
+StageExecution(ref_id="access_evidence_2", cancel_region="evidence_access", ...)
+
+# Cancel all stages in the region
+queue.push(CancelRegion(
+    execution_type="workflow",
+    execution_id=workflow.id,
+    region="evidence_access",
+))
+
+19.7 Signals - Suspend/Resume (WCP-23, WCP-24)
+------------------------------------------------
+# Task suspends itself waiting for external signal
+class ApprovalTask(Task):
+    def execute(self, stage: StageExecution) -> TaskResult:
+        signal_name = stage.context.get("_signal_name")
+        if signal_name == "approved":
+            return TaskResult.success(
+                outputs={"approved_by": stage.context.get("_signal_data", {}).get("user")}
+            )
+        return TaskResult.suspend()  # Wait for signal
+
+# Send signal (transient - discarded if stage not suspended)
+from stabilize.queue.messages import SignalStage
+
+queue.push(SignalStage(
+    execution_type="workflow",
+    execution_id=workflow.id,
+    stage_id=stage.id,
+    signal_name="approved",
+    signal_data={"user": "alice"},
+    persistent=False,  # True = buffer until stage is ready (WCP-24)
+))
+
+Signal data available in resumed task via:
+  stage.context["_signal_name"]  # Signal name
+  stage.context["_signal_data"]  # Signal payload dict
+
+19.8 Multi-Instance Patterns (WCP-12-15)
+-----------------------------------------
+from stabilize.stages.multi_instance_builder import MultiInstanceBuilder
+
+parent = StageExecution(ref_id="review", type="review", name="Review", ...)
+
+# WCP-13: Fixed count, wait for all
+instance_stages = MultiInstanceBuilder.create_fixed(
+    parent_stage=parent, count=6, instance_name_prefix="Reviewer",
+)
+
+# WCP-12: Fire and forget (no synchronization)
+instance_stages = MultiInstanceBuilder.create_fixed(
+    parent_stage=parent, count=3, sync_on_complete=False,
+)
+
+# WCP-14: Count from context
+parent.context["num_reviewers"] = 4
+instance_stages = MultiInstanceBuilder.create_from_context(
+    parent_stage=parent, count_key="num_reviewers",
+)
+
+# Collection-based: one instance per item
+parent.context["items"] = ["a", "b", "c"]
+instance_stages = MultiInstanceBuilder.create_from_collection(
+    parent_stage=parent, collection_key="items", item_context_key="current_item",
+)
+
+# WCP-15: Dynamic (add instances during execution)
+instance_stages = MultiInstanceBuilder.create_dynamic(parent_stage=parent, initial_count=2)
+
+# N-of-M with MI: proceed after 3 of 5 complete, cancel rest
+instance_stages = MultiInstanceBuilder.create_fixed(
+    parent_stage=parent, count=5, join_threshold=3, cancel_remaining=True,
+)
+
+19.9 Structured Loops (WCP-21)
+-------------------------------
+from stabilize.stages.loop_builder import LoopBuilder
+
+# While loop: check condition first, then execute body
+stages = LoopBuilder.while_loop(
+    condition="iteration_count < max_iterations",
+    body_stages=[stage_a, stage_b],
+    loop_ref_prefix="retry_loop",
+    max_iterations=100,
+)
+
+# Repeat-until: execute body first, then check condition
+stages = LoopBuilder.repeat_until(
+    condition="tests_passed == True",
+    body_stages=[stage_a, stage_b],
+    loop_ref_prefix="test_loop",
+)
+
+19.10 Sub-Workflows / Recursion (WCP-22)
+-----------------------------------------
+from stabilize.tasks.sub_workflow import SubWorkflowTask
+
+registry.register("sub_workflow", SubWorkflowTask)
+
+StageExecution(
+    ref_id="resolve_sub_defects",
+    type="sub_workflow",
+    context={
+        "_sub_workflow_config": {
+            "name": "Resolve Sub-Defect",
+            "application": "defect-tracker",
+            "stages": [...],
+            "context": {"defect_id": "DEF-456"},
+        },
+    },
+    ...
+)
+# Recursion depth tracked via _recursion_depth (default max: 10)
+
+19.11 StageExecution Control-Flow Fields Summary
+--------------------------------------------------
+Field                    Type               Default   Patterns
+join_type                JoinType           AND       WCP-7,8,9,28-33
+join_threshold           int                0         WCP-30 (N-of-M)
+split_type               SplitType          AND       WCP-6
+split_conditions         dict[str,str]      {}        WCP-6
+mi_config                MultiInstanceConfig None     WCP-12-15
+deferred_choice_group    str|None           None      WCP-16
+milestone_ref_id         str|None           None      WCP-18
+milestone_status         str|None           None      WCP-18
+mutex_key                str|None           None      WCP-17,39,40
+cancel_region            str|None           None      WCP-25
+
+===============================================================================
 END OF REFERENCE
 ===============================================================================
 '''
