@@ -181,6 +181,28 @@ class TaskResult:
         )
 
     @classmethod
+    def suspend(
+        cls,
+        context: dict[str, Any] | None = None,
+    ) -> TaskResult:
+        """
+        Create a suspended result (waiting for external signal).
+
+        The stage will be set to SUSPENDED status and will wait for a
+        SignalStage message to resume (WCP-23/24).
+
+        Args:
+            context: Context to preserve while suspended
+
+        Returns:
+            A TaskResult with SUSPENDED status
+        """
+        return cls(
+            status=WorkflowStatus.SUSPENDED,
+            context=context or {},
+        )
+
+    @classmethod
     def redirect(
         cls,
         context: dict[str, Any] | None = None,

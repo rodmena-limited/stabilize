@@ -97,6 +97,9 @@ def row_to_execution(row: sqlite3.Row) -> Workflow:
 
 def row_to_stage(row: sqlite3.Row) -> StageExecution:
     """Convert database row to StageExecution."""
+    from stabilize.models.multi_instance import MultiInstanceConfig
+    from stabilize.models.stage import JoinType, SplitType
+
     context = json.loads(row["context"] or "{}")
     outputs = json.loads(row["outputs"] or "{}")
     requisite_ids = json.loads(row["requisite_stage_ref_ids"] or "[]")
@@ -104,6 +107,29 @@ def row_to_stage(row: sqlite3.Row) -> StageExecution:
     synthetic_owner = None
     if row["synthetic_stage_owner"]:
         synthetic_owner = SyntheticStageOwner(row["synthetic_stage_owner"])
+
+    # Parse new control-flow fields with safe defaults for older schemas
+    def _safe_get(key: str, default: Any = None) -> Any:
+        try:
+            return row[key]
+        except (IndexError, KeyError):
+            return default
+
+    join_type_str = _safe_get("join_type", "AND")
+    join_type = JoinType(join_type_str) if join_type_str else JoinType.AND
+
+    split_type_str = _safe_get("split_type", "AND")
+    split_type = SplitType(split_type_str) if split_type_str else SplitType.AND
+
+    split_conditions_raw = _safe_get("split_conditions", "{}")
+    split_conditions = json.loads(split_conditions_raw or "{}") if isinstance(split_conditions_raw, str) else {}
+
+    mi_config_raw = _safe_get("mi_config")
+    mi_config = None
+    if mi_config_raw:
+        mi_data = json.loads(mi_config_raw) if isinstance(mi_config_raw, str) else mi_config_raw
+        if mi_data:
+            mi_config = MultiInstanceConfig.from_dict(mi_data)
 
     return StageExecution(
         id=row["id"],
@@ -121,6 +147,16 @@ def row_to_stage(row: sqlite3.Row) -> StageExecution:
         start_time_expiry=row["start_time_expiry"],
         scheduled_time=row["scheduled_time"],
         version=row["version"],
+        join_type=join_type,
+        join_threshold=_safe_get("join_threshold", 0) or 0,
+        split_type=split_type,
+        split_conditions=split_conditions,
+        mi_config=mi_config,
+        deferred_choice_group=_safe_get("deferred_choice_group"),
+        milestone_ref_id=_safe_get("milestone_ref_id"),
+        milestone_status=_safe_get("milestone_status"),
+        mutex_key=_safe_get("mutex_key"),
+        cancel_region=_safe_get("cancel_region"),
     )
 
 

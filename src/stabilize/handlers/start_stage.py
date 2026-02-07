@@ -16,9 +16,10 @@ from stabilize.dag.graph import StageGraphBuilder
 from stabilize.dag.readiness import PredicatePhase, evaluate_readiness
 from stabilize.errors import ConcurrencyError, is_transient
 from stabilize.handlers.base import StabilizeHandler
-from stabilize.models.stage import SyntheticStageOwner
+from stabilize.models.stage import JoinType, SyntheticStageOwner
 from stabilize.models.status import ACTIVE_STATUSES, WorkflowStatus
 from stabilize.queue.messages import (
+    CancelStage,
     CompleteStage,
     CompleteWorkflow,
     SkipStage,
@@ -281,6 +282,45 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                 )
             return
 
+        # WCP-18: Milestone check - stage only enabled when milestone is in required status
+        if self._is_milestone_expired(stage):
+            logger.info("Milestone expired for stage %s, skipping", stage.name)
+            with self.repository.transaction(self.queue) as txn:
+                if message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="StartStage",
+                        execution_id=message.execution_id,
+                    )
+                txn.push_message(
+                    SkipStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                    )
+                )
+            return
+
+        # WCP-17,39,40: Mutex check - mutual exclusion / critical section
+        if self._is_mutex_blocked(stage):
+            logger.debug(
+                "Stage %s blocked by mutex '%s', re-queuing",
+                stage.name,
+                stage.mutex_key,
+            )
+            retry_count = getattr(message, "retry_count", 0) or 0
+            new_message = StartStage(
+                execution_type=message.execution_type,
+                execution_id=message.execution_id,
+                stage_id=message.stage_id,
+                retry_count=retry_count + 1,
+            )
+            self.queue.push(new_message, self.retry_delay)
+            return
+
+        # WCP-16: Deferred choice - first stage to claim wins, cancel siblings
+        # (handled after atomic claim below)
+
         # Check if start time expired - use transaction for atomicity
         if self._is_after_start_time_expiry(stage):
             logger.warning("Stage %s start time expired, skipping", stage.name)
@@ -319,6 +359,18 @@ class StartStageHandler(StabilizeHandler[StartStage]):
                 stage.name,
             )
             return
+
+        # WCP-16: Deferred choice - cancel sibling stages in the same group
+        if stage.deferred_choice_group:
+            self._cancel_deferred_choice_siblings(stage, message)
+
+        # WCP-9/28/29: Discriminator - mark as fired after claiming
+        if stage.join_type == JoinType.DISCRIMINATOR:
+            stage.context["_join_fired"] = True
+
+        # WCP-30: N-of-M - mark as fired after claiming
+        if stage.join_type == JoinType.N_OF_M:
+            stage.context["_join_fired"] = True
 
         # Now we have exclusive ownership - safe to do expensive planning
         try:
@@ -524,3 +576,87 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         if stage.start_time_expiry is None:
             return False
         return self.current_time_millis() > stage.start_time_expiry
+
+    def _is_milestone_expired(self, stage: StageExecution) -> bool:
+        """Check if the milestone condition for this stage has expired (WCP-18).
+
+        A milestone stage must be in the required status. If the milestone
+        stage has already progressed past the required status, the activity
+        can never be enabled and should be skipped.
+        """
+        if not stage.milestone_ref_id or not stage.milestone_status:
+            return False
+
+        execution = stage.execution
+        milestone_stage = None
+        for s in execution.stages:
+            if s.ref_id == stage.milestone_ref_id:
+                milestone_stage = s
+                break
+
+        if milestone_stage is None:
+            logger.warning(
+                "Milestone stage %s not found for stage %s",
+                stage.milestone_ref_id,
+                stage.name,
+            )
+            return True  # Can't verify milestone, skip
+
+        required_status = WorkflowStatus[stage.milestone_status]
+
+        # If milestone is in the required status, the stage is enabled
+        if milestone_stage.status == required_status:
+            return False
+
+        # If milestone has already completed (progressed past required), expired
+        if milestone_stage.status.is_complete:
+            return True
+
+        # Milestone is still active but not in required status yet
+        # This could mean it hasn't reached the milestone yet - don't skip
+        return False
+
+    def _is_mutex_blocked(self, stage: StageExecution) -> bool:
+        """Check if another stage with the same mutex_key is RUNNING (WCP-17,39,40).
+
+        Provides mutual exclusion within a process instance.
+        """
+        if not stage.mutex_key:
+            return False
+
+        execution = stage.execution
+        for s in execution.stages:
+            if s.id == stage.id:
+                continue
+            if s.mutex_key == stage.mutex_key and s.status == WorkflowStatus.RUNNING:
+                return True
+        return False
+
+    def _cancel_deferred_choice_siblings(
+        self,
+        stage: StageExecution,
+        message: StartStage,
+    ) -> None:
+        """Cancel sibling stages in the same deferred choice group (WCP-16).
+
+        When one branch of a deferred choice is claimed (set to RUNNING),
+        all other branches in the same group are cancelled.
+        """
+        execution = stage.execution
+        for s in execution.stages:
+            if s.id == stage.id:
+                continue
+            if s.deferred_choice_group == stage.deferred_choice_group and s.status == WorkflowStatus.NOT_STARTED:
+                logger.info(
+                    "Deferred choice: cancelling sibling %s (group=%s) because %s was claimed",
+                    s.name,
+                    stage.deferred_choice_group,
+                    stage.name,
+                )
+                self.queue.push(
+                    CancelStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=s.id,
+                    )
+                )

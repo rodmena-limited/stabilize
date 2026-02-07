@@ -244,6 +244,55 @@ class JumpToStage(StageLevel):
     jump_outputs: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class SignalStage(StageLevel):
+    """
+    Message to signal a suspended stage (WCP-23, WCP-24).
+
+    For transient triggers (WCP-23), the signal is discarded if the stage
+    is not currently SUSPENDED. For persistent triggers (WCP-24), the
+    signal is buffered if the stage is not ready.
+
+    Attributes:
+        signal_name: Name/type of the signal
+        signal_data: Payload data carried by the signal
+        persistent: If True, buffer signal when stage not ready (WCP-24)
+    """
+
+    signal_name: str = ""
+    signal_data: dict[str, Any] = field(default_factory=dict)
+    persistent: bool = False
+
+
+@dataclass
+class CancelRegion(WorkflowLevel):
+    """
+    Message to cancel all stages in a named region (WCP-25).
+
+    Finds all stages with matching cancel_region and pushes
+    CancelStage for each active one.
+
+    Attributes:
+        region: The cancel region name to target
+    """
+
+    region: str = ""
+
+
+@dataclass
+class AddMultiInstance(StageLevel):
+    """
+    Message to add a new instance to a running multi-instance activity (WCP-15).
+
+    Creates a new parallel instance for an MI stage that allows dynamic additions.
+
+    Attributes:
+        instance_context: Context for the new instance
+    """
+
+    instance_context: dict[str, Any] = field(default_factory=dict)
+
+
 # ============================================================================
 # Task-level messages
 # ============================================================================
@@ -383,6 +432,9 @@ MESSAGE_TYPES: dict[str, type[Message]] = {
     "ResumeStage": ResumeStage,
     "ContinueParentStage": ContinueParentStage,
     "JumpToStage": JumpToStage,
+    "SignalStage": SignalStage,
+    "CancelRegion": CancelRegion,
+    "AddMultiInstance": AddMultiInstance,
     "StartTask": StartTask,
     "RunTask": RunTask,
     "CompleteTask": CompleteTask,

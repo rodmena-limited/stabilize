@@ -20,12 +20,18 @@ def insert_stage(conn: sqlite3.Connection, stage: StageExecution, execution_id: 
         INSERT INTO stage_executions (
             id, execution_id, ref_id, type, name, status, context, outputs,
             requisite_stage_ref_ids, parent_stage_id, synthetic_stage_owner,
-            start_time, end_time, start_time_expiry, scheduled_time, version
+            start_time, end_time, start_time_expiry, scheduled_time, version,
+            join_type, join_threshold, split_type, split_conditions,
+            mi_config, deferred_choice_group, milestone_ref_id,
+            milestone_status, mutex_key, cancel_region
         ) VALUES (
             :id, :execution_id, :ref_id, :type, :name, :status,
             :context, :outputs, :requisite_stage_ref_ids,
             :parent_stage_id, :synthetic_stage_owner, :start_time,
-            :end_time, :start_time_expiry, :scheduled_time, :version
+            :end_time, :start_time_expiry, :scheduled_time, :version,
+            :join_type, :join_threshold, :split_type, :split_conditions,
+            :mi_config, :deferred_choice_group, :milestone_ref_id,
+            :milestone_status, :mutex_key, :cancel_region
         )
         """,
         {
@@ -45,6 +51,16 @@ def insert_stage(conn: sqlite3.Connection, stage: StageExecution, execution_id: 
             "start_time_expiry": stage.start_time_expiry,
             "scheduled_time": stage.scheduled_time,
             "version": stage.version,
+            "join_type": stage.join_type.value,
+            "join_threshold": stage.join_threshold,
+            "split_type": stage.split_type.value,
+            "split_conditions": json.dumps(stage.split_conditions),
+            "mi_config": json.dumps(stage.mi_config.to_dict()) if stage.mi_config else None,
+            "deferred_choice_group": stage.deferred_choice_group,
+            "milestone_ref_id": stage.milestone_ref_id,
+            "milestone_status": stage.milestone_status,
+            "mutex_key": stage.mutex_key,
+            "cancel_region": stage.cancel_region,
         },
     )
 

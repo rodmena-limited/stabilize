@@ -24,6 +24,7 @@ from stabilize.models.status import (
 from stabilize.models.task import TaskExecution
 
 if TYPE_CHECKING:
+    from stabilize.models.multi_instance import MultiInstanceConfig
     from stabilize.models.snapshot import StageStateSnapshot
     from stabilize.models.workflow import Workflow
 
@@ -45,6 +46,34 @@ class SyntheticStageOwner(Enum):
 
     STAGE_BEFORE = "STAGE_BEFORE"
     STAGE_AFTER = "STAGE_AFTER"
+
+
+class JoinType(Enum):
+    """Join semantics for stages with multiple upstream dependencies.
+
+    AND: Wait for ALL upstreams (default, WCP-3).
+    OR: Wait only for activated branches from a paired OR-split (WCP-7).
+    MULTI_MERGE: Fire once per upstream completion, no sync (WCP-8).
+    DISCRIMINATOR: Fire on first upstream completion, ignore rest (WCP-9).
+    N_OF_M: Fire when N of M upstreams complete (WCP-30).
+    """
+
+    AND = "AND"
+    OR = "OR"
+    MULTI_MERGE = "MULTI_MERGE"
+    DISCRIMINATOR = "DISCRIMINATOR"
+    N_OF_M = "N_OF_M"
+
+
+class SplitType(Enum):
+    """Split semantics for stages with multiple downstream branches.
+
+    AND: Activate ALL downstream stages (default, WCP-2).
+    OR: Evaluate conditions per downstream, activate matching ones (WCP-6).
+    """
+
+    AND = "AND"
+    OR = "OR"
 
 
 @dataclass
@@ -95,6 +124,32 @@ class StageExecution:
     # Finalizer support: cleanup on failure and registered finalizer names
     cleanup_on_failure: bool = False
     finalizer_names: list[str] = field(default_factory=list)
+
+    # ========== Advanced Control-Flow Pattern Fields ==========
+
+    # Join semantics (WCP-7,8,9,28-33,37,38)
+    join_type: JoinType = JoinType.AND
+    join_threshold: int = 0  # For N_OF_M join: how many upstreams needed
+
+    # Split semantics (WCP-6)
+    split_type: SplitType = SplitType.AND
+    split_conditions: dict[str, str] = field(default_factory=dict)  # downstream_ref_id -> condition expr
+
+    # Multi-instance configuration (WCP-12-15, 26, 27, 34-36)
+    mi_config: MultiInstanceConfig | None = None
+
+    # Deferred choice group (WCP-16)
+    deferred_choice_group: str | None = None
+
+    # Milestone gating (WCP-18)
+    milestone_ref_id: str | None = None
+    milestone_status: str | None = None  # Required status name of milestone stage
+
+    # Mutual exclusion / critical section (WCP-17, 39, 40)
+    mutex_key: str | None = None
+
+    # Cancel region (WCP-25)
+    cancel_region: str | None = None
 
     # Back-reference to parent execution (set after construction)
     # Can be weakref (default) or strong ref (for standalone stages)

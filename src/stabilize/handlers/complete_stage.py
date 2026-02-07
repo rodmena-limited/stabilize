@@ -16,13 +16,16 @@ from typing import TYPE_CHECKING
 
 from stabilize.dag.graph import StageGraphBuilder
 from stabilize.errors import is_transient
+from stabilize.expressions import ExpressionError, evaluate_expression
 from stabilize.handlers.base import StabilizeHandler
+from stabilize.models.stage import JoinType, SplitType
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
     CancelStage,
     CompleteStage,
     CompleteWorkflow,
     ContinueParentStage,
+    SkipStage,
     StartStage,
 )
 from stabilize.resilience.config import HandlerConfig
@@ -306,6 +309,16 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                     downstream_stages = self.repository.get_downstream_stages(execution.id, stage.ref_id)
                     phase = stage.synthetic_stage_owner
 
+                    # Apply split logic to determine which downstreams to activate
+                    activated_downstreams, skipped_downstreams = self._apply_split_logic(stage, downstream_stages)
+
+                    # Track activated branches for OR-join (WCP-7)
+                    if stage.split_type == SplitType.OR and activated_downstreams:
+                        self._record_activated_branches(stage, activated_downstreams)
+
+                    # Handle discriminator/N-of-M context updates on upstream completion
+                    self._update_join_tracking(stage, downstream_stages)
+
                     # Atomic: store stage + push all downstream/parent messages together
                     with self.repository.transaction(self.queue) as txn:
                         txn.store_stage(stage)
@@ -319,14 +332,36 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                             )
 
                         logger.debug(
-                            "CompleteStage decision for %s: downstream=%d, phase=%s, parent=%s",
+                            "CompleteStage decision for %s: downstream=%d (activated=%d, skipped=%d), phase=%s, parent=%s",
                             stage.name,
                             len(downstream_stages),
+                            len(activated_downstreams),
+                            len(skipped_downstreams),
                             phase,
                             stage.parent_stage_id,
                         )
-                        if downstream_stages:
-                            # Start all downstream stages
+                        if activated_downstreams:
+                            # Start activated downstream stages
+                            for downstream in activated_downstreams:
+                                txn.push_message(
+                                    StartStage(
+                                        execution_type=execution.type.value,
+                                        execution_id=execution.id,
+                                        stage_id=downstream.id,
+                                    )
+                                )
+                            # Skip non-activated downstream stages (OR-split)
+                            for downstream in skipped_downstreams:
+                                txn.push_message(
+                                    SkipStage(
+                                        execution_type=execution.type.value,
+                                        execution_id=execution.id,
+                                        stage_id=downstream.id,
+                                    )
+                                )
+                        elif downstream_stages and not skipped_downstreams:
+                            # All downstreams came from split logic but none activated
+                            # (shouldn't normally happen for AND-split)
                             for downstream in downstream_stages:
                                 txn.push_message(
                                     StartStage(
@@ -335,7 +370,7 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                                         stage_id=downstream.id,
                                     )
                                 )
-                        elif phase is not None:
+                        elif not downstream_stages and phase is not None:
                             # Synthetic stage - notify parent
                             parent_id = stage.parent_stage_id
                             logger.info(
@@ -352,7 +387,7 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                                         phase=phase,
                                     )
                                 )
-                        else:
+                        elif not downstream_stages:
                             # Terminal stage - complete workflow
                             txn.push_message(
                                 CompleteWorkflow(
@@ -435,6 +470,114 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
             s.execution = stage.execution
             stage.execution.stages.append(s)  # Add to in-memory list for first_after_stages()
             self.repository.add_stage(s)
+
+    def _apply_split_logic(
+        self,
+        stage: StageExecution,
+        downstream_stages: list[StageExecution],
+    ) -> tuple[list[StageExecution], list[StageExecution]]:
+        """Apply split logic to determine which downstreams to activate.
+
+        For AND-split (default): activates all downstream stages.
+        For OR-split (WCP-6): evaluates conditions per downstream and only
+        activates matching ones.
+
+        Returns:
+            Tuple of (activated_stages, skipped_stages).
+        """
+        if not downstream_stages:
+            return [], []
+
+        if stage.split_type != SplitType.OR or not stage.split_conditions:
+            # AND-split: activate all
+            return downstream_stages, []
+
+        # OR-split: evaluate conditions per downstream
+        activated: list[StageExecution] = []
+        skipped: list[StageExecution] = []
+
+        for downstream in downstream_stages:
+            condition = stage.split_conditions.get(downstream.ref_id)
+            if condition is None:
+                # No condition specified for this downstream - activate by default
+                activated.append(downstream)
+                continue
+
+            try:
+                result = evaluate_expression(condition, stage.context)
+                if result:
+                    activated.append(downstream)
+                else:
+                    skipped.append(downstream)
+            except ExpressionError:
+                logger.warning(
+                    "Failed to evaluate split condition '%s' for downstream %s, skipping",
+                    condition,
+                    downstream.ref_id,
+                )
+                skipped.append(downstream)
+
+        # OR-split must activate at least one branch
+        if not activated and downstream_stages:
+            logger.warning(
+                "OR-split for stage %s activated no branches, activating first by default",
+                stage.name,
+            )
+            activated.append(downstream_stages[0])
+            skipped = [d for d in downstream_stages[1:]]
+
+        return activated, skipped
+
+    def _record_activated_branches(
+        self,
+        stage: StageExecution,
+        activated_downstreams: list[StageExecution],
+    ) -> None:
+        """Record activated branch ref_ids for paired OR-join stages (WCP-7).
+
+        Finds downstream stages that have join_type=OR and sets their
+        '_activated_branches' context with the ref_ids of activated branches.
+        """
+        activated_ref_ids = [d.ref_id for d in activated_downstreams]
+
+        # Look for OR-join stages downstream that need branch tracking
+        execution = stage.execution
+        for s in execution.stages:
+            if s.join_type == JoinType.OR:
+                # Check if any of this stage's activated downstreams are upstream of the OR-join
+                if s.requisite_stage_ref_ids & set(activated_ref_ids):
+                    # This OR-join depends on some of our activated branches
+                    existing = s.context.get("_activated_branches", [])
+                    merged = list(set(existing) | set(activated_ref_ids))
+                    s.context["_activated_branches"] = merged
+                    self.repository.store_stage(s)
+
+    def _update_join_tracking(
+        self,
+        stage: StageExecution,
+        downstream_stages: list[StageExecution],
+    ) -> None:
+        """Update join tracking context for discriminator and N-of-M joins.
+
+        When a stage completes, check if any of its downstream stages use
+        special join types that need tracking updates.
+        """
+        for downstream in downstream_stages:
+            if downstream.join_type == JoinType.DISCRIMINATOR:
+                # Track completed branch for discriminator
+                completed = downstream.context.get("_completed_branches", [])
+                if stage.ref_id not in completed:
+                    completed.append(stage.ref_id)
+                    downstream.context["_completed_branches"] = completed
+                    self.repository.store_stage(downstream)
+
+            elif downstream.join_type == JoinType.N_OF_M:
+                # Track completed branch count for N-of-M join
+                completed = downstream.context.get("_completed_branches", [])
+                if stage.ref_id not in completed:
+                    completed.append(stage.ref_id)
+                    downstream.context["_completed_branches"] = completed
+                    self.repository.store_stage(downstream)
 
     def _plan_on_failure_stages(self, stage: StageExecution) -> bool:
         """

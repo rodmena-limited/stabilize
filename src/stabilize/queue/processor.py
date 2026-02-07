@@ -188,7 +188,7 @@ class QueueProcessor:
         circuit_factory: WorkflowCircuitFactory | None = None,
         handler_config: HandlerConfig | None = None,
     ) -> None:
-        """Register all 12 default message handlers.
+        """Register all default message handlers.
 
         Args:
             queue: The message queue
@@ -199,6 +199,8 @@ class QueueProcessor:
             handler_config: Optional handler configuration
         """
         from stabilize.handlers import (
+            AddMultiInstanceHandler,
+            CancelRegionHandler,
             CancelStageHandler,
             CompleteStageHandler,
             CompleteTaskHandler,
@@ -206,6 +208,7 @@ class QueueProcessor:
             ContinueParentStageHandler,
             JumpToStageHandler,
             RunTaskHandler,
+            SignalStageHandler,
             SkipStageHandler,
             StartStageHandler,
             StartTaskHandler,
@@ -221,6 +224,9 @@ class QueueProcessor:
             CancelStageHandler(queue, store),
             ContinueParentStageHandler(queue, store),
             JumpToStageHandler(queue, store),
+            SignalStageHandler(queue, store),
+            CancelRegionHandler(queue, store),
+            AddMultiInstanceHandler(queue, store),
             StartTaskHandler(queue, store, task_registry),
             RunTaskHandler(
                 queue,

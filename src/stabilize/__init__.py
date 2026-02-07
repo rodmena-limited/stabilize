@@ -64,6 +64,8 @@ from stabilize.errors import (
 
 # Handlers
 from stabilize.handlers import (
+    AddMultiInstanceHandler,
+    CancelRegionHandler,
     CancelStageHandler,
     CompleteStageHandler,
     CompleteTaskHandler,
@@ -71,6 +73,7 @@ from stabilize.handlers import (
     ContinueParentStageHandler,
     JumpToStageHandler,
     RunTaskHandler,
+    SignalStageHandler,
     SkipStageHandler,
     StabilizeHandler,
     StartStageHandler,
@@ -100,7 +103,8 @@ from stabilize.logging import (
 )
 
 # Core models
-from stabilize.models.stage import StageExecution
+from stabilize.models.multi_instance import MultiInstanceConfig
+from stabilize.models.stage import JoinType, SplitType, StageExecution
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.task import TaskExecution
 from stabilize.models.workflow import Workflow
@@ -136,6 +140,7 @@ from stabilize.tasks.registry import (
 from stabilize.tasks.result import TaskResult
 from stabilize.tasks.shell import ShellTask
 from stabilize.tasks.ssh import SSHTask
+from stabilize.tasks.sub_workflow import SubWorkflowTask
 from stabilize.tracing import (
     add_event,
     configure_tracing,
@@ -172,6 +177,9 @@ __all__ = [
     "Workflow",
     "StageExecution",
     "TaskExecution",
+    "JoinType",
+    "SplitType",
+    "MultiInstanceConfig",
     # Infrastructure
     "Orchestrator",
     "QueueProcessor",
@@ -189,6 +197,9 @@ __all__ = [
     "CancelStageHandler",
     "ContinueParentStageHandler",
     "JumpToStageHandler",
+    "SignalStageHandler",
+    "CancelRegionHandler",
+    "AddMultiInstanceHandler",
     "StartTaskHandler",
     "StartWaitingWorkflowsHandler",
     "RunTaskHandler",
@@ -206,6 +217,7 @@ __all__ = [
     "SSHTask",
     "HighwayTask",
     "PythonTask",
+    "SubWorkflowTask",
     # Verifier registry
     "register_verifier",
     "get_verifier",

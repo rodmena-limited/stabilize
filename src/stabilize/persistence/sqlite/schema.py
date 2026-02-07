@@ -46,6 +46,16 @@ CREATE TABLE IF NOT EXISTS stage_executions (
     start_time_expiry INTEGER,
     scheduled_time INTEGER,
     version INTEGER DEFAULT 0,
+    join_type TEXT DEFAULT 'AND',
+    join_threshold INTEGER DEFAULT 0,
+    split_type TEXT DEFAULT 'AND',
+    split_conditions TEXT DEFAULT '{}',
+    mi_config TEXT,
+    deferred_choice_group TEXT,
+    milestone_ref_id TEXT,
+    milestone_status TEXT,
+    mutex_key TEXT,
+    cancel_region TEXT,
     UNIQUE(execution_id, ref_id)
 );
 

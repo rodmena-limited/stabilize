@@ -102,12 +102,42 @@ def row_to_execution(row: dict[str, Any]) -> Workflow:
 
 def row_to_stage(row: dict[str, Any]) -> StageExecution:
     """Convert database row to StageExecution."""
+    from stabilize.models.multi_instance import MultiInstanceConfig
+    from stabilize.models.stage import JoinType, SplitType
+
     context = row["context"] if isinstance(row["context"], dict) else json.loads(row["context"] or "{}")
     outputs = row["outputs"] if isinstance(row["outputs"], dict) else json.loads(row["outputs"] or "{}")
 
     synthetic_owner = None
     if row["synthetic_stage_owner"]:
         synthetic_owner = SyntheticStageOwner(row["synthetic_stage_owner"])
+
+    # Parse new control-flow fields with safe defaults for older schemas
+    join_type_str = row.get("join_type", "AND")
+    join_type = JoinType(join_type_str) if join_type_str else JoinType.AND
+
+    split_type_str = row.get("split_type", "AND")
+    split_type = SplitType(split_type_str) if split_type_str else SplitType.AND
+
+    split_conditions_raw = row.get("split_conditions", {})
+    if isinstance(split_conditions_raw, str):
+        split_conditions = json.loads(split_conditions_raw or "{}")
+    elif isinstance(split_conditions_raw, dict):
+        split_conditions = split_conditions_raw
+    else:
+        split_conditions = {}
+
+    mi_config_raw = row.get("mi_config")
+    mi_config = None
+    if mi_config_raw:
+        if isinstance(mi_config_raw, str):
+            mi_data = json.loads(mi_config_raw)
+        elif isinstance(mi_config_raw, dict):
+            mi_data = mi_config_raw
+        else:
+            mi_data = None
+        if mi_data:
+            mi_config = MultiInstanceConfig.from_dict(mi_data)
 
     return StageExecution(
         id=row["id"],
@@ -125,6 +155,16 @@ def row_to_stage(row: dict[str, Any]) -> StageExecution:
         start_time_expiry=row["start_time_expiry"],
         scheduled_time=row["scheduled_time"],
         version=row.get("version", 0) or 0,
+        join_type=join_type,
+        join_threshold=row.get("join_threshold", 0) or 0,
+        split_type=split_type,
+        split_conditions=split_conditions,
+        mi_config=mi_config,
+        deferred_choice_group=row.get("deferred_choice_group"),
+        milestone_ref_id=row.get("milestone_ref_id"),
+        milestone_status=row.get("milestone_status"),
+        mutex_key=row.get("mutex_key"),
+        cancel_region=row.get("cancel_region"),
     )
 
 
