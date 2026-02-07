@@ -140,7 +140,11 @@ def _evaluate_and_join(
     2. If all upstreams in CONTINUABLE_STATUSES, return READY
     3. Otherwise, return NOT_READY
     """
-    from stabilize.models.status import ACTIVE_STATUSES, CONTINUABLE_STATUSES, HALT_STATUSES
+    from stabilize.models.status import (
+        ACTIVE_STATUSES,
+        CONTINUABLE_STATUSES,
+        HALT_STATUSES,
+    )
 
     # Check for halted upstreams
     failed_ids: list[str] = []
@@ -201,7 +205,11 @@ def _evaluate_or_join(
     context as '_activated_branches'. Only those upstreams are checked.
     If '_activated_branches' is not set, falls back to AND-join behavior.
     """
-    from stabilize.models.status import ACTIVE_STATUSES, CONTINUABLE_STATUSES, HALT_STATUSES
+    from stabilize.models.status import (
+        ACTIVE_STATUSES,
+        CONTINUABLE_STATUSES,
+        HALT_STATUSES,
+    )
 
     activated_branches: list[str] | None = stage.context.get("_activated_branches")
 
@@ -212,7 +220,9 @@ def _evaluate_or_join(
     activated_set = set(activated_branches)
 
     # Filter upstream stages to only activated ones
-    relevant_upstreams = [u for u in upstream_stages if u is not None and u.ref_id in activated_set]
+    relevant_upstreams = [
+        u for u in upstream_stages if u is not None and u.ref_id in activated_set
+    ]
 
     if not relevant_upstreams:
         return ReadinessResult(
@@ -313,6 +323,12 @@ def _evaluate_discriminator(
 
     Also supports blocking discriminator (WCP-28) via '_join_blocking' context,
     and cancelling discriminator (WCP-29) via stage context flag.
+
+    CONCURRENCY NOTE: This is a pure function that reads '_join_fired' from context.
+    The CALLER is responsible for atomically setting '_join_fired=True' using
+    store_stage(stage, expected_phase=...) AFTER this function returns READY and
+    BEFORE proceeding with execution. Failure to do so will cause race conditions
+    where multiple upstreams can fire the discriminator simultaneously.
     """
     from stabilize.models.status import CONTINUABLE_STATUSES, HALT_STATUSES
 
@@ -367,6 +383,12 @@ def _evaluate_n_of_m(
 
     Uses stage.join_threshold as N. Tracks completed branches in
     '_completed_branches' context key.
+
+    CONCURRENCY NOTE: This is a pure function that reads '_join_fired' from context.
+    The CALLER is responsible for atomically setting '_join_fired=True' using
+    store_stage(stage, expected_phase=...) AFTER this function returns READY and
+    BEFORE proceeding with execution. Failure to do so will cause race conditions
+    where multiple upstreams can fire the N-of-M join simultaneously.
     """
     from stabilize.models.status import CONTINUABLE_STATUSES, HALT_STATUSES
 

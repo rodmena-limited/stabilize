@@ -27,7 +27,9 @@ class TestExponentialBackoff:
         expected = [1, 2, 4, 8, 16, 32, 60, 60, 60, 60]  # Capped at 60
         for attempt, expected_base in enumerate(expected, start=1):
             base_delay = min(2 ** (attempt - 1), 60)
-            assert base_delay == expected_base, f"Attempt {attempt} should have base delay {expected_base}"
+            assert (
+                base_delay == expected_base
+            ), f"Attempt {attempt} should have base delay {expected_base}"
 
     def test_backoff_capped_at_60_seconds(self) -> None:
         """Backoff should be capped at 60 seconds."""

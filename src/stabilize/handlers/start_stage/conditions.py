@@ -23,8 +23,11 @@ logger = logging.getLogger(__name__)
 class StartStageConditionsMixin:
     """Mixin providing condition-check methods used by StartStageHandler."""
 
-    repository: WorkflowStore
-    queue: Queue
+    if TYPE_CHECKING:
+        repository: WorkflowStore
+        queue: Queue
+
+        def current_time_millis(self) -> int: ...
 
     def _should_skip(self, stage: StageExecution) -> bool:
         """
@@ -97,6 +100,12 @@ class StartStageConditionsMixin:
 
         Queries ALL stages of the execution to find siblings in the same group.
         Returns True if any sibling has progressed past NOT_STARTED.
+
+        CONCURRENCY NOTE: This method performs a read-then-check which is inherently
+        non-atomic. The caller MUST use store_stage(stage, expected_phase="NOT_STARTED")
+        when transitioning the stage to RUNNING to atomically claim the deferred choice.
+        If the atomic store fails (ConcurrencyError), another stage in the group has
+        already claimed it.
         """
         if not stage.deferred_choice_group:
             return False
@@ -105,7 +114,10 @@ class StartStageConditionsMixin:
         for s in all_stages:
             if s.id == stage.id:
                 continue
-            if s.deferred_choice_group == stage.deferred_choice_group and s.status != WorkflowStatus.NOT_STARTED:
+            if (
+                s.deferred_choice_group == stage.deferred_choice_group
+                and s.status != WorkflowStatus.NOT_STARTED
+            ):
                 return True
         return False
 
@@ -113,6 +125,12 @@ class StartStageConditionsMixin:
         """Check if another stage with the same mutex_key is RUNNING (WCP-17,39,40).
 
         Queries ALL stages of the execution for mutual exclusion.
+
+        CONCURRENCY NOTE: This method performs a read-then-check which is inherently
+        non-atomic. The caller MUST use store_stage(stage, expected_phase="NOT_STARTED")
+        when transitioning the stage to RUNNING to atomically acquire the mutex.
+        If the atomic store fails (ConcurrencyError), another stage with the same
+        mutex_key has already acquired it, and this stage should retry later.
         """
         if not stage.mutex_key:
             return False

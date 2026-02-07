@@ -128,7 +128,7 @@ class TransactionHelper:
         self,
         stage: StageExecution | None = None,
         source_message: Message | None = None,
-        messages_to_push: Sequence[tuple[Message, int | None]] | None = None,
+        messages_to_push: Sequence[tuple[Message, float | None]] | None = None,
         handler_name: str = "UnknownHandler",
         require_atomic: bool = False,
     ) -> None:
@@ -194,7 +194,7 @@ class TransactionHelper:
         self,
         stage: StageExecution | None = None,
         source_message: Message | None = None,
-        messages_to_push: Sequence[tuple[Message, int | None]] | None = None,
+        messages_to_push: Sequence[tuple[Message, float | None]] | None = None,
         handler_name: str = "UnknownHandler",
         require_atomic: bool = False,
     ) -> None:

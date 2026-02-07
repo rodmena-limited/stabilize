@@ -123,7 +123,9 @@ class InMemoryEventStore(EventStore):
             return [
                 e
                 for e in self._events
-                if e.entity_type == entity_type and e.entity_id == entity_id and e.version > from_version
+                if e.entity_type == entity_type
+                and e.entity_id == entity_id
+                and e.version > from_version
             ]
 
     def get_events_for_workflow(
@@ -133,7 +135,11 @@ class InMemoryEventStore(EventStore):
     ) -> list[Event]:
         """Get all events for a workflow execution."""
         with self._lock:
-            return [e for e in self._events if e.workflow_id == workflow_id and e.sequence > from_sequence]
+            return [
+                e
+                for e in self._events
+                if e.workflow_id == workflow_id and e.sequence > from_sequence
+            ]
 
     def get_current_sequence(self) -> int:
         """Get the current (latest) global sequence number."""
@@ -247,4 +253,7 @@ class InMemoryEventStore(EventStore):
     def list_subscriptions(self) -> list[dict[str, Any]]:
         """List all durable subscriptions."""
         with self._lock:
-            return [{"id": s["id"], "last_sequence": s["last_sequence"]} for s in self._subscriptions.values()]
+            return [
+                {"id": s["id"], "last_sequence": s["last_sequence"]}
+                for s in self._subscriptions.values()
+            ]

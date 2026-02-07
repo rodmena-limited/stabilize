@@ -340,7 +340,9 @@ class TestShellTaskPlaceholders:
         assert result.status == WorkflowStatus.SUCCEEDED
         assert result.outputs["stdout"] == "Hello World"
 
-    def test_placeholder_not_substituted_if_missing(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+    def test_placeholder_not_substituted_if_missing(
+        self, shell_task: ShellTask, mock_stage: MagicMock
+    ) -> None:
         """Test that missing placeholders remain as-is."""
         mock_stage.context = {"command": "echo {missing}"}
         result = shell_task.execute(mock_stage)
@@ -348,7 +350,9 @@ class TestShellTaskPlaceholders:
         assert result.status == WorkflowStatus.SUCCEEDED
         assert result.outputs["stdout"] == "{missing}"
 
-    def test_reserved_keys_not_substituted(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+    def test_reserved_keys_not_substituted(
+        self, shell_task: ShellTask, mock_stage: MagicMock
+    ) -> None:
         """Test that reserved keys are not substituted."""
         mock_stage.context = {
             "command": "echo {timeout}",
@@ -410,7 +414,9 @@ class TestShellTaskIntegration:
         assert result2.status == WorkflowStatus.SUCCEEDED
         assert "data from stage 1" in result2.outputs["stdout"]
 
-    def test_complex_command_with_all_features(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
+    def test_complex_command_with_all_features(
+        self, shell_task: ShellTask, mock_stage: MagicMock
+    ) -> None:
         """Test complex command using multiple features."""
         with tempfile.TemporaryDirectory() as tmpdir:
             mock_stage.context = {

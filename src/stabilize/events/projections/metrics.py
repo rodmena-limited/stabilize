@@ -267,6 +267,11 @@ class StageMetricsProjection(Projection):
     def to_dict(self) -> dict[str, Any]:
         """Convert all metrics to dictionary."""
         return {
-            "stages": {stage_type: metrics.to_dict() for stage_type, metrics in self._stage_metrics.items()},
-            "tasks": {task_name: metrics.to_dict() for task_name, metrics in self._task_metrics.items()},
+            "stages": {
+                stage_type: metrics.to_dict()
+                for stage_type, metrics in self._stage_metrics.items()
+            },
+            "tasks": {
+                task_name: metrics.to_dict() for task_name, metrics in self._task_metrics.items()
+            },
         }

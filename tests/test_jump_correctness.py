@@ -34,7 +34,9 @@ def reset_tasks():
 
 
 class TestJumpCorrectness:
-    def test_forward_jump_skips_intermediate(self, repository: WorkflowStore, queue: Queue) -> None:
+    def test_forward_jump_skips_intermediate(
+        self, repository: WorkflowStore, queue: Queue
+    ) -> None:
         """
         A -> B -> C
         A jumps to C.
@@ -43,7 +45,9 @@ class TestJumpCorrectness:
         reset_tasks()
         JumpTask.target = "stage_c"
 
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"jump": JumpTask, "record": RecordTask})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"jump": JumpTask, "record": RecordTask}
+        )
 
         execution = Workflow.create(
             application="test",
@@ -99,13 +103,17 @@ class TestJumpCorrectness:
         stage_c = result.stage_by_ref_id("stage_c")
 
         # Check B was skipped
-        assert stage_b.status == WorkflowStatus.SKIPPED, f"Stage B status is {stage_b.status}, expected SKIPPED"
+        assert (
+            stage_b.status == WorkflowStatus.SKIPPED
+        ), f"Stage B status is {stage_b.status}, expected SKIPPED"
 
         # Check C ran
         assert stage_c.status == WorkflowStatus.SUCCEEDED
         assert "stage_c" in RecordTask.records
 
-    def test_backward_jump_resets_intermediate(self, repository: WorkflowStore, queue: Queue) -> None:
+    def test_backward_jump_resets_intermediate(
+        self, repository: WorkflowStore, queue: Queue
+    ) -> None:
         """
         A -> B -> C
         C jumps to B (once).
@@ -197,7 +205,9 @@ class TestJumpCorrectness:
         reset_tasks()
         JumpTask.target = "stage_d"
 
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"jump": JumpTask, "record": RecordTask})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"jump": JumpTask, "record": RecordTask}
+        )
 
         execution = Workflow.create(
             application="test",
@@ -279,20 +289,28 @@ class TestJumpCorrectness:
         reset_tasks()
         JumpTask.target = "stage_c"
 
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"jump": JumpTask, "record": RecordTask})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"jump": JumpTask, "record": RecordTask}
+        )
 
         # Create execution manually to attach synthetic stages
         stage_a = StageExecution(
             ref_id="stage_a",
             name="Stage A",
-            tasks=[TaskExecution.create(name="Jump", implementing_class="jump", stage_start=True, stage_end=True)],
+            tasks=[
+                TaskExecution.create(
+                    name="Jump", implementing_class="jump", stage_start=True, stage_end=True
+                )
+            ],
         )
         stage_b = StageExecution(
             ref_id="stage_b",
             name="Stage B",
             requisite_stage_ref_ids={"stage_a"},
             tasks=[
-                TaskExecution.create(name="Record B", implementing_class="record", stage_start=True, stage_end=True)
+                TaskExecution.create(
+                    name="Record B", implementing_class="record", stage_start=True, stage_end=True
+                )
             ],
         )
         stage_c = StageExecution(
@@ -300,7 +318,9 @@ class TestJumpCorrectness:
             name="Stage C",
             requisite_stage_ref_ids={"stage_b"},
             tasks=[
-                TaskExecution.create(name="Record C", implementing_class="record", stage_start=True, stage_end=True)
+                TaskExecution.create(
+                    name="Record C", implementing_class="record", stage_start=True, stage_end=True
+                )
             ],
         )
 
@@ -313,7 +333,9 @@ class TestJumpCorrectness:
         )
 
         # Create workflow
-        execution = Workflow.create(application="test", name="Synthetic Jump", stages=[stage_a, stage_b, stage_c])
+        execution = Workflow.create(
+            application="test", name="Synthetic Jump", stages=[stage_a, stage_b, stage_c]
+        )
 
         # Manually add synthetic stages to execution since we didn't use builder properly
         b_setup._execution = execution
@@ -345,7 +367,9 @@ class TestJumpCorrectness:
         assert s_teardown.status == WorkflowStatus.SKIPPED, "B Teardown should be SKIPPED"
         assert s_c.status == WorkflowStatus.SUCCEEDED, "Stage C should be SUCCEEDED"
 
-    def test_jump_to_stage_with_already_run_synthetic(self, repository: WorkflowStore, queue: Queue) -> None:
+    def test_jump_to_stage_with_already_run_synthetic(
+        self, repository: WorkflowStore, queue: Queue
+    ) -> None:
         """
         A -> B (has synthetic Before stage).
         1. Run flow. B and B_Before run.
@@ -372,7 +396,9 @@ class TestJumpCorrectness:
             ref_id="stage_a",
             name="Stage A",
             tasks=[
-                TaskExecution.create(name="Record A", implementing_class="record", stage_start=True, stage_end=True)
+                TaskExecution.create(
+                    name="Record A", implementing_class="record", stage_start=True, stage_end=True
+                )
             ],
         )
 
@@ -381,7 +407,9 @@ class TestJumpCorrectness:
             name="Stage B",
             requisite_stage_ref_ids={"stage_a"},
             tasks=[
-                TaskExecution.create(name="Record B", implementing_class="record", stage_start=True, stage_end=True)
+                TaskExecution.create(
+                    name="Record B", implementing_class="record", stage_start=True, stage_end=True
+                )
             ],
         )
 
@@ -405,10 +433,14 @@ class TestJumpCorrectness:
             type="test", name="B Setup", parent=stage_b, owner=SyntheticStageOwner.STAGE_BEFORE
         )
         b_setup.tasks = [
-            TaskExecution.create(name="Record Setup", implementing_class="record", stage_start=True, stage_end=True)
+            TaskExecution.create(
+                name="Record Setup", implementing_class="record", stage_start=True, stage_end=True
+            )
         ]
 
-        execution = Workflow.create(application="test", name="Synthetic Retry", stages=[stage_a, stage_b, stage_c])
+        execution = Workflow.create(
+            application="test", name="Synthetic Retry", stages=[stage_a, stage_b, stage_c]
+        )
 
         b_setup._execution = execution
         execution.stages.append(b_setup)
@@ -428,5 +460,9 @@ class TestJumpCorrectness:
         b_counts = RecordTask.records.count("Stage B")
         setup_counts = RecordTask.records.count("B Setup")
 
-        assert b_counts == 2, f"Stage B should run twice, got {b_counts}. Records: {RecordTask.records}"
-        assert setup_counts == 2, f"B Setup should run twice, got {setup_counts}. Records: {RecordTask.records}"
+        assert (
+            b_counts == 2
+        ), f"Stage B should run twice, got {b_counts}. Records: {RecordTask.records}"
+        assert (
+            setup_counts == 2
+        ), f"B Setup should run twice, got {setup_counts}. Records: {RecordTask.records}"

@@ -236,7 +236,9 @@ class PostgresQueue(Queue):
                 message = self._deserialize_message(msg_type, payload)
                 if message is None:
                     # Corrupted message - move to DLQ for audit instead of deleting
-                    logger.warning("Moving corrupted message %s (type: %s) to DLQ", msg_id, msg_type)
+                    logger.warning(
+                        "Moving corrupted message %s (type: %s) to DLQ", msg_id, msg_type
+                    )
                     self.move_to_dlq(
                         msg_id,
                         error=f"Deserialization failed for message type: {msg_type}",
@@ -411,6 +413,10 @@ class PostgresQueue(Queue):
 
     def check_and_move_expired(self) -> int:
         """Check for messages exceeding max_attempts and move to DLQ."""
-        from stabilize.queue.dlq import check_and_move_expired as _check_and_move_expired
+        from stabilize.queue.dlq import (
+            check_and_move_expired as _check_and_move_expired,
+        )
 
-        return _check_and_move_expired(self._get_pool(), self.table_name, self._pending, self.max_attempts)
+        return _check_and_move_expired(
+            self._get_pool(), self.table_name, self._pending, self.max_attempts
+        )

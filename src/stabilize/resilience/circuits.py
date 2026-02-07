@@ -85,15 +85,21 @@ def _create_storage(database_url: str | None) -> CircuitBreakerStorage:
                 else:
                     host, port = hostport, "5432"
 
-                conn_string = f"host={host} port={port} dbname={dbname} user={user} password={password}"
+                conn_string = (
+                    f"host={host} port={port} dbname={dbname} user={user} password={password}"
+                )
 
             logger.info("Using PostgreSQL storage for circuit breakers")
             return PostgresStorage(connection_string=conn_string)
         except ImportError:
-            logger.warning("psycopg not available, falling back to in-memory circuit breaker storage")
+            logger.warning(
+                "psycopg not available, falling back to in-memory circuit breaker storage"
+            )
             return InMemoryStorage()
         except Exception as e:
-            logger.warning("Failed to create PostgreSQL storage: %s, falling back to in-memory storage", e)
+            logger.warning(
+                "Failed to create PostgreSQL storage: %s, falling back to in-memory storage", e
+            )
             return InMemoryStorage()
     else:
         # SQLite or no database: use in-memory storage
@@ -199,4 +205,6 @@ class WorkflowCircuitFactory:
             del self._circuits[key]
 
         if keys_to_remove:
-            logger.debug("Cleared %d circuit(s) for workflow=%s", len(keys_to_remove), workflow_execution_id)
+            logger.debug(
+                "Cleared %d circuit(s) for workflow=%s", len(keys_to_remove), workflow_execution_id
+            )

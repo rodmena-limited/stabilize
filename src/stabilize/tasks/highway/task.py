@@ -150,7 +150,9 @@ class HighwayTask(RetryableTask):
         """
         workflow_def = stage.context.get("highway_workflow_definition")
         if not workflow_def:
-            return TaskResult.terminal(error="highway_workflow_definition not provided in stage context")
+            return TaskResult.terminal(
+                error="highway_workflow_definition not provided in stage context"
+            )
 
         # CRITICAL: Deterministic Idempotency Key
         # Format: stabilize-{execution_id}-{stage_id}
@@ -171,7 +173,9 @@ class HighwayTask(RetryableTask):
                 value = self._resolve_context_path(merged_context, context_path)
                 if value is not None:
                     inputs[input_key] = value
-                    logger.debug("Mapped context path %s to input %s = %s", context_path, input_key, value)
+                    logger.debug(
+                        "Mapped context path %s to input %s = %s", context_path, input_key, value
+                    )
 
         payload = {
             "workflow_definition": workflow_def,

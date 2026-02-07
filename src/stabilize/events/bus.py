@@ -233,7 +233,9 @@ class EventBus:
             except Exception as e:
                 logger.exception("Error in error handler: %s", e)
 
-    def on_error(self, handler: Callable[[str, Event, Exception], None]) -> Callable[[str, Event, Exception], None]:
+    def on_error(
+        self, handler: Callable[[str, Event, Exception], None]
+    ) -> Callable[[str, Event, Exception], None]:
         """
         Set or replace the global error handler.
 

@@ -22,6 +22,10 @@ if TYPE_CHECKING:
 class SqliteEventStoreMixin:
     """Mixin providing event append, query, and retrieval methods."""
 
+    if TYPE_CHECKING:
+
+        def _get_connection(self) -> sqlite3.Connection: ...
+
     def append(self, event: Event, connection: Any | None = None) -> Event:
         """Append a single event to the store."""
         events = self.append_batch([event], connection)

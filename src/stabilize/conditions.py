@@ -213,7 +213,9 @@ class Condition:
 
         # Only update transition time if status changed
         transition_time = (
-            datetime.now(UTC) if status is not None and status != self.status else self.last_transition_time
+            datetime.now(UTC)
+            if status is not None and status != self.status
+            else self.last_transition_time
         )
 
         return Condition(
@@ -230,7 +232,9 @@ class Condition:
         return {
             "type": self.type.value if isinstance(self.type, ConditionType) else self.type,
             "status": self.status,
-            "reason": (self.reason.value if isinstance(self.reason, ConditionReason) else self.reason),
+            "reason": (
+                self.reason.value if isinstance(self.reason, ConditionReason) else self.reason
+            ),
             "message": self.message,
             "lastTransitionTime": self.last_transition_time.isoformat(),
             "observedGeneration": self.observed_generation,

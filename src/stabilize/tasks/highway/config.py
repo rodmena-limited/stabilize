@@ -79,9 +79,13 @@ class HighwayConfig:
         errors = []
 
         if not self.api_key:
-            errors.append("HIGHWAY_API_KEY not configured. Set environment variable or stage context.")
+            errors.append(
+                "HIGHWAY_API_KEY not configured. Set environment variable or stage context."
+            )
 
         if not self.api_endpoint:
-            errors.append("HIGHWAY_API_ENDPOINT not configured. Set environment variable or stage context.")
+            errors.append(
+                "HIGHWAY_API_ENDPOINT not configured. Set environment variable or stage context."
+            )
 
         return errors

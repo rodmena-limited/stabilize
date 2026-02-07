@@ -154,7 +154,9 @@ def build_line_metadata(data: MonitorData) -> list[dict[str, Any]]:
     return lines
 
 
-def render_line(stdscr: Any, y: int, width: int, line_info: dict[str, Any], is_selected: bool) -> None:
+def render_line(
+    stdscr: Any, y: int, width: int, line_info: dict[str, Any], is_selected: bool
+) -> None:
     """Render a single line based on its type."""
     line_type = line_info["type"]
 
@@ -183,7 +185,9 @@ def render_line(stdscr: Any, y: int, width: int, line_info: dict[str, Any], is_s
         )
 
 
-def render_workflow_line(stdscr: Any, y: int, width: int, wf: WorkflowView, base_attr: int) -> None:
+def render_workflow_line(
+    stdscr: Any, y: int, width: int, wf: WorkflowView, base_attr: int
+) -> None:
     """Render a workflow line with proper column alignment."""
     pos_progress = width - COL_PROGRESS
     pos_duration = width - COL_DURATION
@@ -230,7 +234,9 @@ def render_workflow_line(stdscr: Any, y: int, width: int, wf: WorkflowView, base
     addstr(stdscr, y, pos_progress, f"{progress:>5}", base_attr)
 
 
-def render_stage_line(stdscr: Any, y: int, width: int, stage: StageView, is_last: bool, base_attr: int) -> None:
+def render_stage_line(
+    stdscr: Any, y: int, width: int, stage: StageView, is_last: bool, base_attr: int
+) -> None:
     """Render a stage line with proper column alignment."""
     pos_time = width - COL_TIME
     pos_duration = width - COL_DURATION

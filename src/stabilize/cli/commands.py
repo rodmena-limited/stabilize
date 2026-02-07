@@ -6,7 +6,11 @@ import sys
 from typing import TYPE_CHECKING
 
 from stabilize.cli.config import MIGRATION_TABLE, load_config, parse_db_url
-from stabilize.cli.migrations import compute_checksum, extract_up_migration, get_migrations
+from stabilize.cli.migrations import (
+    compute_checksum,
+    extract_up_migration,
+    get_migrations,
+)
 from stabilize.cli.prompt_text import PROMPT_TEXT
 
 if TYPE_CHECKING:
@@ -206,7 +210,9 @@ def mg_status(db_url: str | None = None) -> None:
 
                 applied = {}
                 if table_exists:
-                    cur.execute(f"SELECT name, checksum, applied_at FROM {MIGRATION_TABLE} ORDER BY applied_at")
+                    cur.execute(
+                        f"SELECT name, checksum, applied_at FROM {MIGRATION_TABLE} ORDER BY applied_at"
+                    )
                     applied = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
 
                 migrations = get_migrations()

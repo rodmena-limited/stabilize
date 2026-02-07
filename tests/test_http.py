@@ -416,7 +416,9 @@ class TestFileOperations:
         finally:
             os.unlink(temp_path)
 
-    def test_file_upload_with_form_fields(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+    def test_file_upload_with_form_fields(
+        self, task: HTTPTask, stage: MagicMock, http_server: str
+    ) -> None:
         """Test file upload with additional form fields."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             f.write("upload content")
@@ -519,7 +521,9 @@ class TestErrorHandling:
 
         assert result.status == WorkflowStatus.TERMINAL
 
-    def test_file_not_found_upload(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+    def test_file_not_found_upload(
+        self, task: HTTPTask, stage: MagicMock, http_server: str
+    ) -> None:
         """Test error when upload file doesn't exist."""
         stage.context = {
             "url": f"{http_server}/upload",
@@ -535,7 +539,9 @@ class TestErrorHandling:
 class TestExpectedStatus:
     """Test expected status validation."""
 
-    def test_expected_status_single(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+    def test_expected_status_single(
+        self, task: HTTPTask, stage: MagicMock, http_server: str
+    ) -> None:
         """Test single expected status."""
         stage.context = {
             "url": http_server,
@@ -544,7 +550,9 @@ class TestExpectedStatus:
         result = task.execute(stage)
         assert result.status == WorkflowStatus.SUCCEEDED
 
-    def test_expected_status_list(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+    def test_expected_status_list(
+        self, task: HTTPTask, stage: MagicMock, http_server: str
+    ) -> None:
         """Test list of expected statuses."""
         stage.context = {
             "url": f"{http_server}/error/404",
@@ -553,7 +561,9 @@ class TestExpectedStatus:
         result = task.execute(stage)
         assert result.status == WorkflowStatus.SUCCEEDED  # 404 is expected
 
-    def test_unexpected_status_fails(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+    def test_unexpected_status_fails(
+        self, task: HTTPTask, stage: MagicMock, http_server: str
+    ) -> None:
         """Test failure on unexpected status."""
         stage.context = {
             "url": http_server,
@@ -609,7 +619,9 @@ class TestPlaceholderSubstitution:
         assert result.status == WorkflowStatus.SUCCEEDED
         assert result.outputs["body"] == "Hello, World!"
 
-    def test_bearer_token_placeholder(self, task: HTTPTask, stage: MagicMock, http_server: str) -> None:
+    def test_bearer_token_placeholder(
+        self, task: HTTPTask, stage: MagicMock, http_server: str
+    ) -> None:
         """Test placeholder in bearer token."""
         stage.context = {
             "url": f"{http_server}/auth/bearer",

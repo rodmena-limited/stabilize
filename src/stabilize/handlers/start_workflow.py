@@ -137,7 +137,9 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
         )
 
         running_count = 0
-        for _ in self.repository.retrieve_by_pipeline_config_id(execution.pipeline_config_id, criteria):
+        for _ in self.repository.retrieve_by_pipeline_config_id(
+            execution.pipeline_config_id, criteria
+        ):
             running_count += 1
             if running_count >= execution.max_concurrent_executions:
                 return True

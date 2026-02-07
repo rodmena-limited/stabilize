@@ -74,7 +74,9 @@ class TestWorkflowTerminalPropagation:
         self, repository: WorkflowStore, queue: Queue, backend: str
     ) -> None:
         """Test workflow becomes TERMINAL when single stage fails."""
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"terminal": TerminalTask})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"terminal": TerminalTask}
+        )
 
         execution = Workflow.create(
             application="test",
@@ -104,7 +106,9 @@ class TestWorkflowTerminalPropagation:
         assert result.status == WorkflowStatus.TERMINAL, f"Status: {result.status}"
         assert result.stage_by_ref_id("stage_a").status == WorkflowStatus.TERMINAL
 
-    def test_one_of_many_stages_terminal(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_one_of_many_stages_terminal(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test workflow becomes TERMINAL when one of many sequential stages fails."""
         processor, runner, _ = setup_stabilize(
             repository, queue, extra_tasks={"success": SuccessTask, "terminal": TerminalTask}
@@ -177,9 +181,13 @@ class TestWorkflowTerminalPropagation:
 class TestWorkflowSucceeded:
     """Test workflow SUCCEEDED when all stages complete successfully."""
 
-    def test_all_stages_succeed(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_all_stages_succeed(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test workflow SUCCEEDED when all stages complete successfully."""
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"success": SuccessTask})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"success": SuccessTask}
+        )
 
         execution = Workflow.create(
             application="test",
@@ -241,7 +249,9 @@ class TestWorkflowSucceeded:
 class TestParallelStagesMixedStatus:
     """Test parallel stages with mixed status outcomes."""
 
-    def test_parallel_one_fails_one_succeeds(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_parallel_one_fails_one_succeeds(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test parallel stages where one fails and one succeeds."""
         processor, runner, _ = setup_stabilize(
             repository, queue, extra_tasks={"success": SuccessTask, "terminal": TerminalTask}
@@ -294,7 +304,9 @@ class TestParallelStagesMixedStatus:
         # Fail stage should show TERMINAL
         assert result.stage_by_ref_id("stage_fail").status == WorkflowStatus.TERMINAL
 
-    def test_parallel_with_failed_continue(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_parallel_with_failed_continue(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test parallel stages with FAILED_CONTINUE status.
 
         FAILED_CONTINUE means the stage failed but workflow continues.
@@ -360,7 +372,9 @@ class TestParallelStagesMixedStatus:
 class TestStageStatusWhileRunning:
     """Test stage status while tasks are running."""
 
-    def test_stage_running_while_tasks_running(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_stage_running_while_tasks_running(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test stage stays RUNNING while any task is running."""
         reset_tasks()
         DelayedTask.delay = 0.1
@@ -408,14 +422,18 @@ class TestStageStatusWhileRunning:
 class TestVersionPreventsStaleMessages:
     """Test that version numbers prevent stale message processing."""
 
-    def test_stale_complete_stage_ignored(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_stale_complete_stage_ignored(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """
         Test that a stale CompleteStage message is ignored due to version mismatch.
 
         This is important for jump scenarios where a stage is reset but
         old completion messages might still be in the queue.
         """
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"success": SuccessTask})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"success": SuccessTask}
+        )
 
         execution = Workflow.create(
             application="test",
@@ -459,9 +477,13 @@ class TestVersionPreventsStaleMessages:
 class TestStatusTransitions:
     """Test specific status transitions."""
 
-    def test_not_started_to_running_to_succeeded(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_not_started_to_running_to_succeeded(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test normal status progression: NOT_STARTED -> RUNNING -> SUCCEEDED."""
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"success": SuccessTask})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"success": SuccessTask}
+        )
 
         execution = Workflow.create(
             application="test",
@@ -495,12 +517,16 @@ class TestStatusTransitions:
         final = repository.retrieve(execution.id)
         assert final.status == WorkflowStatus.SUCCEEDED
 
-    def test_running_to_paused_to_running(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_running_to_paused_to_running(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test pause/resume: RUNNING -> PAUSED -> RUNNING."""
         reset_tasks()
         DelayedTask.delay = 0.5
 
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"delayed": DelayedTask})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"delayed": DelayedTask}
+        )
 
         execution = Workflow.create(
             application="test",

@@ -54,7 +54,9 @@ class StartStageOrchestrationMixin:
         before_stages = [
             s
             for s in synthetic_stages
-            if s is not None and s.synthetic_stage_owner == SyntheticStageOwner.STAGE_BEFORE and s.is_initial()
+            if s is not None
+            and s.synthetic_stage_owner == SyntheticStageOwner.STAGE_BEFORE
+            and s.is_initial()
         ]
 
         if before_stages:
@@ -85,7 +87,9 @@ class StartStageOrchestrationMixin:
         after_stages = [
             s
             for s in synthetic_stages
-            if s is not None and s.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER and s.is_initial()
+            if s is not None
+            and s.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER
+            and s.is_initial()
         ]
 
         if after_stages:
@@ -123,7 +127,10 @@ class StartStageOrchestrationMixin:
         for s in all_stages:
             if s.id == stage.id:
                 continue
-            if s.deferred_choice_group == stage.deferred_choice_group and s.status == WorkflowStatus.NOT_STARTED:
+            if (
+                s.deferred_choice_group == stage.deferred_choice_group
+                and s.status == WorkflowStatus.NOT_STARTED
+            ):
                 logger.info(
                     "Deferred choice: cancelling sibling %s (group=%s) because %s was claimed",
                     s.name,

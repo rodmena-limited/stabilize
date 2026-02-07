@@ -22,6 +22,7 @@ from stabilize.queue.messages import (
 from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from stabilize.events.recorder import EventRecorder
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
 
@@ -45,8 +46,11 @@ class StartWaitingWorkflowsHandler(StabilizeHandler[StartWaitingWorkflows]):
         repository: WorkflowStore,
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
+        event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(queue, repository, retry_delay, handler_config)
+        super().__init__(
+            queue, repository, retry_delay, handler_config, event_recorder=event_recorder
+        )
 
     @property
     def message_type(self) -> type[StartWaitingWorkflows]:
@@ -80,7 +84,9 @@ class StartWaitingWorkflowsHandler(StabilizeHandler[StartWaitingWorkflows]):
         # store.retrieve... returns executions.
         # We will fetch and sort in memory for now.
 
-        buffered = list(self.repository.retrieve_by_pipeline_config_id(message.pipeline_config_id, criteria))
+        buffered = list(
+            self.repository.retrieve_by_pipeline_config_id(message.pipeline_config_id, criteria)
+        )
 
         # Sort by creation time (assuming id is ULID/monotonic or created_at)
         # ULID is monotonic.
@@ -91,7 +97,11 @@ class StartWaitingWorkflowsHandler(StabilizeHandler[StartWaitingWorkflows]):
 
         # Check running count
         running_criteria = WorkflowCriteria(statuses={WorkflowStatus.RUNNING})
-        running = list(self.repository.retrieve_by_pipeline_config_id(message.pipeline_config_id, running_criteria))
+        running = list(
+            self.repository.retrieve_by_pipeline_config_id(
+                message.pipeline_config_id, running_criteria
+            )
+        )
         running_count = len(running)
 
         # We assume all buffered have same config limit (from pipeline config)
@@ -131,6 +141,12 @@ class StartWaitingWorkflowsHandler(StabilizeHandler[StartWaitingWorkflows]):
                             execution_type=execution.type.value,
                             execution_id=execution.id,
                         )
+                    )
+
+                if self.event_recorder:
+                    self.set_event_context(execution.id)
+                    self.event_recorder.record_workflow_started(
+                        execution, source_handler="StartWaitingWorkflowsHandler"
                     )
             elif message.purge_queue:
                 # Cancel remaining

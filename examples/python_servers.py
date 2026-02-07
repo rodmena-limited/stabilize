@@ -56,7 +56,11 @@ def create_workflow_stages():
                 "restart_on_failure": True,
             },
             requisite_stage_ref_ids=set(),
-            tasks=[TaskExecution.create(name="S1", implementing_class="shell", stage_start=True, stage_end=True)],
+            tasks=[
+                TaskExecution.create(
+                    name="S1", implementing_class="shell", stage_start=True, stage_end=True
+                )
+            ],
         ),
         StageExecution(
             ref_id="server2",
@@ -68,7 +72,11 @@ def create_workflow_stages():
                 "restart_on_failure": True,
             },
             requisite_stage_ref_ids=set(),
-            tasks=[TaskExecution.create(name="S2", implementing_class="shell", stage_start=True, stage_end=True)],
+            tasks=[
+                TaskExecution.create(
+                    name="S2", implementing_class="shell", stage_start=True, stage_end=True
+                )
+            ],
         ),
         StageExecution(
             ref_id="monitor",
@@ -80,7 +88,11 @@ def create_workflow_stages():
                 "restart_on_failure": True,
             },
             requisite_stage_ref_ids=set(),
-            tasks=[TaskExecution.create(name="Mon", implementing_class="shell", stage_start=True, stage_end=True)],
+            tasks=[
+                TaskExecution.create(
+                    name="Mon", implementing_class="shell", stage_start=True, stage_end=True
+                )
+            ],
         ),
     ]
 

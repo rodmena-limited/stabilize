@@ -17,6 +17,7 @@ from stabilize.queue.messages import CancelStage
 from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
@@ -43,8 +44,11 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
         repository: WorkflowStore,
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
+        event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(queue, repository, retry_delay, handler_config)
+        super().__init__(
+            queue, repository, retry_delay, handler_config, event_recorder=event_recorder
+        )
 
     @property
     def message_type(self) -> type[CancelStage]:
@@ -96,6 +100,12 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
                         handler_type="CancelStage",
                         execution_id=message.execution_id,
                     )
+
+            if self.event_recorder:
+                self.set_event_context(stage.execution.id if stage.execution else "")
+                self.event_recorder.record_stage_canceled(
+                    stage, source_handler="CancelStageHandler"
+                )
 
             logger.info("Canceled stage %s (%s)", stage.name, stage.id)
 

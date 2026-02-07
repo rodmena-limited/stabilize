@@ -24,6 +24,7 @@ from stabilize.queue.messages import (
 from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
@@ -54,8 +55,11 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
         repository: WorkflowStore,
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
+        event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(queue, repository, retry_delay, handler_config)
+        super().__init__(
+            queue, repository, retry_delay, handler_config, event_recorder=event_recorder
+        )
         self.txn_helper = TransactionHelper(repository, queue)
 
     @property
@@ -217,7 +221,9 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
             after_stages = stage.first_after_stages()
             if after_stages:
                 # Only push StartStage for after-stages that are NOT_STARTED to prevent duplicates
-                not_started_after = [s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED]
+                not_started_after = [
+                    s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED
+                ]
                 if not_started_after:
                     messages_to_push = [
                         (

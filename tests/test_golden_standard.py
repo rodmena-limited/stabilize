@@ -352,7 +352,9 @@ class TestGoldenStandard:
         result = repository.retrieve(execution.id)
 
         # Verify execution succeeded
-        assert result.status == WorkflowStatus.SUCCEEDED, f"[{backend}] Execution failed with status {result.status}"
+        assert (
+            result.status == WorkflowStatus.SUCCEEDED
+        ), f"[{backend}] Execution failed with status {result.status}"
 
         # Find finalize stage and get result
         finalize_stage = next(
@@ -364,9 +366,9 @@ class TestGoldenStandard:
         final_result = finalize_stage.outputs.get("final_result", "")
 
         # Verify output matches expected
-        assert final_result == self.EXPECTED_RESULT, (
-            f"[{backend}] Output mismatch!\nExpected: {self.EXPECTED_RESULT}\nGot:      {final_result}"
-        )
+        assert (
+            final_result == self.EXPECTED_RESULT
+        ), f"[{backend}] Output mismatch!\nExpected: {self.EXPECTED_RESULT}\nGot:      {final_result}"
 
         # Cleanup
         repository.delete(execution.id)

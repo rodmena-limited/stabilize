@@ -17,12 +17,18 @@ from stabilize.persistence.sqlite.operations import (
     pause_execution,
     resume_execution,
 )
-from stabilize.persistence.sqlite.queries import get_downstream_stages as _get_downstream_stages
+from stabilize.persistence.sqlite.queries import (
+    get_downstream_stages as _get_downstream_stages,
+)
 from stabilize.persistence.sqlite.queries import (
     get_merged_ancestor_outputs as _get_merged_ancestor_outputs,
 )
-from stabilize.persistence.sqlite.queries import get_synthetic_stages as _get_synthetic_stages
-from stabilize.persistence.sqlite.queries import get_upstream_stages as _get_upstream_stages
+from stabilize.persistence.sqlite.queries import (
+    get_synthetic_stages as _get_synthetic_stages,
+)
+from stabilize.persistence.sqlite.queries import (
+    get_upstream_stages as _get_upstream_stages,
+)
 from stabilize.persistence.sqlite.queries import (
     retrieve_by_application as _retrieve_by_application,
 )
@@ -39,9 +45,11 @@ if TYPE_CHECKING:
 class SqliteQueriesMixin:
     """Mixin providing query and filtering operations."""
 
-    def _get_connection(self) -> sqlite3.Connection: ...
+    if TYPE_CHECKING:
 
-    def retrieve(self, execution_id: str) -> Workflow: ...
+        def _get_connection(self) -> sqlite3.Connection: ...
+
+        def retrieve(self, execution_id: str) -> Workflow: ...
 
     def get_upstream_stages(
         self,
@@ -81,7 +89,9 @@ class SqliteQueriesMixin:
         criteria: WorkflowCriteria | None = None,
     ) -> Iterator[Workflow]:
         """Retrieve executions by pipeline config ID."""
-        return _retrieve_by_pipeline_config_id(self._get_connection(), pipeline_config_id, criteria, self.retrieve)
+        return _retrieve_by_pipeline_config_id(
+            self._get_connection(), pipeline_config_id, criteria, self.retrieve
+        )
 
     def retrieve_by_application(
         self,
@@ -89,7 +99,9 @@ class SqliteQueriesMixin:
         criteria: WorkflowCriteria | None = None,
     ) -> Iterator[Workflow]:
         """Retrieve executions by application."""
-        return _retrieve_by_application(self._get_connection(), application, criteria, self.retrieve)
+        return _retrieve_by_application(
+            self._get_connection(), application, criteria, self.retrieve
+        )
 
     def list_workflows(
         self,

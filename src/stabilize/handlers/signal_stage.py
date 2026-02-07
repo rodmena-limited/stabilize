@@ -18,6 +18,7 @@ from stabilize.queue.messages import RunTask, SignalStage, StartStage
 from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
@@ -42,8 +43,11 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
         repository: WorkflowStore,
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
+        event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(queue, repository, retry_delay, handler_config)
+        super().__init__(
+            queue, repository, retry_delay, handler_config, event_recorder=event_recorder
+        )
 
     @property
     def message_type(self) -> type[SignalStage]:

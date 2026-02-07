@@ -5,13 +5,19 @@ Subscription CRUD operations for PostgreSQL event store.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EventType
+
+if TYPE_CHECKING:
+    from psycopg_pool import ConnectionPool
 
 
 class PostgresSubscriptionsMixin:
     """Mixin providing durable subscription CRUD methods."""
+
+    if TYPE_CHECKING:
+        _pool: ConnectionPool
 
     def save_subscription(
         self,
@@ -125,7 +131,9 @@ class PostgresSubscriptionsMixin:
                 return [
                     {
                         "id": row[0] if isinstance(row, tuple) else row["id"],
-                        "last_sequence": (row[1] if isinstance(row, tuple) else row["last_sequence"]),
+                        "last_sequence": (
+                            row[1] if isinstance(row, tuple) else row["last_sequence"]
+                        ),
                     }
                     for row in cur.fetchall()
                 ]

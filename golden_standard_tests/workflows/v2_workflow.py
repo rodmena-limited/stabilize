@@ -62,7 +62,9 @@ class SetupTask(Task):
         )
 
         if result.returncode == 0:
-            return TaskResult.success(outputs={"output_file": output_file, "retry_flag": retry_flag})
+            return TaskResult.success(
+                outputs={"output_file": output_file, "retry_flag": retry_flag}
+            )
         else:
             return TaskResult.terminal(error=f"Setup failed: {result.stderr}")
 
@@ -139,7 +141,9 @@ class TimeoutTask(RetryableTask):
         return TaskResult.running()
 
     def on_timeout(self, stage: StageExecution) -> TaskResult:
-        return TaskResult.failed_continue(error="Task timed out as expected", outputs={"timeout_occurred": True})
+        return TaskResult.failed_continue(
+            error="Task timed out as expected", outputs={"timeout_occurred": True}
+        )
 
 
 class CompensationTask(Task):
@@ -223,7 +227,9 @@ class EventReceiverTask(Task):
         else:
             token = f"::ERROR_NO_EVENT_{event_payload}"
 
-        result = subprocess.run(f"printf '{token}' >> '{output_file}'", shell=True, capture_output=True, text=True)
+        result = subprocess.run(
+            f"printf '{token}' >> '{output_file}'", shell=True, capture_output=True, text=True
+        )
 
         if result.returncode == 0:
             return TaskResult.success()
@@ -271,7 +277,9 @@ class LoopIterationTask(Task):
         else:
             token = f"::PHASE5_LOOP_ELSE_{counter}"
 
-        result = subprocess.run(f"printf '{token}' >> '{output_file}'", shell=True, capture_output=True, text=True)
+        result = subprocess.run(
+            f"printf '{token}' >> '{output_file}'", shell=True, capture_output=True, text=True
+        )
 
         if result.returncode == 0:
             return TaskResult.success()
@@ -290,7 +298,9 @@ class FinalizeTask(Task):
             return TaskResult.terminal(error="output_file not in context")
 
         # Append final token
-        subprocess.run(f"printf '::PHASE6_END' >> '{output_file}'", shell=True, capture_output=True, text=True)
+        subprocess.run(
+            f"printf '::PHASE6_END' >> '{output_file}'", shell=True, capture_output=True, text=True
+        )
 
         # Read the entire file content
         result = subprocess.run(f"cat '{output_file}'", shell=True, capture_output=True, text=True)

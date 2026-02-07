@@ -77,28 +77,28 @@ class TestPythonTaskDataFlow:
                     ref_id="stage_a",
                     type="python",
                     name="Stage A - Generate Data",
-                    context={
-                        "script": """
+                    context={"script": """
 RESULT = {"value": 42, "name": "test"}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_b",
                     type="python",
                     name="Stage B - Use Data",
                     requisite_stage_ref_ids={"stage_a"},
-                    context={
-                        "script": """
+                    context={"script": """
 # Access upstream output via INPUT
 upstream = INPUT.get("result", {})
 value = upstream.get("value", 0)
 name = upstream.get("name", "")
 RESULT = {"doubled": value * 2, "greeting": f"Hello, {name}!"}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
             ],
         )
@@ -126,35 +126,37 @@ RESULT = {"doubled": value * 2, "greeting": f"Hello, {name}!"}
                     type="python",
                     name="Stage A",
                     context={"script": "RESULT = {'n': 5}"},
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="b",
                     type="python",
                     name="Stage B",
                     requisite_stage_ref_ids={"a"},
-                    context={
-                        "script": """
+                    context={"script": """
 n = INPUT.get("result", {}).get("n", 0)
 RESULT = {"factorial": 1}
 for i in range(1, n + 1):
     RESULT["factorial"] *= i
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="c",
                     type="python",
                     name="Stage C",
                     requisite_stage_ref_ids={"b"},
-                    context={
-                        "script": """
+                    context={"script": """
 factorial = INPUT.get("result", {}).get("factorial", 0)
 RESULT = {"result": f"5! = {factorial}"}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
             ],
         )
@@ -189,39 +191,39 @@ RESULT = {"result": f"5! = {factorial}"}
                     type="python",
                     name="Branch A",
                     requisite_stage_ref_ids={"root"},
-                    context={
-                        "script": """
+                    context={"script": """
 base = int(INPUT.get("stdout", "0"))
 RESULT = {"value": base + 1, "source": "a"}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="branch_b",
                     type="python",
                     name="Branch B",
                     requisite_stage_ref_ids={"root"},
-                    context={
-                        "script": """
+                    context={"script": """
 base = int(INPUT.get("stdout", "0"))
 RESULT = {"value": base + 2, "source": "b"}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="branch_c",
                     type="python",
                     name="Branch C",
                     requisite_stage_ref_ids={"root"},
-                    context={
-                        "script": """
+                    context={"script": """
 base = int(INPUT.get("stdout", "0"))
 RESULT = {"value": base + 3, "source": "c"}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 # Join point - due to key collision, only one result survives
                 # but we verify the workflow completes and at least one branch's data is available
@@ -230,8 +232,7 @@ RESULT = {"value": base + 3, "source": "c"}
                     type="python",
                     name="Join",
                     requisite_stage_ref_ids={"branch_a", "branch_b", "branch_c"},
-                    context={
-                        "script": """
+                    context={"script": """
 # When multiple PythonTask branches complete, their "result" keys
 # get overwritten during merge. Only one branch's result survives.
 # This test verifies the workflow completes and data passes through.
@@ -239,9 +240,10 @@ result = INPUT.get("result", {})
 value = result.get("value", 0)
 source = result.get("source", "unknown")
 RESULT = {"received_value": value, "received_from": source, "all_completed": True}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
             ],
         )
@@ -273,49 +275,51 @@ RESULT = {"received_value": value, "received_from": source, "all_completed": Tru
                     type="python",
                     name="A",
                     context={"script": "RESULT = {'x': 100}"},
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="b",
                     type="python",
                     name="B",
                     requisite_stage_ref_ids={"a"},
-                    context={
-                        "script": """
+                    context={"script": """
 x = INPUT.get("result", {}).get("x", 0)
 RESULT = {"value": x * 2, "from": "b"}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="c",
                     type="python",
                     name="C",
                     requisite_stage_ref_ids={"a"},
-                    context={
-                        "script": """
+                    context={"script": """
 x = INPUT.get("result", {}).get("x", 0)
 RESULT = {"value": x * 3, "from": "c"}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="d",
                     type="python",
                     name="D",
                     requisite_stage_ref_ids={"b", "c"},
-                    context={
-                        "script": """
+                    context={"script": """
 # Due to key collision, only one of B or C's result is available
 result = INPUT.get("result", {})
 value = result.get("value", 0)
 source = result.get("from", "unknown")
 RESULT = {"received": value, "source": source}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
             ],
         )
@@ -352,15 +356,15 @@ class TestShellTaskDataFlow:
                     type="python",
                     name="Process Numbers",
                     requisite_stage_ref_ids={"shell_stage"},
-                    context={
-                        "script": """
+                    context={"script": """
 # Shell output is in stdout key
 stdout = INPUT.get("stdout", "")
 numbers = [int(x) for x in stdout.split()]
 RESULT = {"sum": sum(numbers), "count": len(numbers)}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
             ],
         )
@@ -423,14 +427,14 @@ RESULT = {"sum": sum(numbers), "count": len(numbers)}
                     type="python",
                     name="Check Exit Code",
                     requisite_stage_ref_ids={"shell_stage"},
-                    context={
-                        "script": """
+                    context={"script": """
 returncode = INPUT.get("returncode", -1)
 stdout = INPUT.get("stdout", "")
 RESULT = {"exit_ok": returncode == 0, "output": stdout}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
             ],
         )
@@ -472,7 +476,9 @@ class TestDockerTaskDataFlow:
                             "image": "alpine",
                             "command": "echo container_output_data",
                         },
-                        tasks=[TaskExecution.create("Run", "docker", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create("Run", "docker", stage_start=True, stage_end=True)
+                        ],
                     ),
                     StageExecution(
                         ref_id="shell_stage",
@@ -482,7 +488,9 @@ class TestDockerTaskDataFlow:
                         context={
                             "command": "echo 'Received: {stdout}'",
                         },
-                        tasks=[TaskExecution.create("Run", "shell", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create("Run", "shell", stage_start=True, stage_end=True)
+                        ],
                     ),
                 ],
             )
@@ -513,7 +521,9 @@ class TestDockerTaskDataFlow:
                         type="shell",
                         name="Generate Value",
                         context={"command": "printf '%s' test_data"},
-                        tasks=[TaskExecution.create("Run", "shell", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create("Run", "shell", stage_start=True, stage_end=True)
+                        ],
                     ),
                     StageExecution(
                         ref_id="docker_stage",
@@ -525,7 +535,9 @@ class TestDockerTaskDataFlow:
                             "image": "alpine",
                             "command": "echo 'docker received: {stdout}'",
                         },
-                        tasks=[TaskExecution.create("Run", "docker", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create("Run", "docker", stage_start=True, stage_end=True)
+                        ],
                     ),
                 ],
             )
@@ -670,14 +682,14 @@ class TestMixedTaskDataFlow:
                     type="python",
                     name="Process",
                     requisite_stage_ref_ids={"shell1"},
-                    context={
-                        "script": """
+                    context={"script": """
 stdout = INPUT.get("stdout", "0")
 value = int(stdout)
 RESULT = {"doubled": value * 2}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 # Stage 3: Another Python in parallel
                 StageExecution(
@@ -685,14 +697,14 @@ RESULT = {"doubled": value * 2}
                     type="python",
                     name="Parallel Process",
                     requisite_stage_ref_ids={"shell1"},
-                    context={
-                        "script": """
+                    context={"script": """
 stdout = INPUT.get("stdout", "0")
 value = int(stdout)
 RESULT = {"tripled": value * 3}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 # Stage 4: Final shell aggregation
                 # Note: Due to key collision between process and parallel,
@@ -739,20 +751,22 @@ class TestEdgeCases:
                     type="python",
                     name="Empty Output",
                     context={"script": "RESULT = {}"},
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="b",
                     type="python",
                     name="Handle Empty",
                     requisite_stage_ref_ids={"a"},
-                    context={
-                        "script": """
+                    context={"script": """
 result = INPUT.get("result", {})
 RESULT = {"empty": len(result) == 0}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
             ],
         )
@@ -774,8 +788,7 @@ RESULT = {"empty": len(result) == 0}
                     ref_id="a",
                     type="python",
                     name="Generate Complex",
-                    context={
-                        "script": """
+                    context={"script": """
 RESULT = {
     "users": [
         {"name": "Alice", "age": 30, "tags": ["admin", "user"]},
@@ -786,25 +799,26 @@ RESULT = {
         "nested": {"deep": {"value": 42}},
     },
 }
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="b",
                     type="python",
                     name="Access Nested",
                     requisite_stage_ref_ids={"a"},
-                    context={
-                        "script": """
+                    context={"script": """
 result = INPUT.get("result", {})
 users = result.get("users", [])
 deep_value = result.get("metadata", {}).get("nested", {}).get("deep", {}).get("value", 0)
 admin_count = sum(1 for u in users if "admin" in u.get("tags", []))
 RESULT = {"user_count": len(users), "deep_value": deep_value, "admin_count": admin_count}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
             ],
         )
@@ -830,14 +844,18 @@ RESULT = {"user_count": len(users), "deep_value": deep_value, "admin_count": adm
                     type="python",
                     name="Independent A",
                     context={"script": "RESULT = {'from': 'A'}"},
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="b",
                     type="python",
                     name="Independent B",
                     context={"script": "RESULT = {'from': 'B'}"},
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
             ],
         )
@@ -862,37 +880,39 @@ RESULT = {"user_count": len(users), "deep_value": deep_value, "admin_count": adm
                     type="python",
                     name="A",
                     context={"script": "RESULT = {'a_value': 'from_a'}"},
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="b",
                     type="python",
                     name="B",
                     requisite_stage_ref_ids={"a"},
-                    context={
-                        "script": """
+                    context={"script": """
 # B depends on A, so a_value should be available
 a_val = INPUT.get("result", {}).get("a_value", "missing")
 RESULT = {"b_value": 'from_b', "saw_a": a_val}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="c",
                     type="python",
                     name="C",
                     requisite_stage_ref_ids={"b"},  # Only depends on B, not A
-                    context={
-                        "script": """
+                    context={"script": """
 # C only depends on B directly
 result = INPUT.get("result", {})
 b_val = result.get("b_value", "missing")
 saw_a = result.get("saw_a", "missing")
 RESULT = {"c_saw_b": b_val, "c_saw_a_through_b": saw_a}
-"""
-                    },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+"""},
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
             ],
         )
@@ -921,7 +941,9 @@ class TestDataFlowWithInputs:
                     type="python",
                     name="A",
                     context={"script": "RESULT = {'upstream': 100}"},
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="b",
@@ -937,7 +959,9 @@ RESULT = {"sum": explicit + upstream}
 """,
                         "inputs": {"explicit_value": 50},
                     },
-                    tasks=[TaskExecution.create("Run", "python", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Run", "python", stage_start=True, stage_end=True)
+                    ],
                 ),
             ],
         )

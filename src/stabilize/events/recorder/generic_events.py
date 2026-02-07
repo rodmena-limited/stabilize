@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 class GenericEventsMixin:
     """Mixin providing generic event recording methods."""
 
+    if TYPE_CHECKING:
+
+        def _record(self, event: Event, connection: Any | None = None) -> Event: ...
+
     def record_status_change(
         self,
         entity_type: EntityType,

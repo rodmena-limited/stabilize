@@ -30,8 +30,14 @@ class StoreTransaction(ABC):
         return False
 
     @abstractmethod
-    def store_stage(self, stage: StageExecution) -> None:
-        """Store or update a stage within the transaction."""
+    def store_stage(self, stage: StageExecution, expected_phase: str | None = None) -> None:
+        """Store or update a stage within the transaction.
+
+        Args:
+            stage: The stage to store
+            expected_phase: If provided, adds status check to WHERE clause for
+                           phase-aware optimistic locking (CAS pattern).
+        """
         pass
 
     @abstractmethod
@@ -40,7 +46,7 @@ class StoreTransaction(ABC):
         pass
 
     @abstractmethod
-    def push_message(self, message: Message, delay: int = 0) -> None:
+    def push_message(self, message: Message, delay: float = 0) -> None:
         """Push a message to the queue within the transaction."""
         pass
 

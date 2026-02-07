@@ -178,7 +178,9 @@ class CompleteStageHandler(
                         self._plan_after_stages(stage)
                         after_stages = stage.first_after_stages()
 
-                    not_started = [s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED]
+                    not_started = [
+                        s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED
+                    ]
                     if not_started:
                         # Atomic: store stage + push all after stage messages together
                         # Store stage to persist any context changes from planning
@@ -205,7 +207,9 @@ class CompleteStageHandler(
                     if has_on_failure:
                         after_stages = stage.first_after_stages()
                         # Only push StartStage for on-failure stages that are NOT_STARTED
-                        not_started_on_failure = [s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED]
+                        not_started_on_failure = [
+                            s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED
+                        ]
                         if not_started_on_failure:
                             # Atomic: store stage + push all on-failure stage messages together
                             # Store stage to persist any context changes from planning
@@ -231,7 +235,11 @@ class CompleteStageHandler(
                 if self.event_recorder:
                     self.set_event_context(stage.execution.id if stage.execution else "")
                     if status.is_failure:
-                        error = stage.context.get("exception", {}).get("details", {}).get("error", "Unknown error")
+                        error = (
+                            stage.context.get("exception", {})
+                            .get("details", {})
+                            .get("error", "Unknown error")
+                        )
                         self.event_recorder.record_stage_failed(
                             stage,
                             error=str(error),
@@ -274,7 +282,9 @@ class CompleteStageHandler(
                     # BLOCKING FAILURE CHECK: If stage has _blocking_failure=True and
                     # status is FAILED_CONTINUE, treat it as a hard failure that blocks
                     # downstream execution. This prevents false-positive workflow success.
-                    if status == WorkflowStatus.FAILED_CONTINUE and stage.context.get("_blocking_failure", False):
+                    if status == WorkflowStatus.FAILED_CONTINUE and stage.context.get(
+                        "_blocking_failure", False
+                    ):
                         logger.warning(
                             "Stage %s has _blocking_failure=True, converting FAILED_CONTINUE to TERMINAL",
                             stage.name,
@@ -291,7 +301,10 @@ class CompleteStageHandler(
                                     stage_id=message.stage_id,
                                 )
                             )
-                            if stage.synthetic_stage_owner is None or stage.parent_stage_id is None:
+                            if (
+                                stage.synthetic_stage_owner is None
+                                or stage.parent_stage_id is None
+                            ):
                                 txn.push_message(
                                     CompleteWorkflow(
                                         execution_type=message.execution_type,
@@ -309,11 +322,15 @@ class CompleteStageHandler(
                         return
                     # Get downstream stages and parent info BEFORE transaction
                     execution = stage.execution
-                    downstream_stages = self.repository.get_downstream_stages(execution.id, stage.ref_id)
+                    downstream_stages = self.repository.get_downstream_stages(
+                        execution.id, stage.ref_id
+                    )
                     phase = stage.synthetic_stage_owner
 
                     # Apply split logic to determine which downstreams to activate
-                    activated_downstreams, skipped_downstreams = self._apply_split_logic(stage, downstream_stages)
+                    activated_downstreams, skipped_downstreams = self._apply_split_logic(
+                        stage, downstream_stages
+                    )
 
                     # Track activated branches for OR-join (WCP-7)
                     if stage.split_type == SplitType.OR and activated_downstreams:
@@ -335,7 +352,7 @@ class CompleteStageHandler(
                             )
 
                         logger.debug(
-                            "CompleteStage decision for %s: downstream=%d (activated=%d, skipped=%d), phase=%s, parent=%s",
+                            "CompleteStage decision for %s: down=%d (act=%d, skip=%d), phase=%s, parent=%s",
                             stage.name,
                             len(downstream_stages),
                             len(activated_downstreams),

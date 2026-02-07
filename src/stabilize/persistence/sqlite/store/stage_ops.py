@@ -26,7 +26,21 @@ if TYPE_CHECKING:
 class SqliteStageOpsMixin:
     """Mixin providing stage operations."""
 
-    def _get_connection(self) -> sqlite3.Connection: ...
+    if TYPE_CHECKING:
+
+        def _get_connection(self) -> sqlite3.Connection: ...
+
+        def get_upstream_stages(
+            self,
+            execution_id: str,
+            stage_ref_id: str,
+        ) -> list[StageExecution]: ...
+
+        def get_synthetic_stages(
+            self,
+            execution_id: str,
+            parent_stage_id: str,
+        ) -> list[StageExecution]: ...
 
     def store_stage(
         self,
@@ -104,7 +118,9 @@ class SqliteStageOpsMixin:
                         f"Optimistic lock failed for stage {stage.id} "
                         f"(version {stage.version}, expected_phase {expected_phase})"
                     )
-                raise ConcurrencyError(f"Optimistic lock failed for stage {stage.id} (version {stage.version})")
+                raise ConcurrencyError(
+                    f"Optimistic lock failed for stage {stage.id} (version {stage.version})"
+                )
 
             # Update local version
             stage.version += 1

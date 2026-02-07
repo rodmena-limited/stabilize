@@ -91,7 +91,9 @@ class StageExecution:
 
     # Split semantics (WCP-6)
     split_type: SplitType = SplitType.AND
-    split_conditions: dict[str, str] = field(default_factory=dict)  # downstream_ref_id -> condition expr
+    split_conditions: dict[str, str] = field(
+        default_factory=dict
+    )  # downstream_ref_id -> condition expr
 
     # Multi-instance configuration (WCP-12-15, 26, 27, 34-36)
     mi_config: MultiInstanceConfig | None = None
@@ -219,7 +221,11 @@ class StageExecution:
         """
         if not self.has_execution():
             return []
-        return [stage for stage in self.execution.stages if stage.ref_id in self.requisite_stage_ref_ids]
+        return [
+            stage
+            for stage in self.execution.stages
+            if stage.ref_id in self.requisite_stage_ref_ids
+        ]
 
     def downstream_stages(self) -> list[StageExecution]:
         """
@@ -230,7 +236,11 @@ class StageExecution:
         """
         if not self.has_execution():
             return []
-        return [stage for stage in self.execution.stages if self.ref_id in stage.requisite_stage_ref_ids]
+        return [
+            stage
+            for stage in self.execution.stages
+            if self.ref_id in stage.requisite_stage_ref_ids
+        ]
 
     def all_upstream_stages_complete(self) -> bool:
         """
@@ -256,7 +266,10 @@ class StageExecution:
             if upstream.status in halt_statuses:
                 return True
             # Check recursively for NOT_STARTED stages
-            if upstream.status == WorkflowStatus.NOT_STARTED and upstream.any_upstream_stages_failed():
+            if (
+                upstream.status == WorkflowStatus.NOT_STARTED
+                and upstream.any_upstream_stages_failed()
+            ):
                 return True
         return False
 
@@ -282,7 +295,9 @@ class StageExecution:
     def after_stages(self) -> list[StageExecution]:
         """Get synthetic stages that run after this stage completes."""
         return [
-            stage for stage in self.synthetic_stages() if stage.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER
+            stage
+            for stage in self.synthetic_stages()
+            if stage.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER
         ]
 
     def first_before_stages(self) -> list[StageExecution]:

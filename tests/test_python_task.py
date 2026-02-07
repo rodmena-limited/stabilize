@@ -192,7 +192,10 @@ class TestPythonTaskValidation:
         result = task.execute(stage)
 
         assert result.status == WorkflowStatus.TERMINAL
-        assert "script" in result.context["error"].lower() or "module" in result.context["error"].lower()
+        assert (
+            "script" in result.context["error"].lower()
+            or "module" in result.context["error"].lower()
+        )
 
     def test_multiple_execution_modes(self) -> None:
         """Test error when multiple execution modes specified."""

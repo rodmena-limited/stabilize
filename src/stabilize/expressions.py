@@ -147,10 +147,10 @@ def _eval_node(node: ast.AST, context: dict[str, Any]) -> Any:
 
     if isinstance(node, ast.UnaryOp):
         operand = _eval_node(node.operand, context)
-        func = _SAFE_UNARY_OPS.get(type(node.op))
-        if func is None:
+        unary_func = _SAFE_UNARY_OPS.get(type(node.op))
+        if unary_func is None:
             raise ExpressionError(f"Unsupported unary operator: {type(node.op).__name__}")
-        return func(operand)
+        return unary_func(operand)
 
     if isinstance(node, ast.IfExp):
         test = _eval_node(node.test, context)

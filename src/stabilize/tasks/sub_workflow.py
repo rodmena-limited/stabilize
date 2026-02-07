@@ -9,6 +9,7 @@ Supports recursion depth tracking to prevent infinite recursion.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Any
 
 from stabilize.models.status import WorkflowStatus
@@ -43,13 +44,17 @@ class SubWorkflowTask(RetryableTask):
     def aliases(self) -> list[str]:
         return ["subWorkflow", "sub_workflow", "childWorkflow"]
 
-    def get_timeout(self) -> int:
+    def get_timeout(self) -> timedelta:
         """Default timeout: 30 minutes."""
-        return 30 * 60 * 1000
+        return timedelta(minutes=30)
 
-    def get_backoff_period(self) -> int:
+    def get_backoff_period(
+        self,
+        stage: Any = None,
+        duration: timedelta | None = None,
+    ) -> timedelta:
         """Poll every 5 seconds."""
-        return 5000
+        return timedelta(seconds=5)
 
     def execute(self, stage: Any) -> TaskResult:
         """Execute or poll the sub-workflow."""
@@ -89,28 +94,33 @@ class SubWorkflowTask(RetryableTask):
         )
 
         try:
+            from stabilize.models.workflow import Workflow
             from stabilize.orchestrator import Orchestrator
 
             orchestrator = Orchestrator.get_instance()
             if orchestrator is None:
                 return TaskResult.terminal("No Orchestrator instance available for sub-workflow")
 
-            child_id = orchestrator.start(
-                name=config.get("name", f"sub-workflow-depth-{depth + 1}"),
+            child_workflow = Workflow.create(
                 application=config.get("application", "stabilize"),
+                name=config.get("name", f"sub-workflow-depth-{depth + 1}"),
                 stages=config.get("stages", []),
                 context=child_context,
             )
 
+            if orchestrator.store:
+                orchestrator.store.store(child_workflow)
+            orchestrator.start(child_workflow)
+
             logger.info(
                 "Started child workflow %s at recursion depth %d",
-                child_id,
+                child_workflow.id,
                 depth + 1,
             )
 
             return TaskResult.running(
                 context={
-                    "_sub_workflow_id": child_id,
+                    "_sub_workflow_id": child_workflow.id,
                     "_recursion_depth": depth + 1,
                 },
             )

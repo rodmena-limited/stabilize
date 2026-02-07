@@ -37,7 +37,10 @@ class TestMessageDeduplicationRace:
         # For SQLite :memory:, each thread gets its own database (thread-local)
         # So we need to use file-based SQLite for this test
         if backend == "sqlite":
-            from stabilize.persistence.connection import ConnectionManager, SingletonMeta
+            from stabilize.persistence.connection import (
+                ConnectionManager,
+                SingletonMeta,
+            )
             from stabilize.persistence.sqlite import SqliteWorkflowStore
             from stabilize.queue.sqlite import SqliteQueue
 
@@ -187,7 +190,9 @@ class TestMessageDeduplicationRace:
                 "Handlers must be idempotent to handle this."
             )
 
-    def test_handler_idempotency_is_required(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_handler_idempotency_is_required(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """
         Verify that handlers must be idempotent because of the deduplication race.
 
@@ -237,7 +242,9 @@ class TestMessageDeduplicationRace:
         final_task = next(t for t in final_stage.tasks if t.id == task.id)
         assert final_task.status == WorkflowStatus.SUCCEEDED
 
-    def test_deduplication_stress(self, repository: WorkflowStore, queue: Queue, backend: str, tmp_path: Any) -> None:
+    def test_deduplication_stress(
+        self, repository: WorkflowStore, queue: Queue, backend: str, tmp_path: Any
+    ) -> None:
         """
         Stress test: 20 threads trying to process the same message.
 
@@ -248,7 +255,10 @@ class TestMessageDeduplicationRace:
         """
         # For SQLite :memory:, use file-based DB for real concurrency test
         if backend == "sqlite":
-            from stabilize.persistence.connection import ConnectionManager, SingletonMeta
+            from stabilize.persistence.connection import (
+                ConnectionManager,
+                SingletonMeta,
+            )
             from stabilize.persistence.sqlite import SqliteWorkflowStore
             from stabilize.queue.sqlite import SqliteQueue
 
@@ -375,7 +385,9 @@ class TestMessageDeduplicationRace:
 class TestMessageDeduplicationEdgeCases:
     """Edge cases for message deduplication."""
 
-    def test_mark_processed_with_none_handler_type(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_mark_processed_with_none_handler_type(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test marking a message with None handler_type."""
         message_id = f"null-handler-{time.time()}"
 

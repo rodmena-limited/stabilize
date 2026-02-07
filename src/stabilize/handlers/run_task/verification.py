@@ -116,7 +116,9 @@ def verify_task_outputs(
     if verifier_type == "output":
         _verify_with_output_verifier(temp_stage, verification_config, max_retries, retry_delay)
     elif verifier_type == "callable":
-        _verify_with_callable_verifier(temp_stage, verification_config, max_retries, retry_delay, task_registry)
+        _verify_with_callable_verifier(
+            temp_stage, verification_config, max_retries, retry_delay, task_registry
+        )
 
 
 def _verify_with_output_verifier(

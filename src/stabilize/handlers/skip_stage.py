@@ -22,6 +22,7 @@ from stabilize.queue.messages import (
 from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
@@ -46,8 +47,11 @@ class SkipStageHandler(StabilizeHandler[SkipStage]):
         repository: WorkflowStore,
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
+        event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(queue, repository, retry_delay, handler_config)
+        super().__init__(
+            queue, repository, retry_delay, handler_config, event_recorder=event_recorder
+        )
 
     @property
     def message_type(self) -> type[SkipStage]:
@@ -85,6 +89,12 @@ class SkipStageHandler(StabilizeHandler[SkipStage]):
             stage.end_time = self.current_time_millis()
 
             logger.info("Skipped stage %s (%s)", stage.name, stage.id)
+
+            if self.event_recorder:
+                self.set_event_context(stage.execution.id if stage.execution else "")
+                self.event_recorder.record_stage_skipped(
+                    stage, reason="Stage skipped", source_handler="SkipStageHandler"
+                )
 
             # Get downstream stages and parent info BEFORE transaction
             execution = stage.execution

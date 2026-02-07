@@ -199,7 +199,9 @@ SIMPLE_HTTP_WORKFLOW = {
 # =============================================================================
 
 
-def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
+def setup_pipeline_runner(
+    store: WorkflowStore, queue: Queue
+) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with HighwayTask registered."""
     task_registry = TaskRegistry()
     task_registry.register("highway", HighwayTask)
@@ -287,7 +289,11 @@ def example_simple_highway() -> None:
         print("Highway Run ID: {}".format(outputs.get("highway_run_id")))
         print("Highway Status: {}".format(outputs.get("highway_status")))
         if outputs.get("highway_result"):
-            print("Highway Result: {}".format(json.dumps(outputs.get("highway_result"), indent=2)[:500]))
+            print(
+                "Highway Result: {}".format(
+                    json.dumps(outputs.get("highway_result"), indent=2)[:500]
+                )
+            )
     else:
         print("No outputs received (check Highway logs)")
 

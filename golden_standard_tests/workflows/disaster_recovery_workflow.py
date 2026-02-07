@@ -64,7 +64,9 @@ class DRSetupTask(Task):
         )
 
         if result.returncode == 0:
-            return TaskResult.success(outputs={"output_file": output_file, "retry_flag": retry_flag})
+            return TaskResult.success(
+                outputs={"output_file": output_file, "retry_flag": retry_flag}
+            )
         else:
             return TaskResult.terminal(error=f"Setup failed: {result.stderr}")
 
@@ -135,7 +137,9 @@ class DRTimeoutTask(RetryableTask):
         return TaskResult.running()
 
     def on_timeout(self, stage: StageExecution) -> TaskResult:
-        return TaskResult.failed_continue(error="Task timed out as expected", outputs={"timeout_occurred": True})
+        return TaskResult.failed_continue(
+            error="Task timed out as expected", outputs={"timeout_occurred": True}
+        )
 
 
 class DRCompensationTask(Task):
@@ -154,7 +158,9 @@ class DRCompensationTask(Task):
         else:
             token = "\\n::BRANCH_B_COMPENSATION_SUCCESS"
 
-        result = subprocess.run(f"printf '{token}' >> '{output_file}'", shell=True, capture_output=True, text=True)
+        result = subprocess.run(
+            f"printf '{token}' >> '{output_file}'", shell=True, capture_output=True, text=True
+        )
 
         if result.returncode == 0:
             return TaskResult.success()
@@ -207,7 +213,9 @@ class DREventReceiverTask(Task):
         else:
             token = f"\\n::ERROR_NO_EVENT_{event_payload}"
 
-        result = subprocess.run(f"printf '{token}' >> '{output_file}'", shell=True, capture_output=True, text=True)
+        result = subprocess.run(
+            f"printf '{token}' >> '{output_file}'", shell=True, capture_output=True, text=True
+        )
 
         if result.returncode == 0:
             return TaskResult.success()

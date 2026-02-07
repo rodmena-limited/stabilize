@@ -52,11 +52,16 @@ class PostgresTransaction(StoreTransaction):
             obj.version = original_version
         self._staged_objects.clear()
 
-    def store_stage(self, stage: StageExecution) -> None:
-        """Store or update a stage within the transaction."""
+    def store_stage(self, stage: StageExecution, expected_phase: str | None = None) -> None:
+        """Store or update a stage within the transaction.
+
+        Args:
+            stage: Stage to store
+            expected_phase: If provided, passed to store.store_stage() for CAS.
+        """
         # Track original version before store (which may increment it)
         original_version = stage.version
-        self._store.store_stage(stage, connection=self._conn)
+        self._store.store_stage(stage, expected_phase=expected_phase, connection=self._conn)
         # Track for potential rollback (store after because store_stage increments version)
         self._staged_objects.append((stage, original_version))
         # Also track tasks that were updated
@@ -83,7 +88,7 @@ class PostgresTransaction(StoreTransaction):
                 },
             )
 
-    def push_message(self, message: Message, delay: int = 0) -> None:
+    def push_message(self, message: Message, delay: float = 0) -> None:
         """Push a message to the queue within the transaction.
 
         Raises:
@@ -97,7 +102,9 @@ class PostgresTransaction(StoreTransaction):
         from datetime import timedelta
 
         # Use the connection to push, ensuring atomicity
-        self._queue.push(message, delay=timedelta(seconds=delay) if delay else None, connection=self._conn)
+        self._queue.push(
+            message, delay=timedelta(seconds=delay) if delay else None, connection=self._conn
+        )
 
     def mark_message_processed(
         self,
@@ -125,4 +132,6 @@ class PostgresTransaction(StoreTransaction):
 
 
 # Forward reference for type hint
-from stabilize.persistence.postgres.store import PostgresWorkflowStore  # noqa: E402, F401
+from stabilize.persistence.postgres.store import (  # noqa: E402, F401
+    PostgresWorkflowStore,
+)

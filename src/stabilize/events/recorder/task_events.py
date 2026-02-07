@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 class TaskEventsMixin:
     """Mixin providing task event recording methods."""
 
+    if TYPE_CHECKING:
+
+        def _record(self, event: Event, connection: Any | None = None) -> Event: ...
+
     def record_task_started(
         self,
         task: TaskExecution,
@@ -60,7 +64,9 @@ class TaskEventsMixin:
                 "name": task.name,
                 "status": task.status.name,
                 "end_time": task.end_time,
-                "duration_ms": (task.end_time - task.start_time if task.start_time and task.end_time else None),
+                "duration_ms": (
+                    task.end_time - task.start_time if task.start_time and task.end_time else None
+                ),
                 "outputs": outputs or {},
             },
             metadata=get_event_metadata(source_handler),
@@ -109,7 +115,11 @@ class TaskEventsMixin:
             data={
                 "name": task.name,
                 "attempt": attempt,
-                "last_error": task.exception_details.exception if task.exception_details else None,
+                "last_error": (
+                    task.task_exception_details.get("exception")
+                    if task.task_exception_details
+                    else None
+                ),
             },
             metadata=get_event_metadata(source_handler),
         )

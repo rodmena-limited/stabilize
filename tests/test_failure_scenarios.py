@@ -278,9 +278,9 @@ class TestDeadLetterQueue:
             result = conn.execute(f"SELECT attempts FROM {sqlite_queue.table_name}")
             row = result.fetchone()
             if row:
-                assert row["attempts"] >= sqlite_queue.max_attempts, (
-                    f"Message attempts={row['attempts']} should be >= {sqlite_queue.max_attempts}"
-                )
+                assert (
+                    row["attempts"] >= sqlite_queue.max_attempts
+                ), f"Message attempts={row['attempts']} should be >= {sqlite_queue.max_attempts}"
 
         assert moved == 1, f"Expected 1 message to be moved, but {moved} were moved"
         assert sqlite_queue.dlq_size() == 1
@@ -370,21 +370,6 @@ class TestRecovery:
         # Should not fail even with no workflows
         results = recovery.recover_pending_workflows(application="nonexistent-app")
         assert len(results) == 0
-
-    @pytest.mark.skip(reason="Requires integration with retrieve_by_application")
-    def test_recover_pending_workflow(self, sqlite_store, sqlite_queue, sample_workflow):
-        """Verify pending workflow is recovered on startup."""
-        pass
-
-    @pytest.mark.skip(reason="Requires integration with retrieve_by_application")
-    def test_skip_completed_workflow(self, sqlite_store, sqlite_queue, sample_workflow):
-        """Verify completed workflows are skipped during recovery."""
-        pass
-
-    @pytest.mark.skip(reason="Requires integration with retrieve_by_application")
-    def test_recover_on_startup_convenience(self, sqlite_store, sqlite_queue, sample_workflow):
-        """Verify convenience function works."""
-        pass
 
 
 # =============================================================================

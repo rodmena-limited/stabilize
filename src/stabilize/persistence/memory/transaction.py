@@ -22,18 +22,18 @@ class InMemoryTransaction(StoreTransaction):
     def __init__(self, store: InMemoryWorkflowStore, queue: Queue | None) -> None:
         self._store = store
         self._queue = queue
-        self._stages: list[StageExecution] = []
+        self._stages: list[tuple[StageExecution, str | None]] = []
         self._workflows: list[Workflow] = []
-        self._messages: list[tuple[Message, int]] = []
+        self._messages: list[tuple[Message, float]] = []
         self._processed: list[tuple[str, str | None, str | None]] = []
 
-    def store_stage(self, stage: StageExecution) -> None:
-        self._stages.append(stage)
+    def store_stage(self, stage: StageExecution, expected_phase: str | None = None) -> None:
+        self._stages.append((stage, expected_phase))
 
     def update_workflow_status(self, workflow: Workflow) -> None:
         self._workflows.append(workflow)
 
-    def push_message(self, message: Message, delay: int = 0) -> None:
+    def push_message(self, message: Message, delay: float = 0) -> None:
         self._messages.append((message, delay))
 
     def mark_message_processed(
@@ -55,7 +55,7 @@ class InMemoryTransaction(StoreTransaction):
             snapshot: dict[str, Workflow] = {}
             affected_ids = set()
 
-            for s in self._stages:
+            for s, _ in self._stages:
                 affected_ids.add(s.execution.id)
             for w in self._workflows:
                 affected_ids.add(w.id)
@@ -86,7 +86,7 @@ class InMemoryTransaction(StoreTransaction):
                     stored.paused = workflow.paused
 
                 # Update stages
-                for stage in self._stages:
+                for stage, expected_phase in self._stages:
                     execution_id = stage.execution.id
                     if execution_id not in self._store._executions:
                         continue  # Should raise?
@@ -97,6 +97,14 @@ class InMemoryTransaction(StoreTransaction):
                     found = False
                     for i, s in enumerate(execution.stages):
                         if s.id == stage.id:
+                            # Check expected_phase if provided (CAS pattern)
+                            if expected_phase is not None and s.status.name != expected_phase:
+                                from stabilize.errors import ConcurrencyError
+
+                                raise ConcurrencyError(
+                                    f"Optimistic lock failed for stage {stage.id} "
+                                    f"(expected_phase {expected_phase}, actual {s.status.name})"
+                                )
                             execution.stages[i] = copy.deepcopy(stage)
                             execution.stages[i].execution = execution
                             found = True

@@ -42,6 +42,7 @@ from stabilize.queue.messages import (
 from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
     from stabilize.persistence.store import WorkflowStore
@@ -72,8 +73,11 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
         repository: WorkflowStore,
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
+        event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(queue, repository, retry_delay, handler_config)
+        super().__init__(
+            queue, repository, retry_delay, handler_config, event_recorder=event_recorder
+        )
         self.txn_helper = TransactionHelper(repository, queue)
 
     @property
@@ -196,7 +200,9 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             )
 
             # Handle source stage based on jump direction
-            self._handle_source_stage(message, execution, source_stage, target_stage, is_backward_jump)
+            self._handle_source_stage(
+                message, execution, source_stage, target_stage, is_backward_jump
+            )
 
             # Get jump count for context updates
             jump_count = source_stage.context.get("_jump_count", 0)
@@ -226,7 +232,9 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                     "from_stage": source_stage.ref_id,
                     "to_stage": message.target_stage_ref_id,
                     "jump_number": new_jump_count,
-                    "context_keys": (list(message.jump_context.keys()) if message.jump_context else []),
+                    "context_keys": (
+                        list(message.jump_context.keys()) if message.jump_context else []
+                    ),
                 }
             )
 
@@ -248,7 +256,9 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                     "_jump_count": new_jump_count,
                     "_jump_history": jump_history,
                 }
-                source_target_status = WorkflowStatus.NOT_STARTED if is_backward_jump else WorkflowStatus.SUCCEEDED
+                source_target_status = (
+                    WorkflowStatus.NOT_STARTED if is_backward_jump else WorkflowStatus.SUCCEEDED
+                )
                 self.retry_on_concurrency_error(
                     partial(
                         self._reload_reset_and_store,

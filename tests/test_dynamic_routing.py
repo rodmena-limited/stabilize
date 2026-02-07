@@ -286,7 +286,9 @@ class TestJumpCountLimiting:
         """Verify max jump count is enforced to prevent infinite loops."""
         InfiniteLoopTask.jump_count = 0
 
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"infinite_loop": InfiniteLoopTask})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"infinite_loop": InfiniteLoopTask}
+        )
 
         execution = Workflow.create(
             application="test",
@@ -341,7 +343,9 @@ class TestJumpToNonexistentStage:
         RouterTask.target_stage = "nonexistent_stage"  # This doesn't exist
         RouterTask.jump_context = {}
 
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"router": RouterTask})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"router": RouterTask}
+        )
 
         execution = Workflow.create(
             application="test",
@@ -396,7 +400,9 @@ class TestBackwardCompatibility:
                 # Regular redirect without target
                 return TaskResult.redirect(context={"redirected": True})
 
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"regular_redirect": RegularRedirectTask})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"regular_redirect": RegularRedirectTask}
+        )
 
         execution = Workflow.create(
             application="test",

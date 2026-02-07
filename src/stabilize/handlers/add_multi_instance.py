@@ -16,6 +16,7 @@ from stabilize.queue.messages import AddMultiInstance, StartStage
 from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
@@ -41,8 +42,11 @@ class AddMultiInstanceHandler(StabilizeHandler[AddMultiInstance]):
         repository: WorkflowStore,
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
+        event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(queue, repository, retry_delay, handler_config)
+        super().__init__(
+            queue, repository, retry_delay, handler_config, event_recorder=event_recorder
+        )
 
     @property
     def message_type(self) -> type[AddMultiInstance]:
@@ -59,7 +63,7 @@ class AddMultiInstanceHandler(StabilizeHandler[AddMultiInstance]):
         """Inner handle logic to be retried."""
 
         def on_stage(stage: StageExecution) -> None:
-            from stabilize.models.stage import StageExecution as SE
+            from stabilize.models.stage import StageExecution as StageExec
 
             if stage.mi_config is None:
                 logger.warning(
@@ -93,7 +97,7 @@ class AddMultiInstanceHandler(StabilizeHandler[AddMultiInstance]):
             instance_context["_mi_parent_ref_id"] = stage.ref_id
             instance_context["_mi_instance_index"] = instance_count
 
-            new_instance = SE.create(
+            new_instance = StageExec.create(
                 type=stage.type,
                 name=f"{stage.name} [instance {instance_count}]",
                 ref_id=instance_ref_id,

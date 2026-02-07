@@ -217,7 +217,8 @@ def assert_context_type(
     value = assert_context(stage, key, message)
     if not isinstance(value, expected_type):
         raise ContextError(
-            message or f"Context key '{key}' must be {expected_type.__name__}, got {type(value).__name__}",
+            message
+            or f"Context key '{key}' must be {expected_type.__name__}, got {type(value).__name__}",
             key=key,
         )
     return value
@@ -313,7 +314,8 @@ def assert_output_type(
     value = assert_output(stage, key, message)
     if not isinstance(value, expected_type):
         raise OutputError(
-            message or f"Output key '{key}' must be {expected_type.__name__}, got {type(value).__name__}",
+            message
+            or f"Output key '{key}' must be {expected_type.__name__}, got {type(value).__name__}",
             key=key,
         )
     return value

@@ -126,13 +126,19 @@ class MonitorDisplay:
                         show_details(self.stdscr, self._get_selected_item(), self.data_fetcher)
                         need_render = True
                     elif key == ord("p"):
-                        handle_workflow_action(self.stdscr, "pause", self._get_selected_item(), self.data_fetcher)
+                        handle_workflow_action(
+                            self.stdscr, "pause", self._get_selected_item(), self.data_fetcher
+                        )
                         need_render = True
                     elif key == ord("r"):
-                        handle_workflow_action(self.stdscr, "resume", self._get_selected_item(), self.data_fetcher)
+                        handle_workflow_action(
+                            self.stdscr, "resume", self._get_selected_item(), self.data_fetcher
+                        )
                         need_render = True
                     elif key == ord("c"):
-                        handle_workflow_action(self.stdscr, "cancel", self._get_selected_item(), self.data_fetcher)
+                        handle_workflow_action(
+                            self.stdscr, "cancel", self._get_selected_item(), self.data_fetcher
+                        )
                         need_render = True
                     elif key == curses.KEY_RESIZE:
                         self.stdscr.clear()

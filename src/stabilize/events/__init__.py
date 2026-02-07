@@ -146,7 +146,7 @@ __all__ = [
 
 # PostgreSQL support is optional
 try:
-    from stabilize.events.store.postgres import PostgresEventStore
+    from stabilize.events.store.postgres import PostgresEventStore  # noqa: F401
 
     __all__.append("PostgresEventStore")
 except ImportError:

@@ -7,14 +7,20 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EntityType, Event, EventMetadata, EventType
 from stabilize.events.store.interface import EventQuery
 
+if TYPE_CHECKING:
+    from psycopg_pool import ConnectionPool
+
 
 class PostgresEventsMixin:
     """Mixin providing event append, query, and retrieval methods."""
+
+    if TYPE_CHECKING:
+        _pool: ConnectionPool
 
     def append(self, event: Event, connection: Any | None = None) -> Event:
         """Append a single event to the store."""
@@ -255,7 +261,8 @@ class PostgresEventsMixin:
                 row = cur.fetchone()
                 if row is None:
                     return 0
-                return row[0] if isinstance(row, tuple) else row.get("count", 0)
+                count_val = row[0] if isinstance(row, tuple) else row.get("count", 0)
+                return count_val if count_val is not None else 0
 
     def _row_to_event(self, row: Any) -> Event:
         """Convert a database row to an Event."""

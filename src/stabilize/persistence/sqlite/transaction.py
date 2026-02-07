@@ -62,7 +62,7 @@ class AtomicTransaction(StoreTransaction):
             stage.version = original_version
         self._staged_objects.clear()
 
-    def store_stage(self, stage: StageExecution) -> None:
+    def store_stage(self, stage: StageExecution, expected_phase: str | None = None) -> None:
         """Store or update a stage within the transaction.
 
         This performs the same operations as SqliteWorkflowStore.store_stage()
@@ -71,6 +71,8 @@ class AtomicTransaction(StoreTransaction):
 
         Args:
             stage: Stage to store/update
+            expected_phase: If provided, adds status check to WHERE clause for
+                           phase-aware optimistic locking (CAS pattern).
         """
         # Check if stage exists
         result = self._conn.execute(
@@ -81,30 +83,61 @@ class AtomicTransaction(StoreTransaction):
 
         if exists:
             # Update with optimistic locking
-            cursor = self._conn.execute(
-                """
-                UPDATE stage_executions SET
-                    status = :status,
-                    context = :context,
-                    outputs = :outputs,
-                    start_time = :start_time,
-                    end_time = :end_time,
-                    version = version + 1
-                WHERE id = :id AND version = :version
-                """,
-                {
-                    "id": stage.id,
-                    "status": stage.status.name,
-                    "context": json.dumps(stage.context),
-                    "outputs": json.dumps(stage.outputs),
-                    "start_time": stage.start_time,
-                    "end_time": stage.end_time,
-                    "version": stage.version,
-                },
-            )
+            if expected_phase is not None:
+                cursor = self._conn.execute(
+                    """
+                    UPDATE stage_executions SET
+                        status = :status,
+                        context = :context,
+                        outputs = :outputs,
+                        start_time = :start_time,
+                        end_time = :end_time,
+                        version = version + 1
+                    WHERE id = :id AND version = :version AND status = :expected_phase
+                    """,
+                    {
+                        "id": stage.id,
+                        "status": stage.status.name,
+                        "context": json.dumps(stage.context),
+                        "outputs": json.dumps(stage.outputs),
+                        "start_time": stage.start_time,
+                        "end_time": stage.end_time,
+                        "version": stage.version,
+                        "expected_phase": expected_phase,
+                    },
+                )
+            else:
+                cursor = self._conn.execute(
+                    """
+                    UPDATE stage_executions SET
+                        status = :status,
+                        context = :context,
+                        outputs = :outputs,
+                        start_time = :start_time,
+                        end_time = :end_time,
+                        version = version + 1
+                    WHERE id = :id AND version = :version
+                    """,
+                    {
+                        "id": stage.id,
+                        "status": stage.status.name,
+                        "context": json.dumps(stage.context),
+                        "outputs": json.dumps(stage.outputs),
+                        "start_time": stage.start_time,
+                        "end_time": stage.end_time,
+                        "version": stage.version,
+                    },
+                )
 
             if cursor.rowcount == 0:
-                raise ConcurrencyError(f"Optimistic lock failed for stage {stage.id} (version {stage.version})")
+                if expected_phase is not None:
+                    raise ConcurrencyError(
+                        f"Optimistic lock failed for stage {stage.id} "
+                        f"(version {stage.version}, expected_phase {expected_phase})"
+                    )
+                raise ConcurrencyError(
+                    f"Optimistic lock failed for stage {stage.id} (version {stage.version})"
+                )
 
             # Track original version for rollback before incrementing
             self._staged_objects.append((stage, stage.version))
@@ -149,7 +182,7 @@ class AtomicTransaction(StoreTransaction):
     def push_message(
         self,
         message: Message,
-        delay: int = 0,
+        delay: float = 0,
     ) -> None:
         """Push a message to the queue within the transaction.
 

@@ -68,7 +68,9 @@ def reset_tasks() -> None:
 class TestSyntheticStageOrdering:
     """Test synthetic stage execution ordering."""
 
-    def test_before_stage_runs_before_main_tasks(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_before_stage_runs_before_main_tasks(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """
         Test that STAGE_BEFORE synthetic stage completes before main stage tasks start.
         """
@@ -136,9 +138,13 @@ class TestSyntheticStageOrdering:
         )
 
         if before_idx >= 0 and main_idx >= 0:
-            assert before_idx < main_idx, f"Before stage should run first. Order: {OrderTracker.execution_order}"
+            assert (
+                before_idx < main_idx
+            ), f"Before stage should run first. Order: {OrderTracker.execution_order}"
 
-    def test_after_stage_runs_after_main_tasks(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_after_stage_runs_after_main_tasks(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """
         Test that STAGE_AFTER synthetic stage runs after main stage tasks complete.
         """
@@ -205,13 +211,17 @@ class TestSyntheticStageOrdering:
         )
 
         if main_idx >= 0 and after_idx >= 0:
-            assert main_idx < after_idx, f"Main should run before after stage. Order: {OrderTracker.execution_order}"
+            assert (
+                main_idx < after_idx
+            ), f"Main should run before after stage. Order: {OrderTracker.execution_order}"
 
 
 class TestSyntheticStageResetOnJump:
     """Test that synthetic stages are reset when parent is jumped to."""
 
-    def test_synthetic_reset_on_backward_jump(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_synthetic_reset_on_backward_jump(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """
         Test that jumping back to a stage resets its synthetic stages too.
         """
@@ -296,17 +306,23 @@ class TestSyntheticStageResetOnJump:
         assert result.status == WorkflowStatus.SUCCEEDED, f"Status: {result.status}"
 
         # Setup task should have run twice (once per parent execution)
-        assert CountingSetupTask.count == 2, f"Setup should run twice after jump. Got {CountingSetupTask.count}"
+        assert (
+            CountingSetupTask.count == 2
+        ), f"Setup should run twice after jump. Got {CountingSetupTask.count}"
 
 
 class TestSyntheticStageEdgeCases:
     """Edge cases for synthetic stages."""
 
-    def test_multiple_before_stages(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_multiple_before_stages(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test handling of multiple STAGE_BEFORE stages for same parent."""
         reset_tasks()
 
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"order": OrderTracker})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"order": OrderTracker}
+        )
 
         parent_stage = StageExecution(
             ref_id="parent_stage",
@@ -370,11 +386,15 @@ class TestSyntheticStageEdgeCases:
         # All three should have executed
         assert len(OrderTracker.execution_order) >= 3
 
-    def test_nested_synthetic_stages(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_nested_synthetic_stages(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test parent with both before AND after synthetic stages."""
         reset_tasks()
 
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"order": OrderTracker})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"order": OrderTracker}
+        )
 
         parent_stage = StageExecution(
             ref_id="parent_stage",
@@ -441,7 +461,9 @@ class TestSyntheticStageEdgeCases:
 class TestSyntheticStageFailure:
     """Test synthetic stage failure handling."""
 
-    def test_before_stage_failure_prevents_main(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_before_stage_failure_prevents_main(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test that if STAGE_BEFORE fails, main stage doesn't run."""
         reset_tasks()
 
@@ -449,7 +471,9 @@ class TestSyntheticStageFailure:
             def execute(self, stage: StageExecution) -> TaskResult:
                 return TaskResult.terminal("Intentional failure")
 
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"fail": FailTask, "order": OrderTracker})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"fail": FailTask, "order": OrderTracker}
+        )
 
         parent_stage = StageExecution(
             ref_id="parent_stage",

@@ -177,12 +177,12 @@ def classify_error(error: Exception) -> ErrorCode:
     """
     # Check for explicit error_code attribute (Stabilize exceptions)
     if hasattr(error, "error_code"):
-        return error.error_code
+        return error.error_code  # type: ignore[no-any-return]
 
     # Check the cause chain for Stabilize exceptions with error_code
     for exc in error_chain(error):
         if hasattr(exc, "error_code"):
-            return exc.error_code
+            return exc.error_code  # type: ignore[no-any-return]
 
     # Type-based classification for common exception types
     error_type = type(error).__name__.lower()
@@ -193,7 +193,10 @@ def classify_error(error: Exception) -> ErrorCode:
         return ErrorCode.TASK_TIMEOUT
 
     # Connection/network errors
-    if any(pattern in error_type for pattern in ["connection", "network", "socket", "dns", "http", "url"]):
+    if any(
+        pattern in error_type
+        for pattern in ["connection", "network", "socket", "dns", "http", "url"]
+    ):
         return ErrorCode.NETWORK_ERROR
 
     # Auth errors
@@ -222,7 +225,9 @@ def classify_error(error: Exception) -> ErrorCode:
         return ErrorCode.TASK_NOT_FOUND
 
     # Resource exhaustion
-    if any(pattern in error_type for pattern in ["resource", "memory", "quota", "limit", "exhausted"]):
+    if any(
+        pattern in error_type for pattern in ["resource", "memory", "quota", "limit", "exhausted"]
+    ):
         return ErrorCode.RESOURCE_EXHAUSTED
 
     # Circuit breaker
@@ -234,7 +239,9 @@ def classify_error(error: Exception) -> ErrorCode:
         return ErrorCode.BULKHEAD_FULL
 
     # Concurrency errors
-    if any(pattern in error_type for pattern in ["concurrency", "conflict", "optimistic", "version"]):
+    if any(
+        pattern in error_type for pattern in ["concurrency", "conflict", "optimistic", "version"]
+    ):
         return ErrorCode.CONCURRENCY_CONFLICT
 
     # Check for resilient-circuit errors by module

@@ -101,7 +101,9 @@ def reset_tasks() -> None:
 class TestJumpToSelf:
     """Test jumping to the same stage (self-loop for retry)."""
 
-    def test_jump_to_self_retry_loop(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_jump_to_self_retry_loop(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """
         Test that a stage can jump to itself for retry semantics.
 
@@ -110,7 +112,9 @@ class TestJumpToSelf:
         reset_tasks()
         JumpToSelfTask.max_retries = 2
 
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"jump_self": JumpToSelfTask})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"jump_self": JumpToSelfTask}
+        )
 
         execution = Workflow.create(
             application="test",
@@ -141,14 +145,20 @@ class TestJumpToSelf:
         assert result.status == WorkflowStatus.SUCCEEDED, f"Workflow status: {result.status}"
 
         # Retry count should be max_retries + 1 (final success)
-        assert JumpToSelfTask.retry_count == 3, f"Expected 3 attempts, got {JumpToSelfTask.retry_count}"
+        assert (
+            JumpToSelfTask.retry_count == 3
+        ), f"Expected 3 attempts, got {JumpToSelfTask.retry_count}"
 
-    def test_jump_to_self_increments_jump_count(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_jump_to_self_increments_jump_count(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test that jumping to self properly tracks jump count."""
         reset_tasks()
         JumpToSelfTask.max_retries = 1
 
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"jump_self": JumpToSelfTask})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"jump_self": JumpToSelfTask}
+        )
 
         execution = Workflow.create(
             application="test",
@@ -184,7 +194,9 @@ class TestJumpToSelf:
 class TestMaxJumpsExceeded:
     """Test behavior when max jump count is exceeded."""
 
-    def test_max_jumps_causes_terminal(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_max_jumps_causes_terminal(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """
         Test that exceeding max jumps causes workflow to become TERMINAL.
 
@@ -192,7 +204,9 @@ class TestMaxJumpsExceeded:
         """
         reset_tasks()
 
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"max_jump": MaxJumpsTask})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"max_jump": MaxJumpsTask}
+        )
 
         execution = Workflow.create(
             application="test",
@@ -227,13 +241,17 @@ class TestMaxJumpsExceeded:
 class TestJumpToNonexistent:
     """Test jumping to a stage that doesn't exist."""
 
-    def test_jump_to_nonexistent_stage_fails(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_jump_to_nonexistent_stage_fails(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """
         Test that jumping to a non-existent stage causes failure.
         """
         reset_tasks()
 
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"bad_jump": JumpToNonexistentTask})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"bad_jump": JumpToNonexistentTask}
+        )
 
         execution = Workflow.create(
             application="test",
@@ -267,7 +285,9 @@ class TestJumpToNonexistent:
 class TestJumpContextMerging:
     """Test that jump context is properly merged into target stage."""
 
-    def test_jump_context_merged_into_target(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_jump_context_merged_into_target(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """
         Test that jump_context is properly merged into target stage context.
         """
@@ -329,7 +349,9 @@ class TestJumpContextMerging:
         # Jump context should be merged
         assert recorded.get("jump_key") == "jump_value"
 
-    def test_jump_outputs_available_via_key(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_jump_outputs_available_via_key(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """
         Test that jump_outputs are available via _jump_outputs key.
         """
@@ -387,7 +409,9 @@ class TestJumpContextMerging:
 class TestStaleCompleteStageMessages:
     """Test handling of stale CompleteStage messages after jump."""
 
-    def test_version_prevents_stale_complete_stage(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_version_prevents_stale_complete_stage(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """
         Test that stale CompleteStage messages are ignored after a jump resets the stage.
 
@@ -466,13 +490,17 @@ class TestStaleCompleteStageMessages:
         assert result.status == WorkflowStatus.SUCCEEDED
 
         # Stage A should have executed twice (initial + after jump)
-        assert RecordExecTask.exec_count == 2, f"Expected 2 executions, got {RecordExecTask.exec_count}"
+        assert (
+            RecordExecTask.exec_count == 2
+        ), f"Expected 2 executions, got {RecordExecTask.exec_count}"
 
 
 class TestBackwardJumpResetsDownstream:
     """Test that backward jumps properly reset downstream stages."""
 
-    def test_backward_jump_resets_all_downstream(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_backward_jump_resets_all_downstream(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """
         Test: A -> B -> C, jump from C to A should reset A, B, and C.
         """
@@ -557,5 +585,9 @@ class TestBackwardJumpResetsDownstream:
         assert result.status == WorkflowStatus.SUCCEEDED
 
         # All stages should have executed twice
-        assert CounterTask.counters.get("stage_a") == 2, f"Stage A: {CounterTask.counters.get('stage_a')}"
-        assert CounterTask.counters.get("stage_b") == 2, f"Stage B: {CounterTask.counters.get('stage_b')}"
+        assert (
+            CounterTask.counters.get("stage_a") == 2
+        ), f"Stage A: {CounterTask.counters.get('stage_a')}"
+        assert (
+            CounterTask.counters.get("stage_b") == 2
+        ), f"Stage B: {CounterTask.counters.get('stage_b')}"

@@ -40,7 +40,9 @@ from stabilize.events import (
 # =============================================================================
 
 
-def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
+def setup_pipeline_runner(
+    store: WorkflowStore, queue: Queue
+) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with ShellTask registered."""
     # Create task registry and register our ShellTask
     task_registry = TaskRegistry()
@@ -152,7 +154,9 @@ def example_sequential() -> None:
                 type="shell",
                 name="Create File",
                 requisite_stage_ref_ids={"1"},  # depends on stage 1
-                context={"command": "echo 'Hello from Stabilize!' > /tmp/stabilize_test/hello.txt"},
+                context={
+                    "command": "echo 'Hello from Stabilize!' > /tmp/stabilize_test/hello.txt"
+                },
                 tasks=[
                     TaskExecution.create(
                         name="create file",

@@ -85,7 +85,9 @@ class CountingOutputTask(Task):
     def execute(self, stage: StageExecution) -> TaskResult:
         with CountingOutputTask._lock:
             CountingOutputTask.execution_count += 1
-            CountingOutputTask.execution_log.append((stage.execution.id, stage.ref_id, time.time()))
+            CountingOutputTask.execution_log.append(
+                (stage.execution.id, stage.ref_id, time.time())
+            )
         outputs = stage.context.get("outputs_to_produce", {})
         return TaskResult.success(outputs=outputs)
 
@@ -120,7 +122,9 @@ class VerifyInputsTask(Task):
                 VerifyInputsTask.verification_errors.append(error)
                 return TaskResult.terminal(error)
 
-        return TaskResult.success(outputs={"verified": True, "received_keys": list(stage.context.keys())})
+        return TaskResult.success(
+            outputs={"verified": True, "received_keys": list(stage.context.keys())}
+        )
 
 
 class ConditionalFailTask(Task):
@@ -302,8 +306,14 @@ def create_deep_diamond_workflow(name: str) -> Workflow:
                 ref_id="stage_g",
                 name="Stage G (Join 2)",
                 requisite_stage_ref_ids={"stage_e", "stage_f"},
-                context={"expected_keys": ["from_a", "from_b", "from_c", "from_d", "from_e", "from_f"]},
-                tasks=[TaskExecution.create("Task G", "verify_inputs", stage_start=True, stage_end=True)],
+                context={
+                    "expected_keys": ["from_a", "from_b", "from_c", "from_d", "from_e", "from_f"]
+                },
+                tasks=[
+                    TaskExecution.create(
+                        "Task G", "verify_inputs", stage_start=True, stage_end=True
+                    )
+                ],
             ),
         ],
     )
@@ -324,7 +334,9 @@ def create_wide_diamond_workflow(name: str, width: int = 5) -> Workflow:
             ref_id="stage_a",
             name="Stage A (Root)",
             context={"outputs_to_produce": {"from_a": True}},
-            tasks=[TaskExecution.create("Task A", "random_delay", stage_start=True, stage_end=True)],
+            tasks=[
+                TaskExecution.create("Task A", "random_delay", stage_start=True, stage_end=True)
+            ],
         )
     ]
 
@@ -347,7 +359,11 @@ def create_wide_diamond_workflow(name: str, width: int = 5) -> Workflow:
                     "min_delay": 0.01,
                     "max_delay": 0.1,
                 },
-                tasks=[TaskExecution.create(f"Task Branch {i}", "random_delay", stage_start=True, stage_end=True)],
+                tasks=[
+                    TaskExecution.create(
+                        f"Task Branch {i}", "random_delay", stage_start=True, stage_end=True
+                    )
+                ],
             )
         )
 
@@ -357,7 +373,11 @@ def create_wide_diamond_workflow(name: str, width: int = 5) -> Workflow:
             name="Stage Join",
             requisite_stage_ref_ids=set(branch_refs),
             context={"expected_keys": expected_keys},
-            tasks=[TaskExecution.create("Task Join", "verify_inputs", stage_start=True, stage_end=True)],
+            tasks=[
+                TaskExecution.create(
+                    "Task Join", "verify_inputs", stage_start=True, stage_end=True
+                )
+            ],
         )
     )
 
@@ -398,12 +418,18 @@ class TestBasicDiamond:
 
         # All stages should be SUCCEEDED
         for stage in result.stages:
-            assert stage.status == WorkflowStatus.SUCCEEDED, f"Stage {stage.ref_id}: {stage.status}"
+            assert (
+                stage.status == WorkflowStatus.SUCCEEDED
+            ), f"Stage {stage.ref_id}: {stage.status}"
 
         # Stage D should have received all expected keys
-        assert not VerifyInputsTask.verification_errors, f"Errors: {VerifyInputsTask.verification_errors}"
+        assert (
+            not VerifyInputsTask.verification_errors
+        ), f"Errors: {VerifyInputsTask.verification_errors}"
 
-    def test_join_waits_for_all_branches(self, file_repository: WorkflowStore, file_queue: Queue, backend: str) -> None:
+    def test_join_waits_for_all_branches(
+        self, file_repository: WorkflowStore, file_queue: Queue, backend: str
+    ) -> None:
         """Join stage D must wait for both B and C before starting."""
         CountingOutputTask.reset()
         VerifyInputsTask.reset()
@@ -428,28 +454,40 @@ class TestBasicDiamond:
                     ref_id="stage_a",
                     name="Stage A",
                     context={"outputs_to_produce": {"from_a": True}},
-                    tasks=[TaskExecution.create("Task A", "output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Task A", "output", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_b",
                     name="Stage B (Slow)",
                     requisite_stage_ref_ids={"stage_a"},
                     context={"outputs_to_produce": {"from_b": True}, "delay": 0.3},
-                    tasks=[TaskExecution.create("Task B", "slow_output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task B", "slow_output", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_c",
                     name="Stage C (Fast)",
                     requisite_stage_ref_ids={"stage_a"},
                     context={"outputs_to_produce": {"from_c": True}},
-                    tasks=[TaskExecution.create("Task C", "output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Task C", "output", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_d",
                     name="Stage D (Join)",
                     requisite_stage_ref_ids={"stage_b", "stage_c"},
                     context={"expected_keys": ["from_a", "from_b", "from_c"]},
-                    tasks=[TaskExecution.create("Task D", "verify_inputs", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task D", "verify_inputs", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
             ],
         )
@@ -540,7 +578,11 @@ class TestOutputMerging:
                         ref_id="stage_a",
                         name="Stage A",
                         context={"outputs_to_produce": {"shared": "from_a"}},
-                        tasks=[TaskExecution.create("Task A", "output", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task A", "output", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="stage_b",
@@ -551,7 +593,11 @@ class TestOutputMerging:
                             "min_delay": 0.01,
                             "max_delay": 0.05,
                         },
-                        tasks=[TaskExecution.create("Task B", "random_delay", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task B", "random_delay", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="stage_c",
@@ -562,14 +608,24 @@ class TestOutputMerging:
                             "min_delay": 0.01,
                             "max_delay": 0.05,
                         },
-                        tasks=[TaskExecution.create("Task C", "random_delay", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task C", "random_delay", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="stage_d",
                         name="Stage D",
                         requisite_stage_ref_ids={"stage_b", "stage_c"},
-                        context={"expected_keys": ["shared", "conflict_key", "b_marker", "c_marker"]},
-                        tasks=[TaskExecution.create("Task D", "verify_inputs", stage_start=True, stage_end=True)],
+                        context={
+                            "expected_keys": ["shared", "conflict_key", "b_marker", "c_marker"]
+                        },
+                        tasks=[
+                            TaskExecution.create(
+                                "Task D", "verify_inputs", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                 ],
             )
@@ -598,7 +654,9 @@ class TestOutputMerging:
                 f"This indicates the merge order of parallel branches is not stable."
             )
 
-    def test_list_outputs_concatenated(self, file_repository: WorkflowStore, file_queue: Queue, backend: str) -> None:
+    def test_list_outputs_concatenated(
+        self, file_repository: WorkflowStore, file_queue: Queue, backend: str
+    ) -> None:
         """List outputs from parallel branches should be concatenated."""
         VerifyInputsTask.reset()
 
@@ -619,28 +677,38 @@ class TestOutputMerging:
                     ref_id="stage_a",
                     name="Stage A",
                     context={"outputs_to_produce": {"items": ["a1", "a2"]}},
-                    tasks=[TaskExecution.create("Task A", "output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Task A", "output", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_b",
                     name="Stage B",
                     requisite_stage_ref_ids={"stage_a"},
                     context={"outputs_to_produce": {"items": ["b1", "b2"]}},
-                    tasks=[TaskExecution.create("Task B", "output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Task B", "output", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_c",
                     name="Stage C",
                     requisite_stage_ref_ids={"stage_a"},
                     context={"outputs_to_produce": {"items": ["c1", "c2"]}},
-                    tasks=[TaskExecution.create("Task C", "output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Task C", "output", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_d",
                     name="Stage D",
                     requisite_stage_ref_ids={"stage_b", "stage_c"},
                     context={"expected_keys": ["items"]},
-                    tasks=[TaskExecution.create("Task D", "verify_inputs", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task D", "verify_inputs", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
             ],
         )
@@ -687,28 +755,40 @@ class TestDiamondWithFailures:
                     ref_id="stage_a",
                     name="Stage A",
                     context={"outputs_to_produce": {"from_a": True}},
-                    tasks=[TaskExecution.create("Task A", "output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Task A", "output", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_b",
                     name="Stage B (Will Fail)",
                     requisite_stage_ref_ids={"stage_a"},
                     context={"should_fail": True},
-                    tasks=[TaskExecution.create("Task B", "conditional_fail", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task B", "conditional_fail", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_c",
                     name="Stage C",
                     requisite_stage_ref_ids={"stage_a"},
                     context={"outputs_to_produce": {"from_c": True}},
-                    tasks=[TaskExecution.create("Task C", "output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Task C", "output", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_d",
                     name="Stage D (Join)",
                     requisite_stage_ref_ids={"stage_b", "stage_c"},
                     context={"expected_keys": ["from_a", "from_c"]},
-                    tasks=[TaskExecution.create("Task D", "verify_inputs", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task D", "verify_inputs", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
             ],
         )
@@ -733,7 +813,9 @@ class TestDiamondWithFailures:
 class TestDeepDiamond:
     """Test deep diamond patterns with multiple join points."""
 
-    def test_deep_diamond_completes(self, file_repository: WorkflowStore, file_queue: Queue, backend: str) -> None:
+    def test_deep_diamond_completes(
+        self, file_repository: WorkflowStore, file_queue: Queue, backend: str
+    ) -> None:
         """Deep diamond with two join points should complete successfully."""
         VerifyInputsTask.reset()
 
@@ -755,13 +837,17 @@ class TestDeepDiamond:
         assert result.status == WorkflowStatus.SUCCEEDED, f"Workflow status: {result.status}"
 
         # Final join stage G should have all expected inputs
-        assert not VerifyInputsTask.verification_errors, f"Errors: {VerifyInputsTask.verification_errors}"
+        assert (
+            not VerifyInputsTask.verification_errors
+        ), f"Errors: {VerifyInputsTask.verification_errors}"
 
 
 class TestWideDiamond:
     """Test wide diamond patterns with many parallel branches."""
 
-    def test_wide_diamond_completes(self, file_repository: WorkflowStore, file_queue: Queue, backend: str) -> None:
+    def test_wide_diamond_completes(
+        self, file_repository: WorkflowStore, file_queue: Queue, backend: str
+    ) -> None:
         """Wide diamond with 10 parallel branches should complete."""
         VerifyInputsTask.reset()
 
@@ -788,7 +874,9 @@ class TestConcurrentDiamonds:
     """Test multiple diamond workflows running concurrently."""
 
     @pytest.mark.stress
-    def test_many_concurrent_diamonds(self, file_repository: WorkflowStore, file_queue: Queue, backend: str) -> None:
+    def test_many_concurrent_diamonds(
+        self, file_repository: WorkflowStore, file_queue: Queue, backend: str
+    ) -> None:
         """
         Run many diamond workflows concurrently.
 
@@ -823,7 +911,11 @@ class TestConcurrentDiamonds:
                             "min_delay": 0.001,
                             "max_delay": 0.01,
                         },
-                        tasks=[TaskExecution.create("Task A", "random_delay", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task A", "random_delay", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="stage_b",
@@ -834,7 +926,11 @@ class TestConcurrentDiamonds:
                             "min_delay": 0.001,
                             "max_delay": 0.02,
                         },
-                        tasks=[TaskExecution.create("Task B", "random_delay", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task B", "random_delay", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="stage_c",
@@ -845,14 +941,24 @@ class TestConcurrentDiamonds:
                             "min_delay": 0.001,
                             "max_delay": 0.02,
                         },
-                        tasks=[TaskExecution.create("Task C", "random_delay", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task C", "random_delay", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="stage_d",
                         name="Stage D (Join)",
                         requisite_stage_ref_ids={"stage_b", "stage_c"},
-                        context={"expected_keys": ["workflow_index", "from_a", "from_b", "from_c"]},
-                        tasks=[TaskExecution.create("Task D", "verify_inputs", stage_start=True, stage_end=True)],
+                        context={
+                            "expected_keys": ["workflow_index", "from_a", "from_b", "from_c"]
+                        },
+                        tasks=[
+                            TaskExecution.create(
+                                "Task D", "verify_inputs", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                 ],
             )
@@ -873,8 +979,12 @@ class TestConcurrentDiamonds:
             else:
                 failed.append((wf_id, result.status))
 
-        assert succeeded == num_workflows, f"Only {succeeded}/{num_workflows} succeeded. Failed: {failed}"
-        assert not VerifyInputsTask.verification_errors, f"Verification errors: {VerifyInputsTask.verification_errors}"
+        assert (
+            succeeded == num_workflows
+        ), f"Only {succeeded}/{num_workflows} succeeded. Failed: {failed}"
+        assert (
+            not VerifyInputsTask.verification_errors
+        ), f"Verification errors: {VerifyInputsTask.verification_errors}"
 
 
 class TestDiamondRaceConditions:
@@ -910,28 +1020,44 @@ class TestDiamondRaceConditions:
                         ref_id="stage_a",
                         name="Stage A",
                         context={"outputs_to_produce": {"from_a": True}},
-                        tasks=[TaskExecution.create("Task A", "slow_output", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task A", "slow_output", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="stage_b",
                         name="Stage B",
                         requisite_stage_ref_ids={"stage_a"},
                         context={"outputs_to_produce": {"from_b": True}, "delay": 0.1},
-                        tasks=[TaskExecution.create("Task B", "slow_output", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task B", "slow_output", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="stage_c",
                         name="Stage C",
                         requisite_stage_ref_ids={"stage_a"},
                         context={"outputs_to_produce": {"from_c": True}, "delay": 0.1},
-                        tasks=[TaskExecution.create("Task C", "slow_output", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task C", "slow_output", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="stage_d",
                         name="Stage D (Join)",
                         requisite_stage_ref_ids={"stage_b", "stage_c"},
                         context={"expected_keys": ["from_a", "from_b", "from_c"]},
-                        tasks=[TaskExecution.create("Task D", "verify_inputs", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task D", "verify_inputs", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                 ],
             )
@@ -976,14 +1102,18 @@ class TestDiamondRaceConditions:
                     ref_id="stage_a",
                     name="Stage A",
                     context={"outputs_to_produce": {"from_a": True}},
-                    tasks=[TaskExecution.create("Task A", "output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Task A", "output", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_b",
                     name="Stage B (Fast)",
                     requisite_stage_ref_ids={"stage_a"},
                     context={"outputs_to_produce": {"from_b": True, "b_finished_first": True}},
-                    tasks=[TaskExecution.create("Task B", "output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Task B", "output", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_c",
@@ -993,7 +1123,11 @@ class TestDiamondRaceConditions:
                         "outputs_to_produce": {"from_c": True, "c_finished_last": True},
                         "delay": 0.5,
                     },
-                    tasks=[TaskExecution.create("Task C", "slow_output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task C", "slow_output", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_d",
@@ -1009,7 +1143,11 @@ class TestDiamondRaceConditions:
                             "c_finished_last",
                         ]
                     },
-                    tasks=[TaskExecution.create("Task D", "verify_inputs", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task D", "verify_inputs", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
             ],
         )
@@ -1022,9 +1160,9 @@ class TestDiamondRaceConditions:
         assert result.status == WorkflowStatus.SUCCEEDED
 
         # D must have received from_c (meaning it waited for C)
-        assert not VerifyInputsTask.verification_errors, (
-            f"Join started prematurely! Errors: {VerifyInputsTask.verification_errors}"
-        )
+        assert (
+            not VerifyInputsTask.verification_errors
+        ), f"Join started prematurely! Errors: {VerifyInputsTask.verification_errors}"
 
         stage_d_key = f"{wf.id}:stage_d"
         ctx = VerifyInputsTask.verified_contexts.get(stage_d_key, {})
@@ -1034,7 +1172,9 @@ class TestDiamondRaceConditions:
 class TestDiamondEdgeCases:
     """Test edge cases in diamond patterns."""
 
-    def test_empty_outputs_in_branch(self, file_repository: WorkflowStore, file_queue: Queue, backend: str) -> None:
+    def test_empty_outputs_in_branch(
+        self, file_repository: WorkflowStore, file_queue: Queue, backend: str
+    ) -> None:
         """Branch with empty outputs should still allow join to proceed."""
         VerifyInputsTask.reset()
 
@@ -1062,7 +1202,9 @@ class TestDiamondEdgeCases:
         result = file_repository.retrieve(wf.id)
         assert result.status == WorkflowStatus.SUCCEEDED
 
-    def test_large_outputs_in_diamond(self, file_repository: WorkflowStore, file_queue: Queue, backend: str) -> None:
+    def test_large_outputs_in_diamond(
+        self, file_repository: WorkflowStore, file_queue: Queue, backend: str
+    ) -> None:
         """Diamond with large outputs should handle merging correctly."""
         VerifyInputsTask.reset()
 
@@ -1147,7 +1289,11 @@ class TestAggressiveStress:
                             "min_delay": 0.001,
                             "max_delay": 0.005,
                         },
-                        tasks=[TaskExecution.create("Task A", "random_delay", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task A", "random_delay", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="stage_b",
@@ -1158,7 +1304,11 @@ class TestAggressiveStress:
                             "min_delay": 0.001,
                             "max_delay": 0.01,
                         },
-                        tasks=[TaskExecution.create("Task B", "random_delay", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task B", "random_delay", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="stage_c",
@@ -1169,14 +1319,22 @@ class TestAggressiveStress:
                             "min_delay": 0.001,
                             "max_delay": 0.01,
                         },
-                        tasks=[TaskExecution.create("Task C", "random_delay", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task C", "random_delay", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="stage_d",
                         name="Stage D",
                         requisite_stage_ref_ids={"stage_b", "stage_c"},
                         context={"expected_keys": ["index", "conflict", "from_b", "from_c"]},
-                        tasks=[TaskExecution.create("Task D", "verify_inputs", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task D", "verify_inputs", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                 ],
             )
@@ -1200,7 +1358,9 @@ class TestAggressiveStress:
 
         # Verify all workflows succeeded
         succeeded = sum(
-            1 for wf_id in workflow_ids if file_repository.retrieve(wf_id).status == WorkflowStatus.SUCCEEDED
+            1
+            for wf_id in workflow_ids
+            if file_repository.retrieve(wf_id).status == WorkflowStatus.SUCCEEDED
         )
         assert succeeded == num_workflows, f"Only {succeeded}/{num_workflows} succeeded"
 
@@ -1218,7 +1378,9 @@ class TestAggressiveStress:
             )
 
     @pytest.mark.stress
-    def test_triple_diamond_chain(self, file_repository: WorkflowStore, file_queue: Queue, backend: str) -> None:
+    def test_triple_diamond_chain(
+        self, file_repository: WorkflowStore, file_queue: Queue, backend: str
+    ) -> None:
         """
         Test a chain of three diamonds - maximum complexity.
 
@@ -1260,7 +1422,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.01,
                     },
-                    tasks=[TaskExecution.create("Task A", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task A", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="B",
@@ -1271,7 +1437,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.02,
                     },
-                    tasks=[TaskExecution.create("Task B", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task B", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="C",
@@ -1282,7 +1452,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.02,
                     },
-                    tasks=[TaskExecution.create("Task C", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task C", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="D",
@@ -1293,7 +1467,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.02,
                     },
-                    tasks=[TaskExecution.create("Task D", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task D", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="E",
@@ -1304,7 +1482,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.01,
                     },
-                    tasks=[TaskExecution.create("Task E", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task E", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 # Second diamond
                 StageExecution(
@@ -1316,7 +1498,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.02,
                     },
-                    tasks=[TaskExecution.create("Task F", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task F", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="G",
@@ -1327,7 +1513,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.02,
                     },
-                    tasks=[TaskExecution.create("Task G", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task G", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="H",
@@ -1338,7 +1528,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.02,
                     },
-                    tasks=[TaskExecution.create("Task H", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task H", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="I",
@@ -1349,7 +1543,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.01,
                     },
-                    tasks=[TaskExecution.create("Task I", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task I", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 # Third diamond
                 StageExecution(
@@ -1361,7 +1559,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.02,
                     },
-                    tasks=[TaskExecution.create("Task J", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task J", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="K",
@@ -1372,7 +1574,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.02,
                     },
-                    tasks=[TaskExecution.create("Task K", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task K", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="L",
@@ -1383,7 +1589,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.02,
                     },
-                    tasks=[TaskExecution.create("Task L", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task L", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="M",
@@ -1405,7 +1615,11 @@ class TestAggressiveStress:
                             "from_L",
                         ]
                     },
-                    tasks=[TaskExecution.create("Task M", "verify_inputs", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task M", "verify_inputs", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
             ],
         )
@@ -1416,10 +1630,14 @@ class TestAggressiveStress:
 
         result = file_repository.retrieve(wf.id)
         assert result.status == WorkflowStatus.SUCCEEDED, f"Status: {result.status}"
-        assert not VerifyInputsTask.verification_errors, f"Errors: {VerifyInputsTask.verification_errors}"
+        assert (
+            not VerifyInputsTask.verification_errors
+        ), f"Errors: {VerifyInputsTask.verification_errors}"
 
     @pytest.mark.stress
-    def test_interleaved_diamonds(self, file_repository: WorkflowStore, file_queue: Queue, backend: str) -> None:
+    def test_interleaved_diamonds(
+        self, file_repository: WorkflowStore, file_queue: Queue, backend: str
+    ) -> None:
         """
         Test interleaved diamonds - one branch of diamond 1 feeds into diamond 2.
 
@@ -1458,7 +1676,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.01,
                     },
-                    tasks=[TaskExecution.create("Task A1", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task A1", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="B1",
@@ -1469,7 +1691,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.02,
                     },
-                    tasks=[TaskExecution.create("Task B1", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task B1", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="C1",
@@ -1480,7 +1706,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.03,
                     },
-                    tasks=[TaskExecution.create("Task C1", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task C1", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="D1",
@@ -1491,7 +1721,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.02,
                     },
-                    tasks=[TaskExecution.create("Task D1", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task D1", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 # E joins from C1 (bypassing B1->D1 path) and D1
                 StageExecution(
@@ -1503,7 +1737,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.01,
                     },
-                    tasks=[TaskExecution.create("Task E", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task E", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="F",
@@ -1514,7 +1752,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.02,
                     },
-                    tasks=[TaskExecution.create("Task F", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task F", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="G",
@@ -1525,7 +1767,11 @@ class TestAggressiveStress:
                         "min_delay": 0.001,
                         "max_delay": 0.02,
                     },
-                    tasks=[TaskExecution.create("Task G", "random_delay", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task G", "random_delay", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="H",
@@ -1542,7 +1788,11 @@ class TestAggressiveStress:
                             "from_G",
                         ]
                     },
-                    tasks=[TaskExecution.create("Task H", "verify_inputs", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task H", "verify_inputs", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
             ],
         )
@@ -1553,7 +1803,9 @@ class TestAggressiveStress:
 
         result = file_repository.retrieve(wf.id)
         assert result.status == WorkflowStatus.SUCCEEDED, f"Status: {result.status}"
-        assert not VerifyInputsTask.verification_errors, f"Errors: {VerifyInputsTask.verification_errors}"
+        assert (
+            not VerifyInputsTask.verification_errors
+        ), f"Errors: {VerifyInputsTask.verification_errors}"
 
     @pytest.mark.stress
     def test_diamond_with_rapid_fire_messages(
@@ -1591,28 +1843,44 @@ class TestAggressiveStress:
                         ref_id="A",
                         name="A",
                         context={"outputs_to_produce": {"wf": i}},
-                        tasks=[TaskExecution.create("Task A", "output", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task A", "output", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="B",
                         name="B",
                         requisite_stage_ref_ids={"A"},
                         context={"outputs_to_produce": {"from_B": True}},
-                        tasks=[TaskExecution.create("Task B", "output", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task B", "output", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="C",
                         name="C",
                         requisite_stage_ref_ids={"A"},
                         context={"outputs_to_produce": {"from_C": True}},
-                        tasks=[TaskExecution.create("Task C", "output", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task C", "output", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="D",
                         name="D",
                         requisite_stage_ref_ids={"B", "C"},
                         context={"expected_keys": ["wf", "from_B", "from_C"]},
-                        tasks=[TaskExecution.create("Task D", "verify_inputs", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task D", "verify_inputs", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                 ],
             )
@@ -1665,28 +1933,40 @@ class TestDiamondRecovery:
                     ref_id="A",
                     name="A",
                     context={"outputs_to_produce": {"from_A": True}},
-                    tasks=[TaskExecution.create("Task A", "output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Task A", "output", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="B",
                     name="B",
                     requisite_stage_ref_ids={"A"},
                     context={"outputs_to_produce": {"from_B": True}},
-                    tasks=[TaskExecution.create("Task B", "output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Task B", "output", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="C",
                     name="C",
                     requisite_stage_ref_ids={"A"},
                     context={"outputs_to_produce": {"from_C": True}, "delay": 0.5},
-                    tasks=[TaskExecution.create("Task C", "slow_output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task C", "slow_output", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="D",
                     name="D",
                     requisite_stage_ref_ids={"B", "C"},
                     context={"expected_keys": ["from_A", "from_B", "from_C"]},
-                    tasks=[TaskExecution.create("Task D", "verify_inputs", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task D", "verify_inputs", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
             ],
         )
@@ -1790,28 +2070,40 @@ class TestDiamondWithJumps:
                     ref_id="stage_a",
                     name="Stage A",
                     context={"outputs_to_produce": {"from_a": True}},
-                    tasks=[TaskExecution.create("Task A", "output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Task A", "output", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_b",
                     name="Stage B",
                     requisite_stage_ref_ids={"stage_a"},
                     context={"outputs_to_produce": {"from_b": True}},
-                    tasks=[TaskExecution.create("Task B", "output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Task B", "output", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_c",
                     name="Stage C (May Jump)",
                     requisite_stage_ref_ids={"stage_a"},
                     context={},  # Uses JumpOnFirstAttemptTask
-                    tasks=[TaskExecution.create("Task C", "jump_first", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task C", "jump_first", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_d",
                     name="Stage D (Join)",
                     requisite_stage_ref_ids={"stage_b", "stage_c"},
                     context={"expected_keys": ["from_a", "from_b", "from_c"]},
-                    tasks=[TaskExecution.create("Task D", "verify_inputs", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task D", "verify_inputs", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
             ],
         )
@@ -1826,9 +2118,9 @@ class TestDiamondWithJumps:
 
         # Verify C was executed twice (jump + retry)
         c_key = f"{wf.id}:stage_c"
-        assert JumpOnFirstAttemptTask.attempts.get(c_key, 0) == 2, (
-            f"C should have been executed twice, got {JumpOnFirstAttemptTask.attempts.get(c_key, 0)}"
-        )
+        assert (
+            JumpOnFirstAttemptTask.attempts.get(c_key, 0) == 2
+        ), f"C should have been executed twice, got {JumpOnFirstAttemptTask.attempts.get(c_key, 0)}"
 
     def test_diamond_jump_from_join_point(
         self, file_repository: WorkflowStore, file_queue: Queue, backend: str
@@ -1894,28 +2186,38 @@ class TestDiamondWithJumps:
                     ref_id="stage_a",
                     name="Stage A",
                     context={"outputs_to_produce": {"from_a": True}},
-                    tasks=[TaskExecution.create("Task A", "output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Task A", "output", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_b",
                     name="Stage B",
                     requisite_stage_ref_ids={"stage_a"},
                     context={"outputs_to_produce": {"from_b": True}},
-                    tasks=[TaskExecution.create("Task B", "output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Task B", "output", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_c",
                     name="Stage C",
                     requisite_stage_ref_ids={"stage_a"},
                     context={"outputs_to_produce": {"from_c": True}},
-                    tasks=[TaskExecution.create("Task C", "output", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create("Task C", "output", stage_start=True, stage_end=True)
+                    ],
                 ),
                 StageExecution(
                     ref_id="stage_d",
                     name="Stage D (Join - May Jump)",
                     requisite_stage_ref_ids={"stage_b", "stage_c"},
                     context={"expected_keys": ["from_a", "from_b", "from_c"]},
-                    tasks=[TaskExecution.create("Task D", "jump_from_join", stage_start=True, stage_end=True)],
+                    tasks=[
+                        TaskExecution.create(
+                            "Task D", "jump_from_join", stage_start=True, stage_end=True
+                        )
+                    ],
                 ),
             ],
         )
@@ -2006,28 +2308,44 @@ class TestDiamondChaos:
                         ref_id="stage_a",
                         name="Stage A",
                         context={"outputs_to_produce": {"from_a": True, "wf_index": i}},
-                        tasks=[TaskExecution.create("Task A", "maybe_jump", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task A", "maybe_jump", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="stage_b",
                         name="Stage B",
                         requisite_stage_ref_ids={"stage_a"},
                         context={"outputs_to_produce": {"from_b": True}},
-                        tasks=[TaskExecution.create("Task B", "maybe_jump", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task B", "maybe_jump", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="stage_c",
                         name="Stage C",
                         requisite_stage_ref_ids={"stage_a"},
                         context={"outputs_to_produce": {"from_c": True}},
-                        tasks=[TaskExecution.create("Task C", "maybe_jump", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task C", "maybe_jump", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                     StageExecution(
                         ref_id="stage_d",
                         name="Stage D",
                         requisite_stage_ref_ids={"stage_b", "stage_c"},
                         context={"expected_keys": ["from_a", "from_b", "from_c", "wf_index"]},
-                        tasks=[TaskExecution.create("Task D", "verify_inputs", stage_start=True, stage_end=True)],
+                        tasks=[
+                            TaskExecution.create(
+                                "Task D", "verify_inputs", stage_start=True, stage_end=True
+                            )
+                        ],
                     ),
                 ],
             )
@@ -2046,7 +2364,11 @@ class TestDiamondChaos:
                 failed.append((wf_id, result.status))
 
         assert not failed, f"Failed workflows: {failed}"
-        assert not VerifyInputsTask.verification_errors, f"Errors: {VerifyInputsTask.verification_errors}"
+        assert (
+            not VerifyInputsTask.verification_errors
+        ), f"Errors: {VerifyInputsTask.verification_errors}"
 
         # Log chaos statistics
-        print(f"\nChaos stats: {MaybeJumpTask.jump_count} jumps, {MaybeJumpTask.success_count} successes")
+        print(
+            f"\nChaos stats: {MaybeJumpTask.jump_count} jumps, {MaybeJumpTask.success_count} successes"
+        )

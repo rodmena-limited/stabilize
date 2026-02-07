@@ -13,16 +13,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stabilize.queue.queue import Queue
-
 from golden_standard_tests.workflows.disaster_recovery_workflow import (
     DREventEmitterTask,
     DRRetryTask,
     create_disaster_recovery_workflow,
     register_dr_tasks,
 )
-from stabilize import TaskRegistry, WorkflowStatus
+from stabilize import WorkflowStatus
 from stabilize.persistence.store import WorkflowStore
+from stabilize.queue import Queue
 from tests.conftest import setup_stabilize
 
 
@@ -41,14 +40,8 @@ class TestGoldenDisasterRecovery:
         DREventEmitterTask.reset_emitter()
 
         # Setup with custom tasks
-        processor, runner = setup_stabilize(repository, queue)
-
-        # Get the task registry and register DR tasks
-        for handler in processor._handlers.values():
-            if hasattr(handler, "task_registry"):
-                task_registry: TaskRegistry = handler.task_registry
-                register_dr_tasks(task_registry)
-                break
+        processor, runner, task_registry = setup_stabilize(repository, queue)
+        register_dr_tasks(task_registry)
 
         # Create and store workflow
         workflow = create_disaster_recovery_workflow()
@@ -62,7 +55,9 @@ class TestGoldenDisasterRecovery:
         result = repository.retrieve(workflow.id)
 
         # Verify execution succeeded
-        assert result.status == WorkflowStatus.SUCCEEDED, f"[{backend}] Workflow failed with status {result.status}"
+        assert (
+            result.status == WorkflowStatus.SUCCEEDED
+        ), f"[{backend}] Workflow failed with status {result.status}"
 
         # Find finalize stage and get result
         finalize_stage = next(
@@ -74,11 +69,15 @@ class TestGoldenDisasterRecovery:
         final_result = finalize_stage.outputs.get("final_result", "")
 
         # Load expected result
-        expected_path = Path(__file__).parent / "expected" / "disaster_recovery_expected_result.txt"
+        expected_path = (
+            Path(__file__).parent / "expected" / "disaster_recovery_expected_result.txt"
+        )
         expected = expected_path.read_text().strip()
 
         # Verify output matches expected
-        assert final_result == expected, f"[{backend}] Output mismatch!\nExpected:\n{expected}\nGot:\n{final_result}"
+        assert (
+            final_result == expected
+        ), f"[{backend}] Output mismatch!\nExpected:\n{expected}\nGot:\n{final_result}"
 
         # Cleanup
         repository.delete(workflow.id)

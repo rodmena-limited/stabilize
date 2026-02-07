@@ -350,7 +350,9 @@ IMPORTANT RULES:
         print("\nFailed scenarios:")
         for r in results:
             if not r.get("success"):
-                print(f"  - {r['scenario']}: {r.get('stderr', r.get('error', 'Unknown error'))[:200]}")
+                print(
+                    f"  - {r['scenario']}: {r.get('stderr', r.get('error', 'Unknown error'))[:200]}"
+                )
 
     # Save full results
     with open("/tmp/prompt_test_results.json", "w") as f:

@@ -151,9 +151,13 @@ print("__PYTHONTASK_RESULT_END__")
         # Validate execution mode
         mode_count = sum(bool(x) for x in [script, script_file, module])
         if mode_count == 0:
-            return TaskResult.terminal(error="One of 'script', 'script_file', or 'module' must be specified")
+            return TaskResult.terminal(
+                error="One of 'script', 'script_file', or 'module' must be specified"
+            )
         if mode_count > 1:
-            return TaskResult.terminal(error="Only one of 'script', 'script_file', or 'module' can be specified")
+            return TaskResult.terminal(
+                error="Only one of 'script', 'script_file', or 'module' can be specified"
+            )
         if module and not function:
             return TaskResult.terminal(error="'function' is required when using 'module' mode")
 

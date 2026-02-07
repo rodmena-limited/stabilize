@@ -153,7 +153,7 @@ class QueueProcessor:
             StartWorkflowHandler,
         )
 
-        handlers: list[MessageHandler[Any]] = [
+        all_handlers = [
             StartWorkflowHandler(queue, store),
             StartWaitingWorkflowsHandler(queue, store),
             StartStageHandler(queue, store),
@@ -178,7 +178,8 @@ class QueueProcessor:
             CompleteWorkflowHandler(queue, store),
         ]
 
-        for handler in handlers:
+        for h in all_handlers:
+            handler: MessageHandler[Any] = h  # type: ignore[assignment]
             self._handlers[handler.message_type] = handler
             logger.debug("Registered handler for %s", handler.message_type.__name__)
 
@@ -414,7 +415,9 @@ class QueueProcessor:
                 )
                 dedup.reset()
 
-        logger.debug("Handling %s (execution=%s)", get_message_type_name(message), execution_id or "N/A")
+        logger.debug(
+            "Handling %s (execution=%s)", get_message_type_name(message), execution_id or "N/A"
+        )
 
         handler.handle(message)
 

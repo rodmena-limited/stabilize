@@ -22,6 +22,7 @@ from stabilize.tasks.interface import SkippableTask
 from stabilize.tasks.registry import TaskNotFoundError, TaskRegistry
 
 if TYPE_CHECKING:
+    from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.models.task import TaskExecution
     from stabilize.persistence.store import WorkflowStore
@@ -49,8 +50,11 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
         task_registry: TaskRegistry,
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
+        event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(queue, repository, retry_delay, handler_config)
+        super().__init__(
+            queue, repository, retry_delay, handler_config, event_recorder=event_recorder
+        )
         self.task_registry = task_registry
 
     @property
@@ -142,6 +146,12 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
                         task_id=message.task_id,
                         task_type=task_model.implementing_class,
                     )
+                )
+
+            if self.event_recorder:
+                self.set_event_context(stage.execution.id)
+                self.event_recorder.record_task_started(
+                    task_model, stage.execution.id, source_handler="StartTaskHandler"
                 )
 
             logger.debug(

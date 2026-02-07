@@ -81,7 +81,9 @@ class StartStageHandler(
         def on_stage(stage: StageExecution) -> None:
             try:
                 # Get upstream stages from repository (returns empty list if none)
-                upstream_stages = self.repository.get_upstream_stages(stage.execution.id, stage.ref_id)
+                upstream_stages = self.repository.get_upstream_stages(
+                    stage.execution.id, stage.ref_id
+                )
                 if upstream_stages is None:
                     upstream_stages = []
 
@@ -241,7 +243,9 @@ class StartStageHandler(
             # it means planning crashed before persisting tasks. We must resume planning.
             if stage.status == WorkflowStatus.RUNNING:
                 has_tasks = len(stage.tasks) > 0
-                synthetic_stages = self.repository.get_synthetic_stages(stage.execution.id, stage.id)
+                synthetic_stages = self.repository.get_synthetic_stages(
+                    stage.execution.id, stage.id
+                )
                 has_synthetic = synthetic_stages is not None and len(synthetic_stages) > 0
 
                 if not has_tasks and not has_synthetic:
@@ -370,12 +374,13 @@ class StartStageHandler(
         # This prevents race conditions where multiple handlers both pass the
         # in-memory status check and then both call _plan_stage() (which emits
         # callbacks like "PHASE START") before optimistic locking kicks in.
+        # Use expected_phase="NOT_STARTED" for CAS (compare-and-swap) semantics.
         stage.start_time = self.current_time_millis()
         self.set_stage_status(stage, WorkflowStatus.RUNNING)
 
         try:
             with self.repository.transaction(self.queue) as txn:
-                txn.store_stage(stage)
+                txn.store_stage(stage, expected_phase="NOT_STARTED")
         except ConcurrencyError:
             # Another handler already claimed this stage (race condition with
             # multiple upstream stages completing simultaneously). This is safe

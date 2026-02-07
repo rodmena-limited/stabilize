@@ -27,7 +27,9 @@ if TYPE_CHECKING:
 class SqliteWorkflowCrudMixin:
     """Mixin providing workflow CRUD operations."""
 
-    def _get_connection(self) -> sqlite3.Connection: ...
+    if TYPE_CHECKING:
+
+        def _get_connection(self) -> sqlite3.Connection: ...
 
     def store(self, execution: Workflow) -> None:
         """Store a complete execution.
@@ -147,7 +149,9 @@ class SqliteWorkflowCrudMixin:
                 "is_canceled": 1 if execution.is_canceled else 0,
                 "canceled_by": execution.canceled_by,
                 "cancellation_reason": execution.cancellation_reason,
-                "paused": (json.dumps(paused_to_dict(execution.paused)) if execution.paused else None),
+                "paused": (
+                    json.dumps(paused_to_dict(execution.paused)) if execution.paused else None
+                ),
             },
         )
         conn.commit()

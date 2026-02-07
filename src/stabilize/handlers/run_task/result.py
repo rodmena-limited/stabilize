@@ -94,7 +94,7 @@ def _handle_running(
     # Atomic: store stage + push message together
     txn_helper.execute_atomic(
         stage=stage,
-        messages_to_push=[(message, int(delay.total_seconds()))],
+        messages_to_push=[(message, delay.total_seconds())],
         handler_name="RunTask",
     )
 

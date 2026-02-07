@@ -5,13 +5,19 @@ Snapshot operations for PostgreSQL event store.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EntityType
+
+if TYPE_CHECKING:
+    from psycopg_pool import ConnectionPool
 
 
 class PostgresSnapshotsMixin:
     """Mixin providing snapshot save and retrieval methods."""
+
+    if TYPE_CHECKING:
+        _pool: ConnectionPool
 
     def save_snapshot(
         self,

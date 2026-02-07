@@ -38,7 +38,9 @@ class BackoffConfig:
 
         Used for tracking which configuration version was used.
         """
-        content = f"BackoffConfig:{self.min_delay_ms}:{self.max_delay_ms}:{self.factor}:{self.jitter}"
+        content = (
+            f"BackoffConfig:{self.min_delay_ms}:{self.max_delay_ms}:{self.factor}:{self.jitter}"
+        )
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
@@ -152,12 +154,16 @@ class HandlerConfig:
             error_handling_max_retries=int(os.getenv("STABILIZE_ERROR_MAX_RETRIES", "10")),
             error_handling_min_delay_ms=int(os.getenv("STABILIZE_ERROR_MIN_DELAY_MS", "25")),
             error_handling_max_delay_ms=int(os.getenv("STABILIZE_ERROR_MAX_DELAY_MS", "10000")),
-            error_handling_backoff_factor=float(os.getenv("STABILIZE_ERROR_BACKOFF_FACTOR", "2.0")),
+            error_handling_backoff_factor=float(
+                os.getenv("STABILIZE_ERROR_BACKOFF_FACTOR", "2.0")
+            ),
             error_handling_jitter=float(os.getenv("STABILIZE_ERROR_JITTER", "0.3")),
             # Stage wait retry settings
             max_stage_wait_retries=int(os.getenv("STABILIZE_MAX_STAGE_WAIT_RETRIES", "240")),
             # Task execution settings (4 hours default for long-running workflows)
-            default_task_timeout_seconds=float(os.getenv("STABILIZE_DEFAULT_TASK_TIMEOUT_S", "14400")),
+            default_task_timeout_seconds=float(
+                os.getenv("STABILIZE_DEFAULT_TASK_TIMEOUT_S", "14400")
+            ),
             task_backoff_min_delay_ms=int(os.getenv("STABILIZE_TASK_BACKOFF_MIN_MS", "1000")),
             task_backoff_max_delay_ms=int(os.getenv("STABILIZE_TASK_BACKOFF_MAX_MS", "60000")),
             # Handler retry delay
@@ -246,7 +252,9 @@ class BulkheadConfig:
 
     def config_fingerprint(self) -> str:
         """Return deterministic hash of all field values."""
-        content = f"BulkheadConfig:{self.max_concurrent}:{self.max_queue_size}:{self.timeout_seconds}"
+        content = (
+            f"BulkheadConfig:{self.max_concurrent}:{self.max_queue_size}:{self.timeout_seconds}"
+        )
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
@@ -337,23 +345,43 @@ class ResilienceConfig:
         bulkheads = (
             (
                 "shell",
-                BulkheadConfig(max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_SHELL_MAX_CONCURRENT", "5"))),
+                BulkheadConfig(
+                    max_concurrent=int(
+                        os.environ.get("STABILIZE_BULKHEAD_SHELL_MAX_CONCURRENT", "5")
+                    )
+                ),
             ),
             (
                 "python",
-                BulkheadConfig(max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_PYTHON_MAX_CONCURRENT", "3"))),
+                BulkheadConfig(
+                    max_concurrent=int(
+                        os.environ.get("STABILIZE_BULKHEAD_PYTHON_MAX_CONCURRENT", "3")
+                    )
+                ),
             ),
             (
                 "http",
-                BulkheadConfig(max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_HTTP_MAX_CONCURRENT", "10"))),
+                BulkheadConfig(
+                    max_concurrent=int(
+                        os.environ.get("STABILIZE_BULKHEAD_HTTP_MAX_CONCURRENT", "10")
+                    )
+                ),
             ),
             (
                 "docker",
-                BulkheadConfig(max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_DOCKER_MAX_CONCURRENT", "3"))),
+                BulkheadConfig(
+                    max_concurrent=int(
+                        os.environ.get("STABILIZE_BULKHEAD_DOCKER_MAX_CONCURRENT", "3")
+                    )
+                ),
             ),
             (
                 "ssh",
-                BulkheadConfig(max_concurrent=int(os.environ.get("STABILIZE_BULKHEAD_SSH_MAX_CONCURRENT", "5"))),
+                BulkheadConfig(
+                    max_concurrent=int(
+                        os.environ.get("STABILIZE_BULKHEAD_SSH_MAX_CONCURRENT", "5")
+                    )
+                ),
             ),
         )
 
@@ -366,7 +394,9 @@ class ResilienceConfig:
         return cls(
             bulkheads=bulkheads,
             circuit_failure_threshold=circuit_failure_threshold,
-            circuit_cooldown_seconds=float(os.environ.get("STABILIZE_CIRCUIT_COOLDOWN_SECONDS", "30")),
+            circuit_cooldown_seconds=float(
+                os.environ.get("STABILIZE_CIRCUIT_COOLDOWN_SECONDS", "30")
+            ),
             circuit_cache_size=int(os.environ.get("STABILIZE_CIRCUIT_CACHE_SIZE", "1000")),
             database_url=os.environ.get("MG_DATABASE_URL"),
         )

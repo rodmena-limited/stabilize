@@ -115,7 +115,9 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
             # Collect running stages to cancel if not successful
             running_stages = []
             if status != WorkflowStatus.SUCCEEDED:
-                running_stages = [s for s in execution.top_level_stages() if s.status == WorkflowStatus.RUNNING]
+                running_stages = [
+                    s for s in execution.top_level_stages() if s.status == WorkflowStatus.RUNNING
+                ]
 
             # Save pipeline_config_id before cleanup
             pipeline_config_id = execution.pipeline_config_id

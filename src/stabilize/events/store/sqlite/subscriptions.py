@@ -7,13 +7,21 @@ Provides the SqliteSubscriptionsMixin with subscription management methods.
 from __future__ import annotations
 
 import json
-from typing import Any
+import sqlite3
+from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EventType
+
+if TYPE_CHECKING:
+    pass
 
 
 class SqliteSubscriptionsMixin:
     """Mixin providing subscription CRUD operations."""
+
+    if TYPE_CHECKING:
+
+        def _get_connection(self) -> sqlite3.Connection: ...
 
     def save_subscription(
         self,
@@ -59,7 +67,11 @@ class SqliteSubscriptionsMixin:
             return None
 
         try:
-            event_types = [EventType(et) for et in json.loads(row["event_types"])] if row["event_types"] else None
+            event_types = (
+                [EventType(et) for et in json.loads(row["event_types"])]
+                if row["event_types"]
+                else None
+            )
         except (json.JSONDecodeError, TypeError):
             event_types = None
 

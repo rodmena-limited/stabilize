@@ -6,7 +6,11 @@ import json
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any, cast
 
-from stabilize.persistence.postgres.converters import row_to_execution, row_to_stage, row_to_task
+from stabilize.persistence.postgres.converters import (
+    row_to_execution,
+    row_to_stage,
+    row_to_task,
+)
 from stabilize.persistence.store import WorkflowCriteria
 
 if TYPE_CHECKING:
@@ -141,7 +145,9 @@ def get_downstream_stages(pool: Any, execution_id: str, stage_ref_id: str) -> li
             return stages
 
 
-def get_synthetic_stages(pool: Any, execution_id: str, parent_stage_id: str) -> list[StageExecution]:
+def get_synthetic_stages(
+    pool: Any, execution_id: str, parent_stage_id: str
+) -> list[StageExecution]:
     """Get synthetic stages with tasks loaded."""
     with pool.connection() as conn:
         with conn.cursor() as cur:
@@ -191,7 +197,9 @@ def get_merged_ancestor_outputs(pool: Any, execution_id: str, stage_ref_id: str)
         outputs_raw = row["outputs"]
         nodes[ref_id] = {
             "requisites": set(requisites or []),
-            "outputs": (outputs_raw if isinstance(outputs_raw, dict) else json.loads(outputs_raw or "{}")),
+            "outputs": (
+                outputs_raw if isinstance(outputs_raw, dict) else json.loads(outputs_raw or "{}")
+            ),
         }
 
     if stage_ref_id not in nodes:

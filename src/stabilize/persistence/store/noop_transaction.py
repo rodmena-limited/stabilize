@@ -55,18 +55,22 @@ class NoOpTransaction(StoreTransaction):
             )
         self._store = store
         self._queue = queue
-        self._pending_stages: list[StageExecution] = []
+        self._pending_stages: list[tuple[StageExecution, str | None]] = []
         self._pending_workflows: list[Workflow] = []
-        self._pending_messages: list[tuple[Message, int]] = []
+        self._pending_messages: list[tuple[Message, float]] = []
         self._pending_processed: list[tuple[str, str | None, str | None]] = []
 
-    def store_stage(self, stage: StageExecution) -> None:
+    def store_stage(self, stage: StageExecution, expected_phase: str | None = None) -> None:
         """Buffer stage to be stored when transaction completes.
 
         Stages are buffered and flushed when the context manager exits
         successfully. If an exception occurs, stages are not stored.
+
+        Args:
+            stage: Stage to store
+            expected_phase: If provided, passed to store.store_stage() for CAS.
         """
-        self._pending_stages.append(stage)
+        self._pending_stages.append((stage, expected_phase))
 
     def update_workflow_status(self, workflow: Workflow) -> None:
         """Buffer workflow status update when transaction completes.
@@ -76,7 +80,7 @@ class NoOpTransaction(StoreTransaction):
         """
         self._pending_workflows.append(workflow)
 
-    def push_message(self, message: Message, delay: int = 0) -> None:
+    def push_message(self, message: Message, delay: float = 0) -> None:
         """Buffer message to be pushed when transaction completes.
 
         Messages are buffered and flushed when the context manager exits
@@ -127,8 +131,8 @@ class NoOpTransaction(StoreTransaction):
             self._pending_workflows.clear()
 
             # 2. Flush stages second - persist stage state changes
-            for stage in self._pending_stages:
-                self._store.store_stage(stage)
+            for stage, expected_phase in self._pending_stages:
+                self._store.store_stage(stage, expected_phase=expected_phase)
                 stages_flushed += 1
             self._pending_stages.clear()
 

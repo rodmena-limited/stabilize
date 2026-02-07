@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 class StageEventsMixin:
     """Mixin providing stage event recording methods."""
 
+    if TYPE_CHECKING:
+
+        def _record(self, event: Event, connection: Any | None = None) -> Event: ...
+
     def record_stage_started(
         self,
         stage: StageExecution,
@@ -62,7 +66,11 @@ class StageEventsMixin:
                 "name": stage.name,
                 "status": stage.status.name,
                 "end_time": stage.end_time,
-                "duration_ms": (stage.end_time - stage.start_time if stage.start_time and stage.end_time else None),
+                "duration_ms": (
+                    stage.end_time - stage.start_time
+                    if stage.start_time and stage.end_time
+                    else None
+                ),
                 "outputs": stage.outputs,
             },
             metadata=get_event_metadata(source_handler),

@@ -33,6 +33,8 @@ class Orchestrator:
     to ensure atomicity - preventing orphaned workflow state if queue push fails.
     """
 
+    _instance: Orchestrator | None = None
+
     def __init__(
         self,
         queue: Queue,
@@ -48,6 +50,36 @@ class Orchestrator:
         """
         self.queue = queue
         self.store = store
+        # Register as the global instance for SubWorkflowTask access
+        Orchestrator._instance = self
+
+    @classmethod
+    def get_instance(cls) -> Orchestrator | None:
+        """Get the most recently created Orchestrator instance.
+
+        Used by SubWorkflowTask to access the orchestrator for
+        starting and polling child workflows.
+
+        Returns:
+            The current Orchestrator instance, or None if not created yet.
+        """
+        return cls._instance
+
+    def get_execution(self, execution_id: str) -> Workflow | None:
+        """Retrieve a workflow execution by ID.
+
+        Args:
+            execution_id: The workflow ID to retrieve.
+
+        Returns:
+            The workflow, or None if not found or no store configured.
+        """
+        if self.store is None:
+            return None
+        try:
+            return self.store.retrieve(execution_id)
+        except Exception:
+            return None
 
     def start(
         self,

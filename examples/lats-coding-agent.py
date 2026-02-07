@@ -67,7 +67,11 @@ class OllamaTask(Task):
         """Write content to file, cleaning markdown if present."""
         full_path = os.path.join("/tmp/stabilize-LATS-project", path)
         os.makedirs(
-            (os.path.dirname(full_path) if os.path.dirname(full_path) else "/tmp/stabilize-LATS-project"),
+            (
+                os.path.dirname(full_path)
+                if os.path.dirname(full_path)
+                else "/tmp/stabilize-LATS-project"
+            ),
             exist_ok=True,
         )
 
@@ -352,7 +356,9 @@ def main():
                     "output_path": "bulkhead.py",
                 },
                 tasks=[
-                    TaskExecution.create("Generate & Save", "ollama", stage_start=True, stage_end=True),
+                    TaskExecution.create(
+                        "Generate & Save", "ollama", stage_start=True, stage_end=True
+                    ),
                 ],
             ),
             # Stage 2: Run Tests
@@ -371,7 +377,9 @@ def main():
                 name="Evaluate Results",
                 requisite_stage_ref_ids={"test"},
                 context={},
-                tasks=[TaskExecution.create("Decide", "decision", stage_start=True, stage_end=True)],
+                tasks=[
+                    TaskExecution.create("Decide", "decision", stage_start=True, stage_end=True)
+                ],
             ),
         ],
     )

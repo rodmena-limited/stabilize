@@ -7,13 +7,21 @@ Provides the SqliteSnapshotsMixin with snapshot save/retrieve methods.
 from __future__ import annotations
 
 import json
-from typing import Any
+import sqlite3
+from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EntityType
+
+if TYPE_CHECKING:
+    pass
 
 
 class SqliteSnapshotsMixin:
     """Mixin providing snapshot operations."""
+
+    if TYPE_CHECKING:
+
+        def _get_connection(self) -> sqlite3.Connection: ...
 
     def save_snapshot(
         self,

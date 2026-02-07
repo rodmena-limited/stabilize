@@ -55,9 +55,13 @@ def paused_to_dict(paused: PausedDetails | None) -> dict[str, Any] | None:
 
 def row_to_execution(row: dict[str, Any]) -> Workflow:
     """Convert database row to Workflow."""
-    trigger_data = row["trigger"] if isinstance(row["trigger"], dict) else json.loads(row["trigger"] or "{}")
+    trigger_data = (
+        row["trigger"] if isinstance(row["trigger"], dict) else json.loads(row["trigger"] or "{}")
+    )
     paused_data = (
-        row["paused"] if isinstance(row["paused"], dict) else json.loads(row["paused"]) if row["paused"] else None
+        row["paused"]
+        if isinstance(row["paused"], dict)
+        else json.loads(row["paused"]) if row["paused"] else None
     )
     # Handle context - may be dict (JSONB auto-parsed), string, or None
     raw_context = row.get("context")
@@ -105,8 +109,12 @@ def row_to_stage(row: dict[str, Any]) -> StageExecution:
     from stabilize.models.multi_instance import MultiInstanceConfig
     from stabilize.models.stage import JoinType, SplitType
 
-    context = row["context"] if isinstance(row["context"], dict) else json.loads(row["context"] or "{}")
-    outputs = row["outputs"] if isinstance(row["outputs"], dict) else json.loads(row["outputs"] or "{}")
+    context = (
+        row["context"] if isinstance(row["context"], dict) else json.loads(row["context"] or "{}")
+    )
+    outputs = (
+        row["outputs"] if isinstance(row["outputs"], dict) else json.loads(row["outputs"] or "{}")
+    )
 
     synthetic_owner = None
     if row["synthetic_stage_owner"]:

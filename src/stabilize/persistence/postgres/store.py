@@ -30,16 +30,24 @@ from stabilize.persistence.postgres.operations import (
 from stabilize.persistence.postgres.operations import (
     cleanup_old_processed_messages as _cleanup_old_processed_messages,
 )
-from stabilize.persistence.postgres.operations import is_message_processed as _is_message_processed
+from stabilize.persistence.postgres.operations import (
+    is_message_processed as _is_message_processed,
+)
 from stabilize.persistence.postgres.operations import (
     mark_message_processed as _mark_message_processed,
 )
-from stabilize.persistence.postgres.queries import get_downstream_stages as _get_downstream_stages
+from stabilize.persistence.postgres.queries import (
+    get_downstream_stages as _get_downstream_stages,
+)
 from stabilize.persistence.postgres.queries import (
     get_merged_ancestor_outputs as _get_merged_ancestor_outputs,
 )
-from stabilize.persistence.postgres.queries import get_synthetic_stages as _get_synthetic_stages
-from stabilize.persistence.postgres.queries import get_upstream_stages as _get_upstream_stages
+from stabilize.persistence.postgres.queries import (
+    get_synthetic_stages as _get_synthetic_stages,
+)
+from stabilize.persistence.postgres.queries import (
+    get_upstream_stages as _get_upstream_stages,
+)
 from stabilize.persistence.postgres.queries import (
     load_tasks_for_stages,
 )
@@ -180,7 +188,11 @@ class PostgresWorkflowStore(WorkflowStore):
                         "is_canceled": execution.is_canceled,
                         "canceled_by": execution.canceled_by,
                         "cancellation_reason": execution.cancellation_reason,
-                        "paused": (json.dumps(paused_to_dict(execution.paused)) if execution.paused else None),
+                        "paused": (
+                            json.dumps(paused_to_dict(execution.paused))
+                            if execution.paused
+                            else None
+                        ),
                     },
                 )
             conn.commit()
@@ -286,7 +298,11 @@ class PostgresWorkflowStore(WorkflowStore):
 
             result = cur.fetchone()
             if result:
-                new_version = result[0] if isinstance(result, tuple) else result.get("version", stage.version + 1)
+                new_version = (
+                    result[0]
+                    if isinstance(result, tuple)
+                    else result.get("version", stage.version + 1)
+                )
                 stage.version = new_version
             else:
                 if expected_phase is not None:
@@ -399,7 +415,9 @@ class PostgresWorkflowStore(WorkflowStore):
         criteria: WorkflowCriteria | None = None,
     ) -> Iterator[Workflow]:
         """Retrieve executions by pipeline config ID."""
-        return _retrieve_by_pipeline_config_id(self._pool, pipeline_config_id, criteria, self.retrieve)
+        return _retrieve_by_pipeline_config_id(
+            self._pool, pipeline_config_id, criteria, self.retrieve
+        )
 
     def retrieve_by_application(
         self,

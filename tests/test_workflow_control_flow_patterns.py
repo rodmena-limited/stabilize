@@ -194,7 +194,9 @@ class TestORSplit:
     matching branches. Non-matching branches are skipped.
     """
 
-    def test_or_split_activates_matching_branches(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_or_split_activates_matching_branches(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """OR-split should activate branches whose conditions evaluate to true."""
         processor, runner, _ = setup_stabilize(
             repository,
@@ -287,7 +289,9 @@ class TestORSplit:
         ambulance = result.stage_by_ref_id("ambulance")
         assert ambulance.status == WorkflowStatus.SKIPPED
 
-    def test_or_split_activates_multiple_branches(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_or_split_activates_multiple_branches(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """OR-split can activate more than one branch simultaneously."""
         processor, runner, _ = setup_stabilize(
             repository,
@@ -598,7 +602,9 @@ class TestNofMJoin:
     The join fires when N out of M upstreams have completed.
     """
 
-    def test_n_of_m_fires_at_threshold(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_n_of_m_fires_at_threshold(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """N-of-M join should fire when threshold is reached."""
         processor, runner, _ = setup_stabilize(
             repository,
@@ -715,7 +721,9 @@ class TestDeferredChoice:
     by the environment.
     """
 
-    def test_deferred_choice_cancels_siblings(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_deferred_choice_cancels_siblings(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """First branch to start should cancel siblings in the same group.
 
         In a deferred choice, the winning branch's sibling is cancelled.
@@ -899,7 +907,9 @@ class TestMutexCriticalSection:
     One must wait for the other to complete.
     """
 
-    def test_mutex_prevents_concurrent_execution(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_mutex_prevents_concurrent_execution(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Stages sharing a mutex_key should execute one at a time."""
         TrackingTask.reset()
 
@@ -989,9 +999,13 @@ class TestMutexCriticalSection:
         # Verify they ran sequentially (not concurrently)
         # Extract execution log for the mutex stages
         db_op_entries = [
-            (ref_id, ts) for _, ref_id, ts in TrackingTask.execution_log if ref_id in ("db_op_1", "db_op_2")
+            (ref_id, ts)
+            for _, ref_id, ts in TrackingTask.execution_log
+            if ref_id in ("db_op_1", "db_op_2")
         ]
-        assert len(db_op_entries) == 2, f"Expected 2 mutex task executions, got {len(db_op_entries)}"
+        assert (
+            len(db_op_entries) == 2
+        ), f"Expected 2 mutex task executions, got {len(db_op_entries)}"
 
 
 # =============================================================================
@@ -1005,7 +1019,9 @@ class TestCancelRegion:
     A set of stages in a named region can be cancelled together.
     """
 
-    def test_cancel_region_cancels_matching_stages(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_cancel_region_cancels_matching_stages(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """CancelRegion should cancel all active stages in the named region."""
         processor, runner, _ = setup_stabilize(
             repository,
@@ -1195,7 +1211,9 @@ class TestTransientTrigger:
         # Verify handler is SUSPENDED
         result = repository.retrieve(wf.id)
         handler = result.stage_by_ref_id("handler")
-        assert handler.status == WorkflowStatus.SUSPENDED, f"Expected SUSPENDED, got {handler.status}"
+        assert (
+            handler.status == WorkflowStatus.SUSPENDED
+        ), f"Expected SUSPENDED, got {handler.status}"
 
         # Send transient signal
         queue.push(
@@ -1314,9 +1332,9 @@ class TestPersistentTrigger:
         # The handler should have completed: the persistent signal was either
         # delivered directly (if stage was SUSPENDED when signal arrived) or
         # buffered then auto-consumed when the task returned SUSPENDED.
-        assert handler.status == WorkflowStatus.SUCCEEDED, (
-            f"Expected handler to complete via persistent signal, got {handler.status}"
-        )
+        assert (
+            handler.status == WorkflowStatus.SUCCEEDED
+        ), f"Expected handler to complete via persistent signal, got {handler.status}"
 
 
 # =============================================================================
@@ -1546,7 +1564,9 @@ class TestModelFields:
         stage = StageExecution(ref_id="test", name="Test")
         assert stage.split_conditions == {}
 
-    def test_stage_persistence_roundtrip(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_stage_persistence_roundtrip(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """New fields should survive store/retrieve roundtrip."""
         processor, runner, _ = setup_stabilize(
             repository,
@@ -1606,7 +1626,9 @@ class TestModelFields:
 class TestCombinedPatterns:
     """Test combinations of multiple WCP patterns in a single workflow."""
 
-    def test_or_split_with_or_join_end_to_end(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_or_split_with_or_join_end_to_end(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Full OR-split -> branches -> OR-join pattern."""
         processor, runner, _ = setup_stabilize(
             repository,

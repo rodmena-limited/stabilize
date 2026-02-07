@@ -201,7 +201,7 @@ class TestBug3NoOpTransactionPartialFlush:
         mock_store.update_status.assert_called_once_with(mock_workflow)
 
         # Verify store_stage was attempted (failed)
-        mock_store.store_stage.assert_called_once_with(mock_stage)
+        mock_store.store_stage.assert_called_once_with(mock_stage, expected_phase=None)
 
     def test_partial_flush_clears_pending_on_error(self) -> None:
         """Test that pending items are cleared after flush error."""

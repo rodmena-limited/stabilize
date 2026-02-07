@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 class WorkflowEventsMixin:
     """Mixin providing workflow event recording methods."""
 
+    if TYPE_CHECKING:
+
+        def _record(self, event: Event, connection: Any | None = None) -> Event: ...
+
     def record_workflow_created(
         self,
         workflow: Workflow,
@@ -78,7 +82,9 @@ class WorkflowEventsMixin:
                 "status": workflow.status.name,
                 "end_time": workflow.end_time,
                 "duration_ms": (
-                    workflow.end_time - workflow.start_time if workflow.start_time and workflow.end_time else None
+                    workflow.end_time - workflow.start_time
+                    if workflow.start_time and workflow.end_time
+                    else None
                 ),
             },
             metadata=get_event_metadata(source_handler),

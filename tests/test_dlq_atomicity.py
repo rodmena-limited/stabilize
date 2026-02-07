@@ -25,7 +25,9 @@ from stabilize.queue.messages import StartWorkflow
 class TestDLQAtomicity:
     """Test DLQ operations for atomicity issues."""
 
-    def test_move_to_dlq_basic(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_move_to_dlq_basic(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test basic move_to_dlq functionality."""
         # Clear queue to ensure clean state
         queue.clear()
@@ -91,7 +93,11 @@ class TestDLQAtomicity:
                 self._insert_done = False
 
             def execute(self, sql: str, params: Any = None) -> Any:
-                result = self._real_conn.execute(sql, params) if params else self._real_conn.execute(sql)
+                result = (
+                    self._real_conn.execute(sql, params)
+                    if params
+                    else self._real_conn.execute(sql)
+                )
 
                 # Crash after INSERT INTO dlq
                 if "INSERT INTO" in sql and "_dlq" in sql:
@@ -167,7 +173,9 @@ class TestDLQAtomicity:
             test_queue.close()
 
     @pytest.mark.xfail(reason="Known atomicity issue: concurrent DLQ moves can create duplicates")
-    def test_concurrent_move_to_dlq_same_message(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_concurrent_move_to_dlq_same_message(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """
         Two workers trying to move the same message to DLQ.
 
@@ -281,9 +289,9 @@ class TestDLQAtomicity:
             # SIMULATE CRASH - don't delete from DLQ
 
             # Verify BUG: Message now exists in BOTH queues
-            dlq_count = real_conn.execute("SELECT COUNT(*) FROM queue_messages_dlq WHERE id = ?", (dlq_id,)).fetchone()[
-                0
-            ]
+            dlq_count = real_conn.execute(
+                "SELECT COUNT(*) FROM queue_messages_dlq WHERE id = ?", (dlq_id,)
+            ).fetchone()[0]
             main_count = real_conn.execute(
                 "SELECT COUNT(*) FROM queue_messages WHERE message_id LIKE '%replay%'"
             ).fetchone()[0]
@@ -295,7 +303,9 @@ class TestDLQAtomicity:
             store.close()
             test_queue.close()
 
-    def test_dlq_operations_under_load(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_dlq_operations_under_load(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """
         Stress test DLQ operations with concurrent message processing failures.
 
@@ -353,7 +363,9 @@ class TestDLQAtomicity:
         # Verify main queue is empty
         assert queue.size() == 0
 
-    def test_check_and_move_expired_atomicity(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_check_and_move_expired_atomicity(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """
         Test check_and_move_expired for atomicity issues.
 
@@ -393,21 +405,27 @@ class TestDLQAtomicity:
 class TestDLQEdgeCases:
     """Edge cases for DLQ operations."""
 
-    def test_move_nonexistent_message_to_dlq(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_move_nonexistent_message_to_dlq(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test moving a non-existent message to DLQ."""
         # Try to move a message that doesn't exist
         queue.move_to_dlq(999999, "Message doesn't exist")
 
         # Should handle gracefully (just log warning, no exception)
 
-    def test_replay_nonexistent_dlq_entry(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_replay_nonexistent_dlq_entry(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test replaying a non-existent DLQ entry."""
         result = queue.replay_dlq(999999)
 
         # Should return False, not raise exception
         assert result is False
 
-    def test_clear_dlq_while_replay_in_progress(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_clear_dlq_while_replay_in_progress(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test clearing DLQ while a replay is potentially in progress."""
         # Clear queue and DLQ to ensure clean state
         queue.clear()
@@ -433,7 +451,9 @@ class TestDLQEdgeCases:
         # Verify DLQ is empty
         assert queue.dlq_size() == 0
 
-    def test_dlq_with_very_large_payload(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_dlq_with_very_large_payload(
+        self, repository: WorkflowStore, queue: Queue, backend: str
+    ) -> None:
         """Test DLQ with a message containing a very large payload."""
         # Clear queue to ensure clean state
         queue.clear()

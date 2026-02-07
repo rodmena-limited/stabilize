@@ -21,7 +21,9 @@ from typing import TYPE_CHECKING
 from stabilize.persistence.sqlite.operations import (
     cleanup_old_processed_messages as _cleanup_old_processed_messages,
 )
-from stabilize.persistence.sqlite.operations import is_message_processed as _is_message_processed
+from stabilize.persistence.sqlite.operations import (
+    is_message_processed as _is_message_processed,
+)
 from stabilize.persistence.sqlite.operations import (
     mark_message_processed as _mark_message_processed,
 )

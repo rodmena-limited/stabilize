@@ -35,7 +35,11 @@ from stabilize.tasks.http.constants import (
 from stabilize.tasks.http.request import build_request
 from stabilize.tasks.http.response import process_response
 from stabilize.tasks.http.ssl_context import build_ssl_context
-from stabilize.tasks.http.utils import format_error, mask_secrets, substitute_placeholders
+from stabilize.tasks.http.utils import (
+    format_error,
+    mask_secrets,
+    substitute_placeholders,
+)
 from stabilize.tasks.interface import Task
 from stabilize.tasks.result import TaskResult
 
@@ -166,7 +170,9 @@ class HTTPTask(Task):
         # Validate method
         method = context.get("method", "GET").upper()
         if method not in SUPPORTED_METHODS:
-            return TaskResult.terminal(error=f"Unsupported method '{method}'. Supported: {sorted(SUPPORTED_METHODS)}")
+            return TaskResult.terminal(
+                error=f"Unsupported method '{method}'. Supported: {sorted(SUPPORTED_METHODS)}"
+            )
 
         # Build request
         try:

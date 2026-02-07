@@ -43,7 +43,9 @@ from stabilize.events import (
 # =============================================================================
 
 
-def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
+def setup_pipeline_runner(
+    store: WorkflowStore, queue: Queue
+) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with SSHTask registered."""
     task_registry = TaskRegistry()
     task_registry.register("ssh", SSHTask)
@@ -357,7 +359,9 @@ def example_parallel_health_check() -> None:
         status_mark = "[OK]" if stage.status == WorkflowStatus.SUCCEEDED else "[FAIL]"
         host = stage.outputs.get("host", "N/A")
         stdout = stage.outputs.get("stdout", "")
-        status_line = [line for line in stdout.split("\n") if "Status:" in line or "complete" in line.lower()]
+        status_line = [
+            line for line in stdout.split("\n") if "Status:" in line or "complete" in line.lower()
+        ]
         status = status_line[0] if status_line else "N/A"
         print(f"  {status_mark} {stage.name} ({host}): {status[:40]}")
 

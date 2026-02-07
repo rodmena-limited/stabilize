@@ -119,7 +119,9 @@ class OllamaTask(Task):
         )
 
         if health_result.status.is_halt or health_result.status.is_failure:
-            return TaskResult.terminal(error=f"Ollama not available at {host}. Ensure Ollama is running.")
+            return TaskResult.terminal(
+                error=f"Ollama not available at {host}. Ensure Ollama is running."
+            )
 
         # Build request payload
         payload: dict[str, Any] = {
@@ -155,7 +157,9 @@ class OllamaTask(Task):
         )
 
         if gen_result.status.is_halt:
-            return TaskResult.terminal(error=f"Ollama API error: {gen_result.context.get('error', 'Unknown')}")
+            return TaskResult.terminal(
+                error=f"Ollama API error: {gen_result.context.get('error', 'Unknown')}"
+            )
 
         if gen_result.status.is_failure:
             error_body = gen_result.outputs.get("body", "Unknown error")
@@ -196,7 +200,9 @@ class OllamaTask(Task):
 # =============================================================================
 
 
-def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
+def setup_pipeline_runner(
+    store: WorkflowStore, queue: Queue
+) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with OllamaTask registered."""
     task_registry = TaskRegistry()
     task_registry.register("ollama", OllamaTask)

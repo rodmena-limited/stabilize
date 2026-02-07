@@ -9,10 +9,14 @@ from stabilize.stages.builder import get_default_factory
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
+    from stabilize.persistence.store import WorkflowStore
 
 
 class CompleteStagePlannerMixin:
     """Mixin providing after-stage and on-failure-stage planning."""
+
+    if TYPE_CHECKING:
+        repository: WorkflowStore
 
     def _plan_after_stages(self, stage: StageExecution) -> None:
         """Plan after stages using the stage definition builder."""

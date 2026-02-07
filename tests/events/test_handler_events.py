@@ -203,9 +203,15 @@ class TestHandlerEventRecording:
         assert EventType.WORKFLOW_COMPLETED in event_types
 
         # Created must come before Started
-        created_seq = next(e.sequence for e in events if e.event_type == EventType.WORKFLOW_CREATED)
-        started_seq = next(e.sequence for e in events if e.event_type == EventType.WORKFLOW_STARTED)
-        completed_seq = next(e.sequence for e in events if e.event_type == EventType.WORKFLOW_COMPLETED)
+        created_seq = next(
+            e.sequence for e in events if e.event_type == EventType.WORKFLOW_CREATED
+        )
+        started_seq = next(
+            e.sequence for e in events if e.event_type == EventType.WORKFLOW_STARTED
+        )
+        completed_seq = next(
+            e.sequence for e in events if e.event_type == EventType.WORKFLOW_COMPLETED
+        )
         assert created_seq < started_seq < completed_seq
 
         repository.delete(workflow.id)

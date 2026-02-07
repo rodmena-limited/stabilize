@@ -70,7 +70,9 @@ class ProgressTask(Task):
             )
 
         # Final success
-        return TaskResult.success(outputs={"final_progress": stage.context.get("progress", 0) + 34})
+        return TaskResult.success(
+            outputs={"final_progress": stage.context.get("progress", 0) + 34}
+        )
 
 
 class TestStatefulRetriesIntegration:
@@ -86,7 +88,9 @@ class TestStatefulRetriesIntegration:
         ProgressTask.attempts = 0
         ProgressTask.max_retries_before_success = 3
 
-        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"progress": ProgressTask})
+        processor, runner, _ = setup_stabilize(
+            repository, queue, extra_tasks={"progress": ProgressTask}
+        )
 
         execution = Workflow.create(
             application="test",
