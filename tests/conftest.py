@@ -21,6 +21,7 @@ from stabilize import (
     TaskRegistry,
     TaskResult,
 )
+from stabilize.events import reset_event_bus, reset_event_recorder
 from stabilize.persistence.connection import ConnectionManager, SingletonMeta
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue import Queue
@@ -59,6 +60,16 @@ def reset_handler_state() -> Generator[None, None, None]:
     RunTaskHandler._executing_tasks.clear()
     yield
     RunTaskHandler._executing_tasks.clear()
+
+
+@pytest.fixture(autouse=True)
+def reset_event_state() -> Generator[None, None, None]:
+    """Reset global event sourcing state between tests."""
+    reset_event_bus()
+    reset_event_recorder()
+    yield
+    reset_event_bus()
+    reset_event_recorder()
 
 
 # =============================================================================

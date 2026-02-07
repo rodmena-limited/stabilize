@@ -17,6 +17,7 @@ Key Features
 *   **Resilience**: Built-in retries, timeouts, circuit breakers, bulkheads, and bloom filter deduplication.
 *   **Structured Errors**: Semantic error codes with chain traversal and automatic classification.
 *   **Configuration Versioning**: Immutable configs with fingerprinting for reproducibility.
+*   **Event Sourcing**: Full audit trail, event replay, projections, and time-travel debugging.
 *   **Observability**: Detailed structured logging and audit trails.
 
 .. toctree::
@@ -31,6 +32,7 @@ Key Features
    guide/persistence
    guide/resilience
    guide/error_handling
+   guide/event_sourcing
 
 .. toctree::
    :maxdepth: 2
@@ -50,6 +52,7 @@ Key Features
    api/persistence
    api/tasks
    api/queue
+   api/events
 
 Indices and tables
 ==================

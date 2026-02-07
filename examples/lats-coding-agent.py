@@ -37,6 +37,7 @@ from stabilize import (
     TaskResult,
     Workflow,
 )
+from stabilize.events import SqliteEventStore, configure_event_sourcing
 
 # =============================================================================
 # Custom Tasks
@@ -44,10 +45,10 @@ from stabilize import (
 
 
 class OllamaTask(Task):
-    """Call Ollama API."""
+    """Call Ollama API and optionally write to file."""
 
     DEFAULT_HOST = "http://localhost:11434"
-    DEFAULT_MODEL = "gemini-3-flash-preview:cloud"
+    DEFAULT_MODEL = "qwen3-coder-next:cloud"
 
     def __init__(self) -> None:
         self._http_task = HTTPTask()
@@ -62,10 +63,30 @@ class OllamaTask(Task):
         )
         return self._http_task.execute(temp_stage)
 
+    def _write_file(self, content: str, path: str) -> str:
+        """Write content to file, cleaning markdown if present."""
+        full_path = os.path.join("/tmp/stabilize-LATS-project", path)
+        os.makedirs(
+            (os.path.dirname(full_path) if os.path.dirname(full_path) else "/tmp/stabilize-LATS-project"),
+            exist_ok=True,
+        )
+
+        # Clean markdown code blocks if present
+        if "```python" in content:
+            content = content.split("```python")[1]
+        if "```" in content:
+            content = content.split("```")[0]
+
+        with open(full_path, "w") as f:
+            f.write(content.strip())
+
+        return full_path
+
     def execute(self, stage: StageExecution) -> TaskResult:
         prompt = stage.context.get("prompt")
         system = stage.context.get("system")
         model = stage.context.get("model", self.DEFAULT_MODEL)
+        output_path = stage.context.get("output_path")  # Optional file output
 
         # Check health
         health = self._make_http_request(
@@ -80,12 +101,11 @@ class OllamaTask(Task):
         if health.status.is_halt:
             # Fallback for mocked environment or if Ollama is missing
             print("  [OllamaTask] Warning: Ollama not reachable. Using mock response.")
-            return TaskResult.success(
-                outputs={
-                    "response": "Mock code for bulkhead pattern.\nclass Bulkhead: pass",
-                    "model": "mock",
-                }
-            )
+            mock_response = "Mock code for bulkhead pattern.\nclass Bulkhead: pass"
+            outputs = {"response": mock_response, "model": "mock"}
+            if output_path:
+                outputs["path"] = self._write_file(mock_response, output_path)
+            return TaskResult.success(outputs=outputs)
 
         payload = {
             "model": model,
@@ -112,7 +132,15 @@ class OllamaTask(Task):
 
         body = result.outputs.get("body_json", {})
         response = body.get("response", "")
-        return TaskResult.success(outputs={"response": response, "model": model})
+
+        outputs = {"response": response, "model": model}
+
+        # Write to file if path specified
+        if output_path:
+            outputs["path"] = self._write_file(response, output_path)
+            print(f"  [OllamaTask] Wrote {len(response)} chars to {outputs['path']}")
+
+        return TaskResult.success(outputs=outputs)
 
 
 class WriteFileTask(Task):
@@ -122,12 +150,16 @@ class WriteFileTask(Task):
         path = stage.context.get("path", "bulkhead.py")  # Default path
         content = stage.context.get("content")
 
-        # If content not in context, look for it in stage outputs
-        if not content and "response" in stage.outputs:
-            content = stage.outputs["response"]
+        # If content not in context, look for it in previous task outputs
+        if not content:
+            # Check previous tasks in this stage for 'response' output
+            for task in stage.tasks:
+                if task.outputs and "response" in task.outputs:
+                    content = task.outputs["response"]
+                    break
 
         if not content:
-            return TaskResult.terminal("Missing content (not in context or stage outputs)")
+            return TaskResult.terminal("Missing content (not in context or previous task outputs)")
 
         full_path = os.path.join("/tmp/stabilize-LATS-project", path)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
@@ -148,12 +180,22 @@ class PytestTask(Task):
     """Run pytest."""
 
     def execute(self, stage: StageExecution) -> TaskResult:
+        import sys
+
         test_file = stage.context.get("test_file", "tests/")
         cwd = "/tmp/stabilize-LATS-project"
 
-        cmd = ["pytest", test_file]
+        # Use the same Python environment's pytest
+        pytest_path = os.path.join(os.path.dirname(sys.executable), "pytest")
+        cmd = [pytest_path, test_file, "-v"]
         try:
             result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=30)
+            print(f"  [PytestTask] Exit code: {result.returncode}")
+            if result.stdout:
+                # Show summary line
+                for line in result.stdout.split("\n"):
+                    if "passed" in line or "failed" in line or "error" in line:
+                        print(f"  [PytestTask] {line.strip()}")
             return TaskResult.success(
                 outputs={
                     "returncode": result.returncode,
@@ -284,9 +326,12 @@ def main():
 
     registry = TaskRegistry()
     registry.register("ollama", OllamaTask)
-    registry.register("write", WriteFileTask)
     registry.register("pytest", PytestTask)
     registry.register("decision", DecisionTask)
+
+    # Enable event sourcing — all handler events are recorded automatically
+    event_store = SqliteEventStore("sqlite:///:memory:", create_tables=True)
+    configure_event_sourcing(event_store)
 
     processor = QueueProcessor(queue, store=store, task_registry=registry)
 
@@ -300,14 +345,14 @@ def main():
                 type="gen",
                 name="Generate Solution",
                 context={
-                    "system": "You are a python expert. Implement a 'Bulkhead' class context manager in 'bulkhead.py'. Raise 'BulkheadError' if full.",
-                    "prompt": "Implement a thread-safe Bulkhead pattern in Python using threading.Semaphore.",
-                    "prompt_history": "Implement a thread-safe Bulkhead pattern in Python using threading.Semaphore.",
-                    "model": "gemini-3-flash-preview:cloud",
+                    "system": "You are a python expert. Output ONLY valid Python code, no explanations. Implement a 'Bulkhead' class context manager. It should use threading.Semaphore with non-blocking acquire. Raise 'BulkheadError' (define it) if the semaphore cannot be acquired immediately.",
+                    "prompt": "Implement a thread-safe Bulkhead pattern in Python. The class must: 1) Accept max_concurrent in __init__, 2) Use threading.Semaphore, 3) Implement __enter__ with non-blocking acquire that raises BulkheadError if full, 4) Implement __exit__ to release. Define BulkheadError as a custom exception.",
+                    "prompt_history": "Implement Bulkhead pattern with threading.Semaphore.",
+                    "model": "qwen3-coder-next:cloud",
+                    "output_path": "bulkhead.py",
                 },
                 tasks=[
-                    TaskExecution.create("Call LLM", "ollama", stage_start=True),
-                    TaskExecution.create("Save File", "write", stage_end=True),
+                    TaskExecution.create("Generate & Save", "ollama", stage_start=True, stage_end=True),
                 ],
             ),
             # Stage 2: Run Tests

@@ -54,6 +54,12 @@ from stabilize import (
     DockerTask,     # For Docker container execution
     HTTPTask,       # For HTTP requests
 )
+from stabilize.events import (
+    configure_event_sourcing,  # One-line setup for event sourcing
+    SqliteEventStore,          # SQLite event store
+    get_event_bus,             # Access the event bus for subscriptions
+    EventType,                 # Event type enum for filtering
+)
 
 
 # Step 1: USE BUILT-IN TASKS - Do NOT define your own Task classes!
@@ -72,8 +78,8 @@ from stabilize import (
 #         return TaskResult.success(outputs={"result": value})
 
 
-# Step 2: Setup infrastructure
-def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
+# Step 2: Setup infrastructure with event sourcing
+def setup_pipeline_runner(store: WorkflowStore, queue: Queue, db_path: str) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with task registered."""
     task_registry = TaskRegistry()
     # Register built-in tasks
@@ -81,6 +87,10 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
     task_registry.register("python", PythonTask)
     task_registry.register("docker", DockerTask)
     task_registry.register("http", HTTPTask)
+
+    # Enable event sourcing — all handler events are recorded automatically
+    event_store = SqliteEventStore(f"sqlite:///{db_path}", create_tables=True)
+    configure_event_sourcing(event_store)
 
     processor = QueueProcessor(queue, store=store, task_registry=task_registry)
 
@@ -95,7 +105,7 @@ def main():
     store = SqliteWorkflowStore(f"sqlite:///{db_path}", create_tables=True)
     queue = SqliteQueue(f"sqlite:///{db_path}", table_name="queue_messages")
     queue._create_table()
-    processor, orchestrator = setup_pipeline_runner(store, queue)
+    processor, orchestrator = setup_pipeline_runner(store, queue, db_path)
 
     # Create workflow with stages using built-in tasks
     workflow = Workflow.create(
@@ -1171,11 +1181,15 @@ class NotifyTask(Task):
             )
 
 
-def setup_pipeline_runner(store, queue):
+def setup_pipeline_runner(store, queue, db_path):
     registry = TaskRegistry()
     registry.register("validate", ValidateTask)
     registry.register("process", ProcessTask)
     registry.register("notify", NotifyTask)
+
+    # Enable event sourcing
+    event_store = SqliteEventStore(f"sqlite:///{db_path}", create_tables=True)
+    configure_event_sourcing(event_store)
 
     processor = QueueProcessor(queue, store=store, task_registry=registry)
 
@@ -1188,7 +1202,7 @@ def main():
     store = SqliteWorkflowStore(f"sqlite:///{db_path}", create_tables=True)
     queue = SqliteQueue(f"sqlite:///{db_path}", table_name="queue_messages")
     queue._create_table()
-    processor, orchestrator = setup_pipeline_runner(store, queue)
+    processor, orchestrator = setup_pipeline_runner(store, queue, db_path)
 
     workflow = Workflow.create(
         application="data-pipeline",
@@ -1263,10 +1277,14 @@ class AggregateTask(Task):
         return TaskResult.success(outputs={"combined_data": combined})
 
 
-def setup_pipeline_runner(store, queue):
+def setup_pipeline_runner(store, queue, db_path):
     registry = TaskRegistry()
     registry.register("fetch", FetchDataTask)
     registry.register("aggregate", AggregateTask)
+
+    # Enable event sourcing
+    event_store = SqliteEventStore(f"sqlite:///{db_path}", create_tables=True)
+    configure_event_sourcing(event_store)
 
     processor = QueueProcessor(queue, store=store, task_registry=registry)
 
@@ -1279,7 +1297,7 @@ def main():
     store = SqliteWorkflowStore(f"sqlite:///{db_path}", create_tables=True)
     queue = SqliteQueue(f"sqlite:///{db_path}", table_name="queue_messages")
     queue._create_table()
-    processor, orchestrator = setup_pipeline_runner(store, queue)
+    processor, orchestrator = setup_pipeline_runner(store, queue, db_path)
 
     #        Start
     #       /  |  \
@@ -1945,6 +1963,91 @@ This is safe because:
 2. Catch ConcurrencyError only when you can safely retry or ignore
 3. Use message deduplication for idempotent processing
 4. Let the engine handle retries for transient failures
+
+===============================================================================
+18. EVENT SOURCING
+===============================================================================
+
+Stabilize includes a built-in event sourcing system. When enabled, every
+workflow, stage, and task state transition is recorded as an immutable event.
+
+18.1 Setup (Required)
+---------------------
+Always enable event sourcing in your setup_pipeline_runner:
+
+from stabilize.events import (
+    configure_event_sourcing,
+    SqliteEventStore,
+    get_event_bus,
+    EventType,
+)
+
+# In setup_pipeline_runner, before QueueProcessor creation:
+event_store = SqliteEventStore(f"sqlite:///{db_path}", create_tables=True)
+configure_event_sourcing(event_store)
+
+# That's it — handlers automatically record events.
+
+18.2 Subscribing to Events
+--------------------------
+Subscribe to the event bus for real-time monitoring:
+
+bus = get_event_bus()
+
+# Log all events
+bus.subscribe("logger", lambda e: print(f"{e.event_type.value}: {e.entity_id}"))
+
+# Filter by event type
+bus.subscribe(
+    "failure-alert",
+    lambda e: handle_failure(e),
+    event_types={EventType.WORKFLOW_FAILED, EventType.TASK_FAILED},
+)
+
+18.3 Event Replay and State Reconstruction
+-------------------------------------------
+Reconstruct workflow state from events at any point in time:
+
+from stabilize.events import EventReplayer
+
+replayer = EventReplayer(event_store)
+state = replayer.rebuild_workflow_state(workflow.id)
+
+# Time-travel: state at a specific sequence number
+partial = replayer.rebuild_workflow_state(workflow.id, as_of_sequence=50)
+
+18.4 Projections
+----------------
+Build analytics views from events:
+
+from stabilize.events import StageMetricsProjection, WorkflowTimelineProjection
+
+# Metrics (subscribe to bus for live updates)
+metrics = StageMetricsProjection()
+bus.subscribe("metrics", metrics.apply)
+# After workflows run:
+for stage_type, m in metrics.get_state().items():
+    print(f"{stage_type}: {m.success_rate:.0f}% success")
+
+# Timeline (apply events manually from store)
+timeline_proj = WorkflowTimelineProjection(workflow.id)
+for event in event_store.get_events_for_workflow(workflow.id):
+    timeline_proj.apply(event)
+timeline = timeline_proj.get_state()
+
+18.5 Event Types
+----------------
+Workflow: workflow.created, workflow.started, workflow.completed, workflow.failed,
+         workflow.canceled, workflow.paused, workflow.resumed
+Stage:    stage.started, stage.completed, stage.failed, stage.skipped, stage.canceled
+Task:     task.started, task.completed, task.failed, task.retried
+State:    status.changed, context.updated, outputs.updated, jump.executed
+
+18.6 Event Stores
+-----------------
+- SqliteEventStore("sqlite:///path.db", create_tables=True)  # Development
+- InMemoryEventStore()                                        # Testing only
+- PostgresEventStore("postgresql://...")                       # Production
 
 ===============================================================================
 END OF REFERENCE

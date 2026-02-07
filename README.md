@@ -23,6 +23,7 @@ pip install stabilize[all]       # All features
 - PostgreSQL and SQLite persistence
 - Pluggable task system
 - Retry and timeout support
+- Event sourcing with full audit trail, replay, and projections
 
 
 ## Comparison to Industry Standards
@@ -215,6 +216,37 @@ class ProgressTask(Task):
 ```
 
 The `context_update` is merged into the stage context before the retry, allowing tasks to resume from where they left off.
+
+## Event Sourcing
+
+Enable full audit trail and event replay with one line:
+
+```python
+from stabilize.events import configure_event_sourcing, SqliteEventStore
+
+# Enable event sourcing — handlers automatically record all state transitions
+event_store = SqliteEventStore("sqlite:///events.db", create_tables=True)
+configure_event_sourcing(event_store)
+
+# Run workflows as usual — events are recorded automatically
+
+# Subscribe to events for monitoring
+from stabilize.events import get_event_bus, EventType
+bus = get_event_bus()
+bus.subscribe("monitor", lambda e: print(e.event_type.value))
+
+# Replay events to reconstruct state at any point
+from stabilize.events import EventReplayer
+replayer = EventReplayer(event_store)
+state = replayer.rebuild_workflow_state(workflow.id)
+
+# Build analytics with projections
+from stabilize.events import StageMetricsProjection
+metrics = StageMetricsProjection()
+bus.subscribe("metrics", metrics.apply)
+```
+
+See `examples/event-sourcing-example.py` for a complete walkthrough.
 
 ## Database Setup
 

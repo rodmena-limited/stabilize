@@ -34,6 +34,10 @@ from stabilize import (
     WorkflowStore,
 )
 from stabilize.errors import TransientError
+from stabilize.events import (
+    SqliteEventStore,
+    configure_event_sourcing,
+)
 from stabilize.models.stage import StageExecution as StageModel
 from stabilize.tasks.interface import Task
 
@@ -150,6 +154,10 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
     task_registry = TaskRegistry()
     task_registry.register("quality_loop", QualityLoopTask)
     task_registry.register("batch", BatchProcessTask)
+
+    # Enable event sourcing — all handler events are recorded automatically
+    event_store = SqliteEventStore("sqlite:///:memory:", create_tables=True)
+    configure_event_sourcing(event_store)
 
     processor = QueueProcessor(queue, store=store, task_registry=task_registry)
 

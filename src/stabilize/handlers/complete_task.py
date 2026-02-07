@@ -21,6 +21,7 @@ from stabilize.queue.messages import (
 from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.models.task import TaskExecution
     from stabilize.persistence.store import WorkflowStore
@@ -45,8 +46,9 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
         repository: WorkflowStore,
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
+        event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(queue, repository, retry_delay, handler_config)
+        super().__init__(queue, repository, retry_delay, handler_config, event_recorder)
 
     @property
     def message_type(self) -> type[CompleteTask]:
@@ -93,6 +95,30 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
             task.end_time = self.current_time_millis()
 
             logger.debug("Task %s completed with status %s", task.name, message.status)
+
+            # Record event if event recorder is configured
+            if self.event_recorder:
+                workflow_id = stage.execution.id if stage.execution else ""
+                self.set_event_context(workflow_id)
+                if message.status.is_failure:
+                    error = "Task failed"
+                    if task.task_exception_details:
+                        error = task.task_exception_details.get("exception", str(task.task_exception_details))
+                    self.event_recorder.record_task_failed(
+                        task,
+                        workflow_id=workflow_id,
+                        error=error,
+                        source_handler="CompleteTaskHandler",
+                    )
+                elif message.status == WorkflowStatus.SKIPPED:
+                    pass  # Skipped tasks don't need completion events
+                else:
+                    self.event_recorder.record_task_completed(
+                        task,
+                        workflow_id=workflow_id,
+                        outputs=stage.outputs,
+                        source_handler="CompleteTaskHandler",
+                    )
 
             # For REDIRECT status, the task initiated a jump to another stage.
             # JumpToStageHandler handles the flow control, so we just complete

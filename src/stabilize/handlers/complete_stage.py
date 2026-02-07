@@ -29,6 +29,7 @@ from stabilize.resilience.config import HandlerConfig
 from stabilize.stages.builder import get_default_factory
 
 if TYPE_CHECKING:
+    from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
@@ -56,8 +57,9 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
         repository: WorkflowStore,
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
+        event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(queue, repository, retry_delay, handler_config)
+        super().__init__(queue, repository, retry_delay, handler_config, event_recorder)
 
     @property
     def message_type(self) -> type[CompleteStage]:
@@ -218,6 +220,28 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                 stage.end_time = self.current_time_millis()
 
                 logger.info("Stage %s completed with status %s", stage.name, status)
+
+                # Record event if event recorder is configured
+                if self.event_recorder:
+                    self.set_event_context(stage.execution.id if stage.execution else "")
+                    if status.is_failure:
+                        error = stage.context.get("exception", {}).get("details", {}).get("error", "Unknown error")
+                        self.event_recorder.record_stage_failed(
+                            stage,
+                            error=str(error),
+                            source_handler="CompleteStageHandler",
+                        )
+                    elif status == WorkflowStatus.SKIPPED:
+                        self.event_recorder.record_stage_skipped(
+                            stage,
+                            reason="Skipped",
+                            source_handler="CompleteStageHandler",
+                        )
+                    else:
+                        self.event_recorder.record_stage_completed(
+                            stage,
+                            source_handler="CompleteStageHandler",
+                        )
 
                 # Handle FAILED_CONTINUE propagation to parent
                 if (

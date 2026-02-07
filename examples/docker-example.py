@@ -33,6 +33,10 @@ from stabilize import (
     WorkflowStatus,
     WorkflowStore,
 )
+from stabilize.events import (
+    SqliteEventStore,
+    configure_event_sourcing,
+)
 
 # =============================================================================
 # Helper: Setup pipeline infrastructure
@@ -43,6 +47,10 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
     """Create processor and orchestrator with DockerTask registered."""
     task_registry = TaskRegistry()
     task_registry.register("docker", DockerTask)
+
+    # Enable event sourcing — all handler events are recorded automatically
+    event_store = SqliteEventStore("sqlite:///:memory:", create_tables=True)
+    configure_event_sourcing(event_store)
 
     processor = QueueProcessor(queue, store=store, task_registry=task_registry)
 
@@ -278,7 +286,7 @@ def example_parallel_containers() -> None:
                 context={
                     "action": "run",
                     "image": "alpine:latest",
-                    "command": "cat /proc/cpuinfo | head -10",
+                    "command": "sh -c 'cat /proc/cpuinfo | head -10'",
                 },
                 tasks=[
                     TaskExecution.create(
@@ -297,7 +305,7 @@ def example_parallel_containers() -> None:
                 context={
                     "action": "run",
                     "image": "alpine:latest",
-                    "command": "cat /proc/meminfo | head -5",
+                    "command": "sh -c 'cat /proc/meminfo | head -5'",
                 },
                 tasks=[
                     TaskExecution.create(

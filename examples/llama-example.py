@@ -9,7 +9,7 @@ This example shows how to:
 
 Requirements:
     Ollama installed and running (https://ollama.ai)
-    At least one model pulled (e.g., ollama pull deepseek-v3.1:671b-cloud)
+    At least one model pulled (e.g., ollama pull qwen3-coder-next:cloud)
 
 Run with:
     python examples/llama-example.py
@@ -36,6 +36,10 @@ from stabilize import (
     Workflow,
     WorkflowStatus,
     WorkflowStore,
+)
+from stabilize.events import (
+    SqliteEventStore,
+    configure_event_sourcing,
 )
 
 # =============================================================================
@@ -73,7 +77,7 @@ class OllamaTask(Task):
     """
 
     DEFAULT_HOST = "http://localhost:11434"
-    DEFAULT_MODEL = "deepseek-v3.1:671b-cloud"
+    DEFAULT_MODEL = "qwen3-coder-next:cloud"
 
     def __init__(self) -> None:
         self._http_task = HTTPTask()
@@ -197,6 +201,10 @@ def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProc
     task_registry = TaskRegistry()
     task_registry.register("ollama", OllamaTask)
 
+    # Enable event sourcing — all handler events are recorded automatically
+    event_store = SqliteEventStore("sqlite:///:memory:", create_tables=True)
+    configure_event_sourcing(event_store)
+
     processor = QueueProcessor(queue, store=store, task_registry=task_registry)
 
     orchestrator = Orchestrator(queue)
@@ -229,7 +237,7 @@ def example_simple_generation() -> None:
                 name="Generate Text",
                 context={
                     "prompt": "Explain what a workflow engine is in 2-3 sentences.",
-                    "model": "deepseek-v3.1:671b-cloud",
+                    "model": "qwen3-coder-next:cloud",
                     "temperature": 0.7,
                     "max_tokens": 150,
                 },
@@ -287,7 +295,7 @@ def example_with_system_prompt() -> None:
                 context={
                     "system": "You are a senior software architect. Provide clear, technical explanations. Be concise.",
                     "prompt": "What are the benefits of using a DAG (Directed Acyclic Graph) for workflow orchestration?",
-                    "model": "deepseek-v3.1:671b-cloud",
+                    "model": "qwen3-coder-next:cloud",
                     "temperature": 0.5,
                     "max_tokens": 200,
                 },
@@ -349,7 +357,7 @@ def example_json_output() -> None:
 - features: array of 3 strings
 - status: one of "alpha", "beta", "stable"
 """,
-                    "model": "deepseek-v3.1:671b-cloud",
+                    "model": "qwen3-coder-next:cloud",
                     "temperature": 0.3,
                     "format": "json",
                 },
@@ -418,7 +426,7 @@ def example_processing_pipeline() -> None:
                 context={
                     "system": "You are a technical writer. Summarize text into bullet points.",
                     "prompt": f"Summarize this into 3 key bullet points:\n\n{original_text}",
-                    "model": "deepseek-v3.1:671b-cloud",
+                    "model": "qwen3-coder-next:cloud",
                     "temperature": 0.3,
                     "max_tokens": 150,
                 },
@@ -440,7 +448,7 @@ def example_processing_pipeline() -> None:
                 context={
                     "system": "Extract technical keywords. Output only a comma-separated list.",
                     "prompt": f"Extract 5 technical keywords from:\n\n{original_text}",
-                    "model": "deepseek-v3.1:671b-cloud",
+                    "model": "qwen3-coder-next:cloud",
                     "temperature": 0.2,
                     "max_tokens": 50,
                 },
@@ -462,7 +470,7 @@ def example_processing_pipeline() -> None:
                 context={
                     "system": "You are a marketing copywriter. Be concise and catchy.",
                     "prompt": f"Create a one-line tagline (max 10 words) for this product:\n\n{original_text}",
-                    "model": "deepseek-v3.1:671b-cloud",
+                    "model": "qwen3-coder-next:cloud",
                     "temperature": 0.8,
                     "max_tokens": 30,
                 },
@@ -526,7 +534,7 @@ def example_parallel_generation() -> None:
                 name="Setup",
                 context={
                     "prompt": "Say 'Starting parallel generation' in exactly 3 words.",
-                    "model": "deepseek-v3.1:671b-cloud",
+                    "model": "qwen3-coder-next:cloud",
                     "max_tokens": 10,
                 },
                 tasks=[
@@ -547,7 +555,7 @@ def example_parallel_generation() -> None:
                 context={
                     "system": "Write in a formal, professional tone.",
                     "prompt": base_prompt,
-                    "model": "deepseek-v3.1:671b-cloud",
+                    "model": "qwen3-coder-next:cloud",
                     "temperature": 0.3,
                     "max_tokens": 50,
                 },
@@ -568,7 +576,7 @@ def example_parallel_generation() -> None:
                 context={
                     "system": "Write in a casual, friendly tone.",
                     "prompt": base_prompt,
-                    "model": "deepseek-v3.1:671b-cloud",
+                    "model": "qwen3-coder-next:cloud",
                     "temperature": 0.7,
                     "max_tokens": 50,
                 },
@@ -589,7 +597,7 @@ def example_parallel_generation() -> None:
                 context={
                     "system": "Write in a technical, precise tone for developers.",
                     "prompt": base_prompt,
-                    "model": "deepseek-v3.1:671b-cloud",
+                    "model": "qwen3-coder-next:cloud",
                     "temperature": 0.2,
                     "max_tokens": 50,
                 },
@@ -610,7 +618,7 @@ def example_parallel_generation() -> None:
                 requisite_stage_ref_ids={"formal", "casual", "technical"},
                 context={
                     "prompt": "Say 'Generation complete' in exactly 2 words.",
-                    "model": "deepseek-v3.1:671b-cloud",
+                    "model": "qwen3-coder-next:cloud",
                     "max_tokens": 10,
                 },
                 tasks=[
@@ -649,8 +657,8 @@ def example_parallel_generation() -> None:
 if __name__ == "__main__":
     print("Stabilize Ollama LLM Examples")
     print("=" * 60)
-    print("Requires: Ollama running with deepseek-v3.1:671b-cloud model")
-    print("Install: ollama pull deepseek-v3.1:671b-cloud")
+    print("Requires: Ollama running with qwen3-coder-next:cloud model")
+    print("Install: ollama pull qwen3-coder-next:cloud")
 
     example_simple_generation()
     example_with_system_prompt()

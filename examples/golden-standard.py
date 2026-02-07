@@ -37,6 +37,7 @@ from stabilize import (
     TaskResult,
     Workflow,
 )
+from stabilize.events import SqliteEventStore, configure_event_sourcing
 
 # =============================================================================
 # Custom Task Implementations
@@ -398,6 +399,10 @@ def setup_runner() -> tuple[SqliteWorkflowStore, SqliteQueue, QueueProcessor, Or
     task_registry.register("join_gate", JoinGateTask)
     task_registry.register("loop_iteration", LoopIterationTask)
     task_registry.register("finalize", FinalizeTask)
+
+    # Enable event sourcing — all handler events are recorded automatically
+    event_store = SqliteEventStore("sqlite:///:memory:", create_tables=True)
+    configure_event_sourcing(event_store)
 
     # Create processor with auto-registered handlers
     processor = QueueProcessor(queue, store=repository, task_registry=task_registry)

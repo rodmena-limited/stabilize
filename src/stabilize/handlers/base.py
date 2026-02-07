@@ -38,6 +38,7 @@ from stabilize.queue.messages import (
 from stabilize.resilience.config import HandlerConfig, get_handler_config
 
 if TYPE_CHECKING:
+    from stabilize.events.recorder import EventRecorder
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
 
@@ -85,12 +86,40 @@ class StabilizeHandler(MessageHandler[M], ABC):
         repository: WorkflowStore,
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
+        event_recorder: EventRecorder | None = None,
     ) -> None:
         self.queue = queue
         self.repository = repository
         self.handler_config = handler_config or get_handler_config()
         # Use explicit retry_delay if provided, otherwise use config
         self.retry_delay = retry_delay or timedelta(seconds=self.handler_config.handler_retry_delay_seconds)
+        # Event recording is optional - use provided recorder or global instance
+        self._event_recorder = event_recorder
+
+    # ========== Event Recording ==========
+
+    @property
+    def event_recorder(self) -> EventRecorder | None:
+        """Get the event recorder, preferring instance over global."""
+        if self._event_recorder is not None:
+            return self._event_recorder
+        # Fall back to global recorder if available
+        from stabilize.events.recorder import get_event_recorder
+
+        return get_event_recorder()
+
+    def set_event_context(self, workflow_id: str) -> None:
+        """Set event context for correlation tracking.
+
+        Call this at the start of handler processing to establish
+        correlation context for any events recorded during handling.
+
+        Args:
+            workflow_id: The workflow ID for correlation.
+        """
+        from stabilize.events.recorder import set_event_context
+
+        set_event_context(correlation_id=workflow_id)
 
     # ========== Execution Retrieval ==========
 

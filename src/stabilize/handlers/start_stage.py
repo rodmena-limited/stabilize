@@ -29,6 +29,7 @@ from stabilize.resilience.config import HandlerConfig
 from stabilize.stages.builder import get_default_factory
 
 if TYPE_CHECKING:
+    from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
@@ -61,8 +62,9 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         repository: WorkflowStore,
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
+        event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(queue, repository, retry_delay, handler_config)
+        super().__init__(queue, repository, retry_delay, handler_config, event_recorder)
 
     @property
     def message_type(self) -> type[StartStage]:
@@ -359,6 +361,14 @@ class StartStageHandler(StabilizeHandler[StartStage]):
             return
 
         logger.info("Started stage %s (%s)", stage.name, stage.id)
+
+        # Record event if event recorder is configured
+        if self.event_recorder:
+            self.set_event_context(stage.execution.id if stage.execution else "")
+            self.event_recorder.record_stage_started(
+                stage,
+                source_handler="StartStageHandler",
+            )
 
     def _collect_start_messages(
         self,

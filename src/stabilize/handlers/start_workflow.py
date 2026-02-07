@@ -24,6 +24,7 @@ from stabilize.queue.messages import (
 from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from stabilize.events.recorder import EventRecorder
     from stabilize.models.workflow import Workflow
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
@@ -48,8 +49,9 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
         repository: WorkflowStore,
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
+        event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(queue, repository, retry_delay, handler_config)
+        super().__init__(queue, repository, retry_delay, handler_config, event_recorder)
 
     @property
     def message_type(self) -> type[StartWorkflow]:
@@ -192,6 +194,19 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
                         stage_id=stage.id,
                     )
                 )
+
+        # Record events if event recorder is configured
+        if self.event_recorder:
+            self.set_event_context(execution.id)
+            self.event_recorder.record_workflow_created(
+                execution,
+                source_handler="StartWorkflowHandler",
+            )
+            self.event_recorder.record_workflow_started(
+                execution,
+                initial_stage_ids=[s.id for s in initial_stages],
+                source_handler="StartWorkflowHandler",
+            )
 
         # Audit log
         audit(

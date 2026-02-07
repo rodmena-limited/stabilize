@@ -12,6 +12,7 @@ This module provides a production-ready DockerTask with:
 from __future__ import annotations
 
 import logging
+import shlex
 import subprocess
 from typing import TYPE_CHECKING, Any
 
@@ -394,7 +395,9 @@ class DockerTask(Task):
         container_cmd = context.get("command")
         if container_cmd:
             if isinstance(container_cmd, str):
-                cmd.extend(container_cmd.split())
+                # Use shlex to handle complex commands with quotes
+                # This allows commands like: sh -c 'echo $VAR'
+                cmd.extend(shlex.split(container_cmd))
             else:
                 cmd.extend(container_cmd)
 
@@ -429,7 +432,7 @@ class DockerTask(Task):
         cmd.append(name)
 
         if isinstance(command, str):
-            cmd.extend(command.split())
+            cmd.extend(shlex.split(command))
         else:
             cmd.extend(command)
 

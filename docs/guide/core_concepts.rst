@@ -49,3 +49,14 @@ The engine operates in a continuous loop:
     *   Enqueues next message (e.g., ``StartTask`` for next task, or ``CompleteStage``).
 
 4.  **Commit**: The transaction commits. If it fails (e.g., optimistic lock error), it rolls back and retries.
+
+Event Sourcing
+--------------
+
+Optionally, Stabilize can record every state transition as an immutable event.
+When enabled via ``configure_event_sourcing()``, handlers automatically record
+events to an event store and publish them to an in-process event bus.
+
+This enables full audit trails, event replay for state reconstruction,
+time-travel queries, and analytics projections. See :doc:`event_sourcing` for
+the full guide.

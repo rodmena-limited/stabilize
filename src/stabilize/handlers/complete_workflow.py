@@ -21,6 +21,7 @@ from stabilize.queue.messages import (
 from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
     from stabilize.persistence.store import WorkflowStore
@@ -47,8 +48,9 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
         repository: WorkflowStore,
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
+        event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(queue, repository, retry_delay, handler_config)
+        super().__init__(queue, repository, retry_delay, handler_config, event_recorder)
 
     @property
     def message_type(self) -> type[CompleteWorkflow]:
@@ -89,6 +91,26 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
             execution.end_time = self.current_time_millis()
 
             logger.info("Execution %s completed with status %s", execution.id, status)
+
+            # Record event if event recorder is configured
+            if self.event_recorder:
+                self.set_event_context(execution.id)
+                if status == WorkflowStatus.SUCCEEDED:
+                    self.event_recorder.record_workflow_completed(
+                        execution,
+                        source_handler="CompleteWorkflowHandler",
+                    )
+                elif status == WorkflowStatus.CANCELED:
+                    self.event_recorder.record_workflow_canceled(
+                        execution,
+                        source_handler="CompleteWorkflowHandler",
+                    )
+                else:
+                    self.event_recorder.record_workflow_failed(
+                        execution,
+                        error=f"Workflow ended with status {status.name}",
+                        source_handler="CompleteWorkflowHandler",
+                    )
 
             # Collect running stages to cancel if not successful
             running_stages = []

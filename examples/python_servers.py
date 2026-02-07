@@ -28,6 +28,7 @@ from stabilize import (
     TaskRegistry,
     Workflow,
 )
+from stabilize.events import SqliteEventStore, configure_event_sourcing
 from stabilize.queue.processor import QueueProcessorConfig
 from stabilize.recovery import recover_on_startup
 
@@ -94,6 +95,10 @@ def main():
 
     reg = TaskRegistry()
     reg.register("shell", ShellTask)
+
+    # Enable event sourcing — all handler events are recorded automatically
+    event_store = SqliteEventStore(f"sqlite:///{db}", create_tables=True)
+    configure_event_sourcing(event_store)
 
     processor = QueueProcessor(
         queue,

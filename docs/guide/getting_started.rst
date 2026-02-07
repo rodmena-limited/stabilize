@@ -71,3 +71,10 @@ Create a simple "Hello World" workflow.
     result = store.retrieve(workflow.id)
     print(result.stages[0].outputs["greeting"])
     # Output: Hello, Stabilize!
+
+Next Steps
+----------
+
+*  **Enable event sourcing** for audit trails and replay — see :doc:`event_sourcing`.
+*  Explore **built-in tasks**: ``ShellTask``, ``HTTPTask``, ``PythonTask``, ``DockerTask`` — see :doc:`tasks`.
+*  Learn about **parallel stages** and **DAG execution** — see :doc:`core_concepts`.
