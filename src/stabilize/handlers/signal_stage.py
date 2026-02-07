@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
-from stabilize.queue.messages import SignalStage, StartStage
+from stabilize.queue.messages import RunTask, SignalStage, StartStage
 from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
@@ -75,6 +75,14 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
                 # Transition back to RUNNING
                 self.set_stage_status(stage, WorkflowStatus.RUNNING)
 
+                # Find the suspended task and set it back to RUNNING
+                suspended_task = None
+                for task in stage.tasks:
+                    if task.status == WorkflowStatus.SUSPENDED:
+                        suspended_task = task
+                        task.status = WorkflowStatus.RUNNING
+                        break
+
                 with self.repository.transaction(self.queue) as txn:
                     txn.store_stage(stage)
                     if message.message_id:
@@ -83,14 +91,25 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
                             handler_type="SignalStage",
                             execution_id=message.execution_id,
                         )
-                    # Re-start the stage to resume execution
-                    txn.push_message(
-                        StartStage(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=message.stage_id,
+                    if suspended_task:
+                        # Push RunTask to re-execute the suspended task
+                        txn.push_message(
+                            RunTask(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=message.stage_id,
+                                task_id=suspended_task.id,
+                            )
                         )
-                    )
+                    else:
+                        # No suspended task found - re-start the stage
+                        txn.push_message(
+                            StartStage(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=message.stage_id,
+                            )
+                        )
                 return
 
             # Stage is not SUSPENDED

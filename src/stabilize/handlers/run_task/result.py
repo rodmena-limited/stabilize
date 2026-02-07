@@ -68,6 +68,9 @@ def process_result(
     }:
         _handle_success_like(stage, result, message, txn_helper)
 
+    elif result.status == WorkflowStatus.SUSPENDED:
+        _handle_suspended(stage, task_model, result, message, txn_helper)
+
     elif result.status == WorkflowStatus.CANCELED:
         _handle_canceled(stage, result, message, txn_helper)
 
@@ -173,6 +176,70 @@ def _handle_success_like(
                 None,
             )
         ],
+        handler_name="RunTask",
+    )
+
+
+def _handle_suspended(
+    stage: StageExecution,
+    task_model: TaskExecution,
+    result: TaskResult,
+    message: RunTask,
+    txn_helper: TransactionHelper,
+) -> None:
+    """Handle SUSPENDED status (WCP-23/24).
+
+    The task is waiting for an external signal. Set the task and stage
+    to SUSPENDED and do NOT push any continuation messages. The stage
+    will be resumed when a SignalStage message is received.
+    """
+    logger.info(
+        "Task %s suspended, waiting for signal",
+        task_model.name,
+    )
+
+    # Set task to SUSPENDED
+    task_model.status = WorkflowStatus.SUSPENDED
+
+    # Set stage to SUSPENDED - this tells the engine the stage is waiting
+    stage.status = WorkflowStatus.SUSPENDED
+
+    # Check for any buffered signals (WCP-24: persistent triggers)
+    buffered = stage.context.get("_buffered_signals", [])
+    if buffered:
+        # Consume the first buffered signal
+        signal = buffered.pop(0)
+        stage.context["_buffered_signals"] = buffered
+        stage.context["_signal_name"] = signal.get("signal_name", "")
+        stage.context["_signal_data"] = signal.get("signal_data", {})
+        # Resume by re-running the same task (stage is already RUNNING)
+        from stabilize.queue.messages import RunTask as RunTaskMsg
+
+        stage.status = WorkflowStatus.RUNNING
+        task_model.status = WorkflowStatus.RUNNING
+        txn_helper.execute_atomic(
+            stage=stage,
+            source_message=message,
+            messages_to_push=[
+                (
+                    RunTaskMsg(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                        task_id=task_model.id,
+                    ),
+                    None,
+                )
+            ],
+            handler_name="RunTask",
+        )
+        return
+
+    # No buffered signals - stay suspended (no continuation message)
+    txn_helper.execute_atomic(
+        stage=stage,
+        source_message=message,
+        messages_to_push=[],
         handler_name="RunTask",
     )
 

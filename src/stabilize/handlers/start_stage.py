@@ -318,8 +318,30 @@ class StartStageHandler(StabilizeHandler[StartStage]):
             self.queue.push(new_message, self.retry_delay)
             return
 
-        # WCP-16: Deferred choice - first stage to claim wins, cancel siblings
-        # (handled after atomic claim below)
+        # WCP-16: Deferred choice - check if a sibling already claimed this group
+        # Query the database directly because retrieve_stage() only loads
+        # upstreams, not siblings in the same deferred_choice_group.
+        if stage.deferred_choice_group and self._is_deferred_choice_claimed(stage):
+            logger.info(
+                "Deferred choice: sibling in group '%s' already claimed, cancelling %s",
+                stage.deferred_choice_group,
+                stage.name,
+            )
+            with self.repository.transaction(self.queue) as txn:
+                if message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="StartStage",
+                        execution_id=message.execution_id,
+                    )
+                txn.push_message(
+                    CancelStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                    )
+                )
+            return
 
         # Check if start time expired - use transaction for atomicity
         if self._is_after_start_time_expiry(stage):
@@ -587,9 +609,9 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         if not stage.milestone_ref_id or not stage.milestone_status:
             return False
 
-        execution = stage.execution
+        all_stages = self.repository.retrieve(stage.execution.id).stages
         milestone_stage = None
-        for s in execution.stages:
+        for s in all_stages:
             if s.ref_id == stage.milestone_ref_id:
                 milestone_stage = s
                 break
@@ -616,16 +638,33 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         # This could mean it hasn't reached the milestone yet - don't skip
         return False
 
+    def _is_deferred_choice_claimed(self, stage: StageExecution) -> bool:
+        """Check if a sibling in the deferred choice group already started (WCP-16).
+
+        Queries ALL stages of the execution to find siblings in the same group.
+        Returns True if any sibling has progressed past NOT_STARTED.
+        """
+        if not stage.deferred_choice_group:
+            return False
+
+        all_stages = self.repository.retrieve(stage.execution.id).stages
+        for s in all_stages:
+            if s.id == stage.id:
+                continue
+            if s.deferred_choice_group == stage.deferred_choice_group and s.status != WorkflowStatus.NOT_STARTED:
+                return True
+        return False
+
     def _is_mutex_blocked(self, stage: StageExecution) -> bool:
         """Check if another stage with the same mutex_key is RUNNING (WCP-17,39,40).
 
-        Provides mutual exclusion within a process instance.
+        Queries ALL stages of the execution for mutual exclusion.
         """
         if not stage.mutex_key:
             return False
 
-        execution = stage.execution
-        for s in execution.stages:
+        all_stages = self.repository.retrieve(stage.execution.id).stages
+        for s in all_stages:
             if s.id == stage.id:
                 continue
             if s.mutex_key == stage.mutex_key and s.status == WorkflowStatus.RUNNING:
@@ -642,8 +681,8 @@ class StartStageHandler(StabilizeHandler[StartStage]):
         When one branch of a deferred choice is claimed (set to RUNNING),
         all other branches in the same group are cancelled.
         """
-        execution = stage.execution
-        for s in execution.stages:
+        all_stages = self.repository.retrieve(stage.execution.id).stages
+        for s in all_stages:
             if s.id == stage.id:
                 continue
             if s.deferred_choice_group == stage.deferred_choice_group and s.status == WorkflowStatus.NOT_STARTED:

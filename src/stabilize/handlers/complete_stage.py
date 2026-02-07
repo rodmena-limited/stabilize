@@ -493,6 +493,11 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
             return downstream_stages, []
 
         # OR-split: evaluate conditions per downstream
+        # Merge context and outputs for condition evaluation so that
+        # conditions can reference both stage context and task outputs.
+        eval_context = dict(stage.context)
+        eval_context.update(stage.outputs)
+
         activated: list[StageExecution] = []
         skipped: list[StageExecution] = []
 
@@ -504,7 +509,7 @@ class CompleteStageHandler(StabilizeHandler[CompleteStage]):
                 continue
 
             try:
-                result = evaluate_expression(condition, stage.context)
+                result = evaluate_expression(condition, eval_context)
                 if result:
                     activated.append(downstream)
                 else:
