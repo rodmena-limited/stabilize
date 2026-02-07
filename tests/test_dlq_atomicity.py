@@ -10,7 +10,6 @@ This module verifies that DLQ operations are atomic:
   (poll uses optimistic locking).
 """
 
-import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta

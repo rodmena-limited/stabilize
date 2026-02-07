@@ -45,9 +45,7 @@ def insert_stage(cur: Any, stage: StageExecution, execution_id: str) -> None:
             "outputs": json.dumps(stage.outputs),
             "requisite_stage_ref_ids": list(stage.requisite_stage_ref_ids),
             "parent_stage_id": stage.parent_stage_id,
-            "synthetic_stage_owner": (
-                stage.synthetic_stage_owner.value if stage.synthetic_stage_owner else None
-            ),
+            "synthetic_stage_owner": (stage.synthetic_stage_owner.value if stage.synthetic_stage_owner else None),
             "start_time": stage.start_time,
             "end_time": stage.end_time,
             "start_time_expiry": stage.start_time_expiry,
@@ -165,9 +163,7 @@ def upsert_tasks_bulk(cur: Any, tasks: list[TaskExecution], stage_id: str) -> No
         result = cur.fetchone()
         if result:
             # Operation succeeded (insert or update), get the new version
-            new_version = (
-                result[0] if isinstance(result, tuple) else result.get("version", task.version + 1)
-            )
+            new_version = result[0] if isinstance(result, tuple) else result.get("version", task.version + 1)
             task.version = new_version
         else:
             # No row returned means the update failed due to version mismatch

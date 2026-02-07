@@ -83,9 +83,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         handler_config: HandlerConfig | None = None,
         event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(
-            queue, repository, retry_delay, handler_config, event_recorder=event_recorder
-        )
+        super().__init__(queue, repository, retry_delay, handler_config, event_recorder=event_recorder)
         self.task_registry = task_registry
         self.txn_helper = TransactionHelper(repository, queue)
         self.timeout_manager = TimeoutManager(self.handler_config.default_task_timeout_seconds)
@@ -100,9 +98,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
 
         # Check isolation mode
         self.isolation_mode = os.environ.get("STABILIZE_ISOLATION_MODE", "thread").lower()
-        self.process_executor = (
-            ProcessIsolatedTaskExecutor() if self.isolation_mode == "process" else None
-        )
+        self.process_executor = ProcessIsolatedTaskExecutor() if self.isolation_mode == "process" else None
 
         # Initialize resilience components with defaults if not provided
         if bulkhead_manager is None or circuit_factory is None:
@@ -243,9 +239,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                         elapsed_ms,
                         int(allowed_ms),
                     )
-                    timeout_result = (
-                        task.on_timeout(stage) if hasattr(task, "on_timeout") else None
-                    )
+                    timeout_result = task.on_timeout(stage) if hasattr(task, "on_timeout") else None
                     if timeout_result is None:
                         complete_with_error(
                             stage,
@@ -257,9 +251,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                             self.retry_on_concurrency_error,
                         )
                     else:
-                        self._process_result_safely(
-                            message.stage_id, message.task_id, timeout_result, message
-                        )
+                        self._process_result_safely(message.stage_id, message.task_id, timeout_result, message)
                     return
 
             # CONCURRENT EXECUTION CHECK: Prevent duplicate execution of same task
@@ -310,9 +302,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                         self.retry_on_concurrency_error,
                     )
                 else:
-                    self._process_result_safely(
-                        message.stage_id, message.task_id, timeout_result, message
-                    )
+                    self._process_result_safely(message.stage_id, message.task_id, timeout_result, message)
             except TransientVerificationError as e:
                 logger.info(
                     "Verification pending for task %s, will retry: %s",

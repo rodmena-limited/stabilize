@@ -82,9 +82,7 @@ class WorkflowEventsMixin:
                 "status": workflow.status.name,
                 "end_time": workflow.end_time,
                 "duration_ms": (
-                    workflow.end_time - workflow.start_time
-                    if workflow.start_time and workflow.end_time
-                    else None
+                    workflow.end_time - workflow.start_time if workflow.start_time and workflow.end_time else None
                 ),
             },
             metadata=get_event_metadata(source_handler),

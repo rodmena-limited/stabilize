@@ -102,9 +102,7 @@ class PostgresTransaction(StoreTransaction):
         from datetime import timedelta
 
         # Use the connection to push, ensuring atomicity
-        self._queue.push(
-            message, delay=timedelta(seconds=delay) if delay else None, connection=self._conn
-        )
+        self._queue.push(message, delay=timedelta(seconds=delay) if delay else None, connection=self._conn)
 
     def mark_message_processed(
         self,

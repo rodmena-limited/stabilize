@@ -45,9 +45,7 @@ def insert_stage(conn: sqlite3.Connection, stage: StageExecution, execution_id: 
             "outputs": json.dumps(stage.outputs),
             "requisite_stage_ref_ids": json.dumps(list(stage.requisite_stage_ref_ids)),
             "parent_stage_id": stage.parent_stage_id,
-            "synthetic_stage_owner": (
-                stage.synthetic_stage_owner.value if stage.synthetic_stage_owner else None
-            ),
+            "synthetic_stage_owner": (stage.synthetic_stage_owner.value if stage.synthetic_stage_owner else None),
             "start_time": stage.start_time,
             "end_time": stage.end_time,
             "start_time_expiry": stage.start_time_expiry,
@@ -138,9 +136,7 @@ def upsert_task(conn: sqlite3.Connection, task: TaskExecution, stage_id: str) ->
             )
         except sqlite3.IntegrityError:
             # Row exists but version mismatch - concurrent modification
-            raise ConcurrencyError(
-                f"Task {task.id} was modified concurrently (expected version {task.version})"
-            )
+            raise ConcurrencyError(f"Task {task.id} was modified concurrently (expected version {task.version})")
     else:
         # Update successful - increment local version
         task.version += 1

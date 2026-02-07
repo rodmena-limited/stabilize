@@ -111,9 +111,7 @@ class InMemoryQueue(Queue):
                 # Add to pending
                 self._pending[message_id] = queued
 
-                logger.debug(
-                    "Polled %s (id=%s)", get_message_type_name(queued.message), message_id
-                )
+                logger.debug("Polled %s (id=%s)", get_message_type_name(queued.message), message_id)
 
                 return queued.message
 

@@ -352,9 +352,7 @@ class TestGoldenStandard:
         result = repository.retrieve(execution.id)
 
         # Verify execution succeeded
-        assert (
-            result.status == WorkflowStatus.SUCCEEDED
-        ), f"[{backend}] Execution failed with status {result.status}"
+        assert result.status == WorkflowStatus.SUCCEEDED, f"[{backend}] Execution failed with status {result.status}"
 
         # Find finalize stage and get result
         finalize_stage = next(

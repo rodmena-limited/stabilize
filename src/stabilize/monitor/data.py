@@ -92,9 +92,7 @@ class MonitorDataFetcher:
             with self.store._pool.connection() as conn:
                 with conn.cursor() as cur:
                     # Build Query
-                    query, params = self._build_workflow_query(
-                        app_filter, limit, status_filter, dialect="postgres"
-                    )
+                    query, params = self._build_workflow_query(app_filter, limit, status_filter, dialect="postgres")
                     cur.execute(query, params)
                     rows = cur.fetchall()
 
@@ -166,9 +164,7 @@ class MonitorDataFetcher:
             cursor = conn.cursor()
 
             # 1. Fetch Workflows
-            query, params = self._build_workflow_query(
-                app_filter, limit, status_filter, dialect="sqlite"
-            )
+            query, params = self._build_workflow_query(app_filter, limit, status_filter, dialect="sqlite")
             cursor.execute(query, params)
             rows = cursor.fetchall()
 
@@ -233,9 +229,7 @@ class MonitorDataFetcher:
         )
         return sorted_workflows
 
-    def _build_workflow_query(
-        self, app: str | None, limit: int, status: str, dialect: str
-    ) -> tuple[str, Any]:
+    def _build_workflow_query(self, app: str | None, limit: int, status: str, dialect: str) -> tuple[str, Any]:
         """Build the SQL query for fetching workflows."""
         clauses: list[str] = []
 

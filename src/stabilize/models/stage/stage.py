@@ -89,9 +89,7 @@ class StageExecution(StageNavigationMixin):
 
     # Split semantics (WCP-6)
     split_type: SplitType = SplitType.AND
-    split_conditions: dict[str, str] = field(
-        default_factory=dict
-    )  # downstream_ref_id -> condition expr
+    split_conditions: dict[str, str] = field(default_factory=dict)  # downstream_ref_id -> condition expr
 
     # Multi-instance configuration (WCP-12-15, 26, 27, 34-36)
     mi_config: MultiInstanceConfig | None = None

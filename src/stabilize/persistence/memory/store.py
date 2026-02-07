@@ -175,11 +175,7 @@ class InMemoryWorkflowStore(WorkflowStore):
             if not target_stage:
                 return []
 
-            return [
-                copy.deepcopy(s)
-                for s in execution.stages
-                if s.ref_id in target_stage.requisite_stage_ref_ids
-            ]
+            return [copy.deepcopy(s) for s in execution.stages if s.ref_id in target_stage.requisite_stage_ref_ids]
 
     def get_downstream_stages(
         self,
@@ -193,11 +189,7 @@ class InMemoryWorkflowStore(WorkflowStore):
 
             execution = self._executions[execution_id]
 
-            return [
-                copy.deepcopy(s)
-                for s in execution.stages
-                if stage_ref_id in s.requisite_stage_ref_ids
-            ]
+            return [copy.deepcopy(s) for s in execution.stages if stage_ref_id in s.requisite_stage_ref_ids]
 
     def get_synthetic_stages(
         self,
@@ -211,9 +203,7 @@ class InMemoryWorkflowStore(WorkflowStore):
 
             execution = self._executions[execution_id]
 
-            return [
-                copy.deepcopy(s) for s in execution.stages if s.parent_stage_id == parent_stage_id
-            ]
+            return [copy.deepcopy(s) for s in execution.stages if s.parent_stage_id == parent_stage_id]
 
     def get_merged_ancestor_outputs(
         self,
@@ -262,11 +252,7 @@ class InMemoryWorkflowStore(WorkflowStore):
             for stage in sorted_stages:
                 if stage.id in ancestors:
                     for key, value in stage.outputs.items():
-                        if (
-                            key in result
-                            and isinstance(result[key], list)
-                            and isinstance(value, list)
-                        ):
+                        if key in result and isinstance(result[key], list) and isinstance(value, list):
                             existing = result[key]
                             for item in value:
                                 if item not in existing:
@@ -284,9 +270,7 @@ class InMemoryWorkflowStore(WorkflowStore):
         """Retrieve executions by pipeline config ID."""
         with self._lock:
             executions = [
-                copy.deepcopy(e)
-                for e in self._executions.values()
-                if e.pipeline_config_id == pipeline_config_id
+                copy.deepcopy(e) for e in self._executions.values() if e.pipeline_config_id == pipeline_config_id
             ]
 
         # Fixup weakrefs
@@ -308,9 +292,7 @@ class InMemoryWorkflowStore(WorkflowStore):
     ) -> Iterator[Workflow]:
         """Retrieve executions by application."""
         with self._lock:
-            executions = [
-                copy.deepcopy(e) for e in self._executions.values() if e.application == application
-            ]
+            executions = [copy.deepcopy(e) for e in self._executions.values() if e.application == application]
 
         # Fixup weakrefs
         for execution in executions:
@@ -339,14 +321,10 @@ class InMemoryWorkflowStore(WorkflowStore):
 
         # Filter by start time
         if criteria.start_time_before:
-            executions = [
-                e for e in executions if e.start_time and e.start_time < criteria.start_time_before
-            ]
+            executions = [e for e in executions if e.start_time and e.start_time < criteria.start_time_before]
 
         if criteria.start_time_after:
-            executions = [
-                e for e in executions if e.start_time and e.start_time > criteria.start_time_after
-            ]
+            executions = [e for e in executions if e.start_time and e.start_time > criteria.start_time_after]
 
         # Sort by start time (newest first) and limit
         executions.sort(key=lambda e: e.start_time or 0, reverse=True)

@@ -131,9 +131,7 @@ class PostgresSubscriptionsMixin:
                 return [
                     {
                         "id": row[0] if isinstance(row, tuple) else row["id"],
-                        "last_sequence": (
-                            row[1] if isinstance(row, tuple) else row["last_sequence"]
-                        ),
+                        "last_sequence": (row[1] if isinstance(row, tuple) else row["last_sequence"]),
                     }
                     for row in cur.fetchall()
                 ]

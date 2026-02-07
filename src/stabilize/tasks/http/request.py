@@ -125,9 +125,7 @@ def build_multipart(context: dict[str, Any]) -> tuple[bytes, str]:
     content_type = guess_content_type(filename)
 
     body_parts.append(f"--{boundary}\r\n".encode())
-    body_parts.append(
-        f'Content-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\n'.encode()
-    )
+    body_parts.append(f'Content-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\n'.encode())
     body_parts.append(f"Content-Type: {content_type}\r\n\r\n".encode())
     body_parts.append(file_content)
     body_parts.append(b"\r\n")

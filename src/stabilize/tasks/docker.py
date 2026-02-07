@@ -160,9 +160,7 @@ class DockerTask(Task):
                 check=True,
             )
         except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-            return TaskResult.terminal(
-                error="Docker is not available. Ensure Docker is installed and running."
-            )
+            return TaskResult.terminal(error="Docker is not available. Ensure Docker is installed and running.")
 
         # Build command based on action
         try:

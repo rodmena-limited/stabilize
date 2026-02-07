@@ -170,9 +170,7 @@ class HTTPTask(Task):
         # Validate method
         method = context.get("method", "GET").upper()
         if method not in SUPPORTED_METHODS:
-            return TaskResult.terminal(
-                error=f"Unsupported method '{method}'. Supported: {sorted(SUPPORTED_METHODS)}"
-            )
+            return TaskResult.terminal(error=f"Unsupported method '{method}'. Supported: {sorted(SUPPORTED_METHODS)}")
 
         # Build request
         try:

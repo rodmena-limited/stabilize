@@ -55,9 +55,7 @@ class TestGoldenDisasterRecovery:
         result = repository.retrieve(workflow.id)
 
         # Verify execution succeeded
-        assert (
-            result.status == WorkflowStatus.SUCCEEDED
-        ), f"[{backend}] Workflow failed with status {result.status}"
+        assert result.status == WorkflowStatus.SUCCEEDED, f"[{backend}] Workflow failed with status {result.status}"
 
         # Find finalize stage and get result
         finalize_stage = next(
@@ -69,15 +67,11 @@ class TestGoldenDisasterRecovery:
         final_result = finalize_stage.outputs.get("final_result", "")
 
         # Load expected result
-        expected_path = (
-            Path(__file__).parent / "expected" / "disaster_recovery_expected_result.txt"
-        )
+        expected_path = Path(__file__).parent / "expected" / "disaster_recovery_expected_result.txt"
         expected = expected_path.read_text().strip()
 
         # Verify output matches expected
-        assert (
-            final_result == expected
-        ), f"[{backend}] Output mismatch!\nExpected:\n{expected}\nGot:\n{final_result}"
+        assert final_result == expected, f"[{backend}] Output mismatch!\nExpected:\n{expected}\nGot:\n{final_result}"
 
         # Cleanup
         repository.delete(workflow.id)

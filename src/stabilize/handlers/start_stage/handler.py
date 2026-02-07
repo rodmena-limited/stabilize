@@ -81,9 +81,7 @@ class StartStageHandler(
         def on_stage(stage: StageExecution) -> None:
             try:
                 # Get upstream stages from repository (returns empty list if none)
-                upstream_stages = self.repository.get_upstream_stages(
-                    stage.execution.id, stage.ref_id
-                )
+                upstream_stages = self.repository.get_upstream_stages(stage.execution.id, stage.ref_id)
                 if upstream_stages is None:
                     upstream_stages = []
 
@@ -243,9 +241,7 @@ class StartStageHandler(
             # it means planning crashed before persisting tasks. We must resume planning.
             if stage.status == WorkflowStatus.RUNNING:
                 has_tasks = len(stage.tasks) > 0
-                synthetic_stages = self.repository.get_synthetic_stages(
-                    stage.execution.id, stage.id
-                )
+                synthetic_stages = self.repository.get_synthetic_stages(stage.execution.id, stage.id)
                 has_synthetic = synthetic_stages is not None and len(synthetic_stages) > 0
 
                 if not has_tasks and not has_synthetic:

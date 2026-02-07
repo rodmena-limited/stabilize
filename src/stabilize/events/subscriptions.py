@@ -355,9 +355,7 @@ class SubscriptionManager:
             "current_sequence": current_sequence,
             "lag": current_sequence - subscription.last_sequence,
             "error_count": subscription.error_count,
-            "event_types": (
-                [et.value for et in subscription.event_types] if subscription.event_types else None
-            ),
+            "event_types": ([et.value for et in subscription.event_types] if subscription.event_types else None),
         }
 
     def get_all_subscription_status(self) -> list[dict[str, Any]]:
@@ -365,8 +363,4 @@ class SubscriptionManager:
         with self._lock:
             subscription_ids = list(self._subscriptions.keys())
 
-        return [
-            status
-            for sub_id in subscription_ids
-            if (status := self.get_subscription_status(sub_id)) is not None
-        ]
+        return [status for sub_id in subscription_ids if (status := self.get_subscription_status(sub_id)) is not None]

@@ -273,11 +273,7 @@ def get_merged_ancestor_outputs(
     for aid in sorted_ancestors:
         outputs = nodes[aid]["outputs"]
         for key, value in outputs.items():
-            if (
-                key in merged_result
-                and isinstance(merged_result[key], list)
-                and isinstance(value, list)
-            ):
+            if key in merged_result and isinstance(merged_result[key], list) and isinstance(value, list):
                 # Concatenate lists
                 existing = merged_result[key]
                 for item in value:

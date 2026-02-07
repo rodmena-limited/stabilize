@@ -62,9 +62,7 @@ class QualityLoopTask(Task):
         # Quality improves with each attempt: 65, 80, 95...
         quality = 50 + (attempt * 15)
 
-        logger.info(
-            f"[QualityLoop] Attempt #{attempt}, quality={quality} (threshold={self.QUALITY_THRESHOLD})"
-        )
+        logger.info(f"[QualityLoop] Attempt #{attempt}, quality={quality} (threshold={self.QUALITY_THRESHOLD})")
 
         if quality >= self.QUALITY_THRESHOLD:
             logger.info(f"[QualityLoop] PASSED! Quality {quality} meets threshold.")
@@ -76,9 +74,7 @@ class QualityLoopTask(Task):
                 }
             )
         else:
-            logger.info(
-                f"[QualityLoop] Quality {quality} < {self.QUALITY_THRESHOLD}, jumping back to retry..."
-            )
+            logger.info(f"[QualityLoop] Quality {quality} < {self.QUALITY_THRESHOLD}, jumping back to retry...")
             # Jump back to same stage with incremented attempt (self-loop)
             return TaskResult.jump_to(
                 "quality_loop",  # Jump to self
@@ -110,9 +106,7 @@ class BatchProcessTask(Task):
         if attempt == 1 and processed == 0:
             # First run - process some items then fail
             new_processed = self.ITEMS_PER_RUN
-            logger.warning(
-                f"[Batch] Transient error after processing {new_processed} items! Saving checkpoint..."
-            )
+            logger.warning(f"[Batch] Transient error after processing {new_processed} items! Saving checkpoint...")
             raise TransientError(
                 "Simulated transient error - network timeout",
                 retry_after=0.1,
@@ -138,9 +132,7 @@ class BatchProcessTask(Task):
             )
         else:
             # More to process - fail again to show multiple retries
-            logger.warning(
-                f"[Batch] Another transient error at {new_processed} items! Checkpointing..."
-            )
+            logger.warning(f"[Batch] Another transient error at {new_processed} items! Checkpointing...")
             raise TransientError(
                 "Simulated transient error - rate limit",
                 retry_after=0.1,
@@ -157,9 +149,7 @@ class BatchProcessTask(Task):
 # =============================================================================
 
 
-def setup_pipeline_runner(
-    store: WorkflowStore, queue: Queue
-) -> tuple[QueueProcessor, Orchestrator]:
+def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with custom tasks registered."""
     task_registry = TaskRegistry()
     task_registry.register("quality_loop", QualityLoopTask)
@@ -242,9 +232,7 @@ Flow: quality_loop (65) -> quality_loop (80, pass!)
             print("\n  Jump tracking (self-loops):")
             print(f"    Total jumps: {jump_count}")
             for i, jump in enumerate(stage.context.get("_jump_history", []), 1):
-                print(
-                    f"    {i}. {jump['from_stage']} -> {jump['to_stage']} (context: {jump['context_keys']})"
-                )
+                print(f"    {i}. {jump['from_stage']} -> {jump['to_stage']} (context: {jump['context_keys']})")
 
 
 # =============================================================================

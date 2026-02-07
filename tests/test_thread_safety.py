@@ -119,9 +119,7 @@ class TestSQLiteThreadSafety:
 
         # The workflow SHOULD be found because it's the same file
         assert len(found_in_thread) == 1
-        assert (
-            found_in_thread[0] is True
-        ), "Expected workflow to be found in separate thread with file-based DB."
+        assert found_in_thread[0] is True, "Expected workflow to be found in separate thread with file-based DB."
 
         store.close()
 
@@ -389,20 +387,12 @@ class TestConnectionManagerEdgeCases:
         conn2.commit()
 
         # Verify tables exist in correct databases
-        assert conn1.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='test1'"
-        ).fetchone()
-        assert conn2.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='test2'"
-        ).fetchone()
+        assert conn1.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='test1'").fetchone()
+        assert conn2.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='test2'").fetchone()
 
         # test1 should NOT exist in db2 and vice versa
-        assert not conn2.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='test1'"
-        ).fetchone()
-        assert not conn1.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='test2'"
-        ).fetchone()
+        assert not conn2.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='test1'").fetchone()
+        assert not conn1.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='test2'").fetchone()
 
     def test_singleton_behavior(self) -> None:
         """Test that ConnectionManager is a proper singleton."""

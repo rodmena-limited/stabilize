@@ -103,9 +103,7 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
                 if message.status.is_failure:
                     error = "Task failed"
                     if task.task_exception_details:
-                        error = task.task_exception_details.get(
-                            "exception", str(task.task_exception_details)
-                        )
+                        error = task.task_exception_details.get("exception", str(task.task_exception_details))
                     self.event_recorder.record_task_failed(
                         task,
                         workflow_id=workflow_id,

@@ -41,9 +41,7 @@ class CancelRegionHandler(StabilizeHandler[CancelRegion]):
         handler_config: HandlerConfig | None = None,
         event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(
-            queue, repository, retry_delay, handler_config, event_recorder=event_recorder
-        )
+        super().__init__(queue, repository, retry_delay, handler_config, event_recorder=event_recorder)
 
     @property
     def message_type(self) -> type[CancelRegion]:
@@ -64,11 +62,7 @@ class CancelRegionHandler(StabilizeHandler[CancelRegion]):
                 return
 
             # Find all stages in the region that are still active
-            stages_to_cancel = [
-                s
-                for s in execution.stages
-                if s.cancel_region == region and not s.status.is_complete
-            ]
+            stages_to_cancel = [s for s in execution.stages if s.cancel_region == region and not s.status.is_complete]
 
             if not stages_to_cancel:
                 logger.debug(

@@ -53,11 +53,7 @@ class StageNavigationMixin:
         """
         if not self.has_execution():
             return []
-        return [
-            stage
-            for stage in self.execution.stages
-            if stage.ref_id in self.requisite_stage_ref_ids
-        ]
+        return [stage for stage in self.execution.stages if stage.ref_id in self.requisite_stage_ref_ids]
 
     def downstream_stages(self) -> list[StageExecution]:
         """
@@ -68,11 +64,7 @@ class StageNavigationMixin:
         """
         if not self.has_execution():
             return []
-        return [
-            stage
-            for stage in self.execution.stages
-            if self.ref_id in stage.requisite_stage_ref_ids
-        ]
+        return [stage for stage in self.execution.stages if self.ref_id in stage.requisite_stage_ref_ids]
 
     def all_upstream_stages_complete(self) -> bool:
         """
@@ -98,10 +90,7 @@ class StageNavigationMixin:
             if upstream.status in halt_statuses:
                 return True
             # Check recursively for NOT_STARTED stages
-            if (
-                upstream.status == WorkflowStatus.NOT_STARTED
-                and upstream.any_upstream_stages_failed()
-            ):
+            if upstream.status == WorkflowStatus.NOT_STARTED and upstream.any_upstream_stages_failed():
                 return True
         return False
 
@@ -127,9 +116,7 @@ class StageNavigationMixin:
     def after_stages(self) -> list[StageExecution]:
         """Get synthetic stages that run after this stage completes."""
         return [
-            stage
-            for stage in self.synthetic_stages()
-            if stage.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER
+            stage for stage in self.synthetic_stages() if stage.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER
         ]
 
     def first_before_stages(self) -> list[StageExecution]:

@@ -28,9 +28,7 @@ from stabilize.queue.messages import StartWorkflow
 class TestBackendParity:
     """Test that PostgreSQL and SQLite behave identically."""
 
-    def test_workflow_storage_and_retrieval(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_workflow_storage_and_retrieval(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test basic workflow storage and retrieval is identical across backends."""
         # Create workflow
         wf = Workflow.create("parity-app", "parity-test", [])
@@ -51,9 +49,7 @@ class TestBackendParity:
         assert retrieved.name == "parity-test"
         assert len(retrieved.stages) == 1
 
-    def test_json_context_storage_parity(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_json_context_storage_parity(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """
         Test JSON context storage is identical across backends.
 
@@ -93,9 +89,7 @@ class TestBackendParity:
         assert retrieved_stage.context["nested"]["list"] == [1, 2, 3]
         assert retrieved_stage.context["array"] == ["a", "b", "c"]
 
-    def test_json_outputs_storage_parity(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_json_outputs_storage_parity(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test JSON outputs storage is identical across backends."""
         wf = Workflow.create("outputs-test-app", "outputs-test", [])
         stage = StageExecution.create("stage-1", "Outputs Test Stage", "1")
@@ -120,9 +114,7 @@ class TestBackendParity:
         assert retrieved_stage.outputs["data"]["key2"] == 123
         assert retrieved_stage.outputs["items"][0]["id"] == 1
 
-    def test_status_update_parity(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_status_update_parity(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test status updates work identically across backends."""
         wf = Workflow.create("status-test-app", "status-test", [])
         stage = StageExecution.create("stage-1", "Status Test Stage", "1")
@@ -149,9 +141,7 @@ class TestBackendParity:
             verified = repository.retrieve(wf.id)
             assert verified.status == status
 
-    def test_pause_resume_json_operations_parity(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_pause_resume_json_operations_parity(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """
         Test pause/resume operations with JSON manipulation.
 
@@ -188,9 +178,7 @@ class TestBackendParity:
         assert resumed_wf.paused.paused_ms is not None
         assert resumed_wf.paused.paused_ms >= 0
 
-    def test_null_handling_parity(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_null_handling_parity(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test NULL handling is consistent across backends."""
         wf = Workflow.create("null-test-app", "null-test", [])
         stage = StageExecution.create("stage-1", "Null Test Stage", "1")
@@ -209,15 +197,9 @@ class TestBackendParity:
         retrieved = repository.retrieve(wf.id)
         assert retrieved is not None
         retrieved_stage = repository.retrieve_stage(stage.id)
-        assert (
-            retrieved_stage.context == {}
-            or retrieved_stage.context is None
-            or retrieved_stage.context == {}
-        )
+        assert retrieved_stage.context == {} or retrieved_stage.context is None or retrieved_stage.context == {}
 
-    def test_version_increment_parity(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_version_increment_parity(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test version increment for optimistic locking is identical."""
         wf = Workflow.create("version-test-app", "version-test", [])
         stage = StageExecution.create("stage-1", "Version Test Stage", "1")
@@ -247,9 +229,7 @@ class TestBackendParity:
         final_stage = repository.retrieve_stage(stage.id)
         assert final_stage.version == 2
 
-    def test_requisite_stage_ref_ids_parity(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_requisite_stage_ref_ids_parity(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test requisite_stage_ref_ids (JSON array) storage parity."""
         wf = Workflow.create("dag-test-app", "dag-test", [])
 
@@ -278,9 +258,7 @@ class TestBackendParity:
         retrieved_stage3 = repository.retrieve_stage(stage3.id)
         assert retrieved_stage3.requisite_stage_ref_ids == {"1", "2"}
 
-    def test_task_exception_details_json_parity(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_task_exception_details_json_parity(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test task_exception_details JSON storage parity."""
         wf = Workflow.create("exception-test-app", "exception-test", [])
         stage = StageExecution.create("stage-1", "Exception Test Stage", "1")
@@ -314,9 +292,7 @@ class TestBackendParity:
 class TestQueueBackendParity:
     """Test queue operations are identical across backends."""
 
-    def test_message_serialization_parity(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_message_serialization_parity(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test message serialization and deserialization is identical."""
         # Clear queue to ensure clean state
         queue.clear()
@@ -335,9 +311,7 @@ class TestQueueBackendParity:
 
         queue.ack(polled)
 
-    def test_delay_handling_parity(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_delay_handling_parity(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test message delay handling is identical across backends."""
         msg = StartWorkflow(
             execution_type="PIPELINE",
@@ -361,9 +335,7 @@ class TestQueueBackendParity:
 
         queue.ack(delayed)
 
-    def test_reschedule_parity(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_reschedule_parity(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test rescheduling behavior is identical across backends."""
         # Clear queue to ensure clean state
         queue.clear()
@@ -391,9 +363,7 @@ class TestQueueBackendParity:
 class TestConcurrentUpdateParity:
     """Test concurrent update behavior is identical across backends."""
 
-    def test_optimistic_locking_error_parity(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_optimistic_locking_error_parity(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test ConcurrencyError behavior is identical."""
         from stabilize.errors import ConcurrencyError
 

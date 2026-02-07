@@ -89,9 +89,7 @@ class SqliteQueriesMixin:
         criteria: WorkflowCriteria | None = None,
     ) -> Iterator[Workflow]:
         """Retrieve executions by pipeline config ID."""
-        return _retrieve_by_pipeline_config_id(
-            self._get_connection(), pipeline_config_id, criteria, self.retrieve
-        )
+        return _retrieve_by_pipeline_config_id(self._get_connection(), pipeline_config_id, criteria, self.retrieve)
 
     def retrieve_by_application(
         self,
@@ -99,9 +97,7 @@ class SqliteQueriesMixin:
         criteria: WorkflowCriteria | None = None,
     ) -> Iterator[Workflow]:
         """Retrieve executions by application."""
-        return _retrieve_by_application(
-            self._get_connection(), application, criteria, self.retrieve
-        )
+        return _retrieve_by_application(self._get_connection(), application, criteria, self.retrieve)
 
     def list_workflows(
         self,

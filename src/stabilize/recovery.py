@@ -248,11 +248,7 @@ class WorkflowRecovery:
         messages_queued = 0
 
         for stage in full_workflow.stages:
-            can_start = (
-                self._can_start(stage, full_workflow)
-                if stage.status == WorkflowStatus.NOT_STARTED
-                else None
-            )
+            can_start = self._can_start(stage, full_workflow) if stage.status == WorkflowStatus.NOT_STARTED else None
             logger.debug(
                 "Recovery eval: stage=%s ref_id=%s status=%s has_started=%s can_start=%s tasks=%d",
                 stage.name,
@@ -306,9 +302,7 @@ class WorkflowRecovery:
             if stage.status == WorkflowStatus.RUNNING:
                 # Handle RUNNING stages - need to determine what messages to re-queue
                 running_tasks = [t for t in stage.tasks if t.status == WorkflowStatus.RUNNING]
-                not_started_tasks = [
-                    t for t in stage.tasks if t.status == WorkflowStatus.NOT_STARTED
-                ]
+                not_started_tasks = [t for t in stage.tasks if t.status == WorkflowStatus.NOT_STARTED]
 
                 if running_tasks:
                     # Re-queue RunTask for each RUNNING task (if not already queued)

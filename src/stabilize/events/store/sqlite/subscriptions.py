@@ -67,11 +67,7 @@ class SqliteSubscriptionsMixin:
             return None
 
         try:
-            event_types = (
-                [EventType(et) for et in json.loads(row["event_types"])]
-                if row["event_types"]
-                else None
-            )
+            event_types = [EventType(et) for et in json.loads(row["event_types"])] if row["event_types"] else None
         except (json.JSONDecodeError, TypeError):
             event_types = None
 

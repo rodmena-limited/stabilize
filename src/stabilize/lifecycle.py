@@ -335,9 +335,7 @@ class LifecycleManager:
             if pending_count > 0:
                 logger.info("Executing %d pending finalizers...", pending_count)
                 results = registry.execute_all_pending(timeout=30.0)
-                failed_count = sum(
-                    1 for stage_results in results.values() for r in stage_results if not r.success
-                )
+                failed_count = sum(1 for stage_results in results.values() for r in stage_results if not r.success)
                 if failed_count > 0:
                     logger.warning(
                         "Shutdown: %d/%d finalizers failed",

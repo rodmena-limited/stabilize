@@ -122,9 +122,7 @@ def row_to_stage(row: sqlite3.Row) -> StageExecution:
     split_type = SplitType(split_type_str) if split_type_str else SplitType.AND
 
     split_conditions_raw = _safe_get("split_conditions", "{}")
-    split_conditions = (
-        json.loads(split_conditions_raw or "{}") if isinstance(split_conditions_raw, str) else {}
-    )
+    split_conditions = json.loads(split_conditions_raw or "{}") if isinstance(split_conditions_raw, str) else {}
 
     mi_config_raw = _safe_get("mi_config")
     mi_config = None

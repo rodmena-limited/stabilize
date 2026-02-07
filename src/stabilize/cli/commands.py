@@ -210,9 +210,7 @@ def mg_status(db_url: str | None = None) -> None:
 
                 applied = {}
                 if table_exists:
-                    cur.execute(
-                        f"SELECT name, checksum, applied_at FROM {MIGRATION_TABLE} ORDER BY applied_at"
-                    )
+                    cur.execute(f"SELECT name, checksum, applied_at FROM {MIGRATION_TABLE} ORDER BY applied_at")
                     applied = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
 
                 migrations = get_migrations()

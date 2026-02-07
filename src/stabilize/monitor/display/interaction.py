@@ -170,16 +170,8 @@ def show_details(
                     "id": wf.id,
                     "status": wf.status.name,
                     "context": wf.trigger.payload if wf.trigger else {},
-                    "start_time": (
-                        datetime.fromtimestamp(wf.start_time / 1000).isoformat()
-                        if wf.start_time
-                        else None
-                    ),
-                    "end_time": (
-                        datetime.fromtimestamp(wf.end_time / 1000).isoformat()
-                        if wf.end_time
-                        else None
-                    ),
+                    "start_time": (datetime.fromtimestamp(wf.start_time / 1000).isoformat() if wf.start_time else None),
+                    "end_time": (datetime.fromtimestamp(wf.end_time / 1000).isoformat() if wf.end_time else None),
                     "paused": wf.paused.__dict__ if wf.paused else None,
                     "cancellation_reason": wf.cancellation_reason,
                 },
@@ -199,14 +191,10 @@ def show_details(
                         "context": stage.context,
                         "outputs": stage.outputs,
                         "start_time": (
-                            datetime.fromtimestamp(stage.start_time / 1000).isoformat()
-                            if stage.start_time
-                            else None
+                            datetime.fromtimestamp(stage.start_time / 1000).isoformat() if stage.start_time else None
                         ),
                         "end_time": (
-                            datetime.fromtimestamp(stage.end_time / 1000).isoformat()
-                            if stage.end_time
-                            else None
+                            datetime.fromtimestamp(stage.end_time / 1000).isoformat() if stage.end_time else None
                         ),
                     },
                     indent=2,

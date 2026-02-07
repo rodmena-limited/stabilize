@@ -77,17 +77,14 @@ def topological_sort(
         # Find all stages whose requisites have been satisfied
         # A stage is sortable if all its requisite_stage_ref_ids are in ref_ids
         sortable = [
-            stage_by_id[sid]
-            for sid in unsorted_ids
-            if ref_ids.issuperset(stage_by_id[sid].requisite_stage_ref_ids)
+            stage_by_id[sid] for sid in unsorted_ids if ref_ids.issuperset(stage_by_id[sid].requisite_stage_ref_ids)
         ]
 
         if not sortable:
             # No progress possible - circular dependency
             unsorted_stages = [stage_by_id[sid] for sid in unsorted_ids]
             relationships = ", ".join(
-                f"{list(stage.requisite_stage_ref_ids)}->{stage.ref_id}"
-                for stage in unsorted_stages
+                f"{list(stage.requisite_stage_ref_ids)}->{stage.ref_id}" for stage in unsorted_stages
             )
             raise CircularDependencyError(
                 f"Invalid stage relationships found: {relationships}",
@@ -169,11 +166,7 @@ def find_terminal_stages(stages: list[StageExecution]) -> list[StageExecution]:
         all_requisites.update(stage.requisite_stage_ref_ids)
 
     # Terminal stages are those whose ref_id is not in any requisite set
-    return [
-        stage
-        for stage in stages
-        if not stage.is_synthetic() and stage.ref_id not in all_requisites
-    ]
+    return [stage for stage in stages if not stage.is_synthetic() and stage.ref_id not in all_requisites]
 
 
 def get_execution_layers(stages: list[StageExecution]) -> list[list[StageExecution]]:
@@ -206,9 +199,7 @@ def get_execution_layers(stages: list[StageExecution]) -> list[list[StageExecuti
     while unsorted_ids:
         # Find all stages whose requisites are satisfied
         layer = [
-            stage_by_id[sid]
-            for sid in unsorted_ids
-            if ref_ids.issuperset(stage_by_id[sid].requisite_stage_ref_ids)
+            stage_by_id[sid] for sid in unsorted_ids if ref_ids.issuperset(stage_by_id[sid].requisite_stage_ref_ids)
         ]
 
         if not layer:

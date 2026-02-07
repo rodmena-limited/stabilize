@@ -511,9 +511,7 @@ class TestTier3TimeoutAndRetry:
         assert t is not None
         assert t.status == WorkflowStatus.TERMINAL
         # Check error mentions timeout
-        error = t.context.get("error", "") or t.context.get("exception", {}).get(
-            "details", {}
-        ).get("error", "")
+        error = t.context.get("error", "") or t.context.get("exception", {}).get("details", {}).get("error", "")
         assert "timeout" in error.lower() or "timed out" in error.lower()
 
     def test_12_shell_task_retry_on_failure(self, tmp_path):
@@ -785,9 +783,7 @@ class TestTier5EdgeCases:
         store, queue, proc, orch, _ = _make_infra()
 
         # Use printf to output JSON with special characters
-        command = (
-            r"""printf '{"key": "value", "quote": "he said \"hello\"", "unicode": "\u2603"}'"""
-        )
+        command = r"""printf '{"key": "value", "quote": "he said \"hello\"", "unicode": "\u2603"}'"""
 
         workflow = Workflow.create(
             application="cert",

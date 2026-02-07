@@ -92,9 +92,7 @@ class StabilizeHandler(MessageHandler[M], ABC):
         self.repository = repository
         self.handler_config = handler_config or get_handler_config()
         # Use explicit retry_delay if provided, otherwise use config
-        self.retry_delay = retry_delay or timedelta(
-            seconds=self.handler_config.handler_retry_delay_seconds
-        )
+        self.retry_delay = retry_delay or timedelta(seconds=self.handler_config.handler_retry_delay_seconds)
         # Event recording is optional - use provided recorder or global instance
         self._event_recorder = event_recorder
 

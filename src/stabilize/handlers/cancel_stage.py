@@ -46,9 +46,7 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
         handler_config: HandlerConfig | None = None,
         event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(
-            queue, repository, retry_delay, handler_config, event_recorder=event_recorder
-        )
+        super().__init__(queue, repository, retry_delay, handler_config, event_recorder=event_recorder)
 
     @property
     def message_type(self) -> type[CancelStage]:
@@ -103,9 +101,7 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
 
             if self.event_recorder:
                 self.set_event_context(stage.execution.id if stage.execution else "")
-                self.event_recorder.record_stage_canceled(
-                    stage, source_handler="CancelStageHandler"
-                )
+                self.event_recorder.record_stage_canceled(stage, source_handler="CancelStageHandler")
 
             logger.info("Canceled stage %s (%s)", stage.name, stage.id)
 

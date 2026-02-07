@@ -43,9 +43,7 @@ from stabilize.events import (
 # =============================================================================
 
 
-def setup_pipeline_runner(
-    store: WorkflowStore, queue: Queue
-) -> tuple[QueueProcessor, Orchestrator]:
+def setup_pipeline_runner(store: WorkflowStore, queue: Queue) -> tuple[QueueProcessor, Orchestrator]:
     """Create processor and orchestrator with DockerTask registered."""
     task_registry = TaskRegistry()
     task_registry.register("docker", DockerTask)

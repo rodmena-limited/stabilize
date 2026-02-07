@@ -66,11 +66,7 @@ class StageEventsMixin:
                 "name": stage.name,
                 "status": stage.status.name,
                 "end_time": stage.end_time,
-                "duration_ms": (
-                    stage.end_time - stage.start_time
-                    if stage.start_time and stage.end_time
-                    else None
-                ),
+                "duration_ms": (stage.end_time - stage.start_time if stage.start_time and stage.end_time else None),
                 "outputs": stage.outputs,
             },
             metadata=get_event_metadata(source_handler),

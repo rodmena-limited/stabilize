@@ -188,11 +188,7 @@ class PostgresWorkflowStore(WorkflowStore):
                         "is_canceled": execution.is_canceled,
                         "canceled_by": execution.canceled_by,
                         "cancellation_reason": execution.cancellation_reason,
-                        "paused": (
-                            json.dumps(paused_to_dict(execution.paused))
-                            if execution.paused
-                            else None
-                        ),
+                        "paused": (json.dumps(paused_to_dict(execution.paused)) if execution.paused else None),
                     },
                 )
             conn.commit()
@@ -298,11 +294,7 @@ class PostgresWorkflowStore(WorkflowStore):
 
             result = cur.fetchone()
             if result:
-                new_version = (
-                    result[0]
-                    if isinstance(result, tuple)
-                    else result.get("version", stage.version + 1)
-                )
+                new_version = result[0] if isinstance(result, tuple) else result.get("version", stage.version + 1)
                 stage.version = new_version
             else:
                 if expected_phase is not None:
@@ -415,9 +407,7 @@ class PostgresWorkflowStore(WorkflowStore):
         criteria: WorkflowCriteria | None = None,
     ) -> Iterator[Workflow]:
         """Retrieve executions by pipeline config ID."""
-        return _retrieve_by_pipeline_config_id(
-            self._pool, pipeline_config_id, criteria, self.retrieve
-        )
+        return _retrieve_by_pipeline_config_id(self._pool, pipeline_config_id, criteria, self.retrieve)
 
     def retrieve_by_application(
         self,

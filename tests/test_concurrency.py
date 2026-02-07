@@ -132,9 +132,7 @@ def test_complete_task_handler_retries_on_contention(store, queue):
             # Simulate another thread updated it already
             # We do this by manually bumping version in DB using a separate connection
             with sqlite3.connect(store.connection_string.replace("sqlite:///", "")) as conn:
-                conn.execute(
-                    f"UPDATE stage_executions SET version = version + 1 WHERE id = '{s.id}'"
-                )
+                conn.execute(f"UPDATE stage_executions SET version = version + 1 WHERE id = '{s.id}'")
                 conn.commit()
 
             # Now call original, which should fail because in-memory 's' has old version
@@ -283,10 +281,7 @@ def test_error_handling_succeeds_under_high_contention(store, queue):
     stage.status = WorkflowStatus.RUNNING
 
     # Create 3 tasks that will all "fail" simultaneously
-    tasks = [
-        TaskExecution.create(f"Task-{i}", "shell", stage_start=(i == 0), stage_end=(i == 2))
-        for i in range(3)
-    ]
+    tasks = [TaskExecution.create(f"Task-{i}", "shell", stage_start=(i == 0), stage_end=(i == 2)) for i in range(3)]
     for task in tasks:
         task.status = WorkflowStatus.RUNNING
     stage.tasks = tasks
@@ -305,9 +300,7 @@ def test_error_handling_succeeds_under_high_contention(store, queue):
             for attempt in range(5):  # Manual retry loop
                 try:
                     fresh_stage = store.retrieve_stage(stage.id)
-                    fresh_stage.context["exception"] = {
-                        "details": {"error": error_msg, "task_id": task_id}
-                    }
+                    fresh_stage.context["exception"] = {"details": {"error": error_msg, "task_id": task_id}}
                     store.store_stage(fresh_stage)
                     with lock:
                         success_count += 1

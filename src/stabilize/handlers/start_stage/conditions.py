@@ -114,10 +114,7 @@ class StartStageConditionsMixin:
         for s in all_stages:
             if s.id == stage.id:
                 continue
-            if (
-                s.deferred_choice_group == stage.deferred_choice_group
-                and s.status != WorkflowStatus.NOT_STARTED
-            ):
+            if s.deferred_choice_group == stage.deferred_choice_group and s.status != WorkflowStatus.NOT_STARTED:
                 return True
         return False
 

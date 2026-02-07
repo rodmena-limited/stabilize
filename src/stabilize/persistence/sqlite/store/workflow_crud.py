@@ -149,9 +149,7 @@ class SqliteWorkflowCrudMixin:
                 "is_canceled": 1 if execution.is_canceled else 0,
                 "canceled_by": execution.canceled_by,
                 "cancellation_reason": execution.cancellation_reason,
-                "paused": (
-                    json.dumps(paused_to_dict(execution.paused)) if execution.paused else None
-                ),
+                "paused": (json.dumps(paused_to_dict(execution.paused)) if execution.paused else None),
             },
         )
         conn.commit()

@@ -214,6 +214,5 @@ class WorkflowTimelineProjection(Projection):
         return [
             e
             for e in self._timeline.entries
-            if e.event_type
-            in {"stage.failed", "task.failed", "workflow.failed", "workflow.canceled"}
+            if e.event_type in {"stage.failed", "task.failed", "workflow.failed", "workflow.canceled"}
         ]

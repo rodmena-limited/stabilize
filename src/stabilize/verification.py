@@ -251,9 +251,7 @@ class OutputVerifier(Verifier):
             if key in stage.outputs:
                 actual = stage.outputs[key]
                 if not isinstance(actual, expected_type):
-                    type_errors.append(
-                        f"{key}: expected {expected_type.__name__}, got {type(actual).__name__}"
-                    )
+                    type_errors.append(f"{key}: expected {expected_type.__name__}, got {type(actual).__name__}")
 
         if missing:
             return VerifyResult.failed(

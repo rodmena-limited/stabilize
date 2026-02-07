@@ -135,9 +135,7 @@ class AtomicTransaction(StoreTransaction):
                         f"Optimistic lock failed for stage {stage.id} "
                         f"(version {stage.version}, expected_phase {expected_phase})"
                     )
-                raise ConcurrencyError(
-                    f"Optimistic lock failed for stage {stage.id} (version {stage.version})"
-                )
+                raise ConcurrencyError(f"Optimistic lock failed for stage {stage.id} (version {stage.version})")
 
             # Track original version for rollback before incrementing
             self._staged_objects.append((stage, stage.version))

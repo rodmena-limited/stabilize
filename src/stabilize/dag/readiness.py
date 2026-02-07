@@ -220,9 +220,7 @@ def _evaluate_or_join(
     activated_set = set(activated_branches)
 
     # Filter upstream stages to only activated ones
-    relevant_upstreams = [
-        u for u in upstream_stages if u is not None and u.ref_id in activated_set
-    ]
+    relevant_upstreams = [u for u in upstream_stages if u is not None and u.ref_id in activated_set]
 
     if not relevant_upstreams:
         return ReadinessResult(

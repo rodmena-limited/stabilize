@@ -601,24 +601,12 @@ class TestDagTraversalEdgeCases:
 
         stages = [
             StageExecution.create(type="stage", name="A", ref_id="a"),
-            StageExecution.create(
-                type="stage", name="B", ref_id="b", requisite_stage_ref_ids={"a"}
-            ),
-            StageExecution.create(
-                type="stage", name="C", ref_id="c", requisite_stage_ref_ids={"a"}
-            ),
-            StageExecution.create(
-                type="stage", name="D", ref_id="d", requisite_stage_ref_ids={"a"}
-            ),
-            StageExecution.create(
-                type="stage", name="E", ref_id="e", requisite_stage_ref_ids={"b", "c"}
-            ),
-            StageExecution.create(
-                type="stage", name="F", ref_id="f", requisite_stage_ref_ids={"c", "d"}
-            ),
-            StageExecution.create(
-                type="stage", name="G", ref_id="g", requisite_stage_ref_ids={"e", "f"}
-            ),
+            StageExecution.create(type="stage", name="B", ref_id="b", requisite_stage_ref_ids={"a"}),
+            StageExecution.create(type="stage", name="C", ref_id="c", requisite_stage_ref_ids={"a"}),
+            StageExecution.create(type="stage", name="D", ref_id="d", requisite_stage_ref_ids={"a"}),
+            StageExecution.create(type="stage", name="E", ref_id="e", requisite_stage_ref_ids={"b", "c"}),
+            StageExecution.create(type="stage", name="F", ref_id="f", requisite_stage_ref_ids={"c", "d"}),
+            StageExecution.create(type="stage", name="G", ref_id="g", requisite_stage_ref_ids={"e", "f"}),
         ]
 
         sorted_stages = topological_sort(stages)
@@ -1744,11 +1732,7 @@ class TestBugDocumentation:
         stage_context: dict[str, int] = {}
 
         # Current (buggy) implementation
-        max_jumps_buggy = (
-            execution_context.get("_max_jumps")
-            or stage_context.get("_max_jumps")
-            or DEFAULT_MAX_JUMPS
-        )
+        max_jumps_buggy = execution_context.get("_max_jumps") or stage_context.get("_max_jumps") or DEFAULT_MAX_JUMPS
 
         # BUG: 0 is treated as falsy, so we get DEFAULT_MAX_JUMPS instead of 0
         assert max_jumps_buggy == DEFAULT_MAX_JUMPS  # BUG: Should be 0

@@ -226,24 +226,18 @@ class ShellTask(Task):
                     if binary:
                         timeout_outputs["stdout"] = stdout_bytes
                     else:
-                        timeout_outputs["stdout"] = stdout_bytes.decode(
-                            "utf-8", errors="replace"
-                        ).strip()
+                        timeout_outputs["stdout"] = stdout_bytes.decode("utf-8", errors="replace").strip()
                 if stderr_bytes:
                     if len(stderr_bytes) > max_output_size:
                         stderr_bytes = stderr_bytes[:max_output_size]
                     if binary:
                         timeout_outputs["stderr"] = stderr_bytes
                     else:
-                        timeout_outputs["stderr"] = stderr_bytes.decode(
-                            "utf-8", errors="replace"
-                        ).strip()
+                        timeout_outputs["stderr"] = stderr_bytes.decode("utf-8", errors="replace").strip()
 
                 error_msg = f"Command timed out after {timeout}s"
                 if restart_on_failure:
-                    raise TransientError(
-                        error_msg, context_update={"_last_outputs": timeout_outputs}
-                    )
+                    raise TransientError(error_msg, context_update={"_last_outputs": timeout_outputs})
                 if continue_on_failure:
                     return TaskResult.failed_continue(error=error_msg, outputs=timeout_outputs)
                 return TaskResult.terminal(error=error_msg, context=timeout_outputs)
@@ -269,20 +263,14 @@ class ShellTask(Task):
                 outputs["stderr"] = stderr_bytes
                 outputs["stdout_b64"] = base64.b64encode(stdout_bytes).decode("ascii")
             else:
-                outputs["stdout"] = (
-                    stdout_bytes.decode("utf-8", errors="replace").strip() if stdout_bytes else ""
-                )
-                outputs["stderr"] = (
-                    stderr_bytes.decode("utf-8", errors="replace").strip() if stderr_bytes else ""
-                )
+                outputs["stdout"] = stdout_bytes.decode("utf-8", errors="replace").strip() if stdout_bytes else ""
+                outputs["stderr"] = stderr_bytes.decode("utf-8", errors="replace").strip() if stderr_bytes else ""
 
             # Check exit code
             if proc.returncode in expected_codes:
                 return TaskResult.success(outputs=outputs)
             else:
-                error_msg = (
-                    f"Command exited with code {proc.returncode} (expected: {expected_codes})"
-                )
+                error_msg = f"Command exited with code {proc.returncode} (expected: {expected_codes})"
                 if outputs.get("stderr"):
                     error_msg += f": {outputs['stderr'][:200]}"
 

@@ -85,9 +85,7 @@ def example_event_logging() -> None:
     bus = get_event_bus()
     bus.subscribe(
         "logger",
-        lambda e: print(
-            f"  [{e.event_type.value:>20s}] {e.entity_type.value}={e.entity_id[:8]}..."
-        ),
+        lambda e: print(f"  [{e.event_type.value:>20s}] {e.entity_type.value}={e.entity_id[:8]}..."),
     )
 
     workflow = Workflow.create(
@@ -338,9 +336,7 @@ def example_event_replay() -> None:
     replayer = EventReplayer(event_store)
     state = replayer.rebuild_workflow_state(workflow.id)
 
-    print(
-        f"\nReconstructed state from {len(event_store.get_events_for_workflow(workflow.id))} events:"
-    )
+    print(f"\nReconstructed state from {len(event_store.get_events_for_workflow(workflow.id))} events:")
     print(f"  Workflow: {state.get('name')}")
     print(f"  Status:   {state.get('status')}")
     print(f"  Stages:   {len(state.get('stages', {}))}")

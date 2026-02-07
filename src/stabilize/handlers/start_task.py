@@ -52,9 +52,7 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
         handler_config: HandlerConfig | None = None,
         event_recorder: EventRecorder | None = None,
     ) -> None:
-        super().__init__(
-            queue, repository, retry_delay, handler_config, event_recorder=event_recorder
-        )
+        super().__init__(queue, repository, retry_delay, handler_config, event_recorder=event_recorder)
         self.task_registry = task_registry
 
     @property

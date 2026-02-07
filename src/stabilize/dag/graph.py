@@ -120,9 +120,7 @@ class StageGraphBuilder:
 
         # Apply initial requisites to first stage
         if not self._stages and self.requisite_stage_ref_ids:
-            stage.requisite_stage_ref_ids = stage.requisite_stage_ref_ids.union(
-                self.requisite_stage_ref_ids
-            )
+            stage.requisite_stage_ref_ids = stage.requisite_stage_ref_ids.union(self.requisite_stage_ref_ids)
 
         self._stages.append(stage)
         self._last_stage = stage

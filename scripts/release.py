@@ -104,9 +104,7 @@ class VersionValidatorTask(Task):
         # Read pyproject.toml version
         try:
             pyproject_content = Path(pyproject_path).read_text()
-            pyproject_match = re.search(
-                r'^version\s*=\s*"([^"]+)"', pyproject_content, re.MULTILINE
-            )
+            pyproject_match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject_content, re.MULTILINE)
             if not pyproject_match:
                 return TaskResult.terminal(error=f"Could not find version in {pyproject_path}")
             pyproject_version = pyproject_match.group(1)

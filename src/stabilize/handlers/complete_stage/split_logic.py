@@ -135,9 +135,7 @@ class CompleteStagesSplitMixin:
                             completed.append(stage.ref_id)
                             fresh_downstream.context["_completed_branches"] = completed
                             # Use expected_phase for atomic update
-                            self.repository.store_stage(
-                                fresh_downstream, expected_phase=fresh_downstream.status.name
-                            )
+                            self.repository.store_stage(fresh_downstream, expected_phase=fresh_downstream.status.name)
                         break
                     except ConcurrencyError:
                         if attempt == max_retries - 1:
@@ -155,9 +153,7 @@ class CompleteStagesSplitMixin:
                             completed.append(stage.ref_id)
                             fresh_downstream.context["_completed_branches"] = completed
                             # Use expected_phase for atomic update
-                            self.repository.store_stage(
-                                fresh_downstream, expected_phase=fresh_downstream.status.name
-                            )
+                            self.repository.store_stage(fresh_downstream, expected_phase=fresh_downstream.status.name)
                         break
                     except ConcurrencyError:
                         if attempt == max_retries - 1:

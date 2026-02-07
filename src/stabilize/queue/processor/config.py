@@ -37,9 +37,7 @@ class QueueProcessorConfig:
     enable_deduplication: bool = True
 
     @classmethod
-    def from_handler_config(
-        cls, handler_config: HandlerConfig | None = None
-    ) -> QueueProcessorConfig:
+    def from_handler_config(cls, handler_config: HandlerConfig | None = None) -> QueueProcessorConfig:
         """Create QueueProcessorConfig from HandlerConfig.
 
         Args:
