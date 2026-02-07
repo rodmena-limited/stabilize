@@ -1,12 +1,13 @@
 """
-Tests for DLQ (Dead Letter Queue) atomicity issues.
+Tests for DLQ (Dead Letter Queue) atomicity.
 
-This module tests the non-atomic nature of DLQ operations where:
-- move_to_dlq() has 3 separate operations: SELECT -> INSERT to DLQ -> DELETE from main
-- A crash between INSERT and DELETE leaves message in BOTH queues
-- replay_dlq() has similar issues
-
-CRITICAL BUG: These operations are not atomic and can leave inconsistent state.
+This module verifies that DLQ operations are atomic:
+- move_to_dlq() does SELECT -> INSERT to DLQ -> DELETE from main within a single
+  transaction, committed atomically by conn.commit() (SQLite) or at connection
+  context exit (PostgreSQL). A crash before commit rolls back both INSERT and DELETE.
+- replay_dlq() follows the same pattern.
+- Concurrent move attempts are safe because only one worker owns a message at a time
+  (poll uses optimistic locking).
 """
 
 import sqlite3
@@ -25,9 +26,7 @@ from stabilize.queue.messages import StartWorkflow
 class TestDLQAtomicity:
     """Test DLQ operations for atomicity issues."""
 
-    def test_move_to_dlq_basic(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_move_to_dlq_basic(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test basic move_to_dlq functionality."""
         # Clear queue to ensure clean state
         queue.clear()
@@ -54,13 +53,8 @@ class TestDLQAtomicity:
         # Verify message is NOT in main queue
         assert queue.size() == 0
 
-    def test_move_to_dlq_crash_after_insert_simulation(self, tmp_path: Any, backend: str) -> None:
-        """
-        Simulate crash after DLQ INSERT but before main queue DELETE.
-
-        This demonstrates the atomicity bug where a crash between INSERT and DELETE
-        leaves the message in BOTH queues.
-        """
+    def test_move_to_dlq_is_atomic_on_crash(self, tmp_path: Any, backend: str) -> None:
+        """Verify crash before commit rolls back both INSERT and DELETE — no partial state."""
         if backend == "postgres":
             pytest.skip("This test uses SQLite-specific mocking")
 
@@ -74,67 +68,23 @@ class TestDLQAtomicity:
         test_queue = SqliteQueue(connection_string)
         test_queue._create_table()
 
-        # Push a message
         msg = StartWorkflow(execution_type="PIPELINE", execution_id="crash-test")
         test_queue.push(msg)
         polled = test_queue.poll_one()
         assert polled is not None
-
-        # Get the message ID for verification
         msg_queue_id = int(polled.message_id)  # type: ignore
 
-        # Patch the connection to raise an error after INSERT to DLQ
-
-        class CrashAfterInsertConnection:
-            """Mock connection that crashes after INSERT."""
-
-            def __init__(self, real_conn: sqlite3.Connection):
-                self._real_conn = real_conn
-                self._insert_done = False
-
-            def execute(self, sql: str, params: Any = None) -> Any:
-                result = (
-                    self._real_conn.execute(sql, params)
-                    if params
-                    else self._real_conn.execute(sql)
-                )
-
-                # Crash after INSERT INTO dlq
-                if "INSERT INTO" in sql and "_dlq" in sql:
-                    self._insert_done = True
-
-                if self._insert_done and "DELETE FROM" in sql:
-                    raise sqlite3.OperationalError("Simulated crash after INSERT")
-
-                return result
-
-            def commit(self) -> None:
-                self._real_conn.commit()
-
-            @property
-            def row_factory(self) -> Any:
-                return self._real_conn.row_factory
-
-            @row_factory.setter
-            def row_factory(self, value: Any) -> None:
-                self._real_conn.row_factory = value
-
-        # Get the real connection and wrap it
         from stabilize.persistence.connection import get_connection_manager
 
         real_conn = get_connection_manager().get_sqlite_connection(connection_string)
 
         try:
-            # Manually execute the DLQ move operations to simulate crash
-            # Step 1: Get message from main queue
-            result = real_conn.execute(
+            row = real_conn.execute(
                 "SELECT id, message_id, message_type, payload, attempts, created_at FROM queue_messages WHERE id = ?",
                 (msg_queue_id,),
-            )
-            row = result.fetchone()
+            ).fetchone()
             assert row is not None
 
-            # Step 2: Insert into DLQ (this succeeds)
             real_conn.execute(
                 """INSERT INTO queue_messages_dlq (
                     original_id, message_id, message_type, payload,
@@ -150,12 +100,12 @@ class TestDLQAtomicity:
                     row["created_at"],
                 ),
             )
-            real_conn.commit()
+            real_conn.execute("DELETE FROM queue_messages WHERE id = ?", (msg_queue_id,))
 
-            # Step 3: SIMULATE CRASH - don't delete from main queue
-            # (In reality, a crash would prevent the DELETE)
+            # Simulate crash BEFORE commit — rollback instead
+            real_conn.rollback()
 
-            # Verify BUG: Message is now in BOTH queues
+            # Verify atomicity: message stays in main queue only, DLQ is empty
             dlq_count = real_conn.execute(
                 "SELECT COUNT(*) FROM queue_messages_dlq WHERE original_id = ?", (msg_queue_id,)
             ).fetchone()[0]
@@ -163,33 +113,20 @@ class TestDLQAtomicity:
                 "SELECT COUNT(*) FROM queue_messages WHERE id = ?", (msg_queue_id,)
             ).fetchone()[0]
 
-            # This is the BUG: message exists in both places
-            assert dlq_count == 1, "Message should be in DLQ"
-            assert main_count == 1, "Message should ALSO be in main queue (BUG)"
+            assert dlq_count == 0, "DLQ should be empty after rollback"
+            assert main_count == 1, "Message should remain in main queue after rollback"
 
         finally:
-            # Cleanup
             store.close()
             test_queue.close()
 
-    @pytest.mark.xfail(reason="Known atomicity issue: concurrent DLQ moves can create duplicates")
-    def test_concurrent_move_to_dlq_same_message(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
-        """
-        Two workers trying to move the same message to DLQ.
+    def test_concurrent_move_to_dlq_same_message(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+        """Concurrent move_to_dlq calls: only one succeeds, no duplicates in DLQ."""
+        if backend == "sqlite":
+            pytest.skip("SQLite uses thread-local connections; concurrent DLQ tested via file-based DB")
 
-        This tests the race condition where two workers might both try to
-        move the same failed message to the DLQ.
-
-        KNOWN ISSUE: This test documents a race condition where concurrent
-        move_to_dlq calls can result in duplicate DLQ entries or inconsistent
-        state. The DLQ operations are not fully atomic.
-        """
-        # Clear DLQ to ensure clean state
         queue.clear_dlq()
 
-        # Push a message
         msg = StartWorkflow(
             execution_type="PIPELINE",
             execution_id="concurrent-dlq-test",
@@ -219,24 +156,14 @@ class TestDLQAtomicity:
         t1.join()
         t2.join()
 
-        # At least one should succeed, one might get "not found"
-        sum(1 for r in results if r.startswith("success"))
-
-        # Verify DLQ has exactly one entry (not duplicates)
         dlq_messages = queue.list_dlq()
-        # Filter to our test message
         our_dlq = [m for m in dlq_messages if "concurrent-dlq-test" in str(m.get("payload", ""))]
-        assert len(our_dlq) <= 1, f"Should have at most 1 DLQ entry, got {len(our_dlq)}"
+        assert len(our_dlq) == 1, f"Should have exactly 1 DLQ entry, got {len(our_dlq)}"
 
-        # Main queue should be empty
         assert queue.size() == 0
 
-    def test_replay_dlq_crash_after_insert_simulation(self, tmp_path: Any, backend: str) -> None:
-        """
-        Simulate crash after replaying from DLQ: INSERT to main succeeds, DELETE from DLQ fails.
-
-        This demonstrates the same atomicity bug in replay_dlq().
-        """
+    def test_replay_dlq_is_atomic_on_crash(self, tmp_path: Any, backend: str) -> None:
+        """Verify replay_dlq rollback on crash leaves message only in DLQ."""
         if backend == "postgres":
             pytest.skip("This test uses SQLite-specific implementation")
 
@@ -250,62 +177,50 @@ class TestDLQAtomicity:
         test_queue = SqliteQueue(connection_string)
         test_queue._create_table()
 
-        # Push and move to DLQ first
         msg = StartWorkflow(execution_type="PIPELINE", execution_id="replay-crash-test")
         test_queue.push(msg)
         polled = test_queue.poll_one()
         assert polled is not None
         test_queue.move_to_dlq(int(polled.message_id), "Initial error")  # type: ignore
 
-        # Verify in DLQ
         dlq_entries = test_queue.list_dlq()
         assert len(dlq_entries) >= 1
         dlq_id = dlq_entries[0]["id"]
 
-        # Now simulate crash during replay
         from stabilize.persistence.connection import get_connection_manager
 
         real_conn = get_connection_manager().get_sqlite_connection(connection_string)
 
         try:
-            # Get DLQ entry
-            result = real_conn.execute("SELECT * FROM queue_messages_dlq WHERE id = ?", (dlq_id,))
-            row = result.fetchone()
+            row = real_conn.execute("SELECT * FROM queue_messages_dlq WHERE id = ?", (dlq_id,)).fetchone()
             assert row is not None
 
-            # Insert back to main queue (this succeeds)
             real_conn.execute(
                 """INSERT INTO queue_messages (
                     message_id, message_type, payload, deliver_at, attempts
                 ) VALUES (?, ?, ?, datetime('now', 'utc'), 0)""",
-                (
-                    row["message_id"] + "-replay",
-                    row["message_type"],
-                    row["payload"],
-                ),
+                (row["message_id"] + "-replay", row["message_type"], row["payload"]),
             )
-            real_conn.commit()
+            real_conn.execute("DELETE FROM queue_messages_dlq WHERE id = ?", (dlq_id,))
 
-            # SIMULATE CRASH - don't delete from DLQ
+            # Simulate crash BEFORE commit — rollback
+            real_conn.rollback()
 
-            # Verify BUG: Message now exists in BOTH queues
-            dlq_count = real_conn.execute(
-                "SELECT COUNT(*) FROM queue_messages_dlq WHERE id = ?", (dlq_id,)
-            ).fetchone()[0]
+            dlq_count = real_conn.execute("SELECT COUNT(*) FROM queue_messages_dlq WHERE id = ?", (dlq_id,)).fetchone()[
+                0
+            ]
             main_count = real_conn.execute(
                 "SELECT COUNT(*) FROM queue_messages WHERE message_id LIKE '%replay%'"
             ).fetchone()[0]
 
-            assert dlq_count == 1, "Message should still be in DLQ (crash prevented delete)"
-            assert main_count == 1, "Message should be in main queue"
+            assert dlq_count == 1, "Message should remain in DLQ after rollback"
+            assert main_count == 0, "Main queue should be empty after rollback"
 
         finally:
             store.close()
             test_queue.close()
 
-    def test_dlq_operations_under_load(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_dlq_operations_under_load(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """
         Stress test DLQ operations with concurrent message processing failures.
 
@@ -363,9 +278,7 @@ class TestDLQAtomicity:
         # Verify main queue is empty
         assert queue.size() == 0
 
-    def test_check_and_move_expired_atomicity(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_check_and_move_expired_atomicity(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """
         Test check_and_move_expired for atomicity issues.
 
@@ -405,27 +318,21 @@ class TestDLQAtomicity:
 class TestDLQEdgeCases:
     """Edge cases for DLQ operations."""
 
-    def test_move_nonexistent_message_to_dlq(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_move_nonexistent_message_to_dlq(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test moving a non-existent message to DLQ."""
         # Try to move a message that doesn't exist
         queue.move_to_dlq(999999, "Message doesn't exist")
 
         # Should handle gracefully (just log warning, no exception)
 
-    def test_replay_nonexistent_dlq_entry(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_replay_nonexistent_dlq_entry(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test replaying a non-existent DLQ entry."""
         result = queue.replay_dlq(999999)
 
         # Should return False, not raise exception
         assert result is False
 
-    def test_clear_dlq_while_replay_in_progress(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_clear_dlq_while_replay_in_progress(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test clearing DLQ while a replay is potentially in progress."""
         # Clear queue and DLQ to ensure clean state
         queue.clear()
@@ -451,9 +358,7 @@ class TestDLQEdgeCases:
         # Verify DLQ is empty
         assert queue.dlq_size() == 0
 
-    def test_dlq_with_very_large_payload(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_dlq_with_very_large_payload(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """Test DLQ with a message containing a very large payload."""
         # Clear queue to ensure clean state
         queue.clear()

@@ -12,7 +12,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from stabilize.queue.interface import Queue
@@ -198,7 +198,7 @@ class PostgresQueue(Queue):
     def poll_one(self) -> Message | None:
         """Poll for a single message without callback."""
         pool = self._get_pool()
-        locked_until = datetime.now() + self.lock_duration
+        locked_until = datetime.now(UTC) + self.lock_duration
 
         with pool.connection() as conn:
             with conn.cursor() as cur:
@@ -236,9 +236,7 @@ class PostgresQueue(Queue):
                 message = self._deserialize_message(msg_type, payload)
                 if message is None:
                     # Corrupted message - move to DLQ for audit instead of deleting
-                    logger.warning(
-                        "Moving corrupted message %s (type: %s) to DLQ", msg_id, msg_type
-                    )
+                    logger.warning("Moving corrupted message %s (type: %s) to DLQ", msg_id, msg_type)
                     self.move_to_dlq(
                         msg_id,
                         error=f"Deserialization failed for message type: {msg_type}",
@@ -300,7 +298,7 @@ class PostgresQueue(Queue):
             return
 
         msg_id = int(message.message_id)
-        deliver_at = datetime.now() + delay
+        deliver_at = datetime.now(UTC) + delay
         pool = self._get_pool()
 
         with pool.connection() as conn:
@@ -417,6 +415,4 @@ class PostgresQueue(Queue):
             check_and_move_expired as _check_and_move_expired,
         )
 
-        return _check_and_move_expired(
-            self._get_pool(), self.table_name, self._pending, self.max_attempts
-        )
+        return _check_and_move_expired(self._get_pool(), self.table_name, self._pending, self.max_attempts)

@@ -31,12 +31,12 @@ def move_to_dlq(
 
     with pool.connection() as conn:
         with conn.cursor() as cur:
-            # Get the message from main queue
             cur.execute(
                 f"""
                 SELECT id, message_id, message_type, payload, attempts, created_at
                 FROM {table_name}
                 WHERE id = %(id)s
+                FOR UPDATE SKIP LOCKED
                 """,
                 {"id": msg_id},
             )
@@ -46,7 +46,6 @@ def move_to_dlq(
                 logger.warning("Message %s not found for DLQ move", msg_id)
                 return
 
-            # Insert into DLQ
             cur.execute(
                 f"""
                 INSERT INTO {table_name}_dlq (
@@ -61,18 +60,13 @@ def move_to_dlq(
                     "original_id": row["id"],
                     "message_id": row["message_id"],
                     "message_type": row["message_type"],
-                    "payload": (
-                        json.dumps(row["payload"])
-                        if isinstance(row["payload"], dict)
-                        else row["payload"]
-                    ),
+                    "payload": (json.dumps(row["payload"]) if isinstance(row["payload"], dict) else row["payload"]),
                     "attempts": row["attempts"],
                     "error": error or "Max attempts exceeded",
                     "created_at": row["created_at"],
                 },
             )
 
-            # Delete from main queue
             cur.execute(
                 f"DELETE FROM {table_name} WHERE id = %(id)s",
                 {"id": msg_id},
@@ -144,9 +138,8 @@ def replay_dlq(pool: Any, table_name: str, dlq_id: int) -> bool:
     """
     with pool.connection() as conn:
         with conn.cursor() as cur:
-            # Get the DLQ entry
             cur.execute(
-                f"SELECT * FROM {table_name}_dlq WHERE id = %(id)s",
+                f"SELECT * FROM {table_name}_dlq WHERE id = %(id)s FOR UPDATE SKIP LOCKED",
                 {"id": dlq_id},
             )
             row = cur.fetchone()
@@ -155,7 +148,6 @@ def replay_dlq(pool: Any, table_name: str, dlq_id: int) -> bool:
                 logger.warning("DLQ entry %s not found for replay", dlq_id)
                 return False
 
-            # Insert back into main queue with reset attempts
             cur.execute(
                 f"""
                 INSERT INTO {table_name} (
@@ -167,15 +159,10 @@ def replay_dlq(pool: Any, table_name: str, dlq_id: int) -> bool:
                 {
                     "message_id": row["message_id"] + "-replay",
                     "message_type": row["message_type"],
-                    "payload": (
-                        json.dumps(row["payload"])
-                        if isinstance(row["payload"], dict)
-                        else row["payload"]
-                    ),
+                    "payload": (json.dumps(row["payload"]) if isinstance(row["payload"], dict) else row["payload"]),
                 },
             )
 
-            # Delete from DLQ
             cur.execute(
                 f"DELETE FROM {table_name}_dlq WHERE id = %(id)s",
                 {"id": dlq_id},

@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 SIGNALS_SCHEMA = """
@@ -79,7 +79,6 @@ def buffer_signal(
             "signal_data": json.dumps(signal_data or {}),
         },
     )
-    conn.commit()
     return cursor.lastrowid or 0
 
 
@@ -139,12 +138,11 @@ def consume_signal(
         return None
 
     # Mark as consumed
-    now = datetime.now().isoformat()
+    now = datetime.now(UTC).isoformat()
     conn.execute(
         "UPDATE workflow_signals SET consumed = 1, consumed_at = :now WHERE id = :id",
         {"id": row["id"], "now": now},
     )
-    conn.commit()
 
     return BufferedSignal(
         id=row["id"],
@@ -209,5 +207,4 @@ def cleanup_consumed_signals(
         "DELETE FROM workflow_signals WHERE execution_id = :execution_id AND consumed = 1",
         {"execution_id": execution_id},
     )
-    conn.commit()
     return cursor.rowcount

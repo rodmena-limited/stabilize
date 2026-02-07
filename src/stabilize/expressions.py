@@ -133,8 +133,13 @@ def _eval_node(node: ast.AST, context: dict[str, Any]) -> Any:
             op_func = _SAFE_OPERATORS.get(type(op))
             if op_func is None:
                 raise ExpressionError(f"Unsupported comparison operator: {type(op).__name__}")
-            if not op_func(left, right):
-                return False
+            try:
+                if not op_func(left, right):
+                    return False
+            except TypeError as e:
+                raise ExpressionError(
+                    f"Cannot compare {type(left).__name__} and {type(right).__name__} with {type(op).__name__}: {e}"
+                ) from e
             left = right
         return True
 

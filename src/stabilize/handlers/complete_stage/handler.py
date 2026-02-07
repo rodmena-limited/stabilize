@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.tasks.registry import TaskRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +65,10 @@ class CompleteStageHandler(
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
         event_recorder: EventRecorder | None = None,
+        task_registry: TaskRegistry | None = None,
     ) -> None:
         super().__init__(queue, repository, retry_delay, handler_config, event_recorder)
+        self.task_registry = task_registry
 
     @property
     def message_type(self) -> type[CompleteStage]:
@@ -81,6 +84,32 @@ class CompleteStageHandler(
             lambda: self._handle_with_retry(message),
             f"completing stage {message.stage_id}",
         )
+
+    def _invoke_task_cleanup(self, stage: StageExecution) -> None:
+        """Invoke on_cleanup() on all task implementations in the stage.
+
+        Called when a stage reaches a terminal state (SUCCEEDED, FAILED,
+        TERMINAL, CANCELED, SKIPPED, etc.) to allow tasks to release
+        resources such as containers, connections, or temporary files.
+
+        Errors in cleanup are logged but never propagate — cleanup must
+        not prevent stage/workflow completion.
+        """
+        if self.task_registry is None:
+            return
+
+        for task_model in stage.tasks:
+            try:
+                task_impl = self.task_registry.get_by_class(task_model.implementing_class)
+                task_impl.on_cleanup(stage)
+            except Exception as e:
+                logger.warning(
+                    "Error in on_cleanup for task %s (type=%s) in stage %s: %s",
+                    task_model.name,
+                    task_model.implementing_class,
+                    stage.name,
+                    e,
+                )
 
     def _handle_with_retry(self, message: CompleteStage) -> None:
         """Inner handle logic to be retried."""
@@ -178,9 +207,7 @@ class CompleteStageHandler(
                         self._plan_after_stages(stage)
                         after_stages = stage.first_after_stages()
 
-                    not_started = [
-                        s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED
-                    ]
+                    not_started = [s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED]
                     if not_started:
                         # Atomic: store stage + push all after stage messages together
                         # Store stage to persist any context changes from planning
@@ -207,9 +234,7 @@ class CompleteStageHandler(
                     if has_on_failure:
                         after_stages = stage.first_after_stages()
                         # Only push StartStage for on-failure stages that are NOT_STARTED
-                        not_started_on_failure = [
-                            s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED
-                        ]
+                        not_started_on_failure = [s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED]
                         if not_started_on_failure:
                             # Atomic: store stage + push all on-failure stage messages together
                             # Store stage to persist any context changes from planning
@@ -229,17 +254,16 @@ class CompleteStageHandler(
                 self.set_stage_status(stage, status)
                 stage.end_time = self.current_time_millis()
 
+                # Invoke on_cleanup() on all task implementations before persisting
+                self._invoke_task_cleanup(stage)
+
                 logger.info("Stage %s completed with status %s", stage.name, status)
 
                 # Record event if event recorder is configured
                 if self.event_recorder:
                     self.set_event_context(stage.execution.id if stage.execution else "")
                     if status.is_failure:
-                        error = (
-                            stage.context.get("exception", {})
-                            .get("details", {})
-                            .get("error", "Unknown error")
-                        )
+                        error = stage.context.get("exception", {}).get("details", {}).get("error", "Unknown error")
                         self.event_recorder.record_stage_failed(
                             stage,
                             error=str(error),
@@ -282,9 +306,7 @@ class CompleteStageHandler(
                     # BLOCKING FAILURE CHECK: If stage has _blocking_failure=True and
                     # status is FAILED_CONTINUE, treat it as a hard failure that blocks
                     # downstream execution. This prevents false-positive workflow success.
-                    if status == WorkflowStatus.FAILED_CONTINUE and stage.context.get(
-                        "_blocking_failure", False
-                    ):
+                    if status == WorkflowStatus.FAILED_CONTINUE and stage.context.get("_blocking_failure", False):
                         logger.warning(
                             "Stage %s has _blocking_failure=True, converting FAILED_CONTINUE to TERMINAL",
                             stage.name,
@@ -301,10 +323,7 @@ class CompleteStageHandler(
                                     stage_id=message.stage_id,
                                 )
                             )
-                            if (
-                                stage.synthetic_stage_owner is None
-                                or stage.parent_stage_id is None
-                            ):
+                            if stage.synthetic_stage_owner is None or stage.parent_stage_id is None:
                                 txn.push_message(
                                     CompleteWorkflow(
                                         execution_type=message.execution_type,
@@ -322,15 +341,11 @@ class CompleteStageHandler(
                         return
                     # Get downstream stages and parent info BEFORE transaction
                     execution = stage.execution
-                    downstream_stages = self.repository.get_downstream_stages(
-                        execution.id, stage.ref_id
-                    )
+                    downstream_stages = self.repository.get_downstream_stages(execution.id, stage.ref_id)
                     phase = stage.synthetic_stage_owner
 
                     # Apply split logic to determine which downstreams to activate
-                    activated_downstreams, skipped_downstreams = self._apply_split_logic(
-                        stage, downstream_stages
-                    )
+                    activated_downstreams, skipped_downstreams = self._apply_split_logic(stage, downstream_stages)
 
                     # Track activated branches for OR-join (WCP-7)
                     if stage.split_type == SplitType.OR and activated_downstreams:
@@ -460,6 +475,7 @@ class CompleteStageHandler(
                 }
                 self.set_stage_status(stage, WorkflowStatus.TERMINAL)
                 stage.end_time = self.current_time_millis()
+                self._invoke_task_cleanup(stage)
 
                 # Atomic: store stage + cancel + complete workflow
                 with self.repository.transaction(self.queue) as txn:

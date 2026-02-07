@@ -91,7 +91,7 @@ class QueueProcessorMixin:
                 handler_config=handler_config,
             ),
             CompleteTaskHandler(queue, store),
-            CompleteStageHandler(queue, store),
+            CompleteStageHandler(queue, store, task_registry=task_registry),
             CompleteWorkflowHandler(queue, store),
         ]
 
@@ -144,9 +144,7 @@ class QueueProcessorMixin:
                 )
                 dedup.reset()
 
-        logger.debug(
-            "Handling %s (execution=%s)", get_message_type_name(message), execution_id or "N/A"
-        )
+        logger.debug("Handling %s (execution=%s)", get_message_type_name(message), execution_id or "N/A")
 
         handler.handle(message)
 

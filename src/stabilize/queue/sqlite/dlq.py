@@ -48,22 +48,20 @@ class SqliteDLQMixin:
         msg_id = int(message_id)
         conn = self._get_connection()
 
-        # Get the message from main queue
-        result = conn.execute(
+        cursor = conn.execute(
             f"""
-            SELECT id, message_id, message_type, payload, attempts, created_at
-            FROM {self.table_name}
+            DELETE FROM {self.table_name}
             WHERE id = :id
+            RETURNING id, message_id, message_type, payload, attempts, created_at
             """,
             {"id": msg_id},
         )
-        row = result.fetchone()
+        row = cursor.fetchone()
 
         if not row:
             logger.warning("Message %s not found for DLQ move", msg_id)
             return
 
-        # Insert into DLQ
         conn.execute(
             f"""
             INSERT INTO {self.table_name}_dlq (
@@ -83,12 +81,6 @@ class SqliteDLQMixin:
                 "error": error or "Max attempts exceeded",
                 "created_at": row["created_at"],
             },
-        )
-
-        # Delete from main queue
-        conn.execute(
-            f"DELETE FROM {self.table_name} WHERE id = :id",
-            {"id": msg_id},
         )
         conn.commit()
 
@@ -152,18 +144,16 @@ class SqliteDLQMixin:
         """
         conn = self._get_connection()
 
-        # Get the DLQ entry
-        result = conn.execute(
-            f"SELECT * FROM {self.table_name}_dlq WHERE id = :id",
+        cursor = conn.execute(
+            f"DELETE FROM {self.table_name}_dlq WHERE id = :id RETURNING *",
             {"id": dlq_id},
         )
-        row = result.fetchone()
+        row = cursor.fetchone()
 
         if not row:
             logger.warning("DLQ entry %s not found for replay", dlq_id)
             return False
 
-        # Insert back into main queue with reset attempts
         conn.execute(
             f"""
             INSERT INTO {self.table_name} (
@@ -177,12 +167,6 @@ class SqliteDLQMixin:
                 "message_type": row["message_type"],
                 "payload": row["payload"],
             },
-        )
-
-        # Delete from DLQ
-        conn.execute(
-            f"DELETE FROM {self.table_name}_dlq WHERE id = :id",
-            {"id": dlq_id},
         )
         conn.commit()
 

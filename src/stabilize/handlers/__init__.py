@@ -81,7 +81,7 @@ def register_all_handlers(
         StartTaskHandler(queue, repository, task_registry),
         RunTaskHandler(queue, repository, task_registry),
         CompleteTaskHandler(queue, repository),
-        CompleteStageHandler(queue, repository),
+        CompleteStageHandler(queue, repository, task_registry=task_registry),
         CompleteWorkflowHandler(queue, repository),
     ]
 
