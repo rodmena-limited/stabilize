@@ -181,6 +181,12 @@ def repository(
             connection_string="sqlite:///:memory:",
             create_tables=True,
         )
+        conn = repo._get_connection()
+        conn.execute("DELETE FROM task_executions")
+        conn.execute("DELETE FROM stage_executions")
+        conn.execute("DELETE FROM pipeline_executions")
+        conn.execute("DELETE FROM processed_messages")
+        conn.commit()
         yield repo
     else:
         # PostgreSQL: migrations already created tables via mg apply
@@ -212,13 +218,12 @@ def queue(
     """Create queue for current backend."""
     q: Queue
     if backend == "sqlite":
-        # Use same connection string as repository - singleton ConnectionManager
-        # ensures they share the same thread-local connection for in-memory SQLite
         sqlite_q = SqliteQueue(
             connection_string="sqlite:///:memory:",
             table_name="queue_messages",
         )
         sqlite_q._create_table()
+        sqlite_q.clear()
         q = sqlite_q
         yield q
         try:
