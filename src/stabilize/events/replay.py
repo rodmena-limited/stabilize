@@ -7,12 +7,15 @@ in time by replaying events from the event store.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EntityType, Event, EventType
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from stabilize.events.snapshots import SnapshotStore
@@ -123,8 +126,19 @@ class EventReplayer:
         else:
             events = self._event_store.get_events_for_workflow(workflow_id, start_sequence)
 
+        # Check for sequence gaps
+        last_seq = 0
         for event in events:
+            if last_seq > 0 and event.sequence > last_seq + 1:
+                logger.warning(
+                    "Sequence gap detected in workflow %s: %d -> %d (missing %d events)",
+                    workflow_id,
+                    last_seq,
+                    event.sequence,
+                    event.sequence - last_seq - 1,
+                )
             self._apply_event(state, event)
+            last_seq = event.sequence
 
         return state.to_dict()
 
@@ -309,7 +323,7 @@ class EventReplayer:
             task["error"] = event.data.get("error")
 
         elif event.event_type == EventType.TASK_RETRIED:
-            task["retry_count"] = task.get("retry_count", 0) + 1
+            task["retry_count"] = event.data.get("retry_count", task.get("retry_count", 0) + 1)
 
     def get_entity_history(
         self,

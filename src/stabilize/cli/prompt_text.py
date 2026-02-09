@@ -698,7 +698,7 @@ All status values:
 Properties:
   .is_complete: bool    - Has finished executing
   .is_halt: bool        - Blocks downstream stages
-  .is_successful: bool  - SUCCEEDED, STOPPED, or SKIPPED
+  .is_successful: bool  - SUCCEEDED or SKIPPED
   .is_failure: bool     - TERMINAL, STOPPED, or FAILED_CONTINUE
 
 ===============================================================================
@@ -2046,14 +2046,14 @@ State:    status.changed, context.updated, outputs.updated, jump.executed
 18.6 Event Stores
 -----------------
 - SqliteEventStore("sqlite:///path.db", create_tables=True)  # Development
-- InMemoryEventStore()                                        # Testing only
+- SqliteEventStore("sqlite:///:memory:", create_tables=True)  # Testing only
 - PostgresEventStore("postgresql://...")                       # Production
 
 ===============================================================================
-19. ADVANCED WORKFLOW CONTROL-FLOW PATTERNS (WCP 1-43)
+19. ADVANCED WORKFLOW CONTROL-FLOW PATTERNS (20 of 43 WCPs)
 ===============================================================================
 
-Stabilize implements all 43 Workflow Control-Flow Patterns from van der Aalst
+Stabilize implements 20 of the 43 Workflow Control-Flow Patterns from van der Aalst
 et al. These are configured via fields on StageExecution.
 
 19.1 Join Types

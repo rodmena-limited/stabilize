@@ -253,7 +253,12 @@ class StreamingShellTask(ShellTask):
             return TaskResult.terminal(error=f"Streaming error: {e}")
 
         stdout_text = "\n".join(output_lines)
-        outputs = {"stdout": stdout_text, "stderr": "", "returncode": proc.returncode, "truncated": False}
+        outputs = {
+            "stdout": stdout_text,
+            "stderr": "",
+            "returncode": proc.returncode,
+            "truncated": False,
+        }
 
         if proc.returncode == 0:
             return TaskResult.success(outputs=outputs)

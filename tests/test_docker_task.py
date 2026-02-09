@@ -152,6 +152,7 @@ class TestDockerTaskRun:
         context = {
             "image": "alpine",
             "privileged": True,
+            "allow_privileged": True,
         }
 
         cmd = task._build_run_command(context)
@@ -159,12 +160,12 @@ class TestDockerTaskRun:
         assert "--privileged" in cmd
 
     def test_run_with_capabilities(self) -> None:
-        """Test run with Linux capabilities."""
         task = DockerTask()
         context = {
             "image": "alpine",
             "cap_add": ["NET_ADMIN", "SYS_TIME"],
             "cap_drop": ["MKNOD"],
+            "allow_dangerous_capabilities": True,
         }
 
         cmd = task._build_run_command(context)

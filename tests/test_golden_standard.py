@@ -364,9 +364,9 @@ class TestGoldenStandard:
         final_result = finalize_stage.outputs.get("final_result", "")
 
         # Verify output matches expected
-        assert (
-            final_result == self.EXPECTED_RESULT
-        ), f"[{backend}] Output mismatch!\nExpected: {self.EXPECTED_RESULT}\nGot:      {final_result}"
+        assert final_result == self.EXPECTED_RESULT, (
+            f"[{backend}] Output mismatch!\nExpected: {self.EXPECTED_RESULT}\nGot:      {final_result}"
+        )
 
         # Cleanup
         repository.delete(execution.id)

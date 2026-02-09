@@ -11,8 +11,8 @@ from stabilize import (
     Workflow,
     WorkflowStatus,
 )
-from stabilize.persistence.memory import InMemoryWorkflowStore
-from stabilize.queue import InMemoryQueue
+from stabilize.persistence.sqlite import SqliteWorkflowStore
+from stabilize.queue.sqlite import SqliteQueue
 
 
 class SuccessTask(Task):
@@ -40,14 +40,14 @@ class CounterTask(Task):
 
 
 def setup_stabilize() -> tuple[
-    InMemoryQueue,
-    InMemoryWorkflowStore,
+    SqliteQueue,
+    SqliteWorkflowStore,
     QueueProcessor,
     Orchestrator,
 ]:
-    """Set up a complete pipeline runner for testing."""
-    queue = InMemoryQueue()
-    repository = InMemoryWorkflowStore()
+    queue = SqliteQueue("sqlite:///:memory:")
+    queue._create_table()
+    repository = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
     task_registry = TaskRegistry()
 
     # Register test tasks

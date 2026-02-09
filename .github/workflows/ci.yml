@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check src/ tests/ golden_standard_tests/
+      - name: Type check
+        run: mypy src/
+
+  test-sqlite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+      - name: Run SQLite tests
+        run: python -m pytest tests/ -v --tb=short -k "sqlite" --timeout=120
+
+  test-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: stabilize
+          POSTGRES_PASSWORD: stabilize
+          POSTGRES_DB: stabilize_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+      - name: Run PostgreSQL tests
+        env:
+          STABILIZE_POSTGRES_URL: postgresql://stabilize:stabilize@localhost:5432/stabilize_test
+        run: python -m pytest tests/ -v --tb=short -k "postgres" --timeout=120
+
+  golden-tests-sqlite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+      - name: Run golden standard tests (SQLite)
+        run: python -m pytest golden_standard_tests/ -v --tb=short -k "sqlite" --timeout=120
+
+  golden-tests-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: stabilize
+          POSTGRES_PASSWORD: stabilize
+          POSTGRES_DB: stabilize_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+      - name: Run golden standard tests (PostgreSQL)
+        env:
+          STABILIZE_POSTGRES_URL: postgresql://stabilize:stabilize@localhost:5432/stabilize_test
+        run: python -m pytest golden_standard_tests/ -v --tb=short -k "postgres" --timeout=120

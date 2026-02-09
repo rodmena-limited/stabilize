@@ -85,7 +85,8 @@ class WorkflowTimelineProjection(Projection):
         """
         self._workflow_id = workflow_id
         self._timeline = WorkflowTimeline(workflow_id=workflow_id)
-        self._start_times: dict[str, datetime] = {}  # entity_id -> start_time
+        self._start_times: dict[str, datetime] = {}
+        self._processed_sequences: set[int] = set()
 
     @property
     def name(self) -> str:
@@ -93,9 +94,13 @@ class WorkflowTimelineProjection(Projection):
 
     def apply(self, event: Event) -> None:
         """Apply an event to the timeline."""
-        # Only process events for this workflow
         if event.workflow_id != self._workflow_id:
             return
+
+        if event.sequence > 0 and event.sequence in self._processed_sequences:
+            return
+        if event.sequence > 0:
+            self._processed_sequences.add(event.sequence)
 
         entry = self._create_entry(event)
         if entry:
@@ -200,6 +205,7 @@ class WorkflowTimelineProjection(Projection):
         """Reset the projection."""
         self._timeline = WorkflowTimeline(workflow_id=self._workflow_id)
         self._start_times.clear()
+        self._processed_sequences.clear()
 
     def get_stages(self) -> list[TimelineEntry]:
         """Get only stage-related entries."""

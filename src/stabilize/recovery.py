@@ -51,9 +51,10 @@ class RecoveryResult:
     """Result of workflow recovery operation."""
 
     workflow_id: str
-    status: str  # "recovered" | "skipped" | "failed"
+    status: str  # "recovered" | "skipped" | "failed" | "partial"
     message: str
     stages_requeued: int = 0
+    failed_pushes: int = 0
 
 
 class WorkflowRecovery:
@@ -162,12 +163,14 @@ class WorkflowRecovery:
 
         # Summary
         recovered = sum(1 for r in results if r.status == "recovered")
+        partial = sum(1 for r in results if r.status == "partial")
         skipped = sum(1 for r in results if r.status == "skipped")
         failed = sum(1 for r in results if r.status == "failed")
 
         logger.info(
-            "Recovery complete: %d recovered, %d skipped, %d failed",
+            "Recovery complete: %d recovered, %d partial, %d skipped, %d failed",
             recovered,
+            partial,
             skipped,
             failed,
         )
@@ -246,6 +249,7 @@ class WorkflowRecovery:
         # Find stages that need to be re-queued
         stages_to_requeue: list[StageExecution] = []
         messages_queued = 0
+        failed_pushes = 0
 
         for stage in full_workflow.stages:
             can_start = self._can_start(stage, full_workflow) if stage.status == WorkflowStatus.NOT_STARTED else None
@@ -277,19 +281,31 @@ class WorkflowRecovery:
             # No stages to requeue, but workflow isn't complete
             # This might mean we need to restart from the beginning
             if full_workflow.status == WorkflowStatus.NOT_STARTED:
-                # Requeue workflow start
-                self.queue.push(
-                    StartWorkflow(
-                        execution_type=full_workflow.type.value,
-                        execution_id=full_workflow.id,
+                try:
+                    self.queue.push(
+                        StartWorkflow(
+                            execution_type=full_workflow.type.value,
+                            execution_id=full_workflow.id,
+                        )
                     )
-                )
-                return RecoveryResult(
-                    workflow_id=workflow.id,
-                    status="recovered",
-                    message="Re-queued workflow start",
-                    stages_requeued=0,
-                )
+                    return RecoveryResult(
+                        workflow_id=workflow.id,
+                        status="recovered",
+                        message="Re-queued workflow start",
+                        stages_requeued=0,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to re-queue StartWorkflow for %s: %s",
+                        workflow.id,
+                        e,
+                    )
+                    failed_pushes += 1
+                    return RecoveryResult(
+                        workflow_id=workflow.id,
+                        status="failed",
+                        message=f"Failed to re-queue workflow start: {e}",
+                    )
             else:
                 return RecoveryResult(
                     workflow_id=workflow.id,
@@ -297,25 +313,24 @@ class WorkflowRecovery:
                     message="No stages need recovery",
                 )
 
-        # Re-queue each stage that needs recovery
+        # Collect all recovery messages, then push atomically via transaction
+        # to prevent partial recovery on crash.
+        recovery_messages: list = []
+
         for stage in stages_to_requeue:
             if stage.status == WorkflowStatus.RUNNING:
-                # Handle RUNNING stages - need to determine what messages to re-queue
                 running_tasks = [t for t in stage.tasks if t.status == WorkflowStatus.RUNNING]
                 not_started_tasks = [t for t in stage.tasks if t.status == WorkflowStatus.NOT_STARTED]
 
                 if running_tasks:
-                    # Re-queue RunTask for each RUNNING task (if not already queued)
                     for task in running_tasks:
-                        # Always check for existing messages to prevent duplicates
                         if self.queue.has_pending_message_for_task(task.id):
                             logger.debug(
                                 "Skipping recovery for task %s - message already in queue",
                                 task.id,
                             )
                             continue
-
-                        self.queue.push(
+                        recovery_messages.append(
                             RunTask(
                                 execution_type=full_workflow.type.value,
                                 execution_id=full_workflow.id,
@@ -324,18 +339,9 @@ class WorkflowRecovery:
                                 task_type=stage.type,
                             )
                         )
-                        messages_queued += 1
-                        logger.debug(
-                            "Re-queued RunTask for task %s in stage %s (%s)",
-                            task.id,
-                            stage.id,
-                            stage.ref_id,
-                        )
                 elif not_started_tasks and stage.start_time is not None:
-                    # Stage claimed but first task never started - re-queue StartTask
-                    # Find the first task that should run
                     first_task = not_started_tasks[0]
-                    self.queue.push(
+                    recovery_messages.append(
                         StartTask(
                             execution_type=full_workflow.type.value,
                             execution_id=full_workflow.id,
@@ -343,66 +349,50 @@ class WorkflowRecovery:
                             task_id=first_task.id,
                         )
                     )
-                    messages_queued += 1
-                    logger.debug(
-                        "Re-queued StartTask for task %s in stage %s (%s)",
-                        first_task.id,
-                        stage.id,
-                        stage.ref_id,
-                    )
-                elif not stage.tasks:
-                    # Zombie stage - RUNNING with no tasks, re-queue StartStage for planning
-                    self.queue.push(
-                        StartStage(
-                            execution_type=full_workflow.type.value,
-                            execution_id=full_workflow.id,
-                            stage_id=stage.id,
-                        )
-                    )
-                    messages_queued += 1
-                    logger.debug(
-                        "Re-queued StartStage for zombie stage %s (%s)",
-                        stage.id,
-                        stage.ref_id,
-                    )
                 else:
-                    # All tasks complete but stage still RUNNING - push StartStage
-                    # to trigger stage completion logic
-                    self.queue.push(
+                    recovery_messages.append(
                         StartStage(
                             execution_type=full_workflow.type.value,
                             execution_id=full_workflow.id,
                             stage_id=stage.id,
                         )
-                    )
-                    messages_queued += 1
-                    logger.debug(
-                        "Re-queued StartStage for stage with all tasks complete %s (%s)",
-                        stage.id,
-                        stage.ref_id,
                     )
             else:
-                # For NOT_STARTED stages, push StartStage
-                self.queue.push(
+                recovery_messages.append(
                     StartStage(
                         execution_type=full_workflow.type.value,
                         execution_id=full_workflow.id,
                         stage_id=stage.id,
                     )
                 )
-                messages_queued += 1
-                logger.debug(
-                    "Re-queued StartStage for stage %s (%s) in workflow %s",
-                    stage.id,
-                    stage.ref_id,
-                    workflow.id,
-                )
+
+        if not recovery_messages:
+            return RecoveryResult(
+                workflow_id=workflow.id,
+                status="skipped",
+                message="No recovery messages to push",
+            )
+
+        # Push all messages atomically in a single transaction
+        try:
+            with self.store.transaction(self.queue) as txn:
+                for msg in recovery_messages:
+                    txn.push_message(msg)
+            messages_queued = len(recovery_messages)
+        except Exception as e:
+            logger.warning(
+                "Failed to push recovery messages atomically for workflow %s: %s",
+                workflow.id,
+                e,
+            )
+            failed_pushes = len(recovery_messages)
 
         return RecoveryResult(
             workflow_id=workflow.id,
-            status="recovered",
-            message=f"Re-queued {len(stages_to_requeue)} stages ({messages_queued} messages)",
+            status="recovered" if failed_pushes == 0 else "partial",
+            message=f"Re-queued {len(stages_to_requeue)} stages ({messages_queued} messages, {failed_pushes} failed)",
             stages_requeued=len(stages_to_requeue),
+            failed_pushes=failed_pushes,
         )
 
     def _has_started(self, stage: StageExecution) -> bool:
@@ -433,6 +423,7 @@ class WorkflowRecovery:
         A stage can start if:
         - It has no dependencies (initial stage), OR
         - All upstream stages are in CONTINUABLE_STATUSES (SUCCEEDED, FAILED_CONTINUE, SKIPPED, REDIRECT)
+        - Join-type specific conditions are satisfied (DISCRIMINATOR not already fired, N_OF_M threshold met)
 
         Args:
             stage: The stage to check
@@ -441,25 +432,48 @@ class WorkflowRecovery:
         Returns:
             True if stage dependencies are met
         """
+        from stabilize.models.stage import JoinType
         from stabilize.models.status import CONTINUABLE_STATUSES
 
         # No dependencies - can always start
         if not stage.requisite_stage_ref_ids:
             return True
 
+        # DISCRIMINATOR / N_OF_M that already fired should not be re-queued
+        if stage.join_type in (JoinType.DISCRIMINATOR, JoinType.N_OF_M):
+            if stage.context.get("_join_fired", False):
+                return False
+
         # Check all upstream stages
+        upstream_stages = []
         for ref_id in stage.requisite_stage_ref_ids:
             upstream = next((s for s in workflow.stages if s.ref_id == ref_id), None)
             if upstream is None:
-                # Upstream not found - can't start
-                logger.warning(
-                    "Stage %s depends on unknown stage %s",
+                logger.error(
+                    "Stage %s depends on unknown stage %s — possible workflow definition error",
                     stage.ref_id,
                     ref_id,
                 )
                 return False
+            upstream_stages.append(upstream)
+
+        # N_OF_M: check threshold
+        if stage.join_type == JoinType.N_OF_M:
+            threshold = stage.join_threshold
+            if threshold > len(upstream_stages):
+                logger.error(
+                    "Stage %s has join_threshold=%d but only %d upstreams — unreachable",
+                    stage.ref_id,
+                    threshold,
+                    len(upstream_stages),
+                )
+                return False
+            completed = sum(1 for u in upstream_stages if u.status in CONTINUABLE_STATUSES)
+            return completed >= threshold
+
+        # Default (AND join): all upstreams must be complete
+        for upstream in upstream_stages:
             if upstream.status not in CONTINUABLE_STATUSES:
-                # Upstream not complete - can't start
                 return False
 
         return True

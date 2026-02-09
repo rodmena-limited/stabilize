@@ -73,9 +73,6 @@ Event Stores
 .. autoclass:: AppendResult
    :members:
 
-.. autoclass:: InMemoryEventStore
-   :members:
-
 .. autoclass:: SqliteEventStore
    :members:
 

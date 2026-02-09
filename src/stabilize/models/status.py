@@ -125,7 +125,6 @@ COMPLETED_STATUSES: frozenset[WorkflowStatus] = frozenset(
 _SUCCESSFUL_STATUSES: frozenset[WorkflowStatus] = frozenset(
     {
         WorkflowStatus.SUCCEEDED,
-        WorkflowStatus.STOPPED,
         WorkflowStatus.SKIPPED,
     }
 )

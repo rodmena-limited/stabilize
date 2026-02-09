@@ -12,6 +12,7 @@ This module provides a production-ready DockerTask with:
 from __future__ import annotations
 
 import logging
+import os
 import shlex
 import subprocess
 from typing import TYPE_CHECKING, Any
@@ -23,6 +24,20 @@ if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
 
 logger = logging.getLogger(__name__)
+
+_DANGEROUS_CAPABILITIES = frozenset(
+    {
+        "SYS_ADMIN",
+        "SYS_PTRACE",
+        "SYS_RAWIO",
+        "SYS_MODULE",
+        "DAC_READ_SEARCH",
+        "NET_ADMIN",
+        "NET_RAW",
+        "SYS_BOOT",
+        "ALL",
+    }
+)
 
 
 class DockerTask(Task):
@@ -178,10 +193,23 @@ class DockerTask(Task):
                 timeout=timeout,
             )
 
+            max_output_size = stage.context.get("max_output_size", 10 * 1024 * 1024)
+            stdout = result.stdout
+            stderr = result.stderr
+            truncated = False
+
+            if len(stdout) > max_output_size:
+                stdout = stdout[:max_output_size]
+                truncated = True
+            if len(stderr) > max_output_size:
+                stderr = stderr[:max_output_size]
+                truncated = True
+
             outputs: dict[str, Any] = {
-                "stdout": result.stdout.strip(),
-                "stderr": result.stderr.strip(),
+                "stdout": stdout.strip(),
+                "stderr": stderr.strip(),
                 "exit_code": result.returncode,
+                "truncated": truncated,
             }
 
             # Extract container/image ID for relevant actions
@@ -298,12 +326,21 @@ class DockerTask(Task):
         if context.get("hostname"):
             cmd.extend(["--hostname", context["hostname"]])
 
-        # Privileged mode
+        # Privileged mode - requires explicit opt-in
         if context.get("privileged"):
+            if not context.get("allow_privileged", False):
+                raise ValueError(
+                    "Privileged mode requires 'allow_privileged: true' in context. "
+                    "This grants full host access and should only be used when absolutely necessary."
+                )
             cmd.append("--privileged")
 
         # Capabilities
         for cap in context.get("cap_add", []):
+            if cap.upper() in _DANGEROUS_CAPABILITIES and not context.get("allow_dangerous_capabilities", False):
+                raise ValueError(
+                    f"Capability '{cap}' is dangerous and requires 'allow_dangerous_capabilities: true' in context."
+                )
             cmd.extend(["--cap-add", cap])
         for cap in context.get("cap_drop", []):
             cmd.extend(["--cap-drop", cap])
@@ -368,8 +405,13 @@ class DockerTask(Task):
         if context.get("restart"):
             cmd.extend(["--restart", context["restart"]])
 
-        # Volumes
         for vol in context.get("volumes", []):
+            parts = vol.split(":")
+            host_path = parts[0] if parts else vol
+            if ".." in host_path:
+                raise ValueError(f"Volume mount path traversal blocked: {vol}")
+            if not os.path.isabs(host_path):
+                raise ValueError(f"Volume host path must be absolute: {vol}")
             cmd.extend(["-v", vol])
 
         # Ports

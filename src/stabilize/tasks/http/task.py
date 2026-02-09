@@ -17,12 +17,15 @@ Zero external dependencies - uses only Python stdlib.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import socket
 import time
 from datetime import timedelta
 from typing import TYPE_CHECKING
 from urllib.error import HTTPError, URLError
-from urllib.request import urlopen
+from urllib.parse import urlparse
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, build_opener
 
 from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
 from resilient_circuit.exceptions import RetryLimitReached
@@ -49,6 +52,56 @@ if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
 
 logger = logging.getLogger(__name__)
+
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+
+def _validate_url_safety(url: str) -> None:
+    """Raise ValueError if URL resolves to a private/loopback address (SSRF protection)."""
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError(f"Cannot extract hostname from URL: {url}")
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        # Hostname is a DNS name — resolve it
+        try:
+            resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            addrs = {ipaddress.ip_address(r[4][0]) for r in resolved}
+        except socket.gaierror:
+            return  # DNS failure will be caught by urllib later
+        for addr in addrs:
+            for net in _BLOCKED_NETWORKS:
+                if addr in net:
+                    raise ValueError(f"SSRF blocked: URL '{url}' resolves to private address {addr}")
+        return
+
+    for net in _BLOCKED_NETWORKS:
+        if addr in net:
+            raise ValueError(f"SSRF blocked: URL '{url}' targets private address {addr}")
+
+
+class _SafeRedirectHandler(HTTPRedirectHandler):
+    """Validates each redirect target against SSRF rules."""
+
+    def __init__(self, allow_private: bool = False) -> None:
+        super().__init__()
+        self._allow_private = allow_private
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not self._allow_private:
+            _validate_url_safety(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 class HTTPTask(Task):
@@ -167,6 +220,13 @@ class HTTPTask(Task):
         # Substitute placeholders in URL
         url = substitute_placeholders(url, context, secrets)
 
+        # SSRF protection: block requests to private/loopback addresses
+        if not context.get("allow_private_urls", False):
+            try:
+                _validate_url_safety(url)
+            except ValueError as e:
+                return TaskResult.terminal(error=str(e))
+
         # Validate method
         method = context.get("method", "GET").upper()
         if method not in SUPPORTED_METHODS:
@@ -182,6 +242,13 @@ class HTTPTask(Task):
 
         # Build SSL context
         ssl_context = build_ssl_context(context)
+
+        # Build opener with SSRF-safe redirect handler
+        allow_private = context.get("allow_private_urls", False)
+        opener_handlers: list = [_SafeRedirectHandler(allow_private=allow_private)]
+        if ssl_context:
+            opener_handlers.append(HTTPSHandler(context=ssl_context))
+        _opener = build_opener(*opener_handlers)
 
         # Retry configuration
         retries = context.get("retries", 0)
@@ -234,11 +301,12 @@ class HTTPTask(Task):
         def make_request() -> HTTPResponse | HTTPError:
             nonlocal last_error
             try:
-                resp: HTTPResponse = urlopen(
+                if not allow_private:
+                    _validate_url_safety(url)
+                resp: HTTPResponse = _opener.open(
                     request,
                     data=body_bytes,
                     timeout=timeout,
-                    context=ssl_context,
                 )
 
                 # Check if we should retry based on status
@@ -281,11 +349,12 @@ class HTTPTask(Task):
         else:
             # No retries configured - single attempt
             try:
-                response = urlopen(
+                if not allow_private:
+                    _validate_url_safety(url)
+                response = _opener.open(
                     request,
                     data=body_bytes,
                     timeout=timeout,
-                    context=ssl_context,
                 )
                 last_response = response
             except HTTPError as e:

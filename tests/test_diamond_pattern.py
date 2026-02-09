@@ -1022,9 +1022,9 @@ class TestDiamondRaceConditions:
         assert result.status == WorkflowStatus.SUCCEEDED
 
         # D must have received from_c (meaning it waited for C)
-        assert (
-            not VerifyInputsTask.verification_errors
-        ), f"Join started prematurely! Errors: {VerifyInputsTask.verification_errors}"
+        assert not VerifyInputsTask.verification_errors, (
+            f"Join started prematurely! Errors: {VerifyInputsTask.verification_errors}"
+        )
 
         stage_d_key = f"{wf.id}:stage_d"
         ctx = VerifyInputsTask.verified_contexts.get(stage_d_key, {})
@@ -1826,9 +1826,9 @@ class TestDiamondWithJumps:
 
         # Verify C was executed twice (jump + retry)
         c_key = f"{wf.id}:stage_c"
-        assert (
-            JumpOnFirstAttemptTask.attempts.get(c_key, 0) == 2
-        ), f"C should have been executed twice, got {JumpOnFirstAttemptTask.attempts.get(c_key, 0)}"
+        assert JumpOnFirstAttemptTask.attempts.get(c_key, 0) == 2, (
+            f"C should have been executed twice, got {JumpOnFirstAttemptTask.attempts.get(c_key, 0)}"
+        )
 
     def test_diamond_jump_from_join_point(
         self, file_repository: WorkflowStore, file_queue: Queue, backend: str

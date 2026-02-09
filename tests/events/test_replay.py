@@ -9,24 +9,23 @@ from stabilize.events.base import (
     EventType,
 )
 from stabilize.events.replay import EventReplayer, WorkflowState
-from stabilize.events.store import InMemoryEventStore
+from stabilize.events.store import SqliteEventStore
 
 
 class TestEventReplayer:
     """Tests for EventReplayer."""
 
     @pytest.fixture
-    def store(self) -> InMemoryEventStore:
-        """Create a fresh in-memory store."""
-        return InMemoryEventStore()
+    def store(self) -> SqliteEventStore:
+        return SqliteEventStore("sqlite:///:memory:", create_tables=True)
 
     @pytest.fixture
-    def replayer(self, store: InMemoryEventStore) -> EventReplayer:
+    def replayer(self, store: SqliteEventStore) -> EventReplayer:
         """Create an event replayer."""
         return EventReplayer(store)
 
     @pytest.fixture
-    def workflow_events(self, store: InMemoryEventStore) -> list[Event]:
+    def workflow_events(self, store: SqliteEventStore) -> list[Event]:
         """Create and store a sequence of workflow events."""
         metadata = EventMetadata(correlation_id="workflow-123")
         events = [
@@ -156,7 +155,7 @@ class TestEventReplayer:
     def test_rebuild_as_of_sequence(
         self,
         replayer: EventReplayer,
-        store: InMemoryEventStore,
+        store: SqliteEventStore,
     ) -> None:
         """Test rebuilding state as of a specific sequence."""
         metadata = EventMetadata(correlation_id="workflow-456")

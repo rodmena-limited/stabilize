@@ -30,24 +30,16 @@ from stabilize.persistence.postgres.operations import (
 from stabilize.persistence.postgres.operations import (
     cleanup_old_processed_messages as _cleanup_old_processed_messages,
 )
-from stabilize.persistence.postgres.operations import (
-    is_message_processed as _is_message_processed,
-)
+from stabilize.persistence.postgres.operations import is_message_processed as _is_message_processed
 from stabilize.persistence.postgres.operations import (
     mark_message_processed as _mark_message_processed,
 )
-from stabilize.persistence.postgres.queries import (
-    get_downstream_stages as _get_downstream_stages,
-)
+from stabilize.persistence.postgres.queries import get_downstream_stages as _get_downstream_stages
 from stabilize.persistence.postgres.queries import (
     get_merged_ancestor_outputs as _get_merged_ancestor_outputs,
 )
-from stabilize.persistence.postgres.queries import (
-    get_synthetic_stages as _get_synthetic_stages,
-)
-from stabilize.persistence.postgres.queries import (
-    get_upstream_stages as _get_upstream_stages,
-)
+from stabilize.persistence.postgres.queries import get_synthetic_stages as _get_synthetic_stages
+from stabilize.persistence.postgres.queries import get_upstream_stages as _get_upstream_stages
 from stabilize.persistence.postgres.queries import (
     load_tasks_for_stages,
 )

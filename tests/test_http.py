@@ -191,6 +191,11 @@ def http_server():
     server.shutdown()
 
 
+@pytest.fixture(autouse=True)
+def _allow_private_urls(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("stabilize.tasks.http.task._validate_url_safety", lambda url: None)
+
+
 @pytest.fixture
 def task() -> HTTPTask:
     """Create HTTPTask instance."""

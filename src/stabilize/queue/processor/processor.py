@@ -103,6 +103,8 @@ class QueueProcessor(QueueProcessorMixin):
         self._lock = threading.Lock()
         self._processing_lock = threading.Lock()  # Lock for process_all
         self._active_count = 0
+        self._in_flight: set[str] = set()
+        self._in_flight_lock = threading.Lock()
         self._last_dlq_check = 0.0
 
         # Auto-register default handlers when both store and task_registry are provided
@@ -201,6 +203,15 @@ class QueueProcessor(QueueProcessorMixin):
         if self._executor:
             self._executor.shutdown(wait=wait)
 
+        if not wait:
+            with self._in_flight_lock:
+                count = len(self._in_flight)
+            if count > 0:
+                logger.warning(
+                    "Forced shutdown with %d messages in-flight; will be redelivered after queue lock timeout",
+                    count,
+                )
+
         logger.info("Queue processor stopped")
 
     def request_stop(self) -> None:
@@ -282,6 +293,10 @@ class QueueProcessor(QueueProcessorMixin):
         """
 
         def process_and_ack() -> None:
+            msg_id = getattr(message, "message_id", None)
+            if msg_id:
+                with self._in_flight_lock:
+                    self._in_flight.add(msg_id)
             try:
                 self._handle_message(message)
                 self.queue.ack(message)
@@ -298,6 +313,9 @@ class QueueProcessor(QueueProcessorMixin):
                 # Message will be reprocessed after lock expires or reschedule
                 self.queue.reschedule(message, self.config.retry_delay)
             finally:
+                if msg_id:
+                    with self._in_flight_lock:
+                        self._in_flight.discard(msg_id)
                 with self._lock:
                     self._active_count -= 1
 

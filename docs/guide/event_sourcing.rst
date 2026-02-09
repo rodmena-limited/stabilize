@@ -187,14 +187,7 @@ Event Stores
 
 Three event store backends are available:
 
-**In-memory** (testing):
-
-.. code-block:: python
-
-   from stabilize.events import InMemoryEventStore
-   store = InMemoryEventStore()
-
-**SQLite** (development and single-node production):
+**SQLite** (development, testing, and single-node production):
 
 .. code-block:: python
 

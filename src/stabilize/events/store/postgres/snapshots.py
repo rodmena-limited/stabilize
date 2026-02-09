@@ -4,6 +4,7 @@ Snapshot operations for PostgreSQL event store.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import TYPE_CHECKING, Any
 
@@ -31,16 +32,19 @@ class PostgresSnapshotsMixin:
         """Save a snapshot of entity state."""
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
+                state_json = json.dumps(state)
+                state_hash = hashlib.sha256(json.dumps(state, sort_keys=True, default=str).encode()).hexdigest()
                 cur.execute(
                     """
                     INSERT INTO snapshots
-                    (entity_type, entity_id, workflow_id, version, sequence, state)
+                    (entity_type, entity_id, workflow_id, version, sequence, state, state_hash)
                     VALUES (%(entity_type)s, %(entity_id)s, %(workflow_id)s,
-                            %(version)s, %(sequence)s, %(state)s)
+                            %(version)s, %(sequence)s, %(state)s, %(state_hash)s)
                     ON CONFLICT (entity_type, entity_id, version)
                     DO UPDATE SET
                         sequence = EXCLUDED.sequence,
                         state = EXCLUDED.state,
+                        state_hash = EXCLUDED.state_hash,
                         created_at = NOW()
                     """,
                     {
@@ -49,7 +53,8 @@ class PostgresSnapshotsMixin:
                         "workflow_id": workflow_id,
                         "version": version,
                         "sequence": sequence,
-                        "state": json.dumps(state),
+                        "state": state_json,
+                        "state_hash": state_hash,
                     },
                 )
             conn.commit()
@@ -86,6 +91,7 @@ class PostgresSnapshotsMixin:
                         "version": row[4],
                         "sequence": row[5],
                         "state": row[6],
+                        "state_hash": row[7] if len(row) > 7 else None,
                     }
 
                 state = data["state"]
@@ -95,7 +101,7 @@ class PostgresSnapshotsMixin:
                     except (json.JSONDecodeError, TypeError):
                         state = {}
 
-                return {
+                result = {
                     "entity_type": data["entity_type"],
                     "entity_id": data["entity_id"],
                     "workflow_id": data["workflow_id"],
@@ -103,3 +109,7 @@ class PostgresSnapshotsMixin:
                     "sequence": data["sequence"],
                     "state": state,
                 }
+                state_hash = data.get("state_hash")
+                if state_hash is not None:
+                    result["state_hash"] = state_hash
+                return result

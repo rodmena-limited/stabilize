@@ -11,9 +11,11 @@ This module provides a production-ready PythonTask with:
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -22,6 +24,8 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.tasks.interface import Task
 from stabilize.tasks.result import TaskResult
+
+_VALID_IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_.]*$")
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -99,12 +103,9 @@ class PythonTask(Task):
     SCRIPT_WRAPPER = """\
 import json
 import sys
+import base64
 
-# Input data from upstream stages and explicit inputs
-try:
-    INPUT = json.loads('''{inputs_json}''')
-except json.JSONDecodeError:
-    INPUT = {{}}
+INPUT = json.loads(base64.b64decode('{inputs_json_b64}').decode())
 
 # User script
 {script}
@@ -120,14 +121,10 @@ if 'RESULT' in dir():
     MODULE_WRAPPER = """\
 import json
 import sys
+import base64
 
-# Input data
-try:
-    INPUT = json.loads('''{inputs_json}''')
-except json.JSONDecodeError:
-    INPUT = {{}}
+INPUT = json.loads(base64.b64decode('{inputs_json_b64}').decode())
 
-# Import and call function
 from {module} import {function}
 RESULT = {function}(INPUT)
 
@@ -238,10 +235,18 @@ print("__PYTHONTASK_RESULT_END__")
                 env=env,
             )
 
-            # Parse output
+            max_output_size = stage.context.get("max_output_size", 10 * 1024 * 1024)
             stdout = result.stdout
             stderr = result.stderr
             exit_code = result.returncode
+            truncated = False
+
+            if len(stdout) > max_output_size:
+                stdout = stdout[:max_output_size]
+                truncated = True
+            if len(stderr) > max_output_size:
+                stderr = stderr[:max_output_size]
+                truncated = True
 
             # Extract RESULT if present
             script_result = self._extract_result(stdout)
@@ -253,6 +258,7 @@ print("__PYTHONTASK_RESULT_END__")
                 "stdout": clean_stdout,
                 "stderr": stderr,
                 "exit_code": exit_code,
+                "truncated": truncated,
             }
 
             if script_result is not None:
@@ -298,21 +304,22 @@ print("__PYTHONTASK_RESULT_END__")
         inputs: dict[str, Any],
     ) -> str:
         """Generate the wrapped script to execute."""
-        # Double-escape backslashes so they survive embedding in triple-quoted strings.
-        # Without this, "\n" in JSON becomes an actual newline in the Python code,
-        # causing json.loads to fail with JSONDecodeError.
-        inputs_json = json.dumps(inputs).replace("\\", "\\\\")
+        inputs_json_b64 = base64.b64encode(json.dumps(inputs).encode()).decode()
 
         if module and function:
-            # Module + function mode
+            if not _VALID_IDENTIFIER_RE.match(module):
+                raise ValueError(f"Invalid module name: {module!r}")
+            if not _VALID_IDENTIFIER_RE.match(function):
+                raise ValueError(f"Invalid function name: {function!r}")
             return self.MODULE_WRAPPER.format(
-                inputs_json=inputs_json,
+                inputs_json_b64=inputs_json_b64,
                 module=module,
                 function=function,
             )
 
-        # Script mode (inline or file)
         if script_file:
+            if ".." in script_file:
+                raise ValueError(f"Path traversal blocked in script_file: {script_file!r}")
             script_path = Path(script_file)
             if not script_path.exists():
                 raise FileNotFoundError(f"Script file not found: {script_file}")
@@ -320,7 +327,7 @@ print("__PYTHONTASK_RESULT_END__")
 
         assert script is not None
         return self.SCRIPT_WRAPPER.format(
-            inputs_json=inputs_json,
+            inputs_json_b64=inputs_json_b64,
             script=script,
         )
 

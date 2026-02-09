@@ -85,7 +85,6 @@ from stabilize.events.store import (
     AppendResult,
     EventQuery,
     EventStore,
-    InMemoryEventStore,
     SqliteEventStore,
 )
 
@@ -120,7 +119,6 @@ __all__ = [
     "EventStore",
     "EventQuery",
     "AppendResult",
-    "InMemoryEventStore",
     "SqliteEventStore",
     # Projections
     "Projection",

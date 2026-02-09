@@ -2,8 +2,33 @@
 
 from __future__ import annotations
 
+import errno
+import http.client
+import socket
+import urllib.error
+
 from stabilize.errors.permanent import PermanentError
 from stabilize.errors.transient import TransientError
+
+_TRANSIENT_STDLIB_TYPES = (
+    ConnectionError,
+    TimeoutError,
+    socket.timeout,
+    socket.gaierror,
+    http.client.RemoteDisconnected,
+    urllib.error.URLError,
+)
+
+_TRANSIENT_ERRNO_VALUES = frozenset(
+    {
+        errno.ECONNREFUSED,
+        errno.ECONNRESET,
+        errno.ECONNABORTED,
+        errno.ETIMEDOUT,
+        errno.EHOSTUNREACH,
+        errno.ENETUNREACH,
+    }
+)
 
 
 def is_transient(error: Exception) -> bool:
@@ -12,6 +37,11 @@ def is_transient(error: Exception) -> bool:
     Checks the error itself and its cause chain (__cause__) for transient errors.
     This handles cases where libraries wrap errors (e.g., BulkheadError wrapping
     a TransientError).
+
+    IMPORTANT: Permanent classification takes precedence over transient when both
+    match via class-name heuristics.  For example, ``ConnectionValidationError``
+    contains both "connection" (transient pattern) and "validation" (permanent
+    pattern).  Without the guard, such an error would be silently retried forever.
 
     Args:
         error: The exception to check
@@ -22,8 +52,32 @@ def is_transient(error: Exception) -> bool:
     if isinstance(error, TransientError):
         return True
 
-    # Check for common transient errors from other libraries
+    # Permanent type-check takes strict precedence over transient heuristics
+    if isinstance(error, PermanentError):
+        return False
+
+    if isinstance(error, _TRANSIENT_STDLIB_TYPES):
+        return True
+
+    if isinstance(error, OSError) and error.errno in _TRANSIENT_ERRNO_VALUES:
+        return True
+
     error_name = type(error).__name__.lower()
+
+    # Check permanent patterns FIRST — if the class name matches a permanent
+    # pattern, it must NOT be classified as transient regardless of whether a
+    # transient pattern also matches.
+    _PERMANENT_NAME_PATTERNS = (
+        "validation",
+        "authentication",
+        "authorization",
+        "forbidden",
+        "notfound",
+        "invalid",
+    )
+    if any(pattern in error_name for pattern in _PERMANENT_NAME_PATTERNS):
+        return False
+
     transient_patterns = [
         "timeout",
         "connection",
@@ -59,18 +113,40 @@ def is_permanent(error: Exception) -> bool:
     if isinstance(error, PermanentError):
         return True
 
-    # Check for common permanent errors
+    # Explicit TransientError must never be classified as permanent
+    if isinstance(error, TransientError):
+        return False
+
+    if isinstance(error, (ValueError, TypeError, AttributeError, KeyError, IndexError)):
+        return True
+
     error_name = type(error).__name__.lower()
-    permanent_patterns = [
+
+    # Permanent patterns checked FIRST — mirrors is_transient() where permanent
+    # also wins.  Ambiguous names like ConnectionValidationError must be
+    # classified as permanent (same precedence in both functions).
+    permanent_patterns = (
         "validation",
         "authentication",
         "authorization",
         "forbidden",
         "notfound",
         "invalid",
-    ]
+    )
     if any(pattern in error_name for pattern in permanent_patterns):
         return True
+
+    _TRANSIENT_NAME_PATTERNS = (
+        "timeout",
+        "connection",
+        "temporary",
+        "unavailable",
+        "retry",
+        "throttl",
+        "ratelimit",
+    )
+    if any(pattern in error_name for pattern in _TRANSIENT_NAME_PATTERNS):
+        return False
 
     # Check the cause chain for wrapped permanent errors
     cause = getattr(error, "__cause__", None)

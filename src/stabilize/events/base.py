@@ -8,6 +8,7 @@ workflow state at any point in time.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
@@ -24,6 +25,9 @@ def _generate_event_id() -> str:
 def _utc_now() -> datetime:
     """Get current UTC datetime."""
     return datetime.now(UTC)
+
+
+CURRENT_SCHEMA_VERSION = 1
 
 
 class EventType(Enum):
@@ -144,6 +148,7 @@ class Event:
     version: int = 0
     data: dict[str, Any] = field(default_factory=dict)
     metadata: EventMetadata = field(default_factory=lambda: EventMetadata(correlation_id=""))
+    schema_version: int = CURRENT_SCHEMA_VERSION
 
     def with_sequence(self, sequence: int) -> Event:
         """Return a new event with the given sequence number."""
@@ -158,6 +163,7 @@ class Event:
             version=self.version,
             data=self.data,
             metadata=self.metadata,
+            schema_version=self.schema_version,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -173,6 +179,7 @@ class Event:
             "version": self.version,
             "data": self.data,
             "metadata": self.metadata.to_dict(),
+            "schema_version": self.schema_version,
         }
 
     @classmethod
@@ -198,6 +205,7 @@ class Event:
             version=data.get("version", 0),
             data=data.get("data", {}),
             metadata=EventMetadata.from_dict(data.get("metadata", {})),
+            schema_version=data.get("schema_version", 1),
         )
 
     def __repr__(self) -> str:
@@ -269,3 +277,88 @@ def create_task_event(
         data=data,
         metadata=metadata,
     )
+
+
+class EventMigrator:
+    """Migrates events between schema versions.
+
+    Provides a registry of migration functions that transform event data
+    from one schema version to another. Used during event replay when
+    events from older schema versions are encountered.
+
+    Example:
+        migrator = EventMigrator()
+
+        @migrator.register(from_version=1, to_version=2)
+        def migrate_v1_to_v2(event: Event) -> Event:
+            data = dict(event.data)
+            data["new_field"] = data.pop("old_field", None)
+            return Event(
+                event_id=event.event_id,
+                event_type=event.event_type,
+                timestamp=event.timestamp,
+                sequence=event.sequence,
+                entity_type=event.entity_type,
+                entity_id=event.entity_id,
+                workflow_id=event.workflow_id,
+                version=event.version,
+                data=data,
+                metadata=event.metadata,
+                schema_version=2,
+            )
+
+        migrated = migrator.migrate(old_event, target_version=2)
+    """
+
+    def __init__(self) -> None:
+        self._migrations: dict[tuple[int, int], Callable[[Event], Event]] = {}
+
+    def register(self, from_version: int, to_version: int) -> Callable:
+        """Register a migration function.
+
+        Args:
+            from_version: Source schema version
+            to_version: Target schema version
+
+        Returns:
+            Decorator for the migration function
+        """
+
+        def decorator(func: Callable[[Event], Event]) -> Callable[[Event], Event]:
+            self._migrations[(from_version, to_version)] = func
+            return func
+
+        return decorator
+
+    def migrate(self, event: Event, target_version: int | None = None) -> Event:
+        """Migrate an event to the target schema version.
+
+        Args:
+            event: The event to migrate
+            target_version: Target version (default: CURRENT_SCHEMA_VERSION)
+
+        Returns:
+            The migrated event (or original if already at target version)
+        """
+        if target_version is None:
+            target_version = CURRENT_SCHEMA_VERSION
+
+        current = event.schema_version
+        if current == target_version:
+            return event
+
+        # Walk the migration chain
+        while current < target_version:
+            next_version = current + 1
+            migration = self._migrations.get((current, next_version))
+            if migration is None:
+                raise ValueError(f"No migration registered from schema v{current} to v{next_version}")
+            event = migration(event)
+            current = next_version
+
+        return event
+
+    @property
+    def registered_migrations(self) -> list[tuple[int, int]]:
+        """List all registered migration paths."""
+        return sorted(self._migrations.keys())

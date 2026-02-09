@@ -313,13 +313,14 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         Returns:
             True if a pending message exists for this task
         """
+        escaped_id = task_id.replace("%", r"\%").replace("_", r"\_")
         conn = self._get_connection()
         result = conn.execute(
             f"""
             SELECT 1 FROM {self.table_name}
-            WHERE payload LIKE :pattern
+            WHERE payload LIKE :pattern ESCAPE '\\'
             LIMIT 1
             """,
-            {"pattern": f'%"task_id": "{task_id}"%'},
+            {"pattern": f'%"task_id": "{escaped_id}"%'},
         )
         return result.fetchone() is not None

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from stabilize.expressions import ExpressionError, evaluate_expression
 from stabilize.models.status import WorkflowStatus
 
 if TYPE_CHECKING:
@@ -39,14 +40,30 @@ class StartStageConditionsMixin:
         if stage_enabled is None:
             return False
 
+        if isinstance(stage_enabled, bool):
+            return not stage_enabled
+
         if isinstance(stage_enabled, dict):
             expr_type = stage_enabled.get("type")
             if expr_type == "expression":
-                # TODO: Evaluate expression
                 expression = stage_enabled.get("expression", "true")
-                # For now, just check if it's explicitly "false"
                 if isinstance(expression, str):
-                    return expression.lower() == "false"
+                    try:
+                        # Build evaluation context from stage context and upstream outputs
+                        eval_context = dict(stage.context)
+                        if hasattr(stage, "execution") and stage.execution:
+                            for s in stage.execution.stages:
+                                if s.ref_id != stage.ref_id and s.outputs:
+                                    eval_context[s.ref_id] = s.outputs
+                        result = evaluate_expression(expression, eval_context)
+                        return not bool(result)
+                    except ExpressionError:
+                        logger.warning(
+                            "Failed to evaluate stageEnabled expression '%s' for stage %s, not skipping",
+                            expression,
+                            stage.name,
+                        )
+                        return False
 
         return False
 

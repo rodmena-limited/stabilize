@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import math
 import threading
+import time
 
 
 class BloomDeduplicator:
@@ -96,6 +97,8 @@ class BloomDeduplicator:
         # Each byte holds 8 bits, so we need ceil(size / 8) bytes
         self._bit_array = bytearray((self._size + 7) // 8)
         self._items_added = 0
+        self._creation_time = time.monotonic()
+        self._max_age_seconds = 86400.0  # 24 hours default
         self._lock = threading.Lock()
 
     @staticmethod
@@ -208,6 +211,7 @@ class BloomDeduplicator:
         with self._lock:
             self._bit_array = bytearray((self._size + 7) // 8)
             self._items_added = 0
+            self._creation_time = time.monotonic()
 
     @property
     def fill_ratio(self) -> float:
@@ -227,6 +231,11 @@ class BloomDeduplicator:
         """Number of items added to the filter."""
         with self._lock:
             return self._items_added
+
+    @property
+    def age_seconds(self) -> float:
+        """Age of the filter in seconds since creation or last reset."""
+        return time.monotonic() - self._creation_time
 
     @property
     def expected_items(self) -> int:
@@ -256,14 +265,17 @@ class BloomDeduplicator:
             return (1 - math.exp(exponent)) ** self._num_hashes
 
     def should_reset(self, threshold: float = 0.7) -> bool:
-        """Check if filter should be reset based on fill ratio.
+        """Check if filter should be reset based on fill ratio or age.
 
         Args:
             threshold: Fill ratio threshold (default: 0.7)
 
         Returns:
-            True if fill ratio exceeds threshold.
+            True if fill ratio exceeds threshold or filter is older than max_age.
         """
+        age = time.monotonic() - self._creation_time
+        if age > self._max_age_seconds:
+            return True
         return self.fill_ratio > threshold
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import uuid
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -163,7 +164,7 @@ class SqliteDLQMixin:
             )
             """,
             {
-                "message_id": row["message_id"] + "-replay",
+                "message_id": str(uuid.uuid4()),
                 "message_type": row["message_type"],
                 "payload": row["payload"],
             },

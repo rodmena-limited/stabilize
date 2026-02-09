@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import TYPE_CHECKING, Any
 
 from stabilize.tasks.http.constants import CHUNK_SIZE, DEFAULT_MAX_RESPONSE_SIZE
@@ -68,9 +69,11 @@ def process_response(
 
     try:
         if download_to:
-            # Stream to file
+            if ".." in download_to:
+                raise ValueError(f"Path traversal blocked in download_to: {download_to}")
+            resolved = os.path.realpath(download_to)
             bytes_written = 0
-            with open(download_to, "wb") as f:
+            with open(resolved, "wb") as f:
                 while chunk := response_obj.read(CHUNK_SIZE):
                     bytes_written += len(chunk)
                     if bytes_written > max_size:
@@ -79,22 +82,19 @@ def process_response(
             body = download_to
             content_length = bytes_written
         else:
-            # Read body
             body_bytes = response_obj.read(max_size + 1)
             if len(body_bytes) > max_size:
                 raise ValueError(f"Response exceeds max size ({max_size} bytes)")
 
-            # Decode body
             charset = get_charset(content_type)
             body = body_bytes.decode(charset, errors="replace")
             content_length = len(body_bytes)
 
-            # Parse JSON if requested
             if parse_json:
                 try:
                     body_json = json.loads(body)
                 except json.JSONDecodeError:
-                    pass  # Leave body_json as None
+                    pass
 
     except ValueError as e:
         if continue_on_failure:

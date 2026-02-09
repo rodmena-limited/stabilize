@@ -118,7 +118,13 @@ def build_multipart(context: dict[str, Any]) -> tuple[bytes, str]:
     field_name = context.get("upload_field", "file")
     filename = context.get("upload_filename") or os.path.basename(upload_file)
 
-    with open(upload_file, "rb") as f:
+    if ".." in upload_file:
+        raise ValueError(f"Path traversal blocked in upload_file: {upload_file}")
+    resolved = os.path.realpath(upload_file)
+    if not os.path.isfile(resolved):
+        raise FileNotFoundError(f"Upload file not found: {upload_file}")
+
+    with open(resolved, "rb") as f:
         file_content = f.read()
 
     # Detect content type

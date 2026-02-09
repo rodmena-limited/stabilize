@@ -239,10 +239,10 @@ class TestShellTaskExpectedCodes:
 
 
 class TestShellTaskSecrets:
-    """Secret masking tests (logs only, not outputs)."""
+    """Secret masking tests (logs AND outputs)."""
 
     def test_secret_in_command(self, shell_task: ShellTask, mock_stage: MagicMock) -> None:
-        """Test that secrets work (masking is for logs, output still works)."""
+        """Test that secrets are masked in both logs and outputs."""
         mock_stage.context = {
             "command": "echo {token}",
             "token": "secret123",
@@ -251,8 +251,7 @@ class TestShellTaskSecrets:
         result = shell_task.execute(mock_stage)
 
         assert result.status == WorkflowStatus.SUCCEEDED
-        # Output should still contain the actual value (masking is for logs)
-        assert result.outputs["stdout"] == "secret123"
+        assert result.outputs["stdout"] == "***"
 
 
 class TestShellTaskBinary:

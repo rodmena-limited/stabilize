@@ -7,7 +7,7 @@ import pytest
 from stabilize.events import (
     EventQuery,
     EventType,
-    InMemoryEventStore,
+    SqliteEventStore,
     configure_event_sourcing,
     reset_event_bus,
     reset_event_recorder,
@@ -36,14 +36,12 @@ def reset_events() -> Generator[None, None, None]:
 
 
 @pytest.fixture
-def event_store() -> InMemoryEventStore:
-    """Create an in-memory event store for testing."""
-    return InMemoryEventStore()
+def event_store() -> SqliteEventStore:
+    return SqliteEventStore("sqlite:///:memory:", create_tables=True)
 
 
 @pytest.fixture
-def configured_events(event_store: InMemoryEventStore) -> InMemoryEventStore:
-    """Configure event sourcing and return the event store."""
+def configured_events(event_store: SqliteEventStore) -> SqliteEventStore:
     configure_event_sourcing(event_store)
     return event_store
 
@@ -176,7 +174,7 @@ class TestHandlerEventRecording:
         self,
         repository: WorkflowStore,
         queue: Queue,
-        configured_events: InMemoryEventStore,
+        configured_events: SqliteEventStore,
     ) -> None:
         """A successful single-stage workflow records the full lifecycle."""
         processor, runner, _ = setup_stabilize(repository, queue)
@@ -214,7 +212,7 @@ class TestHandlerEventRecording:
         self,
         repository: WorkflowStore,
         queue: Queue,
-        configured_events: InMemoryEventStore,
+        configured_events: SqliteEventStore,
     ) -> None:
         """A failing task records failure events."""
         processor, runner, _ = setup_stabilize(repository, queue)
@@ -243,7 +241,7 @@ class TestHandlerEventRecording:
         self,
         repository: WorkflowStore,
         queue: Queue,
-        configured_events: InMemoryEventStore,
+        configured_events: SqliteEventStore,
     ) -> None:
         """A diamond DAG records events for all stages with correct workflow correlation."""
         processor, runner, _ = setup_stabilize(repository, queue)
@@ -275,7 +273,7 @@ class TestHandlerEventRecording:
         self,
         repository: WorkflowStore,
         queue: Queue,
-        configured_events: InMemoryEventStore,
+        configured_events: SqliteEventStore,
     ) -> None:
         """All events for a workflow share the same correlation_id."""
         processor, runner, _ = setup_stabilize(repository, queue)
@@ -300,7 +298,7 @@ class TestHandlerEventRecording:
         self,
         repository: WorkflowStore,
         queue: Queue,
-        configured_events: InMemoryEventStore,
+        configured_events: SqliteEventStore,
     ) -> None:
         """Events are queryable in the store after workflow execution."""
         processor, runner, _ = setup_stabilize(repository, queue)
@@ -334,7 +332,7 @@ class TestHandlerEventRecording:
         self,
         repository: WorkflowStore,
         queue: Queue,
-        event_store: InMemoryEventStore,
+        event_store: SqliteEventStore,
     ) -> None:
         """Without configure_event_sourcing(), no events are recorded."""
         # Note: we use event_store (not configured_events) — no configuration call

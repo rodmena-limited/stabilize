@@ -344,9 +344,9 @@ replayed_stages = state.get("stages", {})
 replayed_by_ref = {v.get("ref_id"): v for v in replayed_stages.values()}
 for s in http_stages:
     assert s.ref_id in replayed_by_ref, f"Missing {s.ref_id} in replay"
-    assert (
-        replayed_by_ref[s.ref_id].get("status") == "SUCCEEDED"
-    ), f"Replay {s.ref_id}: {replayed_by_ref[s.ref_id].get('status')}"
+    assert replayed_by_ref[s.ref_id].get("status") == "SUCCEEDED", (
+        f"Replay {s.ref_id}: {replayed_by_ref[s.ref_id].get('status')}"
+    )
 print(f"  All {NUM_TASKS} HTTP stages verified via event replay ✓")
 
 # ──────────────────────────────────────────────────

@@ -51,14 +51,32 @@ class EventRecorderBase:
         """
         Record an event to store and optionally publish to bus.
 
+        Note: Event recording is best-effort when called outside a DB transaction.
+        If the process crashes between a workflow state update and event recording,
+        the event log may be missing the most recent event. Replay-based state
+        reconstruction should treat event logs as eventually consistent with the
+        authoritative workflow state in the persistence store.
+
         Args:
             event: Event to record.
-            connection: Optional DB connection for transaction.
+            connection: Optional DB connection for transaction. When provided,
+                the event append participates in the caller's transaction,
+                ensuring atomicity with workflow state changes.
 
         Returns:
             Event with sequence assigned.
         """
-        recorded = self._event_store.append(event, connection=connection)
+        try:
+            recorded = self._event_store.append(event, connection=connection)
+        except Exception as e:
+            logger.error(
+                "Failed to persist event %s for %s/%s: %s",
+                event.event_type.value if event.event_type else "unknown",
+                event.entity_type.value if event.entity_type else "unknown",
+                event.entity_id,
+                e,
+            )
+            raise
 
         if self._publish_to_bus:
             try:

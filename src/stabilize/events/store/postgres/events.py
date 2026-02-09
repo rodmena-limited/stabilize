@@ -41,11 +41,12 @@ class PostgresEventsMixin:
                     INSERT INTO events (
                         event_id, event_type, timestamp, entity_type, entity_id,
                         workflow_id, version, data, correlation_id, causation_id,
-                        actor, source_handler
+                        actor, source_handler, schema_version
                     ) VALUES (
                         %(event_id)s, %(event_type)s, %(timestamp)s, %(entity_type)s,
                         %(entity_id)s, %(workflow_id)s, %(version)s, %(data)s,
-                        %(correlation_id)s, %(causation_id)s, %(actor)s, %(source_handler)s
+                        %(correlation_id)s, %(causation_id)s, %(actor)s, %(source_handler)s,
+                        %(schema_version)s
                     )
                     RETURNING sequence
                     """,
@@ -62,6 +63,7 @@ class PostgresEventsMixin:
                         "causation_id": event.metadata.causation_id,
                         "actor": event.metadata.actor,
                         "source_handler": event.metadata.source_handler,
+                        "schema_version": event.schema_version,
                     },
                 )
 
@@ -285,6 +287,7 @@ class PostgresEventsMixin:
                 "causation_id": row[10],
                 "actor": row[11],
                 "source_handler": row[12],
+                "schema_version": row[13] if len(row) > 13 else 1,
             }
 
         # Parse timestamp
@@ -322,4 +325,5 @@ class PostgresEventsMixin:
                 actor=data["actor"] or "system",
                 source_handler=data["source_handler"],
             ),
+            schema_version=data.get("schema_version", 1),
         )

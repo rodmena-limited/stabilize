@@ -6,6 +6,7 @@ Provides the SqliteSnapshotsMixin with snapshot save/retrieve methods.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from typing import TYPE_CHECKING, Any
@@ -35,11 +36,13 @@ class SqliteSnapshotsMixin:
         """Save a snapshot of entity state."""
         conn = self._get_connection()
 
+        state_json = json.dumps(state)
+        state_hash = hashlib.sha256(json.dumps(state, sort_keys=True, default=str).encode()).hexdigest()
         conn.execute(
             """
             INSERT OR REPLACE INTO snapshots
-            (entity_type, entity_id, workflow_id, version, sequence, state)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (entity_type, entity_id, workflow_id, version, sequence, state, state_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 entity_type.value,
@@ -47,7 +50,8 @@ class SqliteSnapshotsMixin:
                 workflow_id,
                 version,
                 sequence,
-                json.dumps(state),
+                state_json,
+                state_hash,
             ),
         )
         conn.commit()
@@ -79,7 +83,7 @@ class SqliteSnapshotsMixin:
         except (json.JSONDecodeError, TypeError):
             state = {}
 
-        return {
+        result = {
             "entity_type": row["entity_type"],
             "entity_id": row["entity_id"],
             "workflow_id": row["workflow_id"],
@@ -87,3 +91,7 @@ class SqliteSnapshotsMixin:
             "sequence": row["sequence"],
             "state": state,
         }
+        state_hash = row["state_hash"] if "state_hash" in row.keys() else None
+        if state_hash is not None:
+            result["state_hash"] = state_hash
+        return result

@@ -48,8 +48,8 @@ class SqliteEventStoreMixin:
                     INSERT INTO events (
                         event_id, event_type, timestamp, entity_type, entity_id,
                         workflow_id, version, data, correlation_id, causation_id,
-                        actor, source_handler
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        actor, source_handler, schema_version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         event.event_id,
@@ -64,6 +64,7 @@ class SqliteEventStoreMixin:
                         event.metadata.causation_id,
                         event.metadata.actor,
                         event.metadata.source_handler,
+                        event.schema_version,
                     ),
                 )
 
@@ -273,6 +274,12 @@ class SqliteEventStoreMixin:
         except (json.JSONDecodeError, TypeError):
             data = {}
 
+        schema_ver = 1
+        try:
+            schema_ver = row["schema_version"] or 1
+        except (IndexError, KeyError):
+            pass
+
         return Event(
             event_id=row["event_id"],
             event_type=EventType(row["event_type"]),
@@ -289,4 +296,5 @@ class SqliteEventStoreMixin:
                 actor=row["actor"] or "system",
                 source_handler=row["source_handler"],
             ),
+            schema_version=schema_ver,
         )

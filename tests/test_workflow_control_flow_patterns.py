@@ -1314,9 +1314,9 @@ class TestPersistentTrigger:
         # The handler should have completed: the persistent signal was either
         # delivered directly (if stage was SUSPENDED when signal arrived) or
         # buffered then auto-consumed when the task returned SUSPENDED.
-        assert (
-            handler.status == WorkflowStatus.SUCCEEDED
-        ), f"Expected handler to complete via persistent signal, got {handler.status}"
+        assert handler.status == WorkflowStatus.SUCCEEDED, (
+            f"Expected handler to complete via persistent signal, got {handler.status}"
+        )
 
 
 # =============================================================================

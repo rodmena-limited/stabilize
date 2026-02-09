@@ -15,9 +15,9 @@ from stabilize import (
     WorkflowStatus,
 )
 from stabilize.errors import ConcurrencyError
-from stabilize.persistence.memory import InMemoryWorkflowStore
-from stabilize.queue import InMemoryQueue
+from stabilize.persistence.sqlite import SqliteWorkflowStore
 from stabilize.queue.messages import StartStage
+from stabilize.queue.sqlite import SqliteQueue
 
 
 class TestStartStageConcurrencyHandling:
@@ -30,12 +30,10 @@ class TestStartStageConcurrencyHandling:
         arrive for the same stage (due to multiple upstream stages completing),
         and one handler wins while others fail with ConcurrencyError.
         """
-        queue = InMemoryQueue()
-        repository = InMemoryWorkflowStore()
+        queue = SqliteQueue("sqlite:///:memory:")
+        queue._create_table()
+        repository = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
 
-        # Create a diamond pipeline: A -> [B, C] -> D
-        # Stage D has two upstream stages, so when both B and C complete,
-        # two StartStage messages for D may be processed concurrently
         execution = Workflow.create(
             application="test",
             name="Diamond Pipeline",
@@ -120,8 +118,7 @@ class TestStartStageConcurrencyHandling:
 
         # Mock the transaction to raise ConcurrencyError (simulating another
         # handler already updated the stage)
-        def mock_transaction_raises_concurrency_error(queue: InMemoryQueue) -> MagicMock:
-            """Create a mock transaction that raises ConcurrencyError on store_stage."""
+        def mock_transaction_raises_concurrency_error(queue: SqliteQueue) -> MagicMock:
             mock_txn = MagicMock()
             mock_txn.__enter__ = MagicMock(return_value=mock_txn)
             mock_txn.__exit__ = MagicMock(return_value=False)
@@ -144,8 +141,9 @@ class TestStartStageConcurrencyHandling:
         This is the fast-path check before the transaction, which catches
         most duplicate messages.
         """
-        queue = InMemoryQueue()
-        repository = InMemoryWorkflowStore()
+        queue = SqliteQueue("sqlite:///:memory:")
+        queue._create_table()
+        repository = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
 
         execution = Workflow.create(
             application="test",
@@ -206,8 +204,9 @@ class TestStartStageConcurrencyHandling:
             def execute(self, stage: StageExecution) -> TaskResult:
                 return TaskResult.success(outputs={"done": True})
 
-        queue = InMemoryQueue()
-        repository = InMemoryWorkflowStore()
+        queue = SqliteQueue("sqlite:///:memory:")
+        queue._create_table()
+        repository = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
         task_registry = TaskRegistry()
         task_registry.register("success", SuccessTask)
 

@@ -28,9 +28,7 @@ from stabilize.queue import Queue
 
 # Optional PostgreSQL dependencies - only required for postgres tests
 try:
-    from testcontainers.postgres import (
-        PostgresContainer,  # type: ignore[import-untyped]
-    )
+    from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
 
     HAS_TESTCONTAINERS = True
 except ImportError:

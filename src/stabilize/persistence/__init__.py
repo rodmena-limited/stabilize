@@ -5,7 +5,6 @@ from stabilize.persistence.factory import (
     create_repository,
     detect_backend,
 )
-from stabilize.persistence.memory import InMemoryWorkflowStore
 from stabilize.persistence.postgres import PostgresWorkflowStore
 from stabilize.persistence.sqlite import SqliteWorkflowStore
 from stabilize.persistence.store import (
@@ -20,7 +19,6 @@ __all__ = [
     # Implementations
     "PostgresWorkflowStore",
     "SqliteWorkflowStore",
-    "InMemoryWorkflowStore",
     # Factory functions
     "create_repository",
     "create_queue",

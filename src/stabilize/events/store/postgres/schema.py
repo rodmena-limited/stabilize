@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS events (
     correlation_id VARCHAR(36) NOT NULL,
     causation_id VARCHAR(26),
     actor VARCHAR(255) DEFAULT 'system',
-    source_handler VARCHAR(100)
+    source_handler VARCHAR(100),
+    schema_version INTEGER DEFAULT 1
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_entity ON events(entity_type, entity_id, sequence);
@@ -39,6 +40,7 @@ CREATE TABLE IF NOT EXISTS snapshots (
     version INTEGER NOT NULL,
     sequence BIGINT NOT NULL,
     state JSONB NOT NULL,
+    state_hash VARCHAR(64),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(entity_type, entity_id, version)
 );

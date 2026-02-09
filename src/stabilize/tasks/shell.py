@@ -161,12 +161,18 @@ class ShellTask(Task):
         for k, v in env.items():
             full_env[k] = str(v) if not isinstance(v, str) else v
 
-        # Log command with secrets masked
-        log_command = command
+        # Exclude empty strings: str.replace("", "***") corrupts entire output.
+        # Sort longest-first: prevents partial masking of overlapping secrets.
+        secret_values: list[str] = []
         for secret_key in secrets:
             secret_value = stage.context.get(secret_key)
-            if secret_value is not None:
-                log_command = log_command.replace(str(secret_value), "***")
+            if secret_value is not None and str(secret_value) != "":
+                secret_values.append(str(secret_value))
+        secret_values.sort(key=len, reverse=True)
+
+        log_command = command
+        for sv in secret_values:
+            log_command = log_command.replace(sv, "***")
 
         logger.debug("ShellTask executing: %s", log_command)
 
@@ -178,11 +184,16 @@ class ShellTask(Task):
                 "preexec_fn": self._preexec_fn,  # Process isolation + Linux auto-cleanup
             }
 
-            # Handle shell option
             if isinstance(shell, str):
-                # Custom shell path
+                real_path = os.path.realpath(shell)
+                if not os.path.isfile(real_path):
+                    return TaskResult.terminal(error=f"Shell not found: {shell}")
+                if not os.access(real_path, os.X_OK):
+                    return TaskResult.terminal(error=f"Shell not executable: {shell}")
+                if not os.path.isabs(real_path):
+                    return TaskResult.terminal(error=f"Shell must be an absolute path: {shell}")
                 popen_kwargs["shell"] = True
-                popen_kwargs["executable"] = shell
+                popen_kwargs["executable"] = real_path
             else:
                 popen_kwargs["shell"] = shell
 
@@ -226,14 +237,20 @@ class ShellTask(Task):
                     if binary:
                         timeout_outputs["stdout"] = stdout_bytes
                     else:
-                        timeout_outputs["stdout"] = stdout_bytes.decode("utf-8", errors="replace").strip()
+                        decoded = stdout_bytes.decode("utf-8", errors="replace").strip()
+                        for sv in secret_values:
+                            decoded = decoded.replace(sv, "***")
+                        timeout_outputs["stdout"] = decoded
                 if stderr_bytes:
                     if len(stderr_bytes) > max_output_size:
                         stderr_bytes = stderr_bytes[:max_output_size]
                     if binary:
                         timeout_outputs["stderr"] = stderr_bytes
                     else:
-                        timeout_outputs["stderr"] = stderr_bytes.decode("utf-8", errors="replace").strip()
+                        decoded = stderr_bytes.decode("utf-8", errors="replace").strip()
+                        for sv in secret_values:
+                            decoded = decoded.replace(sv, "***")
+                        timeout_outputs["stderr"] = decoded
 
                 error_msg = f"Command timed out after {timeout}s"
                 if restart_on_failure:
@@ -266,6 +283,15 @@ class ShellTask(Task):
                 outputs["stdout"] = stdout_bytes.decode("utf-8", errors="replace").strip() if stdout_bytes else ""
                 outputs["stderr"] = stderr_bytes.decode("utf-8", errors="replace").strip() if stderr_bytes else ""
 
+            # Mask secrets in outputs before returning
+            if secret_values:
+                for key in ("stdout", "stderr"):
+                    val = outputs.get(key)
+                    if isinstance(val, str):
+                        for sv in secret_values:
+                            val = val.replace(sv, "***")
+                        outputs[key] = val
+
             # Check exit code
             if proc.returncode in expected_codes:
                 return TaskResult.success(outputs=outputs)
@@ -275,7 +301,6 @@ class ShellTask(Task):
                     error_msg += f": {outputs['stderr'][:200]}"
 
                 if restart_on_failure:
-                    # Raise TransientError to trigger automatic retry with backoff
                     raise TransientError(error_msg, context_update={"_last_outputs": outputs})
 
                 if continue_on_failure:

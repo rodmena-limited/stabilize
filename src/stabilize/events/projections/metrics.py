@@ -154,13 +154,18 @@ class StageMetricsProjection(Projection):
         """Initialize the metrics projection."""
         self._stage_metrics: dict[str, StageMetrics] = {}
         self._task_metrics: dict[str, TaskMetrics] = {}
+        self._processed_sequences: set[int] = set()
 
     @property
     def name(self) -> str:
         return "stage-metrics"
 
     def apply(self, event: Event) -> None:
-        """Apply an event to update metrics."""
+        if event.sequence and event.sequence in self._processed_sequences:
+            return
+        if event.sequence:
+            self._processed_sequences.add(event.sequence)
+
         if event.entity_type == EntityType.STAGE:
             self._apply_stage_event(event)
         elif event.entity_type == EntityType.TASK:
@@ -245,6 +250,7 @@ class StageMetricsProjection(Projection):
         """Reset all metrics."""
         self._stage_metrics.clear()
         self._task_metrics.clear()
+        self._processed_sequences.clear()
 
     def get_top_slowest_stages(self, n: int = 10) -> list[tuple[str, float]]:
         """Get the n slowest stage types by average duration."""

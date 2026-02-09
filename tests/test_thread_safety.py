@@ -174,9 +174,9 @@ class TestSQLiteThreadSafety:
 
         # All writes should succeed
         total_expected = num_threads * (num_workflows // num_threads)
-        assert (
-            success_count == total_expected
-        ), f"Expected {total_expected} successes, got {success_count}. Errors: {error_count}"
+        assert success_count == total_expected, (
+            f"Expected {total_expected} successes, got {success_count}. Errors: {error_count}"
+        )
 
         store.close()
 

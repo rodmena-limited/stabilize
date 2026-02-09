@@ -278,9 +278,9 @@ class TestDeadLetterQueue:
             result = conn.execute(f"SELECT attempts FROM {sqlite_queue.table_name}")
             row = result.fetchone()
             if row:
-                assert (
-                    row["attempts"] >= sqlite_queue.max_attempts
-                ), f"Message attempts={row['attempts']} should be >= {sqlite_queue.max_attempts}"
+                assert row["attempts"] >= sqlite_queue.max_attempts, (
+                    f"Message attempts={row['attempts']} should be >= {sqlite_queue.max_attempts}"
+                )
 
         assert moved == 1, f"Expected 1 message to be moved, but {moved} were moved"
         assert sqlite_queue.dlq_size() == 1

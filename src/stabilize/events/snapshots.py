@@ -8,6 +8,8 @@ replaying all events from the beginning.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -38,6 +40,12 @@ class Snapshot:
     state: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
+    @staticmethod
+    def _compute_state_hash(state: dict[str, Any]) -> str:
+        """Compute SHA-256 hash of state for integrity verification."""
+        serialized = json.dumps(state, sort_keys=True, default=str).encode()
+        return hashlib.sha256(serialized).hexdigest()
+
     def to_dict(self) -> dict[str, Any]:
         """Convert snapshot to dictionary for storage."""
         return {
@@ -47,6 +55,7 @@ class Snapshot:
             "version": self.version,
             "sequence": self.sequence,
             "state": self.state,
+            "state_hash": self._compute_state_hash(self.state),
             "created_at": self.created_at.isoformat(),
         }
 
@@ -61,13 +70,25 @@ class Snapshot:
         elif created_at is None:
             created_at = datetime.now(UTC)
 
+        state = data.get("state", {})
+
+        # Verify state integrity if hash is present (backward compatible)
+        stored_hash = data.get("state_hash")
+        if stored_hash is not None:
+            computed_hash = cls._compute_state_hash(state)
+            if computed_hash != stored_hash:
+                raise ValueError(
+                    f"Snapshot state integrity check failed: "
+                    f"expected {stored_hash[:16]}..., got {computed_hash[:16]}..."
+                )
+
         return cls(
             entity_type=EntityType(data.get("entity_type", "workflow")),
             entity_id=data.get("entity_id", ""),
             workflow_id=data.get("workflow_id", ""),
             version=data.get("version", 0),
             sequence=data.get("sequence", 0),
-            state=data.get("state", {}),
+            state=state,
             created_at=created_at,
         )
 

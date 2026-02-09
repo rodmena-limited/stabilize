@@ -111,6 +111,10 @@ class StageExecution(StageNavigationMixin):
     # Can be weakref (default) or strong ref (for standalone stages)
     _execution: weakref.ReferenceType[Workflow] | Workflow | None = field(default=None, repr=False)
 
+    def __post_init__(self) -> None:
+        if self.join_type == JoinType.N_OF_M and self.join_threshold < 0:
+            raise ValueError(f"join_threshold must be >= 0 for N_OF_M join, got {self.join_threshold}")
+
     # ========== Phase-Version State Tracking ==========
 
     @property
@@ -238,6 +242,16 @@ class StageExecution(StageNavigationMixin):
         core_statuses = before_stage_statuses + task_statuses
 
         if not core_statuses:
+            # No tasks and no before-stages: if the stage is already RUNNING
+            # (claimed by StartStageHandler), treat as a no-op success rather
+            # than NOT_STARTED which would incorrectly terminate the workflow.
+            if self.status == WorkflowStatus.RUNNING:
+                if after_stage_statuses:
+                    if any(s in {WorkflowStatus.NOT_STARTED, WorkflowStatus.RUNNING} for s in after_stage_statuses):
+                        return WorkflowStatus.RUNNING
+                    if WorkflowStatus.TERMINAL in after_stage_statuses:
+                        return WorkflowStatus.TERMINAL
+                return WorkflowStatus.SUCCEEDED
             return WorkflowStatus.NOT_STARTED
 
         # Check halt conditions first (highest priority)

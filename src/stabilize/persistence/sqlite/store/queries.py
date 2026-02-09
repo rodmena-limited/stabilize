@@ -17,18 +17,12 @@ from stabilize.persistence.sqlite.operations import (
     pause_execution,
     resume_execution,
 )
-from stabilize.persistence.sqlite.queries import (
-    get_downstream_stages as _get_downstream_stages,
-)
+from stabilize.persistence.sqlite.queries import get_downstream_stages as _get_downstream_stages
 from stabilize.persistence.sqlite.queries import (
     get_merged_ancestor_outputs as _get_merged_ancestor_outputs,
 )
-from stabilize.persistence.sqlite.queries import (
-    get_synthetic_stages as _get_synthetic_stages,
-)
-from stabilize.persistence.sqlite.queries import (
-    get_upstream_stages as _get_upstream_stages,
-)
+from stabilize.persistence.sqlite.queries import get_synthetic_stages as _get_synthetic_stages
+from stabilize.persistence.sqlite.queries import get_upstream_stages as _get_upstream_stages
 from stabilize.persistence.sqlite.queries import (
     retrieve_by_application as _retrieve_by_application,
 )

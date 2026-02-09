@@ -71,6 +71,7 @@ class EventBusStats:
     events_delivered: int = 0
     errors: int = 0
     subscriptions_active: int = 0
+    async_fallbacks: int = 0
 
 
 class EventBus:
@@ -213,7 +214,17 @@ class EventBus:
             except Exception as e:
                 self._handle_error(subscription.id, event, e)
 
-        self._executor.submit(_deliver)
+        try:
+            self._executor.submit(_deliver)
+        except RuntimeError:
+            # Executor shut down — fall back to sync delivery
+            logger.warning(
+                "Thread pool unavailable for async delivery to %s, falling back to sync",
+                subscription.id,
+            )
+            with self._lock:
+                self._stats.async_fallbacks += 1
+            self._deliver_sync(subscription, event)
 
     def _handle_error(self, subscription_id: str, event: Event, error: Exception) -> None:
         """Handle a handler error."""
@@ -255,6 +266,7 @@ class EventBus:
                 events_delivered=self._stats.events_delivered,
                 errors=self._stats.errors,
                 subscriptions_active=self._stats.subscriptions_active,
+                async_fallbacks=self._stats.async_fallbacks,
             )
 
     def get_subscriptions(self) -> list[str]:

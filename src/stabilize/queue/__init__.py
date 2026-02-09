@@ -1,7 +1,6 @@
 """Message queue system for pipeline execution."""
 
 from stabilize.queue.interface import Queue, QueuedMessage, QueueFullError
-from stabilize.queue.memory import InMemoryQueue
 from stabilize.queue.messages import (
     CancelStage,
     CancelWorkflow,
@@ -57,7 +56,6 @@ __all__ = [
     "Queue",
     "QueuedMessage",
     "QueueFullError",
-    "InMemoryQueue",
     "PostgresQueue",
     "SqliteQueue",
 ]

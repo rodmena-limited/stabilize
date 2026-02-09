@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -69,7 +70,8 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
     """
 
     # Class-level lock to track tasks currently being executed (prevents duplicate execution)
-    _executing_tasks: set[str] = set()
+    # Maps task_id -> start_time (monotonic) for staleness detection
+    _executing_tasks: dict[str, float] = {}
     _executing_lock = threading.Lock()
 
     def __init__(
@@ -228,6 +230,28 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 )
                 return
 
+            # Stage-level elapsed time check
+            stage_timeout_ms = stage.context.get("stageTimeoutMs")
+            if stage_timeout_ms is not None and stage.start_time:
+                stage_elapsed_ms = self.current_time_millis() - stage.start_time
+                if stage_elapsed_ms > stage_timeout_ms:
+                    logger.info(
+                        "Stage %s exceeded stage timeout (%dms > %dms)",
+                        stage.name,
+                        stage_elapsed_ms,
+                        stage_timeout_ms,
+                    )
+                    complete_with_error(
+                        stage,
+                        task_model,
+                        message,
+                        f"Stage exceeded timeout ({stage_elapsed_ms}ms > {stage_timeout_ms}ms)",
+                        self.repository,
+                        self.txn_helper,
+                        self.retry_on_concurrency_error,
+                    )
+                    return
+
             # Total-lifecycle timeout for RetryableTask (execute_with_timeout only caps single calls)
             if isinstance(task, RetryableTask) and task_model.start_time:
                 elapsed_ms = self.current_time_millis() - task_model.start_time
@@ -255,16 +279,26 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                     return
 
             # CONCURRENT EXECUTION CHECK: Prevent duplicate execution of same task
+            _STALE_THRESHOLD_S = 3600  # 1 hour
             with RunTaskHandler._executing_lock:
-                if task_model.id in RunTaskHandler._executing_tasks:
-                    logger.debug(
-                        "Ignoring duplicate RunTask for %s - already executing",
-                        task_model.name,
-                    )
-                    # Don't mark as processed - let the original execution handle completion
-                    return
-                # Claim this task for execution
-                RunTaskHandler._executing_tasks.add(task_model.id)
+                existing_start = RunTaskHandler._executing_tasks.get(task_model.id)
+                if existing_start is not None:
+                    elapsed = time.monotonic() - existing_start
+                    if elapsed < _STALE_THRESHOLD_S:
+                        logger.debug(
+                            "Ignoring duplicate RunTask for %s - already executing (%.1fs)",
+                            task_model.name,
+                            elapsed,
+                        )
+                        return
+                    else:
+                        logger.warning(
+                            "Stale execution lock for task %s (%.1fs > %ds), allowing re-execution",
+                            task_model.name,
+                            elapsed,
+                            _STALE_THRESHOLD_S,
+                        )
+                RunTaskHandler._executing_tasks[task_model.id] = time.monotonic()
 
             # Execute the task with timeout enforcement
             try:
@@ -359,7 +393,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             finally:
                 # Release the execution lock so other messages can be processed
                 with RunTaskHandler._executing_lock:
-                    RunTaskHandler._executing_tasks.discard(task_model.id)
+                    RunTaskHandler._executing_tasks.pop(task_model.id, None)
 
         self.with_task(message, on_task)
 

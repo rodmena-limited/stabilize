@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import shlex
 import subprocess
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +25,10 @@ if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
 
 logger = logging.getLogger(__name__)
+
+# Validation regexes for SSH parameters
+_VALID_HOST_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
+_VALID_USER_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 
 class SSHTask(Task):
@@ -39,7 +45,7 @@ class SSHTask(Task):
         port (int): SSH port (default: 22)
         key_file (str): Path to private key file (optional)
         timeout (int): Command timeout in seconds (default: 60)
-        strict_host_key (bool): Strict host key checking (default: False)
+        strict_host_key (bool): Strict host key checking (default: True)
         connect_timeout (int): SSH connection timeout (default: 10)
         continue_on_failure (bool): Return failed_continue instead of terminal on error
 
@@ -73,17 +79,32 @@ class SSHTask(Task):
     def execute(self, stage: StageExecution) -> TaskResult:
         """Execute SSH command on remote host."""
         host = stage.context.get("host")
-        user = stage.context.get("user", os.environ.get("USER", "root"))
+        user = stage.context.get("user", os.environ.get("USER", ""))
         command = stage.context.get("command")
         port = stage.context.get("port", 22)
         key_file = stage.context.get("key_file")
         timeout = stage.context.get("timeout", 60)
-        strict_host_key = stage.context.get("strict_host_key", False)
+        strict_host_key = stage.context.get("strict_host_key", True)
         connect_timeout = stage.context.get("connect_timeout", 10)
         continue_on_failure = stage.context.get("continue_on_failure", False)
 
         if not host:
             return TaskResult.terminal(error="No 'host' specified in context")
+
+        if not _VALID_HOST_RE.match(host):
+            return TaskResult.terminal(error="Invalid host: contains disallowed characters")
+
+        if not user:
+            return TaskResult.terminal(error="No 'user' specified in context and USER environment variable not set")
+
+        if not _VALID_USER_RE.match(user):
+            return TaskResult.terminal(error="Invalid user: contains disallowed characters")
+
+        if not isinstance(port, int) or port < 1 or port > 65535:
+            return TaskResult.terminal(error=f"Invalid port: {port}")
+
+        if key_file and ".." in key_file:
+            return TaskResult.terminal(error="Path traversal blocked in key_file")
 
         if not command:
             return TaskResult.terminal(error="No 'command' specified in context")
@@ -127,8 +148,8 @@ class SSHTask(Task):
         target = f"{user}@{host}"
         ssh_cmd.append(target)
 
-        # Command
-        ssh_cmd.append(command)
+        # Command - quote to prevent shell injection on remote host
+        ssh_cmd.append(shlex.quote(command))
 
         logger.debug("SSHTask executing: %s@%s: %s", user, host, command)
 
@@ -140,12 +161,25 @@ class SSHTask(Task):
                 timeout=timeout,
             )
 
+            max_output_size = stage.context.get("max_output_size", 10 * 1024 * 1024)
+            stdout = result.stdout
+            stderr = result.stderr
+            truncated = False
+
+            if len(stdout) > max_output_size:
+                stdout = stdout[:max_output_size]
+                truncated = True
+            if len(stderr) > max_output_size:
+                stderr = stderr[:max_output_size]
+                truncated = True
+
             outputs: dict[str, Any] = {
-                "stdout": result.stdout.strip(),
-                "stderr": result.stderr.strip(),
+                "stdout": stdout.strip(),
+                "stderr": stderr.strip(),
                 "exit_code": result.returncode,
                 "host": host,
                 "user": user,
+                "truncated": truncated,
             }
 
             if result.returncode == 0:

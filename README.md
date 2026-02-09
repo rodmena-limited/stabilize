@@ -24,12 +24,12 @@ pip install stabilize[all]       # All features
 - Pluggable task system
 - Retry and timeout support
 - Event sourcing with full audit trail, replay, and projections
-- **All 43 Workflow Control-Flow Patterns** (van der Aalst et al.)
+- **20 Workflow Control-Flow Patterns** (van der Aalst et al.)
 
 
 ## Advanced Workflow Patterns
 
-Stabilize implements all 43 Workflow Control-Flow Patterns (WCP) from the academic literature:
+Stabilize implements 20 of the 43 Workflow Control-Flow Patterns (WCP) from the academic literature:
 
 ### Branching & Synchronization
 
@@ -99,7 +99,7 @@ StageExecution(ref_id="agent_contact", deferred_choice_group="response", ...)
 StageExecution(ref_id="escalate", deferred_choice_group="response", ...)
 ```
 
-See [Flow Control Guide](docs/guide/flow_control.rst) for complete documentation of all 43 patterns.
+See [Flow Control Guide](docs/guide/flow_control.rst) for complete documentation of all supported patterns.
 
 ## Comparison to Industry Standards
 
@@ -110,7 +110,7 @@ See [Flow Control Guide](docs/guide/flow_control.rst) for complete documentation
 │ State Storage │ Atomic (DB+Queue)  │ Atomic (Redis/SQL)   │ Atomic (SQL)      │
 │ Concurrency   │ Optimistic Locking │ Distributed Lock     │ Database Row Lock │
 │ Resilience    │ Queue-based (DLQ)  │ Queue-based (DLQ)    │ Scheduler Loop    │
-│ Flow Control  │ 43 WCP Patterns    │ Rigid DAG            │ Rigid DAG         │
+│ Flow Control  │ 20 WCP Patterns    │ Rigid DAG            │ Rigid DAG         │
 │ Complexity    │ Low (Library)      │ High (Microservices) │ High (Platform)   │
 └───────────────┴────────────────────┴──────────────────────┴───────────────────┘
 ```

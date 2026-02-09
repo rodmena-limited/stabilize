@@ -8,6 +8,8 @@ import json
 import logging
 from typing import Any
 
+from ulid import ULID
+
 logger = logging.getLogger(__name__)
 
 
@@ -157,7 +159,7 @@ def replay_dlq(pool: Any, table_name: str, dlq_id: int) -> bool:
                 )
                 """,
                 {
-                    "message_id": row["message_id"] + "-replay",
+                    "message_id": str(ULID()),
                     "message_type": row["message_type"],
                     "payload": (json.dumps(row["payload"]) if isinstance(row["payload"], dict) else row["payload"]),
                 },

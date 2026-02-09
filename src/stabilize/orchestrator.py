@@ -111,6 +111,13 @@ class Orchestrator:
 
         if self.store:
             with self.store.transaction(self.queue) as txn:
+                # Store workflow first (if not already stored) to prevent limbo
+                # where message is processed before workflow exists in store
+                try:
+                    self.store.store(execution)
+                except Exception:
+                    # Workflow may already be stored (caller pre-stored it)
+                    pass
                 txn.push_message(message)
         else:
             self.queue.push(message)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from collections.abc import Callable
@@ -16,6 +17,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from stabilize.queue.interface import Queue
+
+_VALID_TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 from stabilize.queue.messages import (
     Message,
     create_message_from_dict,
@@ -55,6 +58,8 @@ class PostgresQueue(Queue):
         from stabilize.persistence.connection import get_connection_manager
 
         self.connection_string = connection_string
+        if not _VALID_TABLE_NAME_RE.match(table_name):
+            raise ValueError(f"Invalid table name: {table_name!r}")
         self.table_name = table_name
         self.lock_duration = lock_duration
         self.max_attempts = max_attempts
@@ -143,42 +148,31 @@ class PostgresQueue(Queue):
         # Use PostgreSQL's NOW() for deliver_at to avoid clock drift between Python and PostgreSQL.
         # When comparing timestamps, we need to ensure consistency with the poll query which uses NOW().
         if delay:
-            delay_seconds = delay.total_seconds()
-            deliver_at_sql = f"NOW() + INTERVAL '{delay_seconds} seconds'"
+            deliver_at_expr = "NOW() + %(delay)s * INTERVAL '1 second'"
+            extra_params = {"delay": delay.total_seconds()}
         else:
-            deliver_at_sql = "NOW()"
+            deliver_at_expr = "NOW()"
+            extra_params = {}
 
-        # Use provided connection or get one from pool
-        # If provided, caller handles commit/rollback
+        sql = f"""
+            INSERT INTO {self.table_name}
+            (message_id, message_type, payload, deliver_at, attempts)
+            VALUES (%(message_id)s, %(type)s, %(payload)s::jsonb, {deliver_at_expr}, 0)
+        """
+        params = {
+            "message_id": message_id,
+            "type": message_type,
+            "payload": payload,
+            **extra_params,
+        }
+
         if connection:
             with connection.cursor() as cur:
-                cur.execute(
-                    f"""
-                    INSERT INTO {self.table_name}
-                    (message_id, message_type, payload, deliver_at, attempts)
-                    VALUES (%(message_id)s, %(type)s, %(payload)s::jsonb, {deliver_at_sql}, 0)
-                    """,
-                    {
-                        "message_id": message_id,
-                        "type": message_type,
-                        "payload": payload,
-                    },
-                )
+                cur.execute(sql, params)
         else:
             with pool.connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(
-                        f"""
-                        INSERT INTO {self.table_name}
-                        (message_id, message_type, payload, deliver_at, attempts)
-                        VALUES (%(message_id)s, %(type)s, %(payload)s::jsonb, {deliver_at_sql}, 0)
-                        """,
-                        {
-                            "message_id": message_id,
-                            "type": message_type,
-                            "payload": payload,
-                        },
-                    )
+                    cur.execute(sql, params)
                 conn.commit()
 
         # Invalidate size cache
@@ -356,16 +350,17 @@ class PostgresQueue(Queue):
         Returns:
             True if a pending message exists for this task
         """
+        escaped_id = task_id.replace("%", r"\%").replace("_", r"\_")
         pool = self._get_pool()
         with pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
                     SELECT 1 FROM {self.table_name}
-                    WHERE payload::text LIKE %s
+                    WHERE payload::text LIKE %s ESCAPE '\\'
                     LIMIT 1
                     """,
-                    (f'%"task_id": "{task_id}"%',),
+                    (f'%"task_id": "{escaped_id}"%',),
                 )
                 return cur.fetchone() is not None
 
@@ -411,8 +406,6 @@ class PostgresQueue(Queue):
 
     def check_and_move_expired(self) -> int:
         """Check for messages exceeding max_attempts and move to DLQ."""
-        from stabilize.queue.dlq import (
-            check_and_move_expired as _check_and_move_expired,
-        )
+        from stabilize.queue.dlq import check_and_move_expired as _check_and_move_expired
 
         return _check_and_move_expired(self._get_pool(), self.table_name, self._pending, self.max_attempts)

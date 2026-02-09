@@ -125,7 +125,7 @@ class CompleteStagesSplitMixin:
         for downstream in downstream_stages:
             if downstream.join_type == JoinType.DISCRIMINATOR:
                 # Track completed branch for discriminator with retry
-                max_retries = 3
+                max_retries = 5
                 for attempt in range(max_retries):
                     try:
                         # Re-read downstream to get latest version
@@ -143,7 +143,7 @@ class CompleteStagesSplitMixin:
 
             elif downstream.join_type == JoinType.N_OF_M:
                 # Track completed branch count for N-of-M join with retry
-                max_retries = 3
+                max_retries = 5
                 for attempt in range(max_retries):
                     try:
                         # Re-read downstream to get latest version
