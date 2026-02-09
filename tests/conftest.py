@@ -1,6 +1,7 @@
 """Shared pytest fixtures for parameterized backend testing."""
 
 import os
+import shutil
 import subprocess
 import threading
 from collections.abc import Generator
@@ -129,9 +130,9 @@ def postgres_url(postgres_container: Any) -> str:
 
     # Run migrations using mg command
     # mg needs to run from project root where mg.yaml and migrations/ exist
-    # Use the venv's mg, not the system mg (which might be a text editor)
+    # Find mg: prefer PATH lookup (works in CI), fall back to local .venv
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    venv_mg = os.path.join(project_root, ".venv", "bin", "mg")
+    venv_mg = shutil.which("mg") or os.path.join(project_root, ".venv", "bin", "mg")
     env = os.environ.copy()
     env["MG_DATABASE_URL"] = url
     result = subprocess.run(
