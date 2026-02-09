@@ -279,12 +279,12 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                     return
 
             # CONCURRENT EXECUTION CHECK: Prevent duplicate execution of same task
-            _STALE_THRESHOLD_S = 3600  # 1 hour
+            stale_threshold_s = 3600
             with RunTaskHandler._executing_lock:
                 existing_start = RunTaskHandler._executing_tasks.get(task_model.id)
                 if existing_start is not None:
                     elapsed = time.monotonic() - existing_start
-                    if elapsed < _STALE_THRESHOLD_S:
+                    if elapsed < stale_threshold_s:
                         logger.debug(
                             "Ignoring duplicate RunTask for %s - already executing (%.1fs)",
                             task_model.name,
@@ -296,7 +296,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                             "Stale execution lock for task %s (%.1fs > %ds), allowing re-execution",
                             task_model.name,
                             elapsed,
-                            _STALE_THRESHOLD_S,
+                            stale_threshold_s,
                         )
                 RunTaskHandler._executing_tasks[task_model.id] = time.monotonic()
 

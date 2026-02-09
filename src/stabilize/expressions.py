@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import ast
 import operator
+from collections.abc import Callable
 from typing import Any
 
-# Safe operators for expression evaluation
-_SAFE_OPERATORS = {
+_SAFE_OPERATORS: dict[type, Callable[..., Any]] = {
     ast.Eq: operator.eq,
     ast.NotEq: operator.ne,
     ast.Lt: operator.lt,

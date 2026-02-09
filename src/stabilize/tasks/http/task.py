@@ -25,7 +25,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import HTTPRedirectHandler, HTTPSHandler, build_opener
+from urllib.request import BaseHandler, HTTPRedirectHandler, HTTPSHandler, build_opener
 
 from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
 from resilient_circuit.exceptions import RetryLimitReached
@@ -47,7 +47,9 @@ from stabilize.tasks.interface import Task
 from stabilize.tasks.result import TaskResult
 
 if TYPE_CHECKING:
-    from http.client import HTTPResponse
+    from http.client import HTTPMessage, HTTPResponse
+    from typing import IO
+    from urllib.request import Request
 
     from stabilize.models.stage import StageExecution
 
@@ -98,7 +100,9 @@ class _SafeRedirectHandler(HTTPRedirectHandler):
         super().__init__()
         self._allow_private = allow_private
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(
+        self, req: Request, fp: IO[bytes], code: int, msg: str, headers: HTTPMessage, newurl: str
+    ) -> Request | None:
         if not self._allow_private:
             _validate_url_safety(newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
@@ -245,7 +249,7 @@ class HTTPTask(Task):
 
         # Build opener with SSRF-safe redirect handler
         allow_private = context.get("allow_private_urls", False)
-        opener_handlers: list = [_SafeRedirectHandler(allow_private=allow_private)]
+        opener_handlers: list[BaseHandler] = [_SafeRedirectHandler(allow_private=allow_private)]
         if ssl_context:
             opener_handlers.append(HTTPSHandler(context=ssl_context))
         _opener = build_opener(*opener_handlers)

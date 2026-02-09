@@ -313,7 +313,9 @@ class EventMigrator:
     def __init__(self) -> None:
         self._migrations: dict[tuple[int, int], Callable[[Event], Event]] = {}
 
-    def register(self, from_version: int, to_version: int) -> Callable:
+    def register(
+        self, from_version: int, to_version: int
+    ) -> Callable[[Callable[[Event], Event]], Callable[[Event], Event]]:
         """Register a migration function.
 
         Args:

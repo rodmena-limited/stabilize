@@ -67,7 +67,7 @@ def is_transient(error: Exception) -> bool:
     # Check permanent patterns FIRST — if the class name matches a permanent
     # pattern, it must NOT be classified as transient regardless of whether a
     # transient pattern also matches.
-    _PERMANENT_NAME_PATTERNS = (
+    permanent_name_patterns = (
         "validation",
         "authentication",
         "authorization",
@@ -75,7 +75,7 @@ def is_transient(error: Exception) -> bool:
         "notfound",
         "invalid",
     )
-    if any(pattern in error_name for pattern in _PERMANENT_NAME_PATTERNS):
+    if any(pattern in error_name for pattern in permanent_name_patterns):
         return False
 
     transient_patterns = [
@@ -136,7 +136,7 @@ def is_permanent(error: Exception) -> bool:
     if any(pattern in error_name for pattern in permanent_patterns):
         return True
 
-    _TRANSIENT_NAME_PATTERNS = (
+    transient_name_patterns = (
         "timeout",
         "connection",
         "temporary",
@@ -145,7 +145,7 @@ def is_permanent(error: Exception) -> bool:
         "throttl",
         "ratelimit",
     )
-    if any(pattern in error_name for pattern in _TRANSIENT_NAME_PATTERNS):
+    if any(pattern in error_name for pattern in transient_name_patterns):
         return False
 
     # Check the cause chain for wrapped permanent errors

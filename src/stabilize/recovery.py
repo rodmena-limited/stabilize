@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from stabilize.models.workflow import Workflow
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.queue.messages import Message
 
 logger = logging.getLogger(__name__)
 
@@ -315,7 +316,7 @@ class WorkflowRecovery:
 
         # Collect all recovery messages, then push atomically via transaction
         # to prevent partial recovery on crash.
-        recovery_messages: list = []
+        recovery_messages: list[Message] = []
 
         for stage in stages_to_requeue:
             if stage.status == WorkflowStatus.RUNNING:

@@ -17,13 +17,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from stabilize.queue.interface import Queue
-
-_VALID_TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 from stabilize.queue.messages import (
     Message,
     create_message_from_dict,
     get_message_type_name,
 )
+
+_VALID_TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 logger = logging.getLogger(__name__)
 

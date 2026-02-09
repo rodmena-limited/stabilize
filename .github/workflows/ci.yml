@@ -19,7 +19,7 @@ jobs:
       - name: Lint
         run: ruff check src/ tests/ golden_standard_tests/
       - name: Type check
-        run: mypy src/
+        run: mypy --strict src/
 
   test-sqlite:
     runs-on: ubuntu-latest
