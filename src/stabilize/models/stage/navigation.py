@@ -25,7 +25,10 @@ class StageNavigationMixin:
     id: str
     parent_stage_id: str | None
     status: WorkflowStatus
-    execution: Workflow
+
+    @property
+    def execution(self) -> Workflow:
+        raise NotImplementedError
 
     def has_execution(self) -> bool:
         return False

@@ -175,14 +175,14 @@ def classify_error(error: Exception) -> ErrorCode:
                 # Fail permanently
                 pass
     """
-    # Check for explicit error_code attribute (Stabilize exceptions)
     if hasattr(error, "error_code"):
-        return error.error_code  # type: ignore[no-any-return]
+        code: ErrorCode = getattr(error, "error_code")
+        return code
 
-    # Check the cause chain for Stabilize exceptions with error_code
     for exc in error_chain(error):
         if hasattr(exc, "error_code"):
-            return exc.error_code  # type: ignore[no-any-return]
+            code = getattr(exc, "error_code")
+            return code
 
     # Type-based classification for common exception types
     error_type = type(error).__name__.lower()

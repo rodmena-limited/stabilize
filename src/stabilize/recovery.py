@@ -211,7 +211,7 @@ class WorkflowRecovery:
             # In production, you'd iterate through known applications
             # For now, we'll use a direct query if available
             if hasattr(self.store, "get_all_pending_workflows"):
-                workflows = list(self.store.get_all_pending_workflows(criteria))
+                workflows = list(getattr(self.store, "get_all_pending_workflows")(criteria))
             else:
                 logger.warning(
                     "Store doesn't support get_all_pending_workflows, "

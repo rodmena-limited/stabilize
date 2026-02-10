@@ -89,7 +89,7 @@ class MonitorDataFetcher:
         # ------------------
         if hasattr(self.store, "_pool"):
             # PostgreSQL
-            with self.store._pool.connection() as conn:
+            with getattr(self.store, "_pool").connection() as conn:
                 with conn.cursor() as cur:
                     # Build Query
                     query, params = self._build_workflow_query(app_filter, limit, status_filter, dialect="postgres")
@@ -148,8 +148,8 @@ class MonitorDataFetcher:
                         for stage in wf.stages:
                             # We need the internal DB ID to link tasks, but StageView doesn't have it by default.
                             # We stored it in _row_to_stage_view temporarily
-                            if hasattr(stage, "_db_id"):
-                                stage_lookup[stage._db_id] = stage
+                            if stage.db_id is not None:
+                                stage_lookup[stage.db_id] = stage
 
                     for row in task_rows:
                         task_view = self._row_to_task_view(row)
@@ -159,8 +159,8 @@ class MonitorDataFetcher:
 
         elif hasattr(self.store, "_manager"):
             # SQLite
-            conn_mgr = self.store._manager
-            conn = conn_mgr.get_sqlite_connection(self.store.connection_string)  # type: ignore
+            conn_mgr = getattr(self.store, "_manager")
+            conn = conn_mgr.get_sqlite_connection(getattr(self.store, "connection_string"))
             cursor = conn.cursor()
 
             # 1. Fetch Workflows
@@ -292,7 +292,7 @@ class MonitorDataFetcher:
         )
 
     def _row_to_stage_view(self, row: Any) -> StageView:
-        view = StageView(
+        return StageView(
             ref_id=row["ref_id"],
             name=row["name"] or "",
             status=WorkflowStatus[row["status"]],
@@ -300,10 +300,8 @@ class MonitorDataFetcher:
             end_time=row["end_time"],
             execution_id=row["execution_id"],
             tasks=[],
+            db_id=row["id"],
         )
-        # Attach internal DB info for linking
-        view._db_id = row["id"]  # type: ignore[attr-defined]
-        return view
 
     def _row_to_task_view(self, row: Any) -> TaskView:
         # Handle JSON exception details safely
@@ -339,8 +337,8 @@ class MonitorDataFetcher:
         try:
             # Try to get queue stats from the queue object
             if hasattr(self.queue, "_manager") and hasattr(self.queue, "connection_string"):
-                conn_mgr = self.queue._manager
-                conn = conn_mgr.get_sqlite_connection(self.queue.connection_string)
+                conn_mgr = getattr(self.queue, "_manager")
+                conn = conn_mgr.get_sqlite_connection(getattr(self.queue, "connection_string"))
                 cursor = conn.cursor()
 
                 now = datetime.now().isoformat()

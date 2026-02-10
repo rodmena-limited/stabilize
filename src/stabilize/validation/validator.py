@@ -72,7 +72,7 @@ class SchemaValidator:
         #          ValidationError("age", "must be >= 0")]
     """
 
-    TYPE_MAP = {
+    TYPE_MAP: dict[str, type | tuple[type, ...]] = {
         "string": str,
         "integer": int,
         "number": (int, float),
@@ -199,13 +199,12 @@ class SchemaValidator:
 
     def _check_type(self, value: Any, type_name: str) -> bool:
         """Check if value matches the JSON Schema type."""
-        # Special case: integer shouldn't match boolean
         if type_name == "integer" and isinstance(value, bool):
             return False
-        expected = self.TYPE_MAP.get(type_name)
+        expected: type | tuple[type, ...] | None = self.TYPE_MAP.get(type_name)
         if expected is None:
-            return True  # Unknown type, allow
-        return isinstance(value, expected)  # type: ignore[arg-type]
+            return True
+        return isinstance(value, expected)
 
     def _validate_string(
         self,

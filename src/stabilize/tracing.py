@@ -22,30 +22,37 @@ all tracing operations become no-ops.
 
 from __future__ import annotations
 
+import importlib
+import types
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 # OpenTelemetry is optional - gracefully degrade to no-ops
+trace: types.ModuleType | None
+Resource: Any
+TracerProvider: Any
+Status: Any
+StatusCode: Any
 try:
-    from opentelemetry import trace
-    from opentelemetry.sdk.resources import Resource
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.trace import Span, Status, StatusCode
-
+    trace = importlib.import_module("opentelemetry.trace")
+    _sdk_resources = importlib.import_module("opentelemetry.sdk.resources")
+    _sdk_trace = importlib.import_module("opentelemetry.sdk.trace")
+    Resource = _sdk_resources.Resource
+    TracerProvider = _sdk_trace.TracerProvider
+    Status = trace.Status
+    StatusCode = trace.StatusCode
     OTEL_AVAILABLE = True
 except ImportError:
+    trace = None
+    Resource = None
+    TracerProvider = None
+    Status = None
+    StatusCode = None
     OTEL_AVAILABLE = False
-    trace = None  # type: ignore[assignment]
-    Span = None  # type: ignore[assignment, misc]
-    Status = None  # type: ignore[assignment, misc]
-    StatusCode = None  # type: ignore[assignment, misc]
-
-if TYPE_CHECKING:
-    from opentelemetry.trace import Tracer
 
 
-_tracer: Tracer | None = None
+_tracer: Any = None
 _configured = False
 
 
@@ -117,6 +124,7 @@ def configure_tracing(
     if environment:
         resource_attrs["deployment.environment"] = environment
 
+    assert trace is not None
     resource = Resource.create(resource_attrs)
 
     # Create and set tracer provider
@@ -146,7 +154,7 @@ def get_tracer() -> Any:
     if not OTEL_AVAILABLE:
         return None
 
-    if _tracer is None:
+    if _tracer is None and trace is not None:
         _tracer = trace.get_tracer("stabilize")
 
     return _tracer
@@ -307,6 +315,7 @@ def add_event(name: str, attributes: dict[str, Any] | None = None) -> None:
     if not OTEL_AVAILABLE:
         return
 
+    assert trace is not None
     span = trace.get_current_span()
     if span:
         span.add_event(name, attributes=attributes or {})
@@ -322,6 +331,7 @@ def set_attribute(key: str, value: Any) -> None:
     if not OTEL_AVAILABLE:
         return
 
+    assert trace is not None
     span = trace.get_current_span()
     if span and value is not None:
         span.set_attribute(key, str(value))

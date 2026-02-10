@@ -7,7 +7,7 @@ Provides handler registration, message deduplication, and DLQ management logic.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from stabilize.queue.dedup import get_deduplicator
 from stabilize.queue.messages import Message, get_message_type_name
@@ -96,7 +96,7 @@ class QueueProcessorMixin:
         ]
 
         for h in all_handlers:
-            handler: MessageHandler[Any] = h  # type: ignore[assignment]
+            handler = cast("MessageHandler[Any]", h)
             self._handlers[handler.message_type] = handler
             logger.debug("Registered handler for %s", handler.message_type.__name__)
 
@@ -169,7 +169,7 @@ class QueueProcessorMixin:
         """
         if hasattr(self.queue, "check_and_move_expired"):
             try:
-                moved = self.queue.check_and_move_expired()
+                moved = getattr(self.queue, "check_and_move_expired")()
                 if moved > 0:
                     logger.info("Moved %d expired messages to DLQ", moved)
             except Exception as e:

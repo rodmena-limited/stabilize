@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
+    from psycopg import Connection
+    from psycopg.rows import DictRow
     from psycopg_pool import ConnectionPool
 
 
@@ -61,7 +63,7 @@ class ConnectionManager(metaclass=SingletonMeta):
     """
 
     def __init__(self) -> None:
-        self._postgres_pools: dict[str, ConnectionPool] = {}
+        self._postgres_pools: dict[str, ConnectionPool[Connection[DictRow]]] = {}
         self._postgres_lock = threading.Lock()
 
         self._sqlite_local = threading.local()
@@ -73,7 +75,7 @@ class ConnectionManager(metaclass=SingletonMeta):
         connection_string: str,
         min_size: int = 5,
         max_size: int = 15,
-    ) -> ConnectionPool:
+    ) -> ConnectionPool[Connection[DictRow]]:
         """
         Get or create a PostgreSQL connection pool.
 
@@ -91,12 +93,15 @@ class ConnectionManager(metaclass=SingletonMeta):
                     from psycopg.rows import dict_row
                     from psycopg_pool import ConnectionPool
 
-                    pool = ConnectionPool(
-                        connection_string,
-                        min_size=min_size,
-                        max_size=max_size,
-                        open=True,
-                        kwargs={"row_factory": dict_row},
+                    pool = cast(
+                        "ConnectionPool[Connection[DictRow]]",
+                        ConnectionPool(
+                            connection_string,
+                            min_size=min_size,
+                            max_size=max_size,
+                            open=True,
+                            kwargs={"row_factory": dict_row},
+                        ),
                     )
                     self._postgres_pools[connection_string] = pool
         return self._postgres_pools[connection_string]

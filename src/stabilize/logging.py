@@ -24,19 +24,20 @@ Context binding:
 
 from __future__ import annotations
 
+import importlib
 import logging
 import sys
+import types
 from typing import Any
 
 # structlog is optional - gracefully degrade to stdlib logging
+structlog: types.ModuleType | None
 try:
-    import structlog
-    from structlog.types import Processor
-
+    structlog = importlib.import_module("structlog")
     STRUCTLOG_AVAILABLE = True
 except ImportError:
+    structlog = None
     STRUCTLOG_AVAILABLE = False
-    structlog = None  # type: ignore[assignment]
 
 
 _configured = False
@@ -83,8 +84,10 @@ def configure_logging(
         stream=sys.stdout,
     )
 
+    assert structlog is not None
+
     # Build processor chain
-    processors: list[Processor] = [
+    processors: list[Any] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
@@ -133,7 +136,7 @@ def get_logger(name: str) -> Any:
         # Auto-configure with defaults if not explicitly configured
         configure_logging()
 
-    if STRUCTLOG_AVAILABLE:
+    if STRUCTLOG_AVAILABLE and structlog is not None:
         return structlog.get_logger(name)
     else:
         return logging.getLogger(name)
@@ -152,7 +155,7 @@ def bind_context(**kwargs: Any) -> None:
         bind_context(workflow_id="wf-123", request_id="req-456")
         logger.info("processing")  # Includes workflow_id and request_id
     """
-    if STRUCTLOG_AVAILABLE:
+    if STRUCTLOG_AVAILABLE and structlog is not None:
         structlog.contextvars.bind_contextvars(**kwargs)
 
 
@@ -161,7 +164,7 @@ def clear_context() -> None:
 
     Call this at the end of a request/workflow to prevent context leakage.
     """
-    if STRUCTLOG_AVAILABLE:
+    if STRUCTLOG_AVAILABLE and structlog is not None:
         structlog.contextvars.clear_contextvars()
 
 
@@ -171,7 +174,7 @@ def unbind_context(*keys: str) -> None:
     Args:
         *keys: Context keys to remove
     """
-    if STRUCTLOG_AVAILABLE:
+    if STRUCTLOG_AVAILABLE and structlog is not None:
         structlog.contextvars.unbind_contextvars(*keys)
 
 

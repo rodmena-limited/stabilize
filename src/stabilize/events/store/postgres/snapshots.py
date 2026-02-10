@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any
 from stabilize.events.base import EntityType
 
 if TYPE_CHECKING:
+    from psycopg import Connection
+    from psycopg.rows import DictRow
     from psycopg_pool import ConnectionPool
 
 
@@ -18,7 +20,7 @@ class PostgresSnapshotsMixin:
     """Mixin providing snapshot save and retrieval methods."""
 
     if TYPE_CHECKING:
-        _pool: ConnectionPool
+        _pool: ConnectionPool[Connection[DictRow]]
 
     def save_snapshot(
         self,

@@ -44,7 +44,8 @@ class TimeoutManager:
             if isinstance(task, RetryableTask):
                 return task.get_dynamic_timeout(stage)
             # Fallback if hasattr but not instance (duck typing)
-            return getattr(task, "get_dynamic_timeout")(stage)  # type: ignore[no-any-return]
+            result: timedelta = getattr(task, "get_dynamic_timeout")(stage)
+            return result
 
         # 2. Stage-level override (standard context key)
         # Some tasks might not be RetryableTask but still want to respect this

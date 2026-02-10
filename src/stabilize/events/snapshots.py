@@ -191,7 +191,7 @@ class SnapshotStore:
         """
         # Delegate to event store's snapshot methods
         if hasattr(self._event_store, "save_snapshot"):
-            self._event_store.save_snapshot(
+            getattr(self._event_store, "save_snapshot")(
                 entity_type=snapshot.entity_type,
                 entity_id=snapshot.entity_id,
                 workflow_id=snapshot.workflow_id,
@@ -217,7 +217,7 @@ class SnapshotStore:
             The latest snapshot or None if not found.
         """
         if hasattr(self._event_store, "get_latest_snapshot"):
-            data = self._event_store.get_latest_snapshot(entity_type, entity_id)
+            data = getattr(self._event_store, "get_latest_snapshot")(entity_type, entity_id)
             if data:
                 return Snapshot.from_dict(data)
         return None

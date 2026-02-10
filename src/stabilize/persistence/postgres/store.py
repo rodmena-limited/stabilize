@@ -11,7 +11,7 @@ import json
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, cast
+from typing import Any
 
 from stabilize.models.workflow import Workflow
 from stabilize.persistence.postgres.converters import (
@@ -121,7 +121,7 @@ class PostgresWorkflowStore(WorkflowStore):
                 if not row:
                     raise WorkflowNotFoundError(execution_id)
 
-                execution = row_to_execution(cast(dict[str, Any], row))
+                execution = row_to_execution(row)
 
                 cur.execute(
                     "SELECT * FROM stage_executions WHERE execution_id = %(execution_id)s",
@@ -131,7 +131,7 @@ class PostgresWorkflowStore(WorkflowStore):
                 stages_by_id: dict[str, Any] = {}
                 stages: list[Any] = []
                 for stage_row in cur.fetchall():
-                    stage = row_to_stage(cast(dict[str, Any], stage_row))
+                    stage = row_to_stage(stage_row)
                     stage.execution = execution
                     stages_by_id[stage.id] = stage
                     stages.append(stage)
@@ -154,7 +154,7 @@ class PostgresWorkflowStore(WorkflowStore):
                 if not row:
                     raise WorkflowNotFoundError(execution_id)
 
-                return row_to_execution(cast(dict[str, Any], row))
+                return row_to_execution(row)
 
     def update_status(self, execution: Workflow) -> None:
         """Update execution status."""
@@ -331,15 +331,15 @@ class PostgresWorkflowStore(WorkflowStore):
                 if not stage_row:
                     raise ValueError(f"Stage {stage_id} not found")
 
-                stage = row_to_stage(cast(dict[str, Any], stage_row))
+                stage = row_to_stage(stage_row)
 
                 cur.execute(
                     "SELECT * FROM pipeline_executions WHERE id = %(id)s",
-                    {"id": stage_row["execution_id"]},  # type: ignore[call-overload]
+                    {"id": stage_row["execution_id"]},
                 )
                 exec_row = cur.fetchone()
                 if exec_row:
-                    execution = row_to_execution(cast(dict[str, Any], exec_row))
+                    execution = row_to_execution(exec_row)
                     stage.set_execution_strong(execution)
 
                     all_stages = [stage]
@@ -354,7 +354,7 @@ class PostgresWorkflowStore(WorkflowStore):
                             {"execution_id": execution.id, "requisites": requisites},
                         )
                         for us_row in cur.fetchall():
-                            us = row_to_stage(cast(dict[str, Any], us_row))
+                            us = row_to_stage(us_row)
                             us.set_execution_strong(execution)
                             all_stages.append(us)
 
@@ -371,7 +371,7 @@ class PostgresWorkflowStore(WorkflowStore):
                     {"stage_id": stage.id},
                 )
                 for task_row in cur.fetchall():
-                    task = row_to_task(cast(dict[str, Any], task_row))
+                    task = row_to_task(task_row)
                     task.stage = stage
                     stage.tasks.append(task)
 

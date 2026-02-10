@@ -165,14 +165,16 @@ class QueueProcessor(QueueProcessorMixin):
             message_type: The type of message to handle
             handler_func: Function to call with the message
         """
+        _msg_type = message_type
+        _handler_fn = handler_func
 
-        class FuncHandler(MessageHandler[M]):
+        class FuncHandler(MessageHandler[Any]):
             @property
-            def message_type(self) -> type[M]:
-                return message_type
+            def message_type(self) -> type[Any]:
+                return _msg_type
 
-            def handle(self, message: M) -> None:
-                handler_func(message)
+            def handle(self, message: Any) -> None:
+                _handler_fn(message)
 
         self.register_handler(FuncHandler())
 

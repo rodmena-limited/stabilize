@@ -140,7 +140,7 @@ class SubscriptionManager:
 
         # Persist subscription
         if hasattr(self._event_store, "save_subscription"):
-            self._event_store.save_subscription(
+            getattr(self._event_store, "save_subscription")(
                 subscription_id=subscription_id,
                 event_types=event_types,
                 entity_filter=entity_filter,
@@ -169,7 +169,7 @@ class SubscriptionManager:
                 del self._subscriptions[subscription_id]
 
         if hasattr(self._event_store, "delete_subscription"):
-            self._event_store.delete_subscription(subscription_id)
+            getattr(self._event_store, "delete_subscription")(subscription_id)
 
         logger.info("Deleted subscription %s", subscription_id)
         return True
@@ -192,7 +192,7 @@ class SubscriptionManager:
         if not hasattr(self._event_store, "get_subscription"):
             return False
 
-        data = self._event_store.get_subscription(subscription_id)
+        data = getattr(self._event_store, "get_subscription")(subscription_id)
         if data is None:
             return False
 
@@ -305,7 +305,7 @@ class SubscriptionManager:
 
         # Persist position
         if hasattr(self._event_store, "update_subscription_sequence"):
-            self._event_store.update_subscription_sequence(
+            getattr(self._event_store, "update_subscription_sequence")(
                 subscription.id,
                 processed_sequence,
             )

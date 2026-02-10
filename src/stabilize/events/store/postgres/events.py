@@ -13,6 +13,8 @@ from stabilize.events.base import EntityType, Event, EventMetadata, EventType
 from stabilize.events.store.interface import EventQuery
 
 if TYPE_CHECKING:
+    from psycopg import Connection
+    from psycopg.rows import DictRow
     from psycopg_pool import ConnectionPool
 
 
@@ -20,7 +22,7 @@ class PostgresEventsMixin:
     """Mixin providing event append, query, and retrieval methods."""
 
     if TYPE_CHECKING:
-        _pool: ConnectionPool
+        _pool: ConnectionPool[Connection[DictRow]]
 
     def append(self, event: Event, connection: Any | None = None) -> Event:
         """Append a single event to the store."""
@@ -130,7 +132,7 @@ class PostgresEventsMixin:
         params["limit"] = query.limit
         params["offset"] = query.offset
 
-        sql = " ".join(sql_parts)
+        sql: Any = " ".join(sql_parts)
 
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
@@ -190,7 +192,7 @@ class PostgresEventsMixin:
                 row = cur.fetchone()
                 if row is None:
                     return 0
-                value = row[0] if isinstance(row, tuple) else row.get("max")
+                value = row.get("max")
                 return value if value is not None else 0
 
     def get_events_since(
@@ -257,13 +259,13 @@ class PostgresEventsMixin:
                         sql_parts.append("AND sequence <= %(to_sequence)s")
                         params["to_sequence"] = query.to_sequence
 
-                    sql = " ".join(sql_parts)
-                    cur.execute(sql, params)
+                    sql_query: Any = " ".join(sql_parts)
+                    cur.execute(sql_query, params)
 
                 row = cur.fetchone()
                 if row is None:
                     return 0
-                count_val = row[0] if isinstance(row, tuple) else row.get("count", 0)
+                count_val = row.get("count", 0)
                 return count_val if count_val is not None else 0
 
     def _row_to_event(self, row: Any) -> Event:

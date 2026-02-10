@@ -5,15 +5,13 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import TYPE_CHECKING, Any
+from http.client import HTTPResponse
+from typing import Any
+from urllib.error import HTTPError
 
 from stabilize.tasks.http.constants import CHUNK_SIZE, DEFAULT_MAX_RESPONSE_SIZE
 from stabilize.tasks.http.utils import get_charset
 from stabilize.tasks.result import TaskResult
-
-if TYPE_CHECKING:
-    from http.client import HTTPResponse
-    from urllib.error import HTTPError
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +40,7 @@ def process_response(
 
     # Extract status and headers
     response_obj: HTTPResponse | HTTPError
-    if hasattr(response, "code"):
+    if isinstance(response, HTTPError):
         # HTTPError
         status_code = response.code
         response_headers = dict(response.headers)

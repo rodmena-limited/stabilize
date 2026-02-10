@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 from stabilize.events.base import EventType
 
 if TYPE_CHECKING:
+    from psycopg import Connection
+    from psycopg.rows import DictRow
     from psycopg_pool import ConnectionPool
 
 
@@ -17,7 +19,7 @@ class PostgresSubscriptionsMixin:
     """Mixin providing durable subscription CRUD methods."""
 
     if TYPE_CHECKING:
-        _pool: ConnectionPool
+        _pool: ConnectionPool[Connection[DictRow]]
 
     def save_subscription(
         self,
@@ -130,8 +132,8 @@ class PostgresSubscriptionsMixin:
                 cur.execute("SELECT id, last_sequence FROM event_subscriptions")
                 return [
                     {
-                        "id": row[0] if isinstance(row, tuple) else row["id"],
-                        "last_sequence": (row[1] if isinstance(row, tuple) else row["last_sequence"]),
+                        "id": row["id"],
+                        "last_sequence": row["last_sequence"],
                     }
                     for row in cur.fetchall()
                 ]

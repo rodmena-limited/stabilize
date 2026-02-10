@@ -1,0 +1,23 @@
+{
+  "include": ["src"],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "standard",
+  "reportMissingTypeStubs": false,
+  "reportUnknownVariableType": false,
+  "reportUnknownMemberType": false,
+  "reportUnknownArgumentType": false,
+  "reportUnknownLambdaType": false,
+  "reportUnknownParameterType": false,
+  "reportAny": false,
+  "reportExplicitAny": false,
+  "reportImplicitStringConcatenation": false,
+  "reportUnannotatedClassAttribute": false,
+  "reportImplicitOverride": false,
+  "reportUnusedCallResult": false,
+  "reportUnnecessaryComparison": false,
+  "reportUnnecessaryIsInstance": false,
+  "reportCallInDefaultInitializer": false,
+  "reportPrivateUsage": false,
+  "reportConstantRedefinition": false,
+  "reportUnusedImport": false
+}

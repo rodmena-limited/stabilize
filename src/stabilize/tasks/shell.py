@@ -208,15 +208,17 @@ class ShellTask(Task):
                 popen_kwargs["env"] = full_env
 
             # Execute command using Popen for process group management
-            proc = subprocess.Popen(command, **popen_kwargs)
+            proc: subprocess.Popen[bytes] = subprocess.Popen(command, **popen_kwargs)
 
             try:
                 # Communicate with timeout
-                stdin_bytes = None
+                stdin_data: bytes | None = None
                 if stdin_input is not None:
-                    stdin_bytes = stdin_input if binary else stdin_input.encode()
+                    stdin_data = stdin_input.encode() if not binary else stdin_input.encode()
 
-                stdout_bytes, stderr_bytes = proc.communicate(input=stdin_bytes, timeout=timeout)
+                stdout_bytes, stderr_bytes = proc.communicate(input=stdin_data, timeout=timeout)
+                assert isinstance(stdout_bytes, bytes)
+                assert isinstance(stderr_bytes, bytes)
 
             except subprocess.TimeoutExpired:
                 # Kill entire process tree on timeout

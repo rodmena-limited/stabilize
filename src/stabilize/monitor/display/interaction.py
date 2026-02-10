@@ -182,8 +182,8 @@ def show_details(
         elif selected_item["type"] == "stage":
             stage_view: StageView = selected_item["data"]
             title = f"Stage: {stage_view.name}"
-            if hasattr(stage_view, "_db_id"):
-                stage = data_fetcher.store.retrieve_stage(stage_view._db_id)
+            if stage_view.db_id is not None:
+                stage = data_fetcher.store.retrieve_stage(str(stage_view.db_id))
                 text = json.dumps(
                     {
                         "name": stage.name,

@@ -32,6 +32,7 @@ class StageView:
     end_time: int | None
     execution_id: str | None = None
     tasks: list[TaskView] = field(default_factory=list)
+    db_id: str | int | None = None  # Internal DB ID for task linking
 
 
 @dataclass

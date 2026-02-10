@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from stabilize.tasks.interface import CallableTask, Task
 from stabilize.tasks.result import TaskResult
 
-if False:  # TYPE_CHECKING
+if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.verification import Verifier, VerifyResult
 

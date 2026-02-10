@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from stabilize.cli.config import MIGRATION_TABLE, load_config, parse_db_url
 from stabilize.cli.migrations import (
@@ -78,7 +78,7 @@ def mg_up(db_url: str | None = None) -> None:
                     pending += 1
                     print(f"Applying: {name}")
 
-                    up_sql = extract_up_migration(content)
+                    up_sql: Any = extract_up_migration(content)
                     cur.execute(up_sql)
 
                     checksum = compute_checksum(content)
