@@ -30,6 +30,7 @@ from stabilize.handlers.jump_to_stage.reset import (
 )
 from stabilize.handlers.jump_to_stage.traversal import (
     get_downstream_stages,
+    get_resettable_downstream_stages,
     get_skipped_stages,
 )
 from stabilize.models.status import WorkflowStatus
@@ -401,7 +402,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
         target_stage: StageExecution,
     ) -> None:
         """Reset all downstream stages that depend on target."""
-        downstream_stages = get_downstream_stages(execution, target_stage.ref_id)
+        downstream_stages = get_resettable_downstream_stages(execution, target_stage.ref_id)
         for stage in downstream_stages:
             if stage.id != source_stage.id:
                 logger.debug("Resetting downstream stage: %s", stage.ref_id)
