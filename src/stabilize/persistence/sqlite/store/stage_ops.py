@@ -81,7 +81,7 @@ class SqliteStageOpsMixin:
                     {
                         "id": stage.id,
                         "status": stage.status.name,
-                        "context": json.dumps(stage.context),
+                        "context": json.dumps(stage.context, default=str),
                         "outputs": json.dumps(stage.outputs),
                         "start_time": stage.start_time,
                         "end_time": stage.end_time,
@@ -104,7 +104,7 @@ class SqliteStageOpsMixin:
                     {
                         "id": stage.id,
                         "status": stage.status.name,
-                        "context": json.dumps(stage.context),
+                        "context": json.dumps(stage.context, default=str),
                         "outputs": json.dumps(stage.outputs),
                         "start_time": stage.start_time,
                         "end_time": stage.end_time,
