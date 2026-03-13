@@ -41,7 +41,7 @@ def insert_stage(cur: Any, stage: StageExecution, execution_id: str) -> None:
             "type": stage.type,
             "name": stage.name,
             "status": stage.status.name,
-            "context": json.dumps(stage.context),
+            "context": json.dumps(stage.context, default=str),
             "outputs": json.dumps(stage.outputs),
             "requisite_stage_ref_ids": list(stage.requisite_stage_ref_ids),
             "parent_stage_id": stage.parent_stage_id,
