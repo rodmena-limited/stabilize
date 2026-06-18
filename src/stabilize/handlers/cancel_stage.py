@@ -78,10 +78,16 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
                 return
 
             # Cancel all tasks that are still running
+            from stabilize.resilience.cancellation import cancel_task
+
             for task in stage.tasks:
                 if task.status in {WorkflowStatus.NOT_STARTED, WorkflowStatus.RUNNING}:
                     self.set_task_status(task, WorkflowStatus.CANCELED)
                     task.end_time = self.current_time_millis()
+                    # Signal any cooperatively-cancellable task currently executing
+                    # so it can stop early (no-op if the task isn't running here or
+                    # doesn't check for cancellation).
+                    cancel_task(task.id)
 
             # Mark stage as canceled
             self.set_stage_status(stage, WorkflowStatus.CANCELED)

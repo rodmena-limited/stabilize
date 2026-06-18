@@ -102,6 +102,20 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         self.isolation_mode = os.environ.get("STABILIZE_ISOLATION_MODE", "thread").lower()
         self.process_executor = ProcessIsolatedTaskExecutor() if self.isolation_mode == "process" else None
 
+        # Opt-in distributed task lease (disabled by default). When enabled, only
+        # one worker across processes executes a given task at a time.
+        self.task_lease = None
+        if os.environ.get("STABILIZE_TASK_LEASE", "").lower() in ("1", "true", "yes"):
+            from stabilize.persistence.task_lease import TaskLeaseManager
+
+            try:
+                ttl = float(os.environ.get("STABILIZE_TASK_LEASE_TTL_SECONDS", "3600"))
+                self.task_lease = TaskLeaseManager(repository, ttl_seconds=ttl)
+                logger.info("Distributed task lease enabled (owner=%s)", self.task_lease.owner)
+            except Exception as e:
+                logger.warning("Failed to initialize task lease manager, continuing without it: %s", e)
+                self.task_lease = None
+
         # Initialize resilience components with defaults if not provided
         if bulkhead_manager is None or circuit_factory is None:
             config = ResilienceConfig.from_env()
@@ -300,6 +314,27 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                         )
                 RunTaskHandler._executing_tasks[task_model.id] = time.monotonic()
 
+            # Register a cooperative cancellation token so a concurrent
+            # CancelStage (or a cooperative task) can signal this task to stop.
+            from stabilize.resilience.cancellation import register_token, unregister_token
+
+            register_token(task_model.id)
+
+            # Opt-in distributed lease: across processes, only one worker runs a
+            # given task at a time. Disabled by default (self.task_lease is None).
+            lease_acquired = False
+            if self.task_lease is not None:
+                lease_acquired = self.task_lease.acquire(task_model.id)
+                if not lease_acquired:
+                    logger.debug(
+                        "Skipping RunTask for %s - lease held by another worker",
+                        task_model.name,
+                    )
+                    with RunTaskHandler._executing_lock:
+                        RunTaskHandler._executing_tasks.pop(task_model.id, None)
+                    unregister_token(task_model.id)
+                    return
+
             # Execute the task with timeout enforcement
             try:
                 timeout = self.timeout_manager.get_task_timeout(stage, task)
@@ -394,6 +429,9 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 # Release the execution lock so other messages can be processed
                 with RunTaskHandler._executing_lock:
                     RunTaskHandler._executing_tasks.pop(task_model.id, None)
+                unregister_token(task_model.id)
+                if lease_acquired and self.task_lease is not None:
+                    self.task_lease.release(task_model.id)
 
         self.with_task(message, on_task)
 

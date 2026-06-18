@@ -36,6 +36,20 @@ class QueueProcessorConfig:
     # Enable message deduplication for idempotency
     enable_deduplication: bool = True
 
+    # --- Automatic crash recovery (opt-in; all default to disabled) ---
+    # Run a one-shot recovery sweep when start() is called. This re-queues
+    # workflows that were interrupted by a crash/restart. Requires a store.
+    recover_on_start: bool = False
+    # If > 0, run periodic recovery sweeps on a background thread every N
+    # seconds (for long-running / distributed deployments where a peer worker
+    # may have died). 0 disables periodic recovery. Relies on the same
+    # idempotent recovery path as recover_on_start.
+    recovery_interval_seconds: float = 0.0
+    # Optional application filter for recovery sweeps.
+    recovery_application: str | None = None
+    # Only recover workflows started within this many hours.
+    recovery_max_age_hours: float = 24.0
+
     @classmethod
     def from_handler_config(cls, handler_config: HandlerConfig | None = None) -> QueueProcessorConfig:
         """Create QueueProcessorConfig from HandlerConfig.

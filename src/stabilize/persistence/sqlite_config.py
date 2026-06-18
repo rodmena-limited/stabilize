@@ -12,10 +12,11 @@ Three optimization tiers are available:
 Environment Variables:
     STABILIZE_SQLITE_TIER: Optimization tier (minimal/safe/aggressive)
     STABILIZE_SQLITE_SYNCHRONOUS: Override synchronous setting (OFF/NORMAL/FULL)
+    STABILIZE_SQLITE_JOURNAL_MODE: Journal mode (DELETE default, or WAL/TRUNCATE/...)
     STABILIZE_SQLITE_CACHE_SIZE_KB: Cache size in KB
     STABILIZE_SQLITE_MMAP_SIZE_MB: Memory-mapped I/O size in MB
     STABILIZE_SQLITE_TEMP_STORE: Temp storage (file/memory)
-    STABILIZE_SQLITE_WAL_AUTOCHECKPOINT: Pages between checkpoints
+    STABILIZE_SQLITE_WAL_AUTOCHECKPOINT: Pages between checkpoints (WAL mode only)
     STABILIZE_SQLITE_BUSY_TIMEOUT_MS: Busy timeout in milliseconds
 """
 
@@ -46,6 +47,7 @@ class SqliteConfig:
     Attributes:
         tier: Optimization tier (determines defaults if individual settings not specified)
         synchronous: Sync mode (OFF, NORMAL, or FULL)
+        journal_mode: Journal mode ("DELETE" default; "WAL" opt-in for higher concurrency)
         cache_size_kb: Page cache size in KB
         mmap_size_mb: Memory-mapped I/O size in MB (0 to disable)
         temp_store: Where to store temp tables ("file" or "memory")
@@ -57,6 +59,7 @@ class SqliteConfig:
 
     # Individual PRAGMA overrides (None = use tier default)
     synchronous: str | None = None  # "OFF", "NORMAL", or "FULL"
+    journal_mode: str | None = None  # "DELETE" (default), "WAL", "TRUNCATE", etc.
     cache_size_kb: int | None = None  # e.g., 32000 for 32MB
     mmap_size_mb: int | None = None  # e.g., 256 for 256MB
     temp_store: str | None = None  # "file" or "memory"
@@ -69,6 +72,7 @@ class SqliteConfig:
         return {
             SqliteOptimizationTier.MINIMAL: {
                 "synchronous": "FULL",
+                "journal_mode": "DELETE",
                 "cache_size_kb": 2000,  # ~2MB
                 "mmap_size_mb": 0,  # Disabled
                 "temp_store": "file",
@@ -76,6 +80,7 @@ class SqliteConfig:
             },
             SqliteOptimizationTier.SAFE: {
                 "synchronous": "NORMAL",
+                "journal_mode": "DELETE",
                 "cache_size_kb": 32000,  # 32MB
                 "mmap_size_mb": 256,  # 256MB
                 "temp_store": "memory",
@@ -83,6 +88,7 @@ class SqliteConfig:
             },
             SqliteOptimizationTier.AGGRESSIVE: {
                 "synchronous": "OFF",
+                "journal_mode": "DELETE",
                 "cache_size_kb": 128000,  # 128MB
                 "mmap_size_mb": 1024,  # 1GB
                 "temp_store": "memory",
@@ -106,6 +112,7 @@ class SqliteConfig:
         return cls(
             tier=tier,
             synchronous=os.getenv("STABILIZE_SQLITE_SYNCHRONOUS"),
+            journal_mode=os.getenv("STABILIZE_SQLITE_JOURNAL_MODE"),
             cache_size_kb=_parse_int_env("STABILIZE_SQLITE_CACHE_SIZE_KB"),
             mmap_size_mb=_parse_int_env("STABILIZE_SQLITE_MMAP_SIZE_MB"),
             temp_store=os.getenv("STABILIZE_SQLITE_TEMP_STORE"),
@@ -138,8 +145,11 @@ class SqliteConfig:
 
         # Always set these (existing behavior)
         statements.append("PRAGMA foreign_keys = ON")
-        # WAL mode disabled - use DELETE journal for simpler locking
-        statements.append("PRAGMA journal_mode = DELETE")
+        # Journal mode: default DELETE (simple locking); WAL is opt-in for higher
+        # read/write concurrency. Validated against an allowlist to keep the value
+        # safe for interpolation into the PRAGMA statement.
+        journal = _normalize_journal_mode(self.get_effective_value("journal_mode"))
+        statements.append(f"PRAGMA journal_mode = {journal}")
         statements.append(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
 
         # Optimization pragmas
@@ -159,11 +169,38 @@ class SqliteConfig:
         temp_value = 2 if temp == "memory" else 0
         statements.append(f"PRAGMA temp_store = {temp_value}")
 
-        # wal_autocheckpoint only applies to WAL mode, skip when using DELETE journal
-        # wal_cp = self.get_effective_value("wal_autocheckpoint")
-        # statements.append(f"PRAGMA wal_autocheckpoint = {wal_cp}")
+        # wal_autocheckpoint only applies to WAL mode
+        if journal == "WAL":
+            wal_cp = self.get_effective_value("wal_autocheckpoint")
+            if wal_cp is not None:
+                statements.append(f"PRAGMA wal_autocheckpoint = {wal_cp}")
 
         return statements
+
+
+# Valid SQLite journal modes (used to keep the interpolated PRAGMA value safe).
+_VALID_JOURNAL_MODES = frozenset({"DELETE", "TRUNCATE", "PERSIST", "MEMORY", "WAL", "OFF"})
+
+
+def _normalize_journal_mode(value: Any) -> str:
+    """Normalize and validate a journal mode value.
+
+    Falls back to the safe default ("DELETE") when the value is unset or not a
+    recognized SQLite journal mode. This both preserves existing behavior and
+    prevents arbitrary strings from being interpolated into the PRAGMA.
+
+    Args:
+        value: The configured journal mode (any case) or None.
+
+    Returns:
+        An upper-cased, allow-listed journal mode string.
+    """
+    if not isinstance(value, str):
+        return "DELETE"
+    mode = value.strip().upper()
+    if mode not in _VALID_JOURNAL_MODES:
+        return "DELETE"
+    return mode
 
 
 def _parse_int_env(name: str) -> int | None:

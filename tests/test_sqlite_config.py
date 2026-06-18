@@ -116,6 +116,37 @@ class TestSqliteConfigPragmaStatements:
 
         assert "PRAGMA busy_timeout = 60000" in statements
 
+    def test_default_journal_mode_is_delete_all_tiers(self) -> None:
+        """All tiers must keep DELETE journal by default (no regression)."""
+        for tier in SqliteOptimizationTier:
+            statements = SqliteConfig(tier=tier).get_pragma_statements()
+            assert "PRAGMA journal_mode = DELETE" in statements, tier
+            # wal_autocheckpoint must NOT be emitted with DELETE journal
+            assert not any("wal_autocheckpoint" in s for s in statements), tier
+
+    def test_wal_journal_mode_opt_in(self) -> None:
+        """journal_mode='WAL' should opt into WAL and emit wal_autocheckpoint."""
+        config = SqliteConfig(tier=SqliteOptimizationTier.SAFE, journal_mode="WAL")
+        statements = config.get_pragma_statements()
+
+        assert "PRAGMA journal_mode = WAL" in statements
+        assert "PRAGMA journal_mode = DELETE" not in statements
+        # SAFE tier default checkpoint is 2000
+        assert "PRAGMA wal_autocheckpoint = 2000" in statements
+
+    def test_journal_mode_is_case_insensitive(self) -> None:
+        """Lower-case journal mode values should be normalized to upper-case."""
+        config = SqliteConfig(journal_mode="wal")
+        statements = config.get_pragma_statements()
+        assert "PRAGMA journal_mode = WAL" in statements
+
+    def test_invalid_journal_mode_falls_back_to_delete(self) -> None:
+        """An unrecognized journal mode must fall back to the safe default."""
+        config = SqliteConfig(journal_mode="DROP TABLE; --")
+        statements = config.get_pragma_statements()
+        assert "PRAGMA journal_mode = DELETE" in statements
+        assert not any("DROP TABLE" in s for s in statements)
+
 
 class TestSqliteConfigFromEnv:
     """Tests for environment variable loading."""
@@ -172,6 +203,20 @@ class TestSqliteConfigFromEnv:
         monkeypatch.setenv("STABILIZE_SQLITE_BUSY_TIMEOUT_MS", "60000")
         config = SqliteConfig.from_env()
         assert config.busy_timeout_ms == 60000
+
+    def test_journal_mode_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Journal mode should be loadable from the environment."""
+        monkeypatch.setenv("STABILIZE_SQLITE_JOURNAL_MODE", "WAL")
+        config = SqliteConfig.from_env()
+        assert config.journal_mode == "WAL"
+        assert config.get_effective_value("journal_mode") == "WAL"
+
+    def test_journal_mode_absent_from_env_keeps_delete(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With no journal-mode env var, the effective mode stays DELETE."""
+        monkeypatch.delenv("STABILIZE_SQLITE_JOURNAL_MODE", raising=False)
+        config = SqliteConfig.from_env()
+        assert config.journal_mode is None
+        assert "PRAGMA journal_mode = DELETE" in config.get_pragma_statements()
 
 
 class TestSqliteConfigSingleton:
@@ -291,6 +336,36 @@ class TestSqliteConfigIntegration:
 
         result = conn.execute("PRAGMA cache_size").fetchone()
         assert result[0] == -128000  # 128MB
+
+        manager.close_all()
+        SingletonMeta.reset(ConnectionManager)
+        reset_sqlite_config()
+
+    def test_wal_mode_applied_to_file_connection(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Opt-in WAL journal mode should take effect on a file-based DB."""
+        from stabilize.persistence.connection import (
+            ConnectionManager,
+            SingletonMeta,
+        )
+
+        SingletonMeta.reset(ConnectionManager)
+        reset_sqlite_config()
+        monkeypatch.setenv("STABILIZE_SQLITE_JOURNAL_MODE", "WAL")
+
+        db_path = tmp_path / "test_wal.db"
+        conn_str = f"sqlite:///{db_path}"
+
+        manager = ConnectionManager()
+        conn = manager.get_sqlite_connection(conn_str)
+
+        result = conn.execute("PRAGMA journal_mode").fetchone()
+        assert result[0].upper() == "WAL"
+
+        # foreign keys still enforced (no regression in other pragmas)
+        result = conn.execute("PRAGMA foreign_keys").fetchone()
+        assert result[0] == 1
 
         manager.close_all()
         SingletonMeta.reset(ConnectionManager)

@@ -13,7 +13,7 @@ workflows with full support for:
 - Configuration validation with JSON Schema
 """
 
-__version__ = "0.17.4"
+__version__ = "0.18.0"
 
 # Assertion helpers
 from stabilize.assertions import (
@@ -124,6 +124,12 @@ from stabilize.recovery import (
     WorkflowRecovery,
     recover_on_startup,
 )
+from stabilize.resilience.cancellation import (
+    CancellationToken,
+    TaskCancelledError,
+    is_cancellation_requested,
+    raise_if_cancellation_requested,
+)
 
 # Tasks
 from stabilize.tasks.docker import DockerTask
@@ -210,6 +216,11 @@ __all__ = [
     "Task",
     "RetryableTask",
     "TaskResult",
+    # Cooperative cancellation
+    "CancellationToken",
+    "TaskCancelledError",
+    "is_cancellation_requested",
+    "raise_if_cancellation_requested",
     "TaskRegistry",
     "ShellTask",
     "HTTPTask",

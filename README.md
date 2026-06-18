@@ -292,6 +292,67 @@ class ProgressTask(Task):
 
 The `context_update` is merged into the stage context before the retry, allowing tasks to resume from where they left off.
 
+## Production Hardening (opt-in)
+
+These features are **disabled by default** — enabling them is the only behavioral
+change, so upgrades are safe. See the [Resilience](docs/guide/resilience.rst) and
+[Persistence](docs/guide/persistence.rst) guides for details.
+
+### Automatic crash recovery
+
+Have the processor re-queue workflows interrupted by a crash/restart, instead of
+calling recovery yourself:
+
+```python
+from stabilize.queue.processor.config import QueueProcessorConfig
+
+config = QueueProcessorConfig(
+    recover_on_start=True,           # recover once when start() is called
+    recovery_interval_seconds=60.0,  # periodic sweeps (0 = disabled; for distributed setups)
+)
+processor = QueueProcessor(queue, config=config, store=store, task_registry=registry)
+processor.start()
+```
+
+### Cooperative cancellation
+
+Let long-running tasks stop early when their stage is canceled (Python can't
+force-kill a thread; use `STABILIZE_ISOLATION_MODE=process` for hard kills):
+
+```python
+from stabilize import Task, TaskResult, is_cancellation_requested
+
+class LongTask(Task):
+    def execute(self, stage):
+        for item in items:
+            if is_cancellation_requested():
+                return TaskResult.terminal("Canceled")
+            process(item)
+        return TaskResult.success()
+```
+
+### Distributed task lease
+
+For multi-process / multi-node deployments, ensure only one worker runs a given
+task at a time. Handlers should remain idempotent — the lease narrows the window,
+it is not exactly-once.
+
+```bash
+export STABILIZE_TASK_LEASE=1
+export STABILIZE_TASK_LEASE_TTL_SECONDS=3600
+```
+
+### SQLite WAL mode
+
+The default journal is `DELETE`. Opt into WAL for higher single-node concurrency:
+
+```bash
+export STABILIZE_SQLITE_JOURNAL_MODE=WAL
+```
+
+SQLite schema is versioned and migrates existing databases in place (see the
+[Persistence guide](docs/guide/persistence.rst)).
+
 ## Event Sourcing
 
 Enable full audit trail and event replay with one line:
@@ -319,7 +380,15 @@ state = replayer.rebuild_workflow_state(workflow.id)
 from stabilize.events import StageMetricsProjection
 metrics = StageMetricsProjection()
 bus.subscribe("metrics", metrics.apply)
+
+# Evolve event schemas over time — register upcasters that are applied on replay
+from stabilize.events import get_event_migrator
+@get_event_migrator().register(from_version=1, to_version=2)
+def _v1_to_v2(event):
+    ...  # transform old payloads to the current shape
 ```
+
+Upcasting is a no-op until you register migrations, so replay is unchanged by default.
 
 See `examples/event-sourcing-example.py` for a complete walkthrough.
 

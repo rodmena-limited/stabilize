@@ -287,6 +287,41 @@ def retrieve_by_pipeline_config_id(
                 yield retrieve_fn(cast(dict[str, Any], row)["id"])
 
 
+def get_all_pending_workflows(
+    pool: Any,
+    criteria: WorkflowCriteria | None,
+    retrieve_fn: Callable[[str], Workflow],
+) -> Iterator[Workflow]:
+    """Get all workflows matching criteria across all applications.
+
+    Mirrors the SQLite implementation so crash recovery can find workflows
+    without an application filter on either backend.
+    """
+    query = "SELECT id FROM pipeline_executions WHERE TRUE"
+    params: dict[str, Any] = {}
+
+    if criteria and criteria.statuses:
+        status_names = [s.name for s in criteria.statuses]
+        query += " AND status = ANY(%(statuses)s)"
+        params["statuses"] = status_names
+
+    if criteria and criteria.start_time_after:
+        # Include not-yet-started workflows (NULL start_time).
+        query += " AND (start_time >= %(start_time_after)s OR start_time IS NULL)"
+        params["start_time_after"] = criteria.start_time_after
+
+    query += " ORDER BY start_time DESC NULLS LAST"
+
+    if criteria and criteria.page_size:
+        query += f" LIMIT {int(criteria.page_size)}"
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            for row in cur.fetchall():
+                yield retrieve_fn(cast(dict[str, Any], row)["id"])
+
+
 def retrieve_by_application(
     pool: Any,
     application: str,

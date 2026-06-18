@@ -37,10 +37,13 @@ from stabilize.events.base import (
     EntityType,
     Event,
     EventMetadata,
+    EventMigrator,
     EventType,
     create_stage_event,
     create_task_event,
     create_workflow_event,
+    get_event_migrator,
+    reset_event_migrator,
 )
 
 # Event bus (in-process pub/sub)
@@ -100,6 +103,9 @@ __all__ = [
     "create_workflow_event",
     "create_stage_event",
     "create_task_event",
+    "EventMigrator",
+    "get_event_migrator",
+    "reset_event_migrator",
     # Event bus
     "EventBus",
     "EventBusStats",

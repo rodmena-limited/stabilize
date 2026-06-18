@@ -100,6 +100,7 @@ class QueueProcessor(QueueProcessorMixin):
         self._stopping = False  # Flag for graceful stop (stop accepting new work)
         self._executor: ThreadPoolExecutor | None = None
         self._poll_thread: threading.Thread | None = None
+        self._recovery_thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._processing_lock = threading.Lock()  # Lock for process_all
         self._active_count = 0
@@ -183,10 +184,23 @@ class QueueProcessor(QueueProcessorMixin):
         if self._running:
             return
 
+        # Opt-in: recover interrupted workflows once before we begin polling, so
+        # re-queued work is picked up immediately. Never let recovery failure
+        # prevent the processor from starting.
+        if self.config.recover_on_start:
+            self.run_recovery()
+
         self._running = True
         self._executor = ThreadPoolExecutor(max_workers=self.config.max_workers)
         self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._poll_thread.start()
+
+        # Opt-in: periodic background recovery sweeps for long-running/distributed
+        # deployments (catch workflows orphaned by a crashed peer worker).
+        if self.config.recovery_interval_seconds and self.config.recovery_interval_seconds > 0:
+            self._recovery_thread = threading.Thread(target=self._recovery_loop, daemon=True)
+            self._recovery_thread.start()
+
         logger.info("Queue processor started")
 
     def stop(self, wait: bool = True) -> None:
@@ -201,6 +215,9 @@ class QueueProcessor(QueueProcessorMixin):
 
         if self._poll_thread:
             self._poll_thread.join(timeout=5.0)
+
+        if self._recovery_thread:
+            self._recovery_thread.join(timeout=5.0)
 
         if self._executor:
             self._executor.shutdown(wait=wait)
@@ -237,6 +254,50 @@ class QueueProcessor(QueueProcessorMixin):
     def is_stopping(self) -> bool:
         """Check if stop has been requested but not yet completed."""
         return self._stopping and self._running
+
+    def run_recovery(self) -> list[Any]:
+        """Run a single workflow-recovery sweep.
+
+        Re-queues workflows that were interrupted by a crash/restart, using the
+        idempotent :class:`stabilize.recovery.WorkflowRecovery`. Safe to call at
+        any time; exceptions are caught and logged so a recovery failure never
+        disrupts message processing.
+
+        Returns:
+            The list of RecoveryResult objects (empty if no store is configured
+            or recovery raised).
+        """
+        if self._store is None:
+            logger.warning("Recovery requested but no store configured; skipping.")
+            return []
+
+        from stabilize.recovery import WorkflowRecovery
+
+        try:
+            recovery = WorkflowRecovery(
+                store=self._store,
+                queue=self.queue,
+                max_recovery_age_hours=self.config.recovery_max_age_hours,
+            )
+            return recovery.recover_pending_workflows(application=self.config.recovery_application)
+        except Exception as e:
+            logger.error("Workflow recovery sweep failed: %s", e, exc_info=True)
+            return []
+
+    def _recovery_loop(self) -> None:
+        """Background loop running periodic recovery sweeps until stopped."""
+        interval = self.config.recovery_interval_seconds
+        # Sleep first so the recover_on_start sweep (if any) isn't immediately
+        # duplicated, and so a freshly started processor isn't sweeping at t=0.
+        while self._running:
+            slept = 0.0
+            # Sleep in small increments so stop() is responsive.
+            while slept < interval and self._running:
+                time.sleep(min(0.5, interval - slept))
+                slept += 0.5
+            if not self._running or self._stopping:
+                break
+            self.run_recovery()
 
     def _poll_loop(self) -> None:
         """Main polling loop.

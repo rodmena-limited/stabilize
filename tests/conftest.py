@@ -22,7 +22,7 @@ from stabilize import (
     TaskRegistry,
     TaskResult,
 )
-from stabilize.events import reset_event_bus, reset_event_recorder
+from stabilize.events import reset_event_bus, reset_event_migrator, reset_event_recorder
 from stabilize.persistence.connection import ConnectionManager, SingletonMeta
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue import Queue
@@ -58,9 +58,13 @@ def reset_connection_manager() -> Generator[None, None, None]:
 @pytest.fixture(autouse=True)
 def reset_handler_state() -> Generator[None, None, None]:
     """Reset RunTaskHandler class-level state between tests."""
+    from stabilize.resilience.cancellation import reset_cancellation_state
+
     RunTaskHandler._executing_tasks.clear()
+    reset_cancellation_state()
     yield
     RunTaskHandler._executing_tasks.clear()
+    reset_cancellation_state()
 
 
 @pytest.fixture(autouse=True)
@@ -68,9 +72,11 @@ def reset_event_state() -> Generator[None, None, None]:
     """Reset global event sourcing state between tests."""
     reset_event_bus()
     reset_event_recorder()
+    reset_event_migrator()
     yield
     reset_event_bus()
     reset_event_recorder()
+    reset_event_migrator()
 
 
 # =============================================================================

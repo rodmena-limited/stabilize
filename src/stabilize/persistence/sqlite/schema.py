@@ -115,9 +115,21 @@ CREATE INDEX IF NOT EXISTS idx_processed_messages_at
 
 
 def create_tables(conn: sqlite3.Connection) -> None:
-    """Create database tables if they don't exist."""
+    """Create database tables if they don't exist, then apply schema migrations.
+
+    The baseline schema above is version 1. After installing it we run the
+    migration framework, which stamps the baseline version (for both new and
+    existing un-versioned databases) and applies any pending forward migrations
+    in order. This is additive and idempotent: existing databases upgrade in
+    place without the baseline DDL being re-run.
+    """
     for statement in SCHEMA.split(";"):
         statement = statement.strip()
         if statement:
             conn.execute(statement)
     conn.commit()
+
+    # Stamp baseline version and apply any pending forward migrations.
+    from stabilize.persistence.sqlite.migrations import apply_migrations
+
+    apply_migrations(conn)

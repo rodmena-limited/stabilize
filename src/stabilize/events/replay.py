@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from stabilize.events.base import EntityType, Event, EventType
+from stabilize.events.base import EntityType, Event, EventType, get_event_migrator
 
 logger = logging.getLogger(__name__)
 
@@ -194,8 +194,9 @@ class EventReplayer:
         """
         events = self._event_store.get_events_for_workflow(workflow_id, checkpoint_sequence)
 
+        migrator = get_event_migrator()
         for event in events:
-            event_handler(event)
+            event_handler(migrator.migrate(event, strict=False))
 
     def _load_state_from_snapshot(
         self,
@@ -214,7 +215,14 @@ class EventReplayer:
         )
 
     def _apply_event(self, state: WorkflowState, event: Event) -> None:
-        """Apply an event to update the state."""
+        """Apply an event to update the state.
+
+        Historical events are upcast to the current schema version before being
+        applied, using the global event migrator. This is lenient: with no
+        migrations registered (the default) the event is returned unchanged, so
+        behavior is identical to before.
+        """
+        event = get_event_migrator().migrate(event, strict=False)
         if event.entity_type == EntityType.WORKFLOW:
             self._apply_workflow_event(state, event)
         elif event.entity_type == EntityType.STAGE:

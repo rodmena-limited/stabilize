@@ -91,9 +91,24 @@ def execute_with_timeout(
     # Define the execution function (process-isolated or direct)
     def execute_task(s: StageExecution) -> TaskResult:
         if process_executor:
-            # Pass timeout directly to avoid race conditions with concurrent tasks
+            # Pass timeout directly to avoid race conditions with concurrent tasks.
+            # Process isolation provides hard interruption; cooperative cancellation
+            # (which relies on a shared in-process token) does not cross processes.
             return process_executor.execute(task, s, timeout_seconds=timeout.total_seconds())
-        return task.execute(s)
+        # Bind the cooperative cancellation token for this task to the worker
+        # thread so the task can check is_cancellation_requested(). No-op for
+        # tasks that never check it.
+        from stabilize.resilience.cancellation import (
+            bind_current_token,
+            get_token,
+            reset_current_token,
+        )
+
+        reset_handle = bind_current_token(get_token(message.task_id))
+        try:
+            return task.execute(s)
+        finally:
+            reset_current_token(reset_handle)
 
     # Execute through bulkhead with circuit breaker protection
     return execute_with_resilience(

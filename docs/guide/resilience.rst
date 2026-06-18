@@ -372,6 +372,100 @@ Recovery automatically:
 *   Uses idempotency to prevent duplicate work
 *   Executes pending finalizers for crashed stages
 
+.. note::
+
+   The ``max_recovery_age_hours`` cutoff is applied on the cross-application
+   path (no ``application`` filter, backed by ``get_all_pending_workflows`` —
+   available on both SQLite and PostgreSQL). The application-filtered path does
+   not currently apply the age cutoff.
+
+Automatic recovery (opt-in)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Rather than calling recovery yourself, you can have the :class:`QueueProcessor`
+run it. Both options are **disabled by default**, so existing behavior is
+unchanged:
+
+.. code-block:: python
+
+    from stabilize.queue.processor.config import QueueProcessorConfig
+
+    config = QueueProcessorConfig(
+        recover_on_start=True,            # one sweep when start() is called
+        recovery_interval_seconds=60.0,   # periodic sweeps (0 = disabled)
+        recovery_application=None,        # optional filter
+        recovery_max_age_hours=24.0,
+    )
+    processor = QueueProcessor(queue, config=config, store=store, task_registry=registry)
+    processor.start()  # recovers interrupted workflows, then begins polling
+
+``recover_on_start`` covers the single-process restart case. The periodic sweeper
+is intended for long-running / distributed deployments where a *peer* worker may
+have died — surviving workers re-queue the orphaned work. You can also trigger a
+sweep manually at any time:
+
+.. code-block:: python
+
+    results = processor.run_recovery()
+
+Recovery failures never disrupt message processing; they are caught and logged.
+
+Cooperative Cancellation
+------------------------
+
+Python cannot forcibly kill a running thread, so a thread-mode timeout or stage
+cancellation cannot interrupt a task that is already mid-execution. Long-running
+tasks can opt into **cooperative** cancellation by checking a flag the engine
+binds for the duration of execution:
+
+.. code-block:: python
+
+    from stabilize import Task, TaskResult, is_cancellation_requested
+
+    class LongTask(Task):
+        def execute(self, stage):
+            for item in items:
+                if is_cancellation_requested():
+                    return TaskResult.terminal("Canceled")
+                process(item)
+            return TaskResult.success()
+
+When a ``CancelStage`` is processed, the engine signals the cooperative token for
+any running task in that stage. Tasks that never check the flag behave exactly as
+before. ``raise_if_cancellation_requested()`` is also available and raises
+``TaskCancelledError`` (treated as terminal).
+
+For **hard** interruption of uncooperative/runaway tasks, run in process-isolation
+mode, which can terminate the worker process:
+
+.. code-block:: bash
+
+    export STABILIZE_ISOLATION_MODE=process
+
+Distributed Task Lease (opt-in)
+-------------------------------
+
+The in-process execution lock prevents one process from running the same task
+twice concurrently. In a **multi-process / multi-node** deployment, an optional
+DB-backed lease ensures that across processes only one worker executes a given
+task at a time. It is **disabled by default**:
+
+.. code-block:: bash
+
+    export STABILIZE_TASK_LEASE=1
+    export STABILIZE_TASK_LEASE_TTL_SECONDS=3600   # lease validity / steal-after
+
+When enabled, ``RunTaskHandler`` acquires a lease before executing a task and
+releases it afterward; a worker that cannot acquire the lease skips the duplicate.
+The lease table is created on demand (no migration required).
+
+.. note::
+
+   The lease *narrows* the cross-process duplicate-execution window; it is not an
+   exactly-once guarantee. A worker can crash after performing a side effect but
+   before releasing the lease (the lease then expires and recovery re-queues), so
+   tasks with external side effects should still be **idempotent**.
+
 DAG Readiness Evaluation
 ------------------------
 

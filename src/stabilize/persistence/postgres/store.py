@@ -34,6 +34,7 @@ from stabilize.persistence.postgres.operations import is_message_processed as _i
 from stabilize.persistence.postgres.operations import (
     mark_message_processed as _mark_message_processed,
 )
+from stabilize.persistence.postgres.queries import get_all_pending_workflows as _get_all_pending_workflows
 from stabilize.persistence.postgres.queries import get_downstream_stages as _get_downstream_stages
 from stabilize.persistence.postgres.queries import (
     get_merged_ancestor_outputs as _get_merged_ancestor_outputs,
@@ -408,6 +409,13 @@ class PostgresWorkflowStore(WorkflowStore):
     ) -> Iterator[Workflow]:
         """Retrieve executions by application."""
         return _retrieve_by_application(self._pool, application, criteria, self.retrieve)
+
+    def get_all_pending_workflows(
+        self,
+        criteria: WorkflowCriteria | None = None,
+    ) -> Iterator[Workflow]:
+        """Get all workflows matching criteria across all applications (for recovery)."""
+        return _get_all_pending_workflows(self._pool, criteria, self.retrieve)
 
     def pause(self, execution_id: str, paused_by: str) -> None:
         """Pause an execution."""

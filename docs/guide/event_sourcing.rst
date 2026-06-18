@@ -182,6 +182,50 @@ The ``EventReplayer`` reconstructs workflow state from events:
    from datetime import datetime, UTC
    historical = replayer.time_travel_query(workflow.id, as_of_time=some_datetime)
 
+Schema Evolution (Upcasting)
+----------------------------
+
+As your application evolves, the shape of event payloads may change. Stabilize
+can **upcast** historical events to the current schema version during replay, so
+old events are interpreted correctly by current code.
+
+Register migrations on the global event migrator. They are applied automatically
+(and leniently) on the replay path:
+
+.. code-block:: python
+
+   from stabilize.events import get_event_migrator, Event
+
+   migrator = get_event_migrator()
+
+   @migrator.register(from_version=1, to_version=2)
+   def _v1_to_v2(event: Event) -> Event:
+       data = dict(event.data)
+       data["status"] = data.pop("legacy_status", None)  # rename a field
+       return Event(
+           event_id=event.event_id,
+           event_type=event.event_type,
+           timestamp=event.timestamp,
+           sequence=event.sequence,
+           entity_type=event.entity_type,
+           entity_id=event.entity_id,
+           workflow_id=event.workflow_id,
+           version=event.version,
+           data=data,
+           metadata=event.metadata,
+           schema_version=2,
+       )
+
+Behavior:
+
+*  **No migrations registered → no-op.** Replay is byte-for-byte unchanged (this
+   is the default).
+*  **Lenient on read.** If a step in the migration chain is missing, replay does
+   not raise — the event is applied as-is. (The explicit ``migrator.migrate(...)``
+   API is strict by default for tooling that wants to fail loudly.)
+*  Upcasting targets ``CURRENT_SCHEMA_VERSION``; bump it when you introduce a new
+   event shape and register the matching migration.
+
 Event Stores
 ------------
 

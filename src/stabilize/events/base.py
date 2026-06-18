@@ -332,12 +332,16 @@ class EventMigrator:
 
         return decorator
 
-    def migrate(self, event: Event, target_version: int | None = None) -> Event:
+    def migrate(self, event: Event, target_version: int | None = None, strict: bool = True) -> Event:
         """Migrate an event to the target schema version.
 
         Args:
             event: The event to migrate
             target_version: Target version (default: CURRENT_SCHEMA_VERSION)
+            strict: When True (default), raise if a step in the migration chain is
+                missing. When False, stop walking the chain and return the event as
+                migrated so far — used on the read path so an incomplete migration
+                registry never breaks replay.
 
         Returns:
             The migrated event (or original if already at target version)
@@ -354,7 +358,9 @@ class EventMigrator:
             next_version = current + 1
             migration = self._migrations.get((current, next_version))
             if migration is None:
-                raise ValueError(f"No migration registered from schema v{current} to v{next_version}")
+                if strict:
+                    raise ValueError(f"No migration registered from schema v{current} to v{next_version}")
+                return event
             event = migration(event)
             current = next_version
 
@@ -364,3 +370,33 @@ class EventMigrator:
     def registered_migrations(self) -> list[tuple[int, int]]:
         """List all registered migration paths."""
         return sorted(self._migrations.keys())
+
+
+# Global event migrator singleton (mirrors the event-bus accessor pattern).
+# Empty by default, so replay/upcasting is a no-op until migrations are
+# registered via get_event_migrator().register(...).
+_event_migrator: EventMigrator | None = None
+
+
+def get_event_migrator() -> EventMigrator:
+    """Get the global EventMigrator, creating an empty one on first use.
+
+    Register migrations on the returned instance to have historical events
+    upcast to the current schema version automatically during replay::
+
+        migrator = get_event_migrator()
+
+        @migrator.register(from_version=1, to_version=2)
+        def _v1_to_v2(event: Event) -> Event:
+            ...
+    """
+    global _event_migrator
+    if _event_migrator is None:
+        _event_migrator = EventMigrator()
+    return _event_migrator
+
+
+def reset_event_migrator() -> None:
+    """Reset the global EventMigrator (primarily for testing)."""
+    global _event_migrator
+    _event_migrator = None
