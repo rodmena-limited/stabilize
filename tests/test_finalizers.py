@@ -233,3 +233,30 @@ class TestGlobalRegistry:
         registry2 = get_finalizer_registry()
 
         assert registry1 is not registry2
+
+
+class TestHungFinalizerTimeout:
+    """Audit finding A1-8: the per-finalizer timeout must actually be
+    enforced — a hung finalizer previously blocked _execute_one forever in
+    the ThreadPoolExecutor context-manager join, stalling graceful shutdown."""
+
+    def test_hung_finalizer_returns_promptly_as_failed(self) -> None:
+        from stabilize.finalizers import FinalizerRegistry
+
+        registry = FinalizerRegistry()
+        hang = threading.Event()
+        registry.register("stage-hung", "hung-cleanup", lambda: hang.wait(10.0))
+
+        start = time.monotonic()
+        results = registry.execute("stage-hung", timeout=0.2)
+        elapsed = time.monotonic() - start
+
+        try:
+            assert elapsed < 2.0, (
+                f"execute() blocked {elapsed:.1f}s on a hung finalizer despite a 0.2s timeout"
+            )
+            assert len(results) == 1
+            assert results[0].success is False
+            assert "Timeout" in (results[0].error or "")
+        finally:
+            hang.set()  # release the abandoned worker thread

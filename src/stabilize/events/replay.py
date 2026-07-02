@@ -126,19 +126,14 @@ class EventReplayer:
         else:
             events = self._event_store.get_events_for_workflow(workflow_id, start_sequence)
 
-        # Check for sequence gaps
-        last_seq = 0
+        # NOTE: no gap detection here. The sequence is GLOBAL across all
+        # workflows, so a single workflow's events legitimately hold
+        # non-contiguous sequences whenever workflows run concurrently;
+        # warning on those "gaps" produced false alarms on every
+        # multi-workflow replay. Per-workflow completeness cannot be judged
+        # from the global sequence.
         for event in events:
-            if last_seq > 0 and event.sequence > last_seq + 1:
-                logger.warning(
-                    "Sequence gap detected in workflow %s: %d -> %d (missing %d events)",
-                    workflow_id,
-                    last_seq,
-                    event.sequence,
-                    event.sequence - last_seq - 1,
-                )
             self._apply_event(state, event)
-            last_seq = event.sequence
 
         return state.to_dict()
 

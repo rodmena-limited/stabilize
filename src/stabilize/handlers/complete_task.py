@@ -96,8 +96,12 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
 
             logger.debug("Task %s completed with status %s", task.name, message.status)
 
-            # Record event if event recorder is configured
-            if self.event_recorder:
+            def record_completion_event() -> None:
+                # Called INSIDE the store transaction: the event joins the
+                # same commit as the task state (no phantom events) and its
+                # bus publication is deferred until after commit.
+                if not self.event_recorder:
+                    return
                 workflow_id = stage.execution.id if stage.execution else ""
                 self.set_event_context(workflow_id)
                 if message.status.is_failure:
@@ -131,6 +135,7 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
                 # Atomic: store stage only (no next message)
                 with self.repository.transaction(self.queue) as txn:
                     txn.store_stage(stage)
+                    record_completion_event()
                     if message.message_id:
                         txn.mark_message_processed(
                             message_id=message.message_id,
@@ -145,6 +150,7 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
             # Atomic: store stage + push next message together
             with self.repository.transaction(self.queue) as txn:
                 txn.store_stage(stage)
+                record_completion_event()
 
                 # Atomic deduplication
                 if message.message_id:

@@ -521,3 +521,34 @@ class TestBackwardJumpWithFanIn:
         assert CounterTask.counters.get("a") == 1
         assert CounterTask.counters.get("b") == 2
         assert CounterTask.counters.get("d") == 1
+
+
+class TestJoinResetOnRetryLoop:
+    """Audit finding A2-10: a discriminator / N-of-M join inside a jump_to
+    retry loop retained _join_fired=True after reset, so the join could
+    never re-arm on the next iteration and the workflow wedged."""
+
+    def test_reset_stage_for_retry_clears_join_tracking(self) -> None:
+        from stabilize.handlers.jump_to_stage.reset import reset_stage_for_retry
+        from stabilize.models.stage import JoinType, StageExecution
+
+        stage = StageExecution(
+            ref_id="join",
+            name="Join",
+            join_type=JoinType.DISCRIMINATOR,
+            context={
+                "_join_fired": True,
+                "_completed_branches": ["a", "b"],
+                "_activated_branches": ["a", "b"],
+                "user_key": "kept",
+            },
+        )
+        stage.status = WorkflowStatus.SUCCEEDED
+
+        reset_stage_for_retry(stage)
+
+        assert stage.status == WorkflowStatus.NOT_STARTED
+        assert "_join_fired" not in stage.context, "join can never re-arm in the retry loop"
+        assert "_completed_branches" not in stage.context
+        assert "_activated_branches" not in stage.context
+        assert stage.context["user_key"] == "kept"

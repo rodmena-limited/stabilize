@@ -137,10 +137,19 @@ class SqliteWorkflowStore(
         Yields:
             AtomicTransaction with store_stage() and push_message() methods
         """
+        from stabilize.events.txn_scope import (
+            abort_store_transaction,
+            begin_store_transaction,
+            commit_store_transaction,
+        )
         from stabilize.persistence.sqlite.transaction import AtomicTransaction
 
         conn = self._get_connection()
         txn = AtomicTransaction(conn, self)
+        # Bind a thread-local scope so event recording inside this block
+        # joins the transaction (same-database event stores) and bus
+        # publication is deferred until after commit.
+        begin_store_transaction(conn, self.connection_string)
         try:
             yield txn
             conn.commit()
@@ -148,7 +157,9 @@ class SqliteWorkflowStore(
             conn.rollback()
             # Restore in-memory versions to match rolled-back database state
             txn.rollback_versions()
+            abort_store_transaction()
             raise
+        commit_store_transaction()
 
     # ========== Message Deduplication ==========
 
