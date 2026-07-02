@@ -77,16 +77,24 @@ class TestJumpAtomicity:
         )
 
         # Inject a failure at the StartStage push — the last step of the jump.
-        from stabilize.persistence.sqlite.transaction import AtomicTransaction
+        # The transaction class differs per backend, so patch the one in use.
+        if backend == "postgres":
+            from stabilize.persistence.postgres.transaction import (
+                PostgresTransaction as _Txn,
+            )
+        else:
+            from stabilize.persistence.sqlite.transaction import (
+                AtomicTransaction as _Txn,
+            )
 
-        original_push = AtomicTransaction.push_message
+        original_push = _Txn.push_message
 
         def failing_push(self: Any, msg: Any, delay: float = 0) -> None:
             if isinstance(msg, StartStage):
                 raise RuntimeError("injected crash at jump commit")
             return original_push(self, msg, delay)
 
-        monkeypatch.setattr(AtomicTransaction, "push_message", failing_push)
+        monkeypatch.setattr(_Txn, "push_message", failing_push)
 
         with pytest.raises(RuntimeError, match="injected crash"):
             handler.handle(message)
