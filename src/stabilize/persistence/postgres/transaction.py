@@ -178,7 +178,8 @@ class PostgresTransaction(StoreTransaction):
                 )
                 return cur.rowcount == 1
 
-            owner_id = row[0]
+            # The pool uses dict_row, so rows are dict-like: access by name.
+            owner_id = row["stage_id"]
             if owner_id == stage_id:
                 return True
 
@@ -191,7 +192,7 @@ class PostgresTransaction(StoreTransaction):
                 )
                 owner_row = cur.fetchone()
                 owner_gone = owner_row is None
-                owner_terminal = owner_row is not None and WorkflowStatus[owner_row[0]].is_complete
+                owner_terminal = owner_row is not None and WorkflowStatus[owner_row["status"]].is_complete
                 if owner_gone or owner_terminal:
                     cur.execute(
                         """

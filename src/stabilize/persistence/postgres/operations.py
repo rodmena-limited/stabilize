@@ -120,7 +120,8 @@ def get_processed_message_ids(pool: Any, limit: int | None = None) -> list[str]:
                 )
             else:
                 cur.execute("SELECT message_id FROM processed_messages")
-            return [row[0] for row in cur.fetchall()]
+            # Pool uses dict_row: rows are dict-like, access by column name.
+            return [row["message_id"] for row in cur.fetchall()]
 
 
 def mark_message_processed(

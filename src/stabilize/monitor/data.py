@@ -21,6 +21,17 @@ if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
 
+
+def _count(row: Any) -> int:
+    """Read a single COUNT(*) value from a cursor row regardless of whether
+    the driver returns tuples (sqlite3.Row) or dicts (psycopg dict_row)."""
+    if row is None:
+        return 0
+    try:
+        return int(row["n"])
+    except (KeyError, TypeError, IndexError):
+        return int(row[0])
+
 # Re-export for backward compatibility
 __all__ = [
     "MonitorDataFetcher",
@@ -391,22 +402,24 @@ class MonitorDataFetcher:
                 )
                 with pool.connection() as conn:
                     with conn.cursor() as cur:
+                        # Alias the count so it works under the pool's dict_row
+                        # factory (rows are dict-like, not tuples).
                         cur.execute(
-                            f"SELECT COUNT(*) FROM {table} "
+                            f"SELECT COUNT(*) AS n FROM {table} "
                             "WHERE (locked_until IS NULL OR locked_until < NOW()) AND deliver_at <= NOW()"
                         )
-                        pending = cur.fetchone()[0]
+                        pending = _count(cur.fetchone())
                         cur.execute(
-                            f"SELECT COUNT(*) FROM {table} "
+                            f"SELECT COUNT(*) AS n FROM {table} "
                             "WHERE locked_until IS NOT NULL AND locked_until > NOW()"
                         )
-                        processing = cur.fetchone()[0]
+                        processing = _count(cur.fetchone())
                         cur.execute(
-                            f"SELECT COUNT(*) FROM {table} "
+                            f"SELECT COUNT(*) AS n FROM {table} "
                             "WHERE locked_until IS NOT NULL AND locked_until < %(threshold)s",
                             {"threshold": stuck_threshold},
                         )
-                        stuck = cur.fetchone()[0]
+                        stuck = _count(cur.fetchone())
                 return QueueStats(pending=pending, processing=processing, stuck=stuck)
 
         except Exception:
