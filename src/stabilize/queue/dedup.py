@@ -28,6 +28,7 @@ import hashlib
 import math
 import threading
 import time
+from collections.abc import Iterable
 
 
 class BloomDeduplicator:
@@ -100,6 +101,12 @@ class BloomDeduplicator:
         self._creation_time = time.monotonic()
         self._max_age_seconds = 86400.0  # 24 hours default
         self._lock = threading.Lock()
+        # A bloom negative only proves "definitely not processed" if this
+        # filter contains every processed message ID — which is false for a
+        # freshly created filter when durable state already exists (process
+        # restart) and after reset(). Callers may only skip the durable
+        # is_message_processed() check while this flag is True.
+        self._authoritative = False
 
     @staticmethod
     def _optimal_size(n: int, p: float) -> int:
@@ -207,11 +214,51 @@ class BloomDeduplicator:
         """Clear the filter (e.g., on rotation schedule).
 
         Use when the filter is too full or on a time-based schedule.
+        Revokes authority: negatives are no longer trustworthy until the
+        filter is re-hydrated from the durable store.
         """
         with self._lock:
             self._bit_array = bytearray((self._size + 7) // 8)
             self._items_added = 0
             self._creation_time = time.monotonic()
+            self._authoritative = False
+
+    @property
+    def authoritative(self) -> bool:
+        """Whether a negative from this filter proves a message is new.
+
+        True only after hydrate() has loaded every processed message ID from
+        the durable store and no reset() has happened since. While False,
+        callers must confirm negatives with the durable store.
+        """
+        with self._lock:
+            return self._authoritative
+
+    def hydrate(self, message_ids: Iterable[str]) -> int:
+        """Load processed message IDs from the durable store and grant
+        authority to bloom negatives.
+
+        The caller is responsible for passing the COMPLETE set of processed
+        message IDs (e.g. all rows of processed_messages); passing a partial
+        set would make negatives falsely trustworthy.
+
+        Args:
+            message_ids: Every processed message ID from the durable store.
+
+        Returns:
+            Number of IDs loaded.
+        """
+        count = 0
+        for message_id in message_ids:
+            positions = self._get_hash_positions(message_id)
+            with self._lock:
+                for pos in positions:
+                    self._set_bit(pos)
+                self._items_added += 1
+            count += 1
+        with self._lock:
+            self._authoritative = True
+        return count
 
     @property
     def fill_ratio(self) -> float:

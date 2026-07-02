@@ -371,12 +371,23 @@ class StartStageHandler(
         # in-memory status check and then both call _plan_stage() (which emits
         # callbacks like "PHASE START") before optimistic locking kicks in.
         # Use expected_phase="NOT_STARTED" for CAS (compare-and-swap) semantics.
-        stage.start_time = self.current_time_millis()
-        self.set_stage_status(stage, WorkflowStatus.RUNNING)
+        #
+        # A zombie re-plan (stage already RUNNING with no tasks/synthetics —
+        # the original claimer crashed between claim and plan) must CAS
+        # against the row's actual RUNNING phase: expecting NOT_STARTED can
+        # never succeed there, so every recovery attempt would be swallowed
+        # as a "duplicate claim" and the workflow wedged forever. The version
+        # check in store_stage still serializes concurrent re-planners.
+        if stage.status == WorkflowStatus.RUNNING:
+            claim_expected_phase = "RUNNING"
+        else:
+            claim_expected_phase = "NOT_STARTED"
+            stage.start_time = self.current_time_millis()
+            self.set_stage_status(stage, WorkflowStatus.RUNNING)
 
         try:
             with self.repository.transaction(self.queue) as txn:
-                txn.store_stage(stage, expected_phase="NOT_STARTED")
+                txn.store_stage(stage, expected_phase=claim_expected_phase)
         except ConcurrencyError:
             # Another handler already claimed this stage (race condition with
             # multiple upstream stages completing simultaneously). This is safe

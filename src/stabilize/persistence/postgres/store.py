@@ -30,6 +30,9 @@ from stabilize.persistence.postgres.operations import (
 from stabilize.persistence.postgres.operations import (
     cleanup_old_processed_messages as _cleanup_old_processed_messages,
 )
+from stabilize.persistence.postgres.operations import (
+    get_processed_message_ids as _get_processed_message_ids,
+)
 from stabilize.persistence.postgres.operations import is_message_processed as _is_message_processed
 from stabilize.persistence.postgres.operations import (
     mark_message_processed as _mark_message_processed,
@@ -445,6 +448,10 @@ class PostgresWorkflowStore(WorkflowStore):
     def cleanup_old_processed_messages(self, max_age_hours: float = 24.0) -> int:
         """Clean up old processed message records."""
         return _cleanup_old_processed_messages(self._pool, max_age_hours)
+
+    def get_processed_message_ids(self, limit: int | None = None) -> list[str] | None:
+        """Return processed message IDs, for hydrating an in-memory dedup cache."""
+        return _get_processed_message_ids(self._pool, limit)
 
     def is_healthy(self) -> bool:
         """Check if the database connection is healthy."""

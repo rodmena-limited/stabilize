@@ -36,6 +36,14 @@ class QueueProcessorConfig:
     # Enable message deduplication for idempotency
     enable_deduplication: bool = True
 
+    # Trust bloom-filter negatives to skip the durable is_message_processed()
+    # check. Only safe when this process is the ONLY writer to the store's
+    # processed_messages (single-process deployments): another worker marking
+    # a message processed after this bloom was hydrated would make a negative
+    # falsely conclusive. Off by default — every message is confirmed against
+    # the durable store.
+    dedup_trust_negative_cache: bool = False
+
     # --- Automatic crash recovery (opt-in; all default to disabled) ---
     # Run a one-shot recovery sweep when start() is called. This re-queues
     # workflows that were interrupted by a crash/restart. Requires a store.

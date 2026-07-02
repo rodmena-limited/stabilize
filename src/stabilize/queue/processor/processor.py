@@ -95,6 +95,11 @@ class QueueProcessor(QueueProcessorMixin):
                 "QueueProcessor created with enable_deduplication=True but no store provided. "
                 "Message deduplication will NOT work. Pass store=store to enable."
             )
+
+        # Hydrate the dedup bloom filter from durable state so its negatives
+        # are trustworthy across process restarts (see _hydrate_deduplicator).
+        if self.config.enable_deduplication and store is not None:
+            self._hydrate_deduplicator()
         self._handlers: dict[type[Message], MessageHandler[Any]] = {}
         self._running = False
         self._stopping = False  # Flag for graceful stop (stop accepting new work)
