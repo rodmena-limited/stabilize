@@ -177,6 +177,25 @@ from stabilize.verification import (
     VerifyStatus,
 )
 
+# Agentic ergonomics (additive, opt-in — see docs/guide)
+from stabilize.hitl import (
+    ApprovalTask,
+    approve,
+    get_signal,
+    reject,
+    send_signal,
+)
+from stabilize.reducers import (
+    apply_output_reducers,
+    get_reducer,
+    register_reducer,
+)
+from stabilize.streaming import (
+    StreamItem,
+    WorkflowStream,
+    emit_progress,
+)
+
 __all__ = [
     # Core models
     "WorkflowStatus",
@@ -309,4 +328,16 @@ __all__ = [
     "get_lifecycle_manager",
     "set_lifecycle_manager",
     "install_shutdown_handlers",
+    # Agentic ergonomics (streaming / HITL / reducers)
+    "WorkflowStream",
+    "StreamItem",
+    "emit_progress",
+    "ApprovalTask",
+    "approve",
+    "reject",
+    "send_signal",
+    "get_signal",
+    "register_reducer",
+    "get_reducer",
+    "apply_output_reducers",
 ]

@@ -107,6 +107,12 @@ class StageExecution(StageNavigationMixin):
     # Cancel region (WCP-25)
     cancel_region: str | None = None
 
+    # Declarative fan-in reducers (agentic ergonomics): output key -> reducer
+    # name (see stabilize.reducers). Applied when this join stage collects its
+    # upstream branches' outputs so parallel branches stop clobbering scalar
+    # keys. Persisted via context (no schema change) — see __post_init__.
+    output_reducers: dict[str, str] = field(default_factory=dict)
+
     # Back-reference to parent execution (set after construction)
     # Can be weakref (default) or strong ref (for standalone stages)
     _execution: weakref.ReferenceType[Workflow] | Workflow | None = field(default=None, repr=False)
@@ -114,6 +120,13 @@ class StageExecution(StageNavigationMixin):
     def __post_init__(self) -> None:
         if self.join_type == JoinType.N_OF_M and self.join_threshold < 0:
             raise ValueError(f"join_threshold must be >= 0 for N_OF_M join, got {self.join_threshold}")
+        # Reducers persist through the context dict (no new DB column). Mirror
+        # the constructor field into context, and rehydrate the field from
+        # context on load so both round-trip.
+        if self.output_reducers:
+            self.context.setdefault("_output_reducers", dict(self.output_reducers))
+        elif self.context.get("_output_reducers"):
+            self.output_reducers = dict(self.context["_output_reducers"])
 
     # ========== Phase-Version State Tracking ==========
 

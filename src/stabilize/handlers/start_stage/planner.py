@@ -29,8 +29,25 @@ class StartStagePlannerMixin:
         # This ensures tasks have access to upstream data even with partial loading
         ancestor_outputs = self.repository.get_merged_ancestor_outputs(stage.execution.id, stage.ref_id)
 
+        # Declarative fan-in reducers: for keys with a configured reducer,
+        # combine the per-branch upstream outputs (collect/sum/merge/...) so
+        # parallel branches stop clobbering scalar keys at the join. Only the
+        # reducer-named keys are affected; everything else keeps the existing
+        # last-write-wins merge below.
+        reducers = stage.output_reducers or stage.context.get("_output_reducers") or {}
+        if reducers:
+            from stabilize.reducers import apply_output_reducers
+
+            upstreams = self.repository.get_upstream_stages(stage.execution.id, stage.ref_id) or []
+            branch_outputs = [u.outputs for u in upstreams if u is not None and u.outputs]
+            ancestor_outputs.update(apply_output_reducers(reducers, branch_outputs))
+
         merged = ancestor_outputs
         for key, value in stage.context.items():
+            if key in reducers:
+                # A reducer produced the authoritative value for this key;
+                # do not let the join stage's own context override it.
+                continue
             if key in merged and isinstance(merged[key], list) and isinstance(value, list):
                 # Concatenate lists, avoiding duplicates
                 existing = merged[key]
