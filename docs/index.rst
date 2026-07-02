@@ -19,6 +19,7 @@ Key Features
 *   **Configuration Versioning**: Immutable configs with fingerprinting for reproducibility.
 *   **Event Sourcing**: Full audit trail, event replay, projections, and time-travel debugging.
 *   **43 Workflow Patterns**: Complete implementation of all WCP control-flow patterns (van der Aalst et al.) including OR-split/join, discriminator, N-of-M, deferred choice, milestones, mutex, signals, multi-instance, and structured loops.
+*   **Agentic Building Blocks**: Opt-in live streaming, human-in-the-loop approvals, declarative fan-in reducers, and an LLM tool-calling agent loop (see :doc:`guide/agentic`).
 *   **Observability**: Detailed structured logging and audit trails.
 
 .. toctree::
@@ -34,6 +35,7 @@ Key Features
    guide/resilience
    guide/error_handling
    guide/event_sourcing
+   guide/agentic
 
 .. toctree::
    :maxdepth: 2
@@ -54,6 +56,7 @@ Key Features
    api/tasks
    api/queue
    api/events
+   api/agentic
 
 Indices and tables
 ==================
