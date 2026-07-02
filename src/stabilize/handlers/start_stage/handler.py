@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class _ClaimBlocked(Exception):
+class _ClaimBlockedError(Exception):
     """Raised inside the claim transaction when a mutex or deferred-choice
     claim is held by another live stage; rolls the transaction back."""
 
@@ -408,15 +408,15 @@ class StartStageHandler(
                     stage.id,
                     steal_if_owner_terminal=True,
                 ):
-                    raise _ClaimBlocked("mutex")
+                    raise _ClaimBlockedError("mutex")
                 if stage.deferred_choice_group and not txn.acquire_claim(
                     message.execution_id,
                     f"choice:{stage.deferred_choice_group}",
                     stage.id,
                 ):
-                    raise _ClaimBlocked("choice")
+                    raise _ClaimBlockedError("choice")
                 txn.store_stage(stage, expected_phase=claim_expected_phase)
-        except _ClaimBlocked as blocked:
+        except _ClaimBlockedError as blocked:
             # The claim transaction rolled back: this stage did not start.
             stage.status = WorkflowStatus.NOT_STARTED
             stage.start_time = None

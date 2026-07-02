@@ -8,8 +8,8 @@ with support for filtering by event type and entity type.
 from __future__ import annotations
 
 import logging
-from collections import deque
 import threading
+from collections import deque
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass

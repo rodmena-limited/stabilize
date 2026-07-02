@@ -43,6 +43,7 @@ from team_tasks import (  # noqa: E402
     ReviewerTask,
     TestWriterTask,
 )
+
 from stabilize import (  # noqa: E402
     JoinType,
     Orchestrator,
@@ -52,9 +53,9 @@ from stabilize import (  # noqa: E402
     StageExecution,
     TaskExecution,
     TaskRegistry,
-    WorkflowStream,
-    WorkflowStatus,
     Workflow,
+    WorkflowStatus,
+    WorkflowStream,
     approve,
     recover_on_startup,
 )

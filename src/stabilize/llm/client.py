@@ -175,7 +175,8 @@ class LLMClient:
         request = urllib.request.Request(url, data=body, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                return json.loads(response.read().decode("utf-8"))
+                parsed: dict[str, Any] = json.loads(response.read().decode("utf-8"))
+                return parsed
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", errors="replace")
             raise LLMError(f"LLM request failed ({e.code}): {detail}") from e
