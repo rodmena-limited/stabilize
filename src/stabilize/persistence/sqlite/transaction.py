@@ -257,6 +257,75 @@ class AtomicTransaction(StoreTransaction):
             },
         )
 
+    def acquire_claim(
+        self,
+        execution_id: str,
+        claim_key: str,
+        stage_id: str,
+        steal_if_owner_terminal: bool = False,
+    ) -> bool:
+        """Atomically acquire a named claim within the transaction.
+
+        See StoreTransaction.acquire_claim for semantics.
+        """
+        params = {
+            "execution_id": execution_id,
+            "claim_key": claim_key,
+            "stage_id": stage_id,
+        }
+        cursor = self._conn.execute(
+            """
+            INSERT OR IGNORE INTO stage_claims (execution_id, claim_key, stage_id)
+            VALUES (:execution_id, :claim_key, :stage_id)
+            """,
+            params,
+        )
+        if cursor.rowcount == 1:
+            return True
+
+        row = self._conn.execute(
+            "SELECT stage_id FROM stage_claims WHERE execution_id = :execution_id AND claim_key = :claim_key",
+            params,
+        ).fetchone()
+        if row is None:
+            # Claim row vanished between insert and select; retry the insert.
+            cursor = self._conn.execute(
+                """
+                INSERT OR IGNORE INTO stage_claims (execution_id, claim_key, stage_id)
+                VALUES (:execution_id, :claim_key, :stage_id)
+                """,
+                params,
+            )
+            return cursor.rowcount == 1
+
+        owner_id = row[0]
+        if owner_id == stage_id:
+            return True
+
+        if steal_if_owner_terminal:
+            from stabilize.models.status import WorkflowStatus
+
+            owner_row = self._conn.execute(
+                "SELECT status FROM stage_executions WHERE id = :id",
+                {"id": owner_id},
+            ).fetchone()
+            owner_gone = owner_row is None
+            owner_terminal = owner_row is not None and WorkflowStatus[owner_row[0]].is_complete
+            if owner_gone or owner_terminal:
+                cursor = self._conn.execute(
+                    """
+                    UPDATE stage_claims
+                    SET stage_id = :stage_id, claimed_at = datetime('now', 'utc')
+                    WHERE execution_id = :execution_id
+                      AND claim_key = :claim_key
+                      AND stage_id = :owner_id
+                    """,
+                    {**params, "owner_id": owner_id},
+                )
+                return cursor.rowcount == 1
+
+        return False
+
 
 # Forward reference for type hint
 from stabilize.persistence.sqlite.store import SqliteWorkflowStore  # noqa: E402, F401

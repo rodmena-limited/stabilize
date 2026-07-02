@@ -111,6 +111,14 @@ CREATE TABLE IF NOT EXISTS processed_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_processed_messages_at
     ON processed_messages(processed_at);
+
+CREATE TABLE IF NOT EXISTS stage_claims (
+    execution_id TEXT NOT NULL,
+    claim_key TEXT NOT NULL,
+    stage_id TEXT NOT NULL,
+    claimed_at TEXT NOT NULL DEFAULT (datetime('now', 'utc')),
+    PRIMARY KEY (execution_id, claim_key)
+);
 """
 
 

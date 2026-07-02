@@ -128,6 +128,85 @@ class PostgresTransaction(StoreTransaction):
                 },
             )
 
+    def acquire_claim(
+        self,
+        execution_id: str,
+        claim_key: str,
+        stage_id: str,
+        steal_if_owner_terminal: bool = False,
+    ) -> bool:
+        """Atomically acquire a named claim within the transaction.
+
+        See StoreTransaction.acquire_claim for semantics. Under READ COMMITTED
+        a concurrent inserter blocks on the unique index until the winner
+        commits, after which the conflict resolves and the loser observes the
+        committed owner.
+        """
+        params = {
+            "execution_id": execution_id,
+            "claim_key": claim_key,
+            "stage_id": stage_id,
+        }
+        with self._conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO stage_claims (execution_id, claim_key, stage_id)
+                VALUES (%(execution_id)s, %(claim_key)s, %(stage_id)s)
+                ON CONFLICT (execution_id, claim_key) DO NOTHING
+                """,
+                params,
+            )
+            if cur.rowcount == 1:
+                return True
+
+            cur.execute(
+                """
+                SELECT stage_id FROM stage_claims
+                WHERE execution_id = %(execution_id)s AND claim_key = %(claim_key)s
+                """,
+                params,
+            )
+            row = cur.fetchone()
+            if row is None:
+                cur.execute(
+                    """
+                    INSERT INTO stage_claims (execution_id, claim_key, stage_id)
+                    VALUES (%(execution_id)s, %(claim_key)s, %(stage_id)s)
+                    ON CONFLICT (execution_id, claim_key) DO NOTHING
+                    """,
+                    params,
+                )
+                return cur.rowcount == 1
+
+            owner_id = row[0]
+            if owner_id == stage_id:
+                return True
+
+            if steal_if_owner_terminal:
+                from stabilize.models.status import WorkflowStatus
+
+                cur.execute(
+                    "SELECT status FROM stage_executions WHERE id = %(id)s",
+                    {"id": owner_id},
+                )
+                owner_row = cur.fetchone()
+                owner_gone = owner_row is None
+                owner_terminal = owner_row is not None and WorkflowStatus[owner_row[0]].is_complete
+                if owner_gone or owner_terminal:
+                    cur.execute(
+                        """
+                        UPDATE stage_claims
+                        SET stage_id = %(stage_id)s, claimed_at = NOW()
+                        WHERE execution_id = %(execution_id)s
+                          AND claim_key = %(claim_key)s
+                          AND stage_id = %(owner_id)s
+                        """,
+                        {**params, "owner_id": owner_id},
+                    )
+                    return cur.rowcount == 1
+
+            return False
+
 
 # Forward reference for type hint
 from stabilize.persistence.postgres.store import (  # noqa: E402, F401

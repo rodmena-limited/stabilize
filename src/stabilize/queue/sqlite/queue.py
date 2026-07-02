@@ -249,6 +249,24 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         self._pending.pop(msg_id, None)
         logger.debug("Acked message (id=%s)", msg_id)
 
+    def extend_lock(self, message: Message, duration: timedelta | None = None) -> bool:
+        """Extend the visibility lock of an in-flight message (heartbeat)."""
+        if not message.message_id:
+            return False
+        try:
+            msg_id = int(message.message_id)
+        except ValueError:
+            return False
+
+        locked_until = datetime.now(UTC) + (duration or self.lock_duration)
+        conn = self._get_connection()
+        cursor = conn.execute(
+            f"UPDATE {self.table_name} SET locked_until = :locked_until WHERE id = :id",
+            {"locked_until": locked_until.isoformat(), "id": msg_id},
+        )
+        conn.commit()
+        return cursor.rowcount == 1
+
     def ensure(
         self,
         message: Message,

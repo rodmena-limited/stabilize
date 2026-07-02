@@ -272,6 +272,27 @@ class PostgresQueue(Queue):
         # Invalidate size cache
         self._size_cache = None
 
+    def extend_lock(self, message: Message, duration: timedelta | None = None) -> bool:
+        """Extend the visibility lock of an in-flight message (heartbeat)."""
+        if not message.message_id:
+            return False
+        try:
+            msg_id = int(message.message_id)
+        except ValueError:
+            return False
+
+        locked_until = datetime.now(UTC) + (duration or self.lock_duration)
+        pool = self._get_pool()
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE {self.table_name} SET locked_until = %(locked_until)s WHERE id = %(id)s",
+                    {"locked_until": locked_until, "id": msg_id},
+                )
+                extended = cur.rowcount == 1
+            conn.commit()
+        return extended
+
     def ensure(
         self,
         message: Message,

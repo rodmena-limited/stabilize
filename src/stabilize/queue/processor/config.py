@@ -44,6 +44,17 @@ class QueueProcessorConfig:
     # the durable store.
     dedup_trust_negative_cache: bool = False
 
+    # Renew the queue message lock (heartbeat) while a handler is executing,
+    # so a task that outlives the queue's lock_duration is not redelivered to
+    # another worker and executed twice. The lock lapses naturally when this
+    # worker dies. Requires the queue to support extend_lock(). For
+    # multi-process deployments also consider the distributed TaskLease
+    # (RunTaskHandler(task_lease=...)) which fences duplicate task execution
+    # across workers even when messages are re-queued by recovery.
+    enable_lock_heartbeat: bool = True
+    # Seconds between heartbeats. None derives half the queue's lock_duration.
+    lock_heartbeat_interval_seconds: float | None = None
+
     # --- Automatic crash recovery (opt-in; all default to disabled) ---
     # Run a one-shot recovery sweep when start() is called. This re-queues
     # workflows that were interrupted by a crash/restart. Requires a store.

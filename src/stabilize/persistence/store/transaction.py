@@ -64,3 +64,37 @@ class StoreTransaction(ABC):
         the transaction commits successfully.
         """
         pass
+
+    def acquire_claim(
+        self,
+        execution_id: str,
+        claim_key: str,
+        stage_id: str,
+        steal_if_owner_terminal: bool = False,
+    ) -> bool:
+        """Atomically acquire a named claim for a stage within the transaction.
+
+        Used to serialize sibling stages competing for the same resource —
+        mutex keys (WCP-17/39/40) and deferred-choice groups (WCP-16) — via a
+        unique (execution_id, claim_key) row. The per-stage-row CAS cannot do
+        this: two DIFFERENT stages each pass their own row's CAS.
+
+        Args:
+            execution_id: The workflow execution
+            claim_key: Namespaced key, e.g. "mutex:<key>" or "choice:<group>"
+            stage_id: The stage attempting to acquire
+            steal_if_owner_terminal: Transfer the claim when the current
+                owner stage has reached a terminal status (mutex release
+                semantics). Leave False for claims that are decided once
+                (deferred choice).
+
+        Returns:
+            True if this stage holds the claim (newly acquired, already
+            owned, or transferred); False if another live stage holds it.
+
+        Note:
+            The default implementation returns True (no enforcement) so
+            custom store transactions without claim support keep their
+            existing behavior.
+        """
+        return True
