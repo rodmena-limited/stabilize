@@ -6,12 +6,13 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.errors.base import StabilizeError
 from stabilize.errors.transient import TransientError
+from stabilize.exceptions import VerificationError as _PublicVerificationError
 
 if TYPE_CHECKING:
     from stabilize.error_codes import ErrorCode
 
 
-class VerificationError(StabilizeError):
+class VerificationError(StabilizeError, _PublicVerificationError):
     """Verification failed.
 
     Raised when verification of stage outputs fails.

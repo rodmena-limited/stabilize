@@ -10,15 +10,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from stabilize.exceptions import StabilizeError as _PublicStabilizeError
+
 if TYPE_CHECKING:
     from stabilize.error_codes import ErrorCode
 
 
-class StabilizeBaseException(Exception):  # noqa: N818 - intentional base exception name
+class StabilizeBaseException(_PublicStabilizeError):  # noqa: N818 - intentional base exception name
     """Base exception for all Stabilize errors.
 
-    This is the root of the exception hierarchy. Use this when you want
-    an exception that bypasses all default error handling.
+    This is the root of the engine exception hierarchy. It subclasses the
+    public ``stabilize.StabilizeError`` (from stabilize.exceptions) so that
+    ``except stabilize.StabilizeError`` catches engine-raised errors too —
+    the two hierarchies used to be unrelated, silently breaking the most
+    natural user error handling. Use this when you want an exception that
+    bypasses all default ENGINE error handling (retry/recovery).
 
     Not caught by:
     - Retry logic

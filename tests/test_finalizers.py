@@ -3,6 +3,8 @@
 import threading
 import time
 
+from stabilize.models.status import WorkflowStatus
+
 import pytest
 
 from stabilize.finalizers import (
@@ -260,3 +262,84 @@ class TestHungFinalizerTimeout:
             assert "Timeout" in (results[0].error or "")
         finally:
             hang.set()  # release the abandoned worker thread
+
+
+class TestFinalizersRunOnStageTerminalStates:
+    """Audit finding A3-18: the registry documents execution 'when stages
+    enter terminal states', but the engine only executed finalizers in the
+    run-task error path and at process shutdown — successful completion and
+    cancellation leaked registered resources for the life of the process."""
+
+    def _make_env(self, tmp_path):
+        from stabilize.persistence.connection import ConnectionManager, SingletonMeta
+        from stabilize.persistence.sqlite import SqliteWorkflowStore
+        from stabilize.queue.sqlite import SqliteQueue
+
+        SingletonMeta.reset(ConnectionManager)
+        url = f"sqlite:///{tmp_path}/finalizer_terminal.db"
+        store = SqliteWorkflowStore(url, create_tables=True)
+        queue = SqliteQueue(url)
+        queue._create_table()
+        return store, queue
+
+    def _make_stage(self, store, task_status):
+        from stabilize.models.stage import StageExecution
+        from stabilize.models.task import TaskExecution
+        from stabilize.models.workflow import Workflow
+
+        task = TaskExecution.create(
+            name="t", implementing_class="noop", stage_start=True, stage_end=True
+        )
+        task.status = task_status
+        stage = StageExecution(ref_id="s", name="S", tasks=[task])
+        stage.status = WorkflowStatus.RUNNING
+        execution = Workflow.create(application="t", name="w", stages=[stage])
+        execution.status = WorkflowStatus.RUNNING
+        store.store(execution)
+        return execution, stage
+
+    def test_finalizers_run_when_stage_completes_successfully(self, tmp_path) -> None:
+        from stabilize.handlers import CompleteStageHandler
+        from stabilize.queue.messages import CompleteStage
+
+        reset_finalizer_registry()
+        store, queue = self._make_env(tmp_path)
+        execution, stage = self._make_stage(store, WorkflowStatus.SUCCEEDED)
+
+        ran: list[str] = []
+        get_finalizer_registry().register(stage.id, "release", lambda: ran.append("release"))
+
+        CompleteStageHandler(queue, store).handle(
+            CompleteStage(
+                execution_type="PIPELINE",
+                execution_id=execution.id,
+                stage_id=stage.id,
+                message_id="fin-1",
+            )
+        )
+        assert ran == ["release"], (
+            "finalizer not executed when the stage completed successfully"
+        )
+        reset_finalizer_registry()
+
+    def test_finalizers_run_when_stage_is_canceled(self, tmp_path) -> None:
+        from stabilize.handlers import CancelStageHandler
+        from stabilize.queue.messages import CancelStage
+
+        reset_finalizer_registry()
+        store, queue = self._make_env(tmp_path)
+        execution, stage = self._make_stage(store, WorkflowStatus.RUNNING)
+
+        ran: list[str] = []
+        get_finalizer_registry().register(stage.id, "release", lambda: ran.append("release"))
+
+        CancelStageHandler(queue, store).handle(
+            CancelStage(
+                execution_type="PIPELINE",
+                execution_id=execution.id,
+                stage_id=stage.id,
+                message_id="fin-2",
+            )
+        )
+        assert ran == ["release"], "finalizer not executed when the stage was canceled"
+        reset_finalizer_registry()

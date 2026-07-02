@@ -256,6 +256,13 @@ class HTTPTask(Task):
 
         # Retry configuration
         retries = context.get("retries", 0)
+        # POST/PATCH are not idempotent: a retry after a timeout or 5xx can
+        # duplicate the side effect on the server. Default keeps the existing
+        # behavior (retries apply to all methods when enabled); set
+        # retry_non_idempotent=False to restrict retries to idempotent methods.
+        if retries and not context.get("retry_non_idempotent", True) and method in {"POST", "PATCH"}:
+            logger.debug("Retries disabled for non-idempotent %s (retry_non_idempotent=False)", method)
+            retries = 0
         retry_delay = context.get("retry_delay", 1.0)
         retry_on_status = context.get("retry_on_status", DEFAULT_RETRY_ON_STATUS)
         timeout = context.get("timeout", DEFAULT_TIMEOUT)

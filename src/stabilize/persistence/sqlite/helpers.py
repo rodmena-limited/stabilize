@@ -42,7 +42,7 @@ def insert_stage(conn: sqlite3.Connection, stage: StageExecution, execution_id: 
             "name": stage.name,
             "status": stage.status.name,
             "context": json.dumps(stage.context, default=str),
-            "outputs": json.dumps(stage.outputs),
+            "outputs": json.dumps(stage.outputs, default=str),
             "requisite_stage_ref_ids": json.dumps(list(stage.requisite_stage_ref_ids)),
             "parent_stage_id": stage.parent_stage_id,
             "synthetic_stage_owner": (stage.synthetic_stage_owner.value if stage.synthetic_stage_owner else None),
@@ -99,7 +99,7 @@ def upsert_task(conn: sqlite3.Connection, task: TaskExecution, stage_id: str) ->
             "stage_end": 1 if task.stage_end else 0,
             "loop_start": 1 if task.loop_start else 0,
             "loop_end": 1 if task.loop_end else 0,
-            "task_exception_details": json.dumps(task.task_exception_details),
+            "task_exception_details": json.dumps(task.task_exception_details, default=str),
             "version": task.version,
         },
     )
@@ -131,7 +131,7 @@ def upsert_task(conn: sqlite3.Connection, task: TaskExecution, stage_id: str) ->
                     "stage_end": 1 if task.stage_end else 0,
                     "loop_start": 1 if task.loop_start else 0,
                     "loop_end": 1 if task.loop_end else 0,
-                    "task_exception_details": json.dumps(task.task_exception_details),
+                    "task_exception_details": json.dumps(task.task_exception_details, default=str),
                 },
             )
         except sqlite3.IntegrityError:

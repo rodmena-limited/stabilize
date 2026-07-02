@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 import os
 import re
-import shlex
 import subprocess
 from typing import TYPE_CHECKING, Any
 
@@ -148,8 +147,13 @@ class SSHTask(Task):
         target = f"{user}@{host}"
         ssh_cmd.append(target)
 
-        # Command - quote to prevent shell injection on remote host
-        ssh_cmd.append(shlex.quote(command))
+        # Command is passed VERBATIM as the final argv element. subprocess
+        # invokes ssh without a local shell, so quoting here would deliver
+        # the literal quote characters to the remote shell, which then treats
+        # the whole string as a single command word — breaking every command
+        # with arguments. The remote shell parses the command; it is the
+        # caller's own payload (same trust model as ShellTask's command).
+        ssh_cmd.append(command)
 
         logger.debug("SSHTask executing: %s@%s: %s", user, host, command)
 

@@ -81,19 +81,27 @@ class TaskRegistry:
         name: str,
         task: TaskImplementation,
         aliases: list[str] | None = None,
+        strict: bool = False,
     ) -> None:
         """
         Register a task implementation.
+
+        By default a duplicate name overwrites the previous registration with
+        a warning (kept for backward compatibility). Pass strict=True to make
+        duplicate registration an error.
 
         Args:
             name: The task type name
             task: Task class, instance, or callable
             aliases: Optional alternative names
+            strict: Raise instead of overwriting when name is already registered
 
         Raises:
-            ValueError: If name is already registered
+            ValueError: If name is already registered and strict=True
         """
         if name in self._tasks:
+            if strict:
+                raise ValueError(f"Task '{name}' is already registered")
             logger.warning("Overwriting existing task registration: %s", name)
 
         self._tasks[name] = task

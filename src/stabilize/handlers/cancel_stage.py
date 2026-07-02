@@ -91,6 +91,11 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
 
             # Mark stage as canceled
             self.set_stage_status(stage, WorkflowStatus.CANCELED)
+
+            # Canceled is a terminal state: release the stage's registered
+            # finalizers (containers, temp files, connections) now instead of
+            # leaking them until process shutdown.
+            self.run_stage_finalizers(stage)
             stage.end_time = self.current_time_millis()
 
             # Atomic: store stage + message deduplication

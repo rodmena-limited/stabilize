@@ -338,6 +338,11 @@ class CompleteStageHandler(
                 # Invoke on_cleanup() on all task implementations before persisting
                 self._invoke_task_cleanup(stage)
 
+                # Execute registered finalizers: the stage is entering a
+                # terminal state (SUCCEEDED/FAILED/SKIPPED/...), which is the
+                # documented finalizer trigger — not just process shutdown.
+                self.run_stage_finalizers(stage)
+
                 logger.info("Stage %s completed with status %s", stage.name, status)
 
                 # Handle FAILED_CONTINUE propagation to parent
@@ -539,6 +544,7 @@ class CompleteStageHandler(
                 self.set_stage_status(stage, WorkflowStatus.TERMINAL)
                 stage.end_time = self.current_time_millis()
                 self._invoke_task_cleanup(stage)
+                self.run_stage_finalizers(stage)
 
                 # Atomic: store stage + cancel + complete workflow
                 with self.repository.transaction(self.queue) as txn:
