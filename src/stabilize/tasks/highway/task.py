@@ -117,9 +117,9 @@ class HighwayTask(RetryableTask):
 
         # Log config for debugging (helps diagnose endpoint/key issues)
         logger.info(
-            "Highway config: endpoint=%s, api_key=%s...",
+            "Highway config: endpoint=%s, api_key=%s",
             config.api_endpoint,
-            config.api_key[:15] if len(config.api_key) > 15 else "(short key)",
+            "(set)" if config.api_key else "(missing)",
         )
 
         # Phase 1: Submit (if not already submitted)

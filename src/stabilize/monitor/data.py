@@ -380,6 +380,35 @@ class MonitorDataFetcher:
 
                 return QueueStats(pending=pending, processing=processing, stuck=stuck)
 
+            # Postgres queues expose a connection pool rather than the
+            # ConnectionManager+connection_string pair. Query the same stats
+            # so `stabilize monitor` is not blank on Postgres deployments.
+            if hasattr(self.queue, "_get_pool") or hasattr(self.queue, "_pool"):
+                pool = self.queue._get_pool() if hasattr(self.queue, "_get_pool") else self.queue._pool
+                table = getattr(self.queue, "table_name", "queue_messages")
+                stuck_threshold = datetime.fromtimestamp(
+                    int(time.time()) - self.stuck_threshold_seconds
+                )
+                with pool.connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            f"SELECT COUNT(*) FROM {table} "
+                            "WHERE (locked_until IS NULL OR locked_until < NOW()) AND deliver_at <= NOW()"
+                        )
+                        pending = cur.fetchone()[0]
+                        cur.execute(
+                            f"SELECT COUNT(*) FROM {table} "
+                            "WHERE locked_until IS NOT NULL AND locked_until > NOW()"
+                        )
+                        processing = cur.fetchone()[0]
+                        cur.execute(
+                            f"SELECT COUNT(*) FROM {table} "
+                            "WHERE locked_until IS NOT NULL AND locked_until < %(threshold)s",
+                            {"threshold": stuck_threshold},
+                        )
+                        stuck = cur.fetchone()[0]
+                return QueueStats(pending=pending, processing=processing, stuck=stuck)
+
         except Exception:
             pass
 

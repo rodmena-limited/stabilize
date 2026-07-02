@@ -127,26 +127,29 @@ class ProcessIsolatedTaskExecutor:
         process.start()
 
         try:
-            # Wait for result with timeout
-            # We add a small buffer to the process join timeout to allow queue put
-            process.join(timeout=effective_timeout)
+            # Drain the result BEFORE joining. A child putting a large result
+            # blocks on the pipe until the parent reads it; joining first
+            # deadlocks until the timeout and misreports the task as timed
+            # out (then kills a healthy child).
+            import queue as queue_module
 
-            if process.is_alive():
-                process.terminate()
-                process.join(timeout=5)
+            try:
+                result_wrapper: ProcessResult = queue.get(timeout=effective_timeout)
+            except queue_module.Empty:
                 if process.is_alive():
-                    process.kill()
-                return TaskResult.terminal(error=f"Task timed out after {effective_timeout}s (Process enforced)")
-
-            if process.exitcode != 0:
-                # Process crashed (segfault, OOM, etc.)
-                return TaskResult.terminal(error=f"Worker process crashed with exit code {process.exitcode}")
-
-            # Check queue for result
-            if queue.empty():
+                    process.terminate()
+                    process.join(timeout=5)
+                    if process.is_alive():
+                        process.kill()
+                    return TaskResult.terminal(error=f"Task timed out after {effective_timeout}s (Process enforced)")
+                # Process died without producing a result
+                process.join(timeout=5)
+                if process.exitcode != 0:
+                    return TaskResult.terminal(error=f"Worker process crashed with exit code {process.exitcode}")
                 return TaskResult.terminal(error="Worker process finished but returned no result")
 
-            result_wrapper: ProcessResult = queue.get()
+            # Result received; the child exits right after the put.
+            process.join(timeout=10)
 
             if result_wrapper.success and result_wrapper.result:
                 return result_wrapper.result

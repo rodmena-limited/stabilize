@@ -52,7 +52,10 @@ def process_response(
         response_obj = response
 
     content_type = response_headers.get("Content-Type", "")
-    content_length = int(response_headers.get("Content-Length", 0))
+    try:
+        content_length = int(response_headers.get("Content-Length", 0))
+    except (TypeError, ValueError):
+        content_length = 0  # malformed header must not crash response handling
 
     # Get final URL (after redirects)
     final_url = response_obj.geturl() if hasattr(response_obj, "geturl") else url

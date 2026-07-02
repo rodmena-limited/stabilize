@@ -342,14 +342,18 @@ class WorkflowRecovery:
                         )
                 elif not_started_tasks and stage.start_time is not None:
                     first_task = not_started_tasks[0]
-                    recovery_messages.append(
-                        StartTask(
-                            execution_type=full_workflow.type.value,
-                            execution_id=full_workflow.id,
-                            stage_id=stage.id,
-                            task_id=first_task.id,
+                    # Mirror the running-task guard: skip if a message for this
+                    # task is already queued, so a recovery sweep overlapping
+                    # normal progress cannot enqueue a duplicate StartTask.
+                    if not self.queue.has_pending_message_for_task(first_task.id):
+                        recovery_messages.append(
+                            StartTask(
+                                execution_type=full_workflow.type.value,
+                                execution_id=full_workflow.id,
+                                stage_id=stage.id,
+                                task_id=first_task.id,
+                            )
                         )
-                    )
                 else:
                     recovery_messages.append(
                         StartStage(

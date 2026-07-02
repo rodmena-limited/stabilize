@@ -101,8 +101,13 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         delay: timedelta | None = None,
         connection: Any | None = None,
     ) -> None:
-        """Push a message onto the queue."""
-        conn = self._get_connection()
+        """Push a message onto the queue.
+
+        When a connection is provided the insert joins the caller's
+        transaction and is NOT committed here (the caller commits).
+        """
+        external_connection = connection is not None
+        conn = connection if external_connection else self._get_connection()
         deliver_at = datetime.now(UTC)
         if delay:
             deliver_at += delay
@@ -125,7 +130,10 @@ class SqliteQueue(SqliteDLQMixin, Queue):
                 "max_attempts": self.max_attempts,
             },
         )
-        conn.commit()
+        # Only commit when we own the connection; with an external connection
+        # the caller's transaction controls the commit (atomicity contract).
+        if not external_connection:
+            conn.commit()
 
         logger.debug("Pushed %s (id=%s, deliver_at=%s)", message_type, message_id, deliver_at)
 
