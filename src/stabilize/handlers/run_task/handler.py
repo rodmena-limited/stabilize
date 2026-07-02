@@ -322,21 +322,21 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
 
             # Opt-in distributed lease: across processes, only one worker runs a
             # given task at a time. Disabled by default (self.task_lease is None).
+            # Acquired INSIDE the try so an acquire() failure (store hiccup)
+            # cannot leak the executing-tasks entry or the cancellation token
+            # and wedge this task until the staleness eviction.
             lease_acquired = False
-            if self.task_lease is not None:
-                lease_acquired = self.task_lease.acquire(task_model.id)
-                if not lease_acquired:
-                    logger.debug(
-                        "Skipping RunTask for %s - lease held by another worker",
-                        task_model.name,
-                    )
-                    with RunTaskHandler._executing_lock:
-                        RunTaskHandler._executing_tasks.pop(task_model.id, None)
-                    unregister_token(task_model.id)
-                    return
-
-            # Execute the task with timeout enforcement
             try:
+                if self.task_lease is not None:
+                    lease_acquired = self.task_lease.acquire(task_model.id)
+                    if not lease_acquired:
+                        logger.debug(
+                            "Skipping RunTask for %s - lease held by another worker",
+                            task_model.name,
+                        )
+                        return
+
+                # Execute the task with timeout enforcement
                 timeout = self.timeout_manager.get_task_timeout(stage, task)
                 with Timer(
                     "task_execution_seconds",

@@ -313,6 +313,28 @@ class StabilizeHandler(MessageHandler[M], ABC):
 
     # ========== Utility Methods ==========
 
+    def run_stage_finalizers(self, stage: StageExecution) -> None:
+        """Execute registered finalizers for a stage entering a terminal state.
+
+        Best-effort: failures are logged and never prevent stage/workflow
+        completion. Finalizers are removed from the registry once executed.
+        """
+        try:
+            from stabilize.finalizers import get_finalizer_registry
+
+            results = get_finalizer_registry().execute(stage.id)
+            failed = [r for r in results if not r.success]
+            if failed:
+                logger.warning(
+                    "Stage %s: %d/%d finalizers failed: %s",
+                    stage.name,
+                    len(failed),
+                    len(results),
+                    [r.name for r in failed],
+                )
+        except Exception as e:
+            logger.warning("Error executing finalizers for stage %s: %s", stage.name, e)
+
     def current_time_millis(self) -> int:
         """Get current time in milliseconds."""
         return int(time.time() * 1000)

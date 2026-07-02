@@ -76,7 +76,7 @@ def buffer_signal(
             "execution_id": execution_id,
             "stage_ref_id": stage_ref_id,
             "signal_name": signal_name,
-            "signal_data": json.dumps(signal_data or {}),
+            "signal_data": json.dumps(signal_data or {}, default=str),
         },
     )
     return cursor.lastrowid or 0

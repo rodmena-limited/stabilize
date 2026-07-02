@@ -19,6 +19,11 @@ def reset_stage_for_retry(stage: StageExecution) -> None:
     stage.start_time = None
     stage.end_time = None
     stage.outputs = {}
+    # Re-arm join/split tracking: a fired discriminator or N-of-M join would
+    # otherwise never become READY again inside a jump_to retry loop, and a
+    # split's recorded branch activations belong to the previous iteration.
+    for key in ("_join_fired", "_completed_branches", "_activated_branches"):
+        stage.context.pop(key, None)
     for task in stage.tasks:
         task.status = WorkflowStatus.NOT_STARTED
         task.start_time = None

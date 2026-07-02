@@ -192,41 +192,48 @@ class FinalizerRegistry:
         start_time = time.monotonic()
 
         try:
-            # Use a thread pool to enforce timeout
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(finalizer.callback)
-                try:
-                    future.result(timeout=timeout)
-                    duration_ms = (time.monotonic() - start_time) * 1000
+            # Use a thread pool to enforce timeout. Deliberately NOT a
+            # context manager: __exit__ would join the worker thread, so a
+            # hung finalizer would block this call forever right after its
+            # timeout was detected — stalling graceful shutdown. On timeout
+            # the executor is shut down without waiting and the hung thread
+            # is abandoned.
+            executor = ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(finalizer.callback)
+            try:
+                future.result(timeout=timeout)
+                duration_ms = (time.monotonic() - start_time) * 1000
 
-                    logger.debug(
-                        "Finalizer '%s' completed in %.1fms",
-                        finalizer.name,
-                        duration_ms,
-                    )
+                logger.debug(
+                    "Finalizer '%s' completed in %.1fms",
+                    finalizer.name,
+                    duration_ms,
+                )
 
-                    return FinalizerResult(
-                        name=finalizer.name,
-                        success=True,
-                        duration_ms=duration_ms,
-                    )
+                executor.shutdown(wait=False)
+                return FinalizerResult(
+                    name=finalizer.name,
+                    success=True,
+                    duration_ms=duration_ms,
+                )
 
-                except FuturesTimeoutError:
-                    duration_ms = (time.monotonic() - start_time) * 1000
-                    error = f"Timeout after {timeout}s"
+            except FuturesTimeoutError:
+                duration_ms = (time.monotonic() - start_time) * 1000
+                error = f"Timeout after {timeout}s"
 
-                    logger.warning(
-                        "Finalizer '%s' timed out after %.1fms",
-                        finalizer.name,
-                        duration_ms,
-                    )
+                logger.warning(
+                    "Finalizer '%s' timed out after %.1fms",
+                    finalizer.name,
+                    duration_ms,
+                )
 
-                    return FinalizerResult(
-                        name=finalizer.name,
-                        success=False,
-                        error=error,
-                        duration_ms=duration_ms,
-                    )
+                executor.shutdown(wait=False, cancel_futures=True)
+                return FinalizerResult(
+                    name=finalizer.name,
+                    success=False,
+                    error=error,
+                    duration_ms=duration_ms,
+                )
 
         except Exception as e:
             duration_ms = (time.monotonic() - start_time) * 1000

@@ -141,6 +141,26 @@ class Queue(ABC):
         """
         return False
 
+    def extend_lock(self, message: Message, duration: timedelta | None = None) -> bool:
+        """Extend the visibility lock of an in-flight message (heartbeat).
+
+        Called periodically by the processor while a handler is still
+        executing, so the message does not become visible to other pollers
+        (and get re-executed) just because it outlived lock_duration. The
+        lock lapses naturally when the processing worker dies.
+
+        Args:
+            message: The in-flight message whose lock to renew
+            duration: Lock extension from now (defaults to the queue's
+                lock_duration)
+
+        Returns:
+            True if the lock was extended; False if unsupported or the
+            message no longer exists.
+        """
+        # Default implementation: heartbeating not supported
+        return False
+
 
 @dataclass(order=True)
 class QueuedMessage:

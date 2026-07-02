@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -48,22 +49,36 @@ class AuditLogger(Protocol):
     def log(self, event: AuditEvent) -> None: ...
 
 
+class LogAuditLogger:
+    """Bridge audit events to the process log with an AUDIT prefix."""
+
+    def log(self, event: AuditEvent) -> None:
+        """Log the event to the standard logger."""
+        logger.info("AUDIT: %s", event.to_json())
+
+
 class FileAuditLogger:
-    """Log audit events to a secure file."""
+    """Append audit events as JSON lines to a file (created with mode 600)."""
 
     def __init__(self, filepath: str = "audit.log") -> None:
         self.filepath = filepath
 
     def log(self, event: AuditEvent) -> None:
-        """Write event to audit log file."""
-        # implementation would likely use a rotating file handler in production
-        # ensuring permission bits are restricted (600)
+        """Append the event to the audit log file and the process log."""
         entry = event.to_json()
-        logger.info("AUDIT: %s", entry)  # For now, bridge to main log with AUDIT prefix
+        try:
+            fd = os.open(self.filepath, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(fd, "a") as f:
+                f.write(entry + "\n")
+        except OSError as e:
+            logger.warning("Failed to write audit log %s: %s", self.filepath, e)
+        logger.info("AUDIT: %s", entry)
 
 
-# Global audit logger instance
-_audit_logger: AuditLogger = FileAuditLogger()
+# Global audit logger instance. Log-only by default: merely importing/using
+# stabilize must not start writing audit files into the working directory.
+# Opt in to file auditing with set_audit_logger(FileAuditLogger(path)).
+_audit_logger: AuditLogger = LogAuditLogger()
 
 
 def set_audit_logger(logger: AuditLogger) -> None:

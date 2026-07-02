@@ -95,6 +95,11 @@ class QueueProcessor(QueueProcessorMixin):
                 "QueueProcessor created with enable_deduplication=True but no store provided. "
                 "Message deduplication will NOT work. Pass store=store to enable."
             )
+
+        # Hydrate the dedup bloom filter from durable state so its negatives
+        # are trustworthy across process restarts (see _hydrate_deduplicator).
+        if self.config.enable_deduplication and store is not None:
+            self._hydrate_deduplicator()
         self._handlers: dict[type[Message], MessageHandler[Any]] = {}
         self._running = False
         self._stopping = False  # Flag for graceful stop (stop accepting new work)
@@ -340,6 +345,47 @@ class QueueProcessor(QueueProcessorMixin):
                     break
                 time.sleep(poll_interval)
 
+    def _start_lock_heartbeat(self, message: Message) -> threading.Event | None:
+        """Start a heartbeat that renews the message's queue lock while its
+        handler executes.
+
+        Without renewal, a handler outliving the queue's lock_duration lets
+        the message become visible again and a second worker re-executes
+        still-running, side-effecting work. Returns the stop event, or None
+        when heartbeating is disabled or unsupported by the queue.
+        """
+        if not getattr(self.config, "enable_lock_heartbeat", False):
+            return None
+        if getattr(message, "message_id", None) is None:
+            return None
+        extend = getattr(self.queue, "extend_lock", None)
+        if extend is None or not callable(extend):
+            return None
+
+        interval = self.config.lock_heartbeat_interval_seconds
+        if interval is None:
+            lock_duration = getattr(self.queue, "lock_duration", None)
+            interval = lock_duration.total_seconds() / 2.0 if lock_duration is not None else 30.0
+        interval = max(0.05, float(interval))
+
+        stop = threading.Event()
+
+        def beat() -> None:
+            while not stop.wait(interval):
+                try:
+                    if not extend(message):
+                        return  # message gone (acked/moved); nothing to renew
+                except Exception as e:
+                    logger.warning(
+                        "Lock heartbeat failed for %s: %s",
+                        get_message_type_name(message),
+                        e,
+                    )
+                    return
+
+        threading.Thread(target=beat, daemon=True, name="stabilize-lock-heartbeat").start()
+        return stop
+
     def _submit_message(self, message: Message) -> None:
         """Submit a message to the thread pool for processing.
 
@@ -360,6 +406,7 @@ class QueueProcessor(QueueProcessorMixin):
             if msg_id:
                 with self._in_flight_lock:
                     self._in_flight.add(msg_id)
+            heartbeat_stop = self._start_lock_heartbeat(message)
             try:
                 self._handle_message(message)
                 self.queue.ack(message)
@@ -376,6 +423,8 @@ class QueueProcessor(QueueProcessorMixin):
                 # Message will be reprocessed after lock expires or reschedule
                 self.queue.reschedule(message, self.config.retry_delay)
             finally:
+                if heartbeat_stop is not None:
+                    heartbeat_stop.set()
                 if msg_id:
                     with self._in_flight_lock:
                         self._in_flight.discard(msg_id)

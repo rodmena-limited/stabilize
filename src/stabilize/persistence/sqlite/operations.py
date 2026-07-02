@@ -121,6 +121,21 @@ def is_message_processed(
     return result is not None
 
 
+def get_processed_message_ids(
+    conn: sqlite3.Connection,
+    limit: int | None = None,
+) -> list[str]:
+    """Return processed message IDs, for hydrating an in-memory dedup cache."""
+    if limit is not None:
+        rows = conn.execute(
+            "SELECT message_id FROM processed_messages LIMIT :limit",
+            {"limit": limit},
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT message_id FROM processed_messages").fetchall()
+    return [row[0] for row in rows]
+
+
 def mark_message_processed(
     conn: sqlite3.Connection,
     message_id: str,

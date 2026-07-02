@@ -42,7 +42,7 @@ def insert_stage(cur: Any, stage: StageExecution, execution_id: str) -> None:
             "name": stage.name,
             "status": stage.status.name,
             "context": json.dumps(stage.context, default=str),
-            "outputs": json.dumps(stage.outputs),
+            "outputs": json.dumps(stage.outputs, default=str),
             "requisite_stage_ref_ids": list(stage.requisite_stage_ref_ids),
             "parent_stage_id": stage.parent_stage_id,
             "synthetic_stage_owner": (stage.synthetic_stage_owner.value if stage.synthetic_stage_owner else None),
@@ -100,7 +100,7 @@ def upsert_task(cur: Any, task: TaskExecution, stage_id: str) -> None:
             "stage_end": task.stage_end,
             "loop_start": task.loop_start,
             "loop_end": task.loop_end,
-            "task_exception_details": json.dumps(task.task_exception_details),
+            "task_exception_details": json.dumps(task.task_exception_details, default=str),
         },
     )
 
@@ -132,7 +132,7 @@ def upsert_tasks_bulk(cur: Any, tasks: list[TaskExecution], stage_id: str) -> No
             "stage_end": task.stage_end,
             "loop_start": task.loop_start,
             "loop_end": task.loop_end,
-            "task_exception_details": json.dumps(task.task_exception_details),
+            "task_exception_details": json.dumps(task.task_exception_details, default=str),
             "version": task.version,
         }
 

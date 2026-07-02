@@ -21,6 +21,9 @@ from typing import TYPE_CHECKING
 from stabilize.persistence.sqlite.operations import (
     cleanup_old_processed_messages as _cleanup_old_processed_messages,
 )
+from stabilize.persistence.sqlite.operations import (
+    get_processed_message_ids as _get_processed_message_ids,
+)
 from stabilize.persistence.sqlite.operations import is_message_processed as _is_message_processed
 from stabilize.persistence.sqlite.operations import (
     mark_message_processed as _mark_message_processed,
@@ -134,10 +137,19 @@ class SqliteWorkflowStore(
         Yields:
             AtomicTransaction with store_stage() and push_message() methods
         """
+        from stabilize.events.txn_scope import (
+            abort_store_transaction,
+            begin_store_transaction,
+            commit_store_transaction,
+        )
         from stabilize.persistence.sqlite.transaction import AtomicTransaction
 
         conn = self._get_connection()
         txn = AtomicTransaction(conn, self)
+        # Bind a thread-local scope so event recording inside this block
+        # joins the transaction (same-database event stores) and bus
+        # publication is deferred until after commit.
+        begin_store_transaction(conn, self.connection_string)
         try:
             yield txn
             conn.commit()
@@ -145,7 +157,9 @@ class SqliteWorkflowStore(
             conn.rollback()
             # Restore in-memory versions to match rolled-back database state
             txn.rollback_versions()
+            abort_store_transaction()
             raise
+        commit_store_transaction()
 
     # ========== Message Deduplication ==========
 
@@ -165,3 +179,7 @@ class SqliteWorkflowStore(
     def cleanup_old_processed_messages(self, max_age_hours: float = 24.0) -> int:
         """Clean up old processed message records."""
         return _cleanup_old_processed_messages(self._get_connection(), max_age_hours)
+
+    def get_processed_message_ids(self, limit: int | None = None) -> list[str] | None:
+        """Return processed message IDs, for hydrating an in-memory dedup cache."""
+        return _get_processed_message_ids(self._get_connection(), limit)

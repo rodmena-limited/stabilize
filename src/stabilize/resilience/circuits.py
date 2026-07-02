@@ -8,6 +8,7 @@ from resilient_circuit.
 from __future__ import annotations
 
 import logging
+import threading
 from collections import OrderedDict
 from datetime import timedelta
 from typing import TYPE_CHECKING
@@ -139,6 +140,10 @@ class WorkflowCircuitFactory:
         self.config = config
         self._storage = _create_storage(config.database_url)
         self._circuits: OrderedDict[tuple[str, str], CircuitProtectorPolicy] = OrderedDict()
+        # get_circuit/clear_workflow_circuits run on concurrent QueueProcessor
+        # worker threads; OrderedDict mutation (move_to_end/popitem/del) is not
+        # thread-safe on its own.
+        self._lock = threading.Lock()
 
     def get_circuit(
         self,
@@ -157,26 +162,27 @@ class WorkflowCircuitFactory:
         """
         key = (workflow_execution_id, task_type)
 
-        if key in self._circuits:
-            # Move to end (most recently used)
-            self._circuits.move_to_end(key)
-            return self._circuits[key]
+        with self._lock:
+            if key in self._circuits:
+                # Move to end (most recently used)
+                self._circuits.move_to_end(key)
+                return self._circuits[key]
 
-        # Evict if full
-        if len(self._circuits) >= self.config.circuit_cache_size:
-            # Remove oldest (first item)
-            self._circuits.popitem(last=False)
+            # Evict if full
+            if len(self._circuits) >= self.config.circuit_cache_size:
+                # Remove oldest (first item)
+                self._circuits.popitem(last=False)
 
-        circuit = CircuitProtectorPolicy(
-            resource_key=task_type,
-            storage=self._storage,
-            namespace=workflow_execution_id,
-            failure_limit=self.config.circuit_failure_threshold,
-            cooldown=timedelta(seconds=self.config.circuit_cooldown_seconds),
-            # Don't trip circuit on TransientErrors - they're expected retryable failures
-            should_handle=_should_trip_circuit,
-        )
-        self._circuits[key] = circuit
+            circuit = CircuitProtectorPolicy(
+                resource_key=task_type,
+                storage=self._storage,
+                namespace=workflow_execution_id,
+                failure_limit=self.config.circuit_failure_threshold,
+                cooldown=timedelta(seconds=self.config.circuit_cooldown_seconds),
+                # Don't trip circuit on TransientErrors - they're expected retryable failures
+                should_handle=_should_trip_circuit,
+            )
+            self._circuits[key] = circuit
         logger.debug(
             "Created circuit breaker for workflow=%s, task_type=%s",
             workflow_execution_id,
@@ -194,9 +200,10 @@ class WorkflowCircuitFactory:
         Args:
             workflow_execution_id: The workflow execution ID
         """
-        keys_to_remove = [key for key in self._circuits if key[0] == workflow_execution_id]
-        for key in keys_to_remove:
-            del self._circuits[key]
+        with self._lock:
+            keys_to_remove = [key for key in self._circuits if key[0] == workflow_execution_id]
+            for key in keys_to_remove:
+                del self._circuits[key]
 
         if keys_to_remove:
             logger.debug("Cleared %d circuit(s) for workflow=%s", len(keys_to_remove), workflow_execution_id)

@@ -83,69 +83,57 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
     def message_type(self) -> type[JumpToStage]:
         return JumpToStage
 
-    def _reload_reset_and_store(
-        self,
-        stage_id: str,
-        context_updates: dict[str, Any] | None = None,
-        target_status: WorkflowStatus = WorkflowStatus.NOT_STARTED,
-    ) -> None:
-        """Reload a stage from DB, apply status change, and store it.
-
-        This pattern ensures we always have the latest version number before
-        storing, preventing optimistic locking failures due to stale versions.
-
-        Args:
-            stage_id: The stage ID to reload and update
-            context_updates: Optional context updates to apply
-            target_status: The status to set (NOT_STARTED, SUCCEEDED, SKIPPED)
-        """
-        # Reload fresh from DB to get current version
-        fresh_stage = self.repository.retrieve_stage(stage_id)
-        if fresh_stage is None:
-            logger.warning("Stage %s not found during reload", stage_id)
-            return
-
-        end_time = self.current_time_millis()
-
-        if target_status == WorkflowStatus.NOT_STARTED:
-            reset_stage_for_retry(fresh_stage)
-        elif target_status == WorkflowStatus.SUCCEEDED:
-            reset_stage_to_succeeded(fresh_stage, end_time)
-        elif target_status == WorkflowStatus.SKIPPED:
-            reset_stage_to_skipped(fresh_stage, end_time)
-        elif target_status == WorkflowStatus.TERMINAL:
-            reset_stage_to_terminal(fresh_stage, end_time)
-        else:
-            fresh_stage.status = target_status
-
-        if context_updates:
-            fresh_stage.context.update(context_updates)
-
-        self.repository.store_stage(fresh_stage)
-
-    def _reset_synthetics_for_stage(self, execution_id: str, parent_stage_id: str) -> None:
-        """Reset all synthetic stages for a given parent stage.
-
-        This ensures that when a stage is reset (e.g. for retry), its synthetic
-        stages (setup/teardown) are also reset and re-executed.
-        """
-        synthetics = self.repository.get_synthetic_stages(execution_id, parent_stage_id)
-        if not synthetics:
-            return
-
-        for stage in synthetics:
-            logger.debug("Resetting synthetic stage: %s", stage.ref_id)
-            self.retry_on_concurrency_error(
-                partial(self._reload_reset_and_store, stage.id),
-                f"resetting synthetic stage {stage.ref_id}",
-            )
-
     def handle(self, message: JumpToStage) -> None:
         """Handle the JumpToStage message."""
         self.retry_on_concurrency_error(
             lambda: self._handle_with_retry(message),
             f"jumping to stage {message.target_stage_ref_id}",
         )
+
+    def _synthetic_reset_mutations(
+        self,
+        execution_id: str,
+        parent_stage_id: str,
+    ) -> list[tuple[str, Any]]:
+        """Collect reset mutations for a stage's synthetic children."""
+        synthetics = self.repository.get_synthetic_stages(execution_id, parent_stage_id) or []
+        return [(s.id, reset_stage_for_retry) for s in synthetics]
+
+    def _apply_jump(
+        self,
+        mutations: list[tuple[str, Any]],
+        message: JumpToStage,
+        messages_to_push: list[Any],
+    ) -> None:
+        """Apply every stage mutation of a jump plus its follow-on messages in
+        ONE transaction.
+
+        A jump that commits stage-by-stage can crash half-applied: the source
+        already SUCCEEDED while skip-region stages are still startable, which
+        recovery then starts, contrary to the jump's semantics. Each attempt
+        reloads fresh rows so optimistic-lock retries operate on current
+        versions; the whole transaction rolls back and retries on conflict.
+        """
+
+        def attempt() -> None:
+            with self.repository.transaction(self.queue) as txn:
+                for stage_id, mutate in mutations:
+                    fresh = self.repository.retrieve_stage(stage_id)
+                    if fresh is None:
+                        logger.warning("Stage %s not found during jump; skipping", stage_id)
+                        continue
+                    mutate(fresh)
+                    txn.store_stage(fresh)
+                if message.message_id:
+                    txn.mark_message_processed(
+                        message_id=message.message_id,
+                        handler_type="JumpToStage",
+                        execution_id=message.execution_id,
+                    )
+                for msg in messages_to_push:
+                    txn.push_message(msg)
+
+        self.retry_on_concurrency_error(attempt, "applying jump atomically")
 
     def _handle_with_retry(self, message: JumpToStage) -> None:
         """Handle jump with concurrency retry support."""
@@ -179,11 +167,19 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             if not self._check_jump_count(message, execution, source_stage):
                 return
 
-            # Reset target stage
+            # Reset target stage (in-memory; persisted atomically below)
             reset_stage_for_retry(target_stage)
 
+            # Collect every stage mutation of this jump; they are applied in
+            # ONE transaction together with the StartStage push at the end.
+            mutations: list[tuple[str, Any]] = []
+
             # Reset all downstream stages that depend on target (for retry loops)
-            self._reset_downstream_stages(message, execution, source_stage, target_stage)
+            for downstream in get_resettable_downstream_stages(execution, target_stage.ref_id):
+                if downstream.id != source_stage.id and downstream.id != target_stage.id:
+                    logger.debug("Resetting downstream stage: %s", downstream.ref_id)
+                    mutations.append((downstream.id, reset_stage_for_retry))
+                    mutations.extend(self._synthetic_reset_mutations(message.execution_id, downstream.id))
 
             # Determine if this is a forward or backward jump
             downstream_stages = get_downstream_stages(execution, target_stage.ref_id)
@@ -199,7 +195,15 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             )
 
             # Handle source stage based on jump direction
-            self._handle_source_stage(message, execution, source_stage, target_stage, is_backward_jump)
+            if not is_backward_jump:
+                # Forward jump: mark all stages between source and target SKIPPED
+                end_time = self.current_time_millis()
+                for skipped in get_skipped_stages(execution, source_stage, target_stage):
+                    if skipped.status == WorkflowStatus.NOT_STARTED:
+                        logger.debug("Marking skipped stage: %s", skipped.ref_id)
+                        mutations.append(
+                            (skipped.id, partial(reset_stage_to_skipped, end_time=end_time))
+                        )
 
             # Get jump count for context updates
             jump_count = source_stage.context.get("_jump_count", 0)
@@ -245,62 +249,56 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                 max_jumps,
             )
 
-            # Store source stage if not self-loop
+            # Source stage mutation if not self-loop
             if not is_self_loop:
                 source_context_updates = {
                     "_jump_count": new_jump_count,
                     "_jump_history": jump_history,
                 }
-                source_target_status = WorkflowStatus.NOT_STARTED if is_backward_jump else WorkflowStatus.SUCCEEDED
-                self.retry_on_concurrency_error(
-                    partial(
-                        self._reload_reset_and_store,
-                        source_stage.id,
-                        source_context_updates,
-                        source_target_status,
-                    ),
-                    f"storing source stage {source_stage.ref_id}",
-                )
+                if is_backward_jump:
+
+                    def mutate_source(s: StageExecution, updates: dict[str, Any] = source_context_updates) -> None:
+                        reset_stage_for_retry(s)
+                        s.context.update(updates)
+
+                else:
+                    source_end_time = self.current_time_millis()
+
+                    def mutate_source(s: StageExecution, updates: dict[str, Any] = source_context_updates) -> None:
+                        reset_stage_to_succeeded(s, source_end_time)
+                        s.context.update(updates)
+
+                mutations.append((source_stage.id, mutate_source))
 
                 # Reset synthetic stages for source if backward jump
                 if is_backward_jump:
-                    self._reset_synthetics_for_stage(message.execution_id, source_stage.id)
+                    mutations.extend(self._synthetic_reset_mutations(message.execution_id, source_stage.id))
 
-            # Store target stage
+            # Target stage mutation
             target_context_updates = dict(target_stage.context)
 
-            def reload_and_store_target() -> None:
-                fresh_target = self.repository.retrieve_stage(target_stage.id)
-                if fresh_target is None:
-                    logger.error("Target stage %s not found during reload", target_stage.id)
-                    return
-                reset_stage_for_retry(fresh_target)
-                fresh_target.context.update(target_context_updates)
-                self.repository.store_stage(fresh_target)
+            def mutate_target(s: StageExecution, updates: dict[str, Any] = target_context_updates) -> None:
+                reset_stage_for_retry(s)
+                s.context.update(updates)
 
-            self.retry_on_concurrency_error(
-                reload_and_store_target,
-                f"storing target stage {target_stage.ref_id}",
-            )
+            mutations.append((target_stage.id, mutate_target))
 
             # Reset synthetic stages for target
-            self._reset_synthetics_for_stage(message.execution_id, target_stage.id)
+            mutations.extend(self._synthetic_reset_mutations(message.execution_id, target_stage.id))
 
-            # Push StartStage message atomically
-            self.txn_helper.execute_atomic(
-                stage=None,
-                source_message=message,
-                messages_to_push=[
-                    (
-                        StartStage(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=target_stage.id,
-                        ),
-                        None,
+            # Apply every mutation + mark processed + StartStage push in ONE
+            # transaction: a crash rolls the whole jump back to a consistent
+            # pre-jump state instead of leaving it half-applied.
+            self._apply_jump(
+                mutations,
+                message,
+                [
+                    StartStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=target_stage.id,
                     )
                 ],
-                handler_name="JumpToStage",
             )
 
         self.with_stage(message, on_stage)
@@ -317,30 +315,22 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             message.execution_id,
         )
         context_updates = {"jump_error": f"Target stage not found: {message.target_stage_ref_id}"}
-        self.retry_on_concurrency_error(
-            partial(
-                self._reload_reset_and_store,
-                source_stage.id,
-                context_updates,
-                WorkflowStatus.TERMINAL,
-            ),
-            f"storing terminal stage {source_stage.ref_id}",
-        )
+        end_time = self.current_time_millis()
 
-        self.txn_helper.execute_atomic(
-            stage=None,
-            source_message=message,
-            messages_to_push=[
-                (
-                    CompleteStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=source_stage.id,
-                    ),
-                    None,
+        def mutate(s: StageExecution) -> None:
+            reset_stage_to_terminal(s, end_time)
+            s.context.update(context_updates)
+
+        self._apply_jump(
+            [(source_stage.id, mutate)],
+            message,
+            [
+                CompleteStage(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=source_stage.id,
                 )
             ],
-            handler_name="JumpToStage",
         )
 
     def _check_jump_count(
@@ -366,80 +356,22 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                 message.execution_id,
             )
             context_updates = {"jump_error": f"Max jump count exceeded: {jump_count}/{max_jumps}"}
-            self.retry_on_concurrency_error(
-                partial(
-                    self._reload_reset_and_store,
-                    source_stage.id,
-                    context_updates,
-                    WorkflowStatus.TERMINAL,
-                ),
-                f"storing max-jump stage {source_stage.ref_id}",
-            )
+            end_time = self.current_time_millis()
 
-            self.txn_helper.execute_atomic(
-                stage=None,
-                source_message=message,
-                messages_to_push=[
-                    (
-                        CompleteStage(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=source_stage.id,
-                        ),
-                        None,
+            def mutate(s: StageExecution) -> None:
+                reset_stage_to_terminal(s, end_time)
+                s.context.update(context_updates)
+
+            self._apply_jump(
+                [(source_stage.id, mutate)],
+                message,
+                [
+                    CompleteStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=source_stage.id,
                     )
                 ],
-                handler_name="JumpToStage",
             )
             return False
         return True
-
-    def _reset_downstream_stages(
-        self,
-        message: JumpToStage,
-        execution: Workflow,
-        source_stage: StageExecution,
-        target_stage: StageExecution,
-    ) -> None:
-        """Reset all downstream stages that depend on target."""
-        downstream_stages = get_resettable_downstream_stages(execution, target_stage.ref_id)
-        for stage in downstream_stages:
-            if stage.id != source_stage.id:
-                logger.debug("Resetting downstream stage: %s", stage.ref_id)
-                self.retry_on_concurrency_error(
-                    partial(self._reload_reset_and_store, stage.id),
-                    f"storing downstream stage {stage.ref_id}",
-                )
-                self._reset_synthetics_for_stage(message.execution_id, stage.id)
-
-    def _handle_source_stage(
-        self,
-        message: JumpToStage,
-        execution: Workflow,
-        source_stage: StageExecution,
-        target_stage: StageExecution,
-        is_backward_jump: bool,
-    ) -> None:
-        """Handle source stage based on jump direction."""
-        if is_backward_jump:
-            # Backward jump (retry loop): reset source so it can run again
-            reset_stage_for_retry(source_stage)
-        else:
-            # Forward jump (skip ahead): mark source as succeeded
-            end_time = self.current_time_millis()
-            reset_stage_to_succeeded(source_stage, end_time)
-
-            # Mark all stages between source and target as SKIPPED
-            skipped_stages = get_skipped_stages(execution, source_stage, target_stage)
-            for stage in skipped_stages:
-                if stage.status == WorkflowStatus.NOT_STARTED:
-                    logger.debug("Marking skipped stage: %s", stage.ref_id)
-                    self.retry_on_concurrency_error(
-                        partial(
-                            self._reload_reset_and_store,
-                            stage.id,
-                            None,
-                            WorkflowStatus.SKIPPED,
-                        ),
-                        f"storing skipped stage {stage.ref_id}",
-                    )

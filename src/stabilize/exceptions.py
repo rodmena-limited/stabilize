@@ -29,9 +29,12 @@ class StabilizeFatalError(StabilizeError):
 
 class StabilizeExpectedError(StabilizeError):
     """
-    Expected error that may allow retry or continuation.
+    Expected error raised by assertion helpers during normal operation.
 
-    Expected errors occur during normal operation and may be recoverable.
+    NOTE: "expected" describes the error's origin, not its retry semantics.
+    The engine's retry machinery only retries errors deriving from
+    stabilize.errors.TransientError; raise TransientError (optionally with
+    context_update) from a task to get automatic retries.
     """
 
     pass

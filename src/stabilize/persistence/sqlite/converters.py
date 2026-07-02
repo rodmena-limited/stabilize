@@ -28,7 +28,7 @@ def execution_to_dict(execution: Workflow) -> dict[str, Any]:
         "application": execution.application,
         "name": execution.name,
         "status": execution.status.name,
-        "context": json.dumps(execution.context),
+        "context": json.dumps(execution.context, default=str),
         "start_time": execution.start_time,
         "end_time": execution.end_time,
         "start_time_expiry": execution.start_time_expiry,

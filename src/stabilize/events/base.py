@@ -70,6 +70,10 @@ class EventType(Enum):
     OUTPUTS_UPDATED = "outputs.updated"
     JUMP_EXECUTED = "jump.executed"
 
+    # Custom / streaming progress emitted by tasks (e.g. LLM token chunks,
+    # agent step narration). Carries a free-form payload in Event.data.
+    CUSTOM = "custom.progress"
+
 
 class EntityType(Enum):
     """Entity types that can emit events."""

@@ -111,6 +111,35 @@ class CompleteStageHandler(
                     e,
                 )
 
+    def _record_completion_event(self, stage: StageExecution, status: WorkflowStatus) -> None:
+        """Record the stage completion/failure/skip event.
+
+        Must be called INSIDE the branch's store transaction so the event
+        joins the same commit as the state change (no phantom events) and
+        its bus publication is deferred until after commit.
+        """
+        if not self.event_recorder:
+            return
+        self.set_event_context(stage.execution.id if stage.execution else "")
+        if status.is_failure:
+            error = stage.context.get("exception", {}).get("details", {}).get("error", "Unknown error")
+            self.event_recorder.record_stage_failed(
+                stage,
+                error=str(error),
+                source_handler="CompleteStageHandler",
+            )
+        elif status == WorkflowStatus.SKIPPED:
+            self.event_recorder.record_stage_skipped(
+                stage,
+                reason="Skipped",
+                source_handler="CompleteStageHandler",
+            )
+        else:
+            self.event_recorder.record_stage_completed(
+                stage,
+                source_handler="CompleteStageHandler",
+            )
+
     def _handle_with_retry(self, message: CompleteStage) -> None:
         """Inner handle logic to be retried."""
 
@@ -209,10 +238,19 @@ class CompleteStageHandler(
 
                     not_started = [s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED]
                     if not_started:
-                        # Atomic: store stage + push all after stage messages together
-                        # Store stage to persist any context changes from planning
+                        # Atomic: store stage + mark source message processed +
+                        # push all after stage messages together. The mark must
+                        # join this transaction: a redelivery after commit but
+                        # before ack would otherwise re-enter while the
+                        # after-stages run and cancel a healthy workflow.
                         with self.repository.transaction(self.queue) as txn:
                             txn.store_stage(stage)
+                            if message.message_id:
+                                txn.mark_message_processed(
+                                    message_id=message.message_id,
+                                    handler_type="CompleteStage",
+                                    execution_id=message.execution_id,
+                                )
                             for s in not_started:
                                 txn.push_message(
                                     StartStage(
@@ -230,16 +268,43 @@ class CompleteStageHandler(
 
                 # Handle failure - plan on-failure stages
                 elif status.is_failure:
-                    has_on_failure = self._plan_on_failure_stages(stage)
+                    # Synthetic children (on-failure or after stages) still in
+                    # flight drive the parent through their own completion
+                    # messages; a CompleteStage arriving meanwhile is stale or
+                    # redelivered and must not re-plan or finalize the stage.
+                    in_flight_children = [s for s in stage.first_after_stages() if not s.status.is_complete]
+                    if in_flight_children:
+                        if message.message_id:
+                            with self.repository.transaction(self.queue) as txn:
+                                txn.mark_message_processed(
+                                    message_id=message.message_id,
+                                    handler_type="CompleteStage",
+                                    execution_id=message.execution_id,
+                                )
+                        return
+
+                    # Plan on-failure stages exactly once per failure: replay
+                    # after they completed must fall through to final failure
+                    # handling, not spawn duplicate on-failure stages.
+                    already_planned = bool(stage.context.get("_on_failure_planned", False))
+                    has_on_failure = False if already_planned else self._plan_on_failure_stages(stage)
                     if has_on_failure:
+                        stage.context["_on_failure_planned"] = True
                         after_stages = stage.first_after_stages()
                         # Only push StartStage for on-failure stages that are NOT_STARTED
                         not_started_on_failure = [s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED]
                         if not_started_on_failure:
-                            # Atomic: store stage + push all on-failure stage messages together
-                            # Store stage to persist any context changes from planning
+                            # Atomic: store stage (persists the planned flag) +
+                            # mark source message processed + push all
+                            # on-failure stage messages together
                             with self.repository.transaction(self.queue) as txn:
                                 txn.store_stage(stage)
+                                if message.message_id:
+                                    txn.mark_message_processed(
+                                        message_id=message.message_id,
+                                        handler_type="CompleteStage",
+                                        execution_id=message.execution_id,
+                                    )
                                 for s in not_started_on_failure:
                                     txn.push_message(
                                         StartStage(
@@ -250,6 +315,22 @@ class CompleteStageHandler(
                                     )
                             return
 
+                # A RUNNING result here means core tasks or synthetic stages
+                # are still in flight and nothing needed starting above: this
+                # message is stale or a redelivery. Progress is driven by the
+                # in-flight work's own completion messages — falling through
+                # would misclassify the stage as failed and cancel a healthy
+                # workflow.
+                if status == WorkflowStatus.RUNNING:
+                    if message.message_id:
+                        with self.repository.transaction(self.queue) as txn:
+                            txn.mark_message_processed(
+                                message_id=message.message_id,
+                                handler_type="CompleteStage",
+                                execution_id=message.execution_id,
+                            )
+                    return
+
                 # Update stage status
                 self.set_stage_status(stage, status)
                 stage.end_time = self.current_time_millis()
@@ -257,29 +338,12 @@ class CompleteStageHandler(
                 # Invoke on_cleanup() on all task implementations before persisting
                 self._invoke_task_cleanup(stage)
 
-                logger.info("Stage %s completed with status %s", stage.name, status)
+                # Execute registered finalizers: the stage is entering a
+                # terminal state (SUCCEEDED/FAILED/SKIPPED/...), which is the
+                # documented finalizer trigger — not just process shutdown.
+                self.run_stage_finalizers(stage)
 
-                # Record event if event recorder is configured
-                if self.event_recorder:
-                    self.set_event_context(stage.execution.id if stage.execution else "")
-                    if status.is_failure:
-                        error = stage.context.get("exception", {}).get("details", {}).get("error", "Unknown error")
-                        self.event_recorder.record_stage_failed(
-                            stage,
-                            error=str(error),
-                            source_handler="CompleteStageHandler",
-                        )
-                    elif status == WorkflowStatus.SKIPPED:
-                        self.event_recorder.record_stage_skipped(
-                            stage,
-                            reason="Skipped",
-                            source_handler="CompleteStageHandler",
-                        )
-                    else:
-                        self.event_recorder.record_stage_completed(
-                            stage,
-                            source_handler="CompleteStageHandler",
-                        )
+                logger.info("Stage %s completed with status %s", stage.name, status)
 
                 # Handle FAILED_CONTINUE propagation to parent
                 if (
@@ -291,6 +355,7 @@ class CompleteStageHandler(
                     # Atomic: store stage + propagate failure to parent
                     with self.repository.transaction(self.queue) as txn:
                         txn.store_stage(stage)
+                        self._record_completion_event(stage, status)
                         txn.push_message(
                             CompleteStage(
                                 execution_type=message.execution_type,
@@ -316,6 +381,7 @@ class CompleteStageHandler(
                         # Fall through to failure handling below
                         with self.repository.transaction(self.queue) as txn:
                             txn.store_stage(stage)
+                            self._record_completion_event(stage, status)
                             txn.push_message(
                                 CancelStage(
                                     execution_type=message.execution_type,
@@ -357,6 +423,7 @@ class CompleteStageHandler(
                     # Atomic: store stage + push all downstream/parent messages together
                     with self.repository.transaction(self.queue) as txn:
                         txn.store_stage(stage)
+                        self._record_completion_event(stage, status)
 
                         # Message deduplication
                         if message.message_id:
@@ -434,6 +501,7 @@ class CompleteStageHandler(
                     # Failure - atomic: store stage + cancel + complete
                     with self.repository.transaction(self.queue) as txn:
                         txn.store_stage(stage)
+                        self._record_completion_event(stage, status)
                         txn.push_message(
                             CancelStage(
                                 execution_type=message.execution_type,
@@ -476,6 +544,7 @@ class CompleteStageHandler(
                 self.set_stage_status(stage, WorkflowStatus.TERMINAL)
                 stage.end_time = self.current_time_millis()
                 self._invoke_task_cleanup(stage)
+                self.run_stage_finalizers(stage)
 
                 # Atomic: store stage + cancel + complete workflow
                 with self.repository.transaction(self.queue) as txn:

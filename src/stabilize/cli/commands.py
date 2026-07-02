@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from typing import TYPE_CHECKING, Any
 
@@ -72,7 +73,17 @@ def mg_up(db_url: str | None = None) -> None:
                         # Verify checksum
                         expected = compute_checksum(content)
                         if applied[name] != expected:
-                            print(f"Warning: Checksum mismatch for {name}")
+                            # A mismatch means an already-applied migration's
+                            # file changed under us — a tampering/drift signal.
+                            # Warn by default (backward compatible); with
+                            # STABILIZE_STRICT_MIGRATIONS=1 refuse to proceed.
+                            msg = f"Checksum mismatch for {name}"
+                            if os.getenv("STABILIZE_STRICT_MIGRATIONS", "").lower() in {"1", "true", "yes"}:
+                                raise RuntimeError(
+                                    f"{msg}: applied migration has changed on disk "
+                                    "(STABILIZE_STRICT_MIGRATIONS is set)"
+                                )
+                            print(f"Warning: {msg}")
                         continue
 
                     pending += 1

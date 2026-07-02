@@ -13,12 +13,18 @@ import pytest
 
 from stabilize.persistence.sqlite.migrations import (
     BASELINE_VERSION,
+    MIGRATIONS,
     Migration,
     apply_migrations,
     ensure_version_table,
     get_schema_version,
 )
 from stabilize.persistence.sqlite.schema import SCHEMA, create_tables
+
+# The version a fully migrated database lands on (baseline + shipped migrations).
+LATEST_VERSION = max([BASELINE_VERSION] + [m.version for m in MIGRATIONS])
+# Free version numbers for test-only demo migrations.
+NEXT = LATEST_VERSION + 1
 
 
 def _raw_conn() -> sqlite3.Connection:
@@ -40,7 +46,7 @@ class TestBaselineStamping:
     def test_create_tables_stamps_baseline(self) -> None:
         conn = _raw_conn()
         create_tables(conn)
-        assert get_schema_version(conn) == BASELINE_VERSION
+        assert get_schema_version(conn) == LATEST_VERSION
 
     def test_create_tables_still_creates_core_tables(self) -> None:
         """No regression: all core tables exist after create_tables."""
@@ -57,6 +63,7 @@ class TestBaselineStamping:
             "queue_messages",
             "processed_messages",
             "schema_migrations",
+            "stage_claims",
         ):
             assert expected in names
 
@@ -65,7 +72,7 @@ class TestBaselineStamping:
         create_tables(conn)
         v1 = apply_migrations(conn)
         v2 = apply_migrations(conn)
-        assert v1 == v2 == BASELINE_VERSION
+        assert v1 == v2 == LATEST_VERSION
         # Exactly one baseline row recorded.
         count = conn.execute(
             "SELECT COUNT(*) FROM schema_migrations WHERE version = ?", (BASELINE_VERSION,)
@@ -89,10 +96,10 @@ class TestExistingDatabaseUpgrade:
         # Un-versioned database reports version 0.
         assert get_schema_version(conn) == 0
 
-        # Upgrade in place.
+        # Upgrade in place (baseline stamp + all shipped forward migrations).
         version = apply_migrations(conn)
-        assert version == BASELINE_VERSION
-        assert get_schema_version(conn) == BASELINE_VERSION
+        assert version == LATEST_VERSION
+        assert get_schema_version(conn) == LATEST_VERSION
 
         # Data preserved (baseline DDL was NOT re-run destructively).
         row = conn.execute("SELECT id, status FROM pipeline_executions").fetchone()
@@ -121,10 +128,10 @@ class TestForwardMigrations:
         conn = _raw_conn()
         create_tables(conn)
         migrations = (
-            Migration(2, "add_col", ("ALTER TABLE task_executions ADD COLUMN demo_col TEXT",)),
+            Migration(NEXT, "add_col", ("ALTER TABLE task_executions ADD COLUMN demo_col TEXT",)),
         )
         version = apply_migrations(conn, migrations=migrations)
-        assert version == 2
+        assert version == NEXT
         cols = {r[1] for r in conn.execute("PRAGMA table_info(task_executions)").fetchall()}
         assert "demo_col" in cols
 
@@ -132,26 +139,29 @@ class TestForwardMigrations:
         conn = _raw_conn()
         create_tables(conn)
         migrations = (
-            Migration(2, "add_table", ("CREATE TABLE demo2 (id TEXT PRIMARY KEY)",)),
+            Migration(NEXT, "add_table", ("CREATE TABLE demo2 (id TEXT PRIMARY KEY)",)),
         )
         apply_migrations(conn, migrations=migrations)
         # Second run must NOT re-run the (non-idempotent) CREATE TABLE.
         version = apply_migrations(conn, migrations=migrations)
-        assert version == 2
-        count = conn.execute("SELECT COUNT(*) FROM schema_migrations WHERE version = 2").fetchone()[0]
+        assert version == NEXT
+        count = conn.execute(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = ?", (NEXT,)
+        ).fetchone()[0]
         assert count == 1
 
     def test_migrations_applied_in_order(self) -> None:
         conn = _raw_conn()
         create_tables(conn)
         migrations = (
-            Migration(3, "third", ("CREATE TABLE m3 (id TEXT)",)),
-            Migration(2, "second", ("CREATE TABLE m2 (id TEXT)",)),
+            Migration(NEXT + 1, "third", ("CREATE TABLE m3 (id TEXT)",)),
+            Migration(NEXT, "second", ("CREATE TABLE m2 (id TEXT)",)),
         )
         version = apply_migrations(conn, migrations=migrations)
-        assert version == 3
+        assert version == NEXT + 1
         ordered = [r[0] for r in conn.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()]
-        assert ordered == [BASELINE_VERSION, 2, 3]
+        assert ordered[-2:] == [NEXT, NEXT + 1]
+        assert ordered[0] == BASELINE_VERSION
 
 
 class TestMigrationValidation:

@@ -54,7 +54,23 @@ class Migration:
 # Forward-only migrations applied *after* the baseline (version 1).
 # Append new migrations here with strictly increasing version numbers, e.g.:
 #     Migration(2, "add_foo_column", ("ALTER TABLE stage_executions ADD COLUMN foo TEXT",))
-MIGRATIONS: tuple[Migration, ...] = ()
+MIGRATIONS: tuple[Migration, ...] = (
+    Migration(
+        2,
+        "add_stage_claims",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS stage_claims (
+                execution_id TEXT NOT NULL,
+                claim_key TEXT NOT NULL,
+                stage_id TEXT NOT NULL,
+                claimed_at TEXT NOT NULL DEFAULT (datetime('now', 'utc')),
+                PRIMARY KEY (execution_id, claim_key)
+            )
+            """,
+        ),
+    ),
+)
 
 
 def ensure_version_table(conn: sqlite3.Connection) -> None:

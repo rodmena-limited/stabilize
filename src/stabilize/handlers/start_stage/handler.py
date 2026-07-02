@@ -38,6 +38,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class _ClaimBlockedError(Exception):
+    """Raised inside the claim transaction when a mutex or deferred-choice
+    claim is held by another live stage; rolls the transaction back."""
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(kind)
+        self.kind = kind
+
+
 class StartStageHandler(
     StartStageConditionsMixin,
     StartStageOrchestrationMixin,
@@ -371,12 +380,85 @@ class StartStageHandler(
         # in-memory status check and then both call _plan_stage() (which emits
         # callbacks like "PHASE START") before optimistic locking kicks in.
         # Use expected_phase="NOT_STARTED" for CAS (compare-and-swap) semantics.
-        stage.start_time = self.current_time_millis()
-        self.set_stage_status(stage, WorkflowStatus.RUNNING)
+        #
+        # A zombie re-plan (stage already RUNNING with no tasks/synthetics —
+        # the original claimer crashed between claim and plan) must CAS
+        # against the row's actual RUNNING phase: expecting NOT_STARTED can
+        # never succeed there, so every recovery attempt would be swallowed
+        # as a "duplicate claim" and the workflow wedged forever. The version
+        # check in store_stage still serializes concurrent re-planners.
+        if stage.status == WorkflowStatus.RUNNING:
+            claim_expected_phase = "RUNNING"
+        else:
+            claim_expected_phase = "NOT_STARTED"
+            stage.start_time = self.current_time_millis()
+            self.set_stage_status(stage, WorkflowStatus.RUNNING)
 
         try:
             with self.repository.transaction(self.queue) as txn:
-                txn.store_stage(stage, expected_phase="NOT_STARTED")
+                # WCP-17/39/40 + WCP-16: the read-then-check fast paths above
+                # (_is_mutex_blocked / _is_deferred_choice_claimed) cannot
+                # serialize two DIFFERENT sibling stages racing past them —
+                # each sibling's per-row CAS succeeds on its own row. Mutual
+                # exclusion is enforced here, inside the claim transaction,
+                # via a unique (execution_id, claim_key) row.
+                if stage.mutex_key and not txn.acquire_claim(
+                    message.execution_id,
+                    f"mutex:{stage.mutex_key}",
+                    stage.id,
+                    steal_if_owner_terminal=True,
+                ):
+                    raise _ClaimBlockedError("mutex")
+                if stage.deferred_choice_group and not txn.acquire_claim(
+                    message.execution_id,
+                    f"choice:{stage.deferred_choice_group}",
+                    stage.id,
+                ):
+                    raise _ClaimBlockedError("choice")
+                txn.store_stage(stage, expected_phase=claim_expected_phase)
+        except _ClaimBlockedError as blocked:
+            # The claim transaction rolled back: this stage did not start.
+            stage.status = WorkflowStatus.NOT_STARTED
+            stage.start_time = None
+            if blocked.kind == "mutex":
+                # Mutex held by a live sibling - wait and retry.
+                logger.debug(
+                    "Stage %s lost mutex claim '%s', re-queuing",
+                    stage.name,
+                    stage.mutex_key,
+                )
+                retry_count = getattr(message, "retry_count", 0) or 0
+                self.queue.push(
+                    StartStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=message.stage_id,
+                        retry_count=retry_count + 1,
+                    ),
+                    self.retry_delay,
+                )
+            else:
+                # Deferred choice already decided - cancel this branch.
+                logger.info(
+                    "Stage %s lost deferred choice claim '%s', cancelling",
+                    stage.name,
+                    stage.deferred_choice_group,
+                )
+                with self.repository.transaction(self.queue) as txn:
+                    if message.message_id:
+                        txn.mark_message_processed(
+                            message_id=message.message_id,
+                            handler_type="StartStage",
+                            execution_id=message.execution_id,
+                        )
+                    txn.push_message(
+                        CancelStage(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                        )
+                    )
+            return
         except ConcurrencyError:
             # Another handler already claimed this stage (race condition with
             # multiple upstream stages completing simultaneously). This is safe

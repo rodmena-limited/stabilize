@@ -36,6 +36,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Loaded once in the parent process: ctypes.CDLL inside a post-fork
+# preexec_fn is not fork-safe in a multithreaded process (see _preexec_fn).
+_LINUX_LIBC = None
+if sys.platform == "linux":
+    try:
+        _LINUX_LIBC = ctypes.CDLL("libc.so.6", use_errno=True)
+    except OSError:
+        _LINUX_LIBC = None
+
 # Keys that should not be substituted as placeholders
 RESERVED_KEYS = frozenset(
     {
@@ -330,15 +339,20 @@ class ShellTask(Task):
 
         Creates a new session (process group) and on Linux, sets PR_SET_PDEATHSIG
         to automatically kill the process when the parent dies.
+
+        Fork-safety: only async-signal-safe work may run between fork and
+        exec in a multithreaded parent. Loading libc with ctypes.CDLL here
+        could deadlock on allocator/loader locks, so the handle is loaded
+        once at module import (in the parent) and the child only makes the
+        plain prctl C call.
         """
         os.setsid()  # Create new session (same as start_new_session=True)
 
         # Linux-only: auto-kill child when parent dies
-        if sys.platform == "linux":
+        if _LINUX_LIBC is not None:
             try:
                 pr_set_pdeathsig = 1
-                libc = ctypes.CDLL("libc.so.6", use_errno=True)
-                libc.prctl(pr_set_pdeathsig, signal.SIGKILL)
+                _LINUX_LIBC.prctl(pr_set_pdeathsig, signal.SIGKILL)
             except (OSError, AttributeError):
                 pass  # Not available, continue without it
 

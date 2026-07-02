@@ -15,6 +15,7 @@ import logging
 import os
 import shlex
 import subprocess
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from stabilize.tasks.interface import Task
@@ -177,6 +178,13 @@ class DockerTask(Task):
         except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
             return TaskResult.terminal(error="Docker is not available. Ensure Docker is installed and running.")
 
+        # Ensure run containers are addressable so a timeout can clean up:
+        # without --name, a client-side kill after TimeoutExpired has no
+        # target and the container keeps running (with --rm it is only
+        # removed when IT exits, not when the docker CLI dies).
+        if action == "run" and not stage.context.get("name"):
+            stage.context["name"] = f"stabilize-run-{uuid.uuid4().hex[:12]}"
+
         # Build command based on action
         try:
             cmd = self._build_command(action, stage.context)
@@ -232,6 +240,22 @@ class DockerTask(Task):
 
         except subprocess.TimeoutExpired:
             error_msg = f"Docker command timed out after {timeout}s"
+            # Killing the docker CLI does not stop the container; kill it by
+            # name so it does not keep consuming resources as an orphan.
+            if action == "run" and stage.context.get("name"):
+                try:
+                    subprocess.run(
+                        ["docker", "kill", stage.context["name"]],
+                        capture_output=True,
+                        timeout=30,
+                    )
+                    logger.warning("Killed timed-out container %s", stage.context["name"])
+                except Exception as kill_error:
+                    logger.warning(
+                        "Failed to kill timed-out container %s: %s",
+                        stage.context["name"],
+                        kill_error,
+                    )
             if continue_on_failure:
                 return TaskResult.failed_continue(error=error_msg)
             return TaskResult.terminal(error=error_msg)

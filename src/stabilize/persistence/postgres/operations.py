@@ -109,6 +109,21 @@ def is_message_processed(pool: Any, message_id: str) -> bool:
             return cur.fetchone() is not None
 
 
+def get_processed_message_ids(pool: Any, limit: int | None = None) -> list[str]:
+    """Return processed message IDs, for hydrating an in-memory dedup cache."""
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            if limit is not None:
+                cur.execute(
+                    "SELECT message_id FROM processed_messages LIMIT %(limit)s",
+                    {"limit": limit},
+                )
+            else:
+                cur.execute("SELECT message_id FROM processed_messages")
+            # Pool uses dict_row: rows are dict-like, access by column name.
+            return [row["message_id"] for row in cur.fetchall()]
+
+
 def mark_message_processed(
     pool: Any,
     message_id: str,

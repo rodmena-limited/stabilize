@@ -124,9 +124,15 @@ class QueueProcessorMixin:
         if self.config.enable_deduplication and message_id is not None:
             dedup = get_deduplicator()
 
-            # Check bloom filter first (fast path)
-            if dedup.maybe_seen(message_id):
-                # Bloom filter positive - need to verify with database
+            # A bloom negative only proves "definitely new" while the filter
+            # is authoritative (hydrated from the store, not reset since) AND
+            # this process is the store's only writer — an empty bloom after a
+            # restart/rotation, or a peer worker marking messages processed,
+            # must not skip the durable check, or already-processed messages
+            # re-execute on redelivery. The negative-cache fast path is
+            # therefore opt-in via dedup_trust_negative_cache.
+            trust_negative = getattr(self.config, "dedup_trust_negative_cache", False)
+            if dedup.maybe_seen(message_id) or not (trust_negative and dedup.authoritative):
                 if self._store is not None and self._store.is_message_processed(message_id):
                     logger.info(
                         "Skipping duplicate message %s (%s)",
@@ -134,7 +140,6 @@ class QueueProcessorMixin:
                         get_message_type_name(message),
                     )
                     return
-            # else: Bloom filter negative - definitely not seen, skip DB check
 
             # Check if bloom filter needs rotation
             if dedup.should_reset(threshold=0.7):
@@ -143,6 +148,8 @@ class QueueProcessorMixin:
                     dedup.fill_ratio,
                 )
                 dedup.reset()
+                # Restore the fast path if the store can enumerate processed IDs
+                self._hydrate_deduplicator()
 
         logger.debug("Handling %s (execution=%s)", get_message_type_name(message), execution_id or "N/A")
 
@@ -161,6 +168,36 @@ class QueueProcessorMixin:
                     handler_type=get_message_type_name(message),
                     execution_id=execution_id,
                 )
+
+    def _hydrate_deduplicator(self) -> None:
+        """Hydrate the bloom filter from the store's processed_messages.
+
+        Grants the bloom authority (negatives skip the DB check) only when
+        the store can enumerate ALL processed message IDs and they fit the
+        filter's capacity. Otherwise the bloom stays advisory and every
+        message is confirmed against the durable store — slower but safe.
+        """
+        if self._store is None:
+            return
+        dedup = get_deduplicator()
+        capacity = dedup.expected_items
+        try:
+            # Fetch one beyond capacity so truncation is detectable.
+            ids = self._store.get_processed_message_ids(limit=capacity + 1)
+        except Exception as e:
+            logger.warning("Dedup hydration failed; bloom stays advisory: %s", e)
+            return
+        if ids is None:
+            return  # store cannot enumerate; bloom stays advisory
+        if len(ids) > capacity:
+            logger.warning(
+                "processed_messages count exceeds bloom capacity (%d > %d); bloom stays advisory",
+                len(ids),
+                capacity,
+            )
+            return
+        count = dedup.hydrate(ids)
+        logger.debug("Hydrated dedup bloom filter with %d processed message IDs", count)
 
     def _check_dlq(self) -> None:
         """Check for expired messages and move them to DLQ.

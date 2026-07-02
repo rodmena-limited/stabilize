@@ -101,8 +101,13 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         delay: timedelta | None = None,
         connection: Any | None = None,
     ) -> None:
-        """Push a message onto the queue."""
-        conn = self._get_connection()
+        """Push a message onto the queue.
+
+        When a connection is provided the insert joins the caller's
+        transaction and is NOT committed here (the caller commits).
+        """
+        external_connection = connection is not None
+        conn = connection if external_connection else self._get_connection()
         deliver_at = datetime.now(UTC)
         if delay:
             deliver_at += delay
@@ -125,7 +130,10 @@ class SqliteQueue(SqliteDLQMixin, Queue):
                 "max_attempts": self.max_attempts,
             },
         )
-        conn.commit()
+        # Only commit when we own the connection; with an external connection
+        # the caller's transaction controls the commit (atomicity contract).
+        if not external_connection:
+            conn.commit()
 
         logger.debug("Pushed %s (id=%s, deliver_at=%s)", message_type, message_id, deliver_at)
 
@@ -248,6 +256,24 @@ class SqliteQueue(SqliteDLQMixin, Queue):
 
         self._pending.pop(msg_id, None)
         logger.debug("Acked message (id=%s)", msg_id)
+
+    def extend_lock(self, message: Message, duration: timedelta | None = None) -> bool:
+        """Extend the visibility lock of an in-flight message (heartbeat)."""
+        if not message.message_id:
+            return False
+        try:
+            msg_id = int(message.message_id)
+        except ValueError:
+            return False
+
+        locked_until = datetime.now(UTC) + (duration or self.lock_duration)
+        conn = self._get_connection()
+        cursor = conn.execute(
+            f"UPDATE {self.table_name} SET locked_until = :locked_until WHERE id = :id",
+            {"locked_until": locked_until.isoformat(), "id": msg_id},
+        )
+        conn.commit()
+        return cursor.rowcount == 1
 
     def ensure(
         self,

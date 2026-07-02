@@ -30,6 +30,9 @@ from stabilize.persistence.postgres.operations import (
 from stabilize.persistence.postgres.operations import (
     cleanup_old_processed_messages as _cleanup_old_processed_messages,
 )
+from stabilize.persistence.postgres.operations import (
+    get_processed_message_ids as _get_processed_message_ids,
+)
 from stabilize.persistence.postgres.operations import is_message_processed as _is_message_processed
 from stabilize.persistence.postgres.operations import (
     mark_message_processed as _mark_message_processed,
@@ -254,7 +257,7 @@ class PostgresWorkflowStore(WorkflowStore):
                         "id": stage.id,
                         "status": stage.status.name,
                         "context": json.dumps(stage.context, default=str),
-                        "outputs": json.dumps(stage.outputs),
+                        "outputs": json.dumps(stage.outputs, default=str),
                         "start_time": stage.start_time,
                         "end_time": stage.end_time,
                         "version": stage.version,
@@ -278,7 +281,7 @@ class PostgresWorkflowStore(WorkflowStore):
                         "id": stage.id,
                         "status": stage.status.name,
                         "context": json.dumps(stage.context, default=str),
-                        "outputs": json.dumps(stage.outputs),
+                        "outputs": json.dumps(stage.outputs, default=str),
                         "start_time": stage.start_time,
                         "end_time": stage.end_time,
                         "version": stage.version,
@@ -446,6 +449,10 @@ class PostgresWorkflowStore(WorkflowStore):
         """Clean up old processed message records."""
         return _cleanup_old_processed_messages(self._pool, max_age_hours)
 
+    def get_processed_message_ids(self, limit: int | None = None) -> list[str] | None:
+        """Return processed message IDs, for hydrating an in-memory dedup cache."""
+        return _get_processed_message_ids(self._pool, limit)
+
     def is_healthy(self) -> bool:
         """Check if the database connection is healthy."""
         try:
@@ -459,14 +466,25 @@ class PostgresWorkflowStore(WorkflowStore):
     @contextmanager
     def transaction(self, queue: Any | None = None) -> Iterator[StoreTransaction]:
         """Create an atomic transaction for store + queue operations."""
+        from stabilize.events.txn_scope import (
+            abort_store_transaction,
+            begin_store_transaction,
+            commit_store_transaction,
+        )
         from stabilize.persistence.postgres.transaction import PostgresTransaction
 
         with self._pool.connection() as conn:
             txn = PostgresTransaction(conn, self, queue)
+            # Bind a thread-local scope so event recording inside this block
+            # joins the transaction (same-database event stores) and bus
+            # publication is deferred until after commit.
+            begin_store_transaction(conn, getattr(self, "connection_string", None))
             try:
                 yield txn
                 conn.commit()
             except Exception:
                 conn.rollback()
                 txn.rollback_versions()
+                abort_store_transaction()
                 raise
+            commit_store_transaction()

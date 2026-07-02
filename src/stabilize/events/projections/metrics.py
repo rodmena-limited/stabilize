@@ -154,17 +154,29 @@ class StageMetricsProjection(Projection):
         """Initialize the metrics projection."""
         self._stage_metrics: dict[str, StageMetrics] = {}
         self._task_metrics: dict[str, TaskMetrics] = {}
-        self._processed_sequences: set[int] = set()
+        self._processed_transitions: set[tuple[str, str, int]] = set()
 
     @property
     def name(self) -> str:
         return "stage-metrics"
 
     def apply(self, event: Event) -> None:
-        if event.sequence and event.sequence in self._processed_sequences:
-            return
-        if event.sequence:
-            self._processed_sequences.add(event.sequence)
+        # Deduplicate on the LOGICAL transition (entity, type, entity version),
+        # not the raw global sequence: a redundant append of the same
+        # transition (handler retry/redelivery) carries a fresh sequence and
+        # would inflate every count, while retry-loop iterations carry a new
+        # entity version and are correctly counted. Events without a version
+        # (synthetic/legacy) fall back to sequence-based dedup.
+        if event.version:
+            transition = (event.entity_id, event.event_type.value, event.version)
+        elif event.sequence:
+            transition = ("__sequence__", "", event.sequence)
+        else:
+            transition = None
+        if transition is not None:
+            if transition in self._processed_transitions:
+                return
+            self._processed_transitions.add(transition)
 
         if event.entity_type == EntityType.STAGE:
             self._apply_stage_event(event)
@@ -250,7 +262,7 @@ class StageMetricsProjection(Projection):
         """Reset all metrics."""
         self._stage_metrics.clear()
         self._task_metrics.clear()
-        self._processed_sequences.clear()
+        self._processed_transitions.clear()
 
     def get_top_slowest_stages(self, n: int = 10) -> list[tuple[str, float]]:
         """Get the n slowest stage types by average duration."""

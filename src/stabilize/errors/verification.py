@@ -6,12 +6,13 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.errors.base import StabilizeError
 from stabilize.errors.transient import TransientError
+from stabilize.exceptions import VerificationError as _PublicVerificationError
 
 if TYPE_CHECKING:
     from stabilize.error_codes import ErrorCode
 
 
-class VerificationError(StabilizeError):
+class VerificationError(StabilizeError, _PublicVerificationError):
     """Verification failed.
 
     Raised when verification of stage outputs fails.
@@ -65,8 +66,11 @@ class TransientVerificationError(VerificationError, TransientError):
         cause: Exception | None = None,
         details: dict[str, Any] | None = None,
         retry_after: float | None = None,
+        context_update: dict[str, Any] | None = None,
     ) -> None:
         # Call VerificationError.__init__ for details
         VerificationError.__init__(self, message, code=code, cause=cause, details=details)
-        # Store retry_after from TransientError
+        # TransientError state (its __init__ is bypassed above): retry_after
+        # and the stateful-retry context_update carried across retries.
         self.retry_after = retry_after
+        self.context_update = context_update or {}

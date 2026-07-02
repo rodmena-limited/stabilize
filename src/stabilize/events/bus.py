@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import deque
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -100,6 +101,12 @@ class EventBus:
         self._subscriptions: dict[str, Subscription] = {}
         self._lock = threading.RLock()
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        # Per-subscription FIFO queues for ASYNC delivery. A shared pool with
+        # one task per event gives no ordering; each subscription instead
+        # drains its own queue with at most one worker at a time, preserving
+        # publish order per subscriber while still sharing the pool.
+        self._async_pending: dict[str, deque[Event]] = {}
+        self._async_draining: set[str] = set()
         self._error_handler = error_handler
         self._stats = EventBusStats()
         self._shutdown = False
@@ -204,27 +211,46 @@ class EventBus:
             self._handle_error(subscription.id, event, e)
 
     def _deliver_async(self, subscription: Subscription, event: Event) -> None:
-        """Deliver event asynchronously via thread pool."""
+        """Deliver event asynchronously, preserving per-subscriber order.
 
-        def _deliver() -> None:
-            try:
-                subscription.handler(event)
+        Events for one subscription are appended to its FIFO queue; a single
+        drain task per subscription processes the queue until empty, so a
+        subscriber never observes e.g. TASK_COMPLETED before TASK_STARTED
+        merely because two pool threads raced.
+        """
+        with self._lock:
+            queue = self._async_pending.setdefault(subscription.id, deque())
+            queue.append(event)
+            if subscription.id in self._async_draining:
+                return  # the active drain task will deliver it in order
+            self._async_draining.add(subscription.id)
+
+        def _drain() -> None:
+            while True:
                 with self._lock:
-                    self._stats.events_delivered += 1
-            except Exception as e:
-                self._handle_error(subscription.id, event, e)
+                    pending = self._async_pending.get(subscription.id)
+                    if not pending:
+                        self._async_draining.discard(subscription.id)
+                        return
+                    next_event = pending.popleft()
+                try:
+                    subscription.handler(next_event)
+                    with self._lock:
+                        self._stats.events_delivered += 1
+                except Exception as e:
+                    self._handle_error(subscription.id, next_event, e)
 
         try:
-            self._executor.submit(_deliver)
+            self._executor.submit(_drain)
         except RuntimeError:
-            # Executor shut down — fall back to sync delivery
+            # Executor shut down — fall back to sync draining
             logger.warning(
                 "Thread pool unavailable for async delivery to %s, falling back to sync",
                 subscription.id,
             )
             with self._lock:
                 self._stats.async_fallbacks += 1
-            self._deliver_sync(subscription, event)
+            _drain()
 
     def _handle_error(self, subscription_id: str, event: Event, error: Exception) -> None:
         """Handle a handler error."""

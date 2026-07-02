@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import Event
 from stabilize.events.bus import get_event_bus
+from stabilize.events.txn_scope import current_scope
 
 if TYPE_CHECKING:
     from stabilize.events.store.interface import EventStore
@@ -66,6 +67,12 @@ class EventRecorderBase:
         Returns:
             Event with sequence assigned.
         """
+        scope = current_scope() if connection is None else None
+        if scope is not None and connection is None and self._store_matches_scope(scope):
+            # Join the caller's open store transaction: the event commits or
+            # rolls back together with the state it describes.
+            connection = scope.connection
+
         try:
             recorded = self._event_store.append(event, connection=connection)
         except Exception as e:
@@ -79,12 +86,25 @@ class EventRecorderBase:
             raise
 
         if self._publish_to_bus:
-            try:
-                get_event_bus().publish(recorded)
-            except Exception as e:
-                logger.warning("Failed to publish event to bus: %s", e)
+            if scope is not None:
+                # Defer publication until the transaction commits; dropped on
+                # rollback so subscribers never observe uncommitted state.
+                scope.pending.append(recorded)
+            else:
+                try:
+                    get_event_bus().publish(recorded)
+                except Exception as e:
+                    logger.warning("Failed to publish event to bus: %s", e)
 
         return recorded
+
+    def _store_matches_scope(self, scope: Any) -> bool:
+        """Whether this recorder's event store lives in the same database as
+        the transaction bound to the current thread (safe to join)."""
+        if scope.url is None:
+            return False
+        store_url = getattr(self._event_store, "_connection_string", None)
+        return store_url is not None and store_url == scope.url
 
     def _record_batch(
         self,
@@ -95,12 +115,19 @@ class EventRecorderBase:
         if not events:
             return []
 
+        scope = current_scope() if connection is None else None
+        if scope is not None and connection is None and self._store_matches_scope(scope):
+            connection = scope.connection
+
         recorded = self._event_store.append_batch(events, connection=connection)
 
         if self._publish_to_bus:
-            try:
-                get_event_bus().publish_batch(recorded)
-            except Exception as e:
-                logger.warning("Failed to publish events to bus: %s", e)
+            if scope is not None:
+                scope.pending.extend(recorded)
+            else:
+                try:
+                    get_event_bus().publish_batch(recorded)
+                except Exception as e:
+                    logger.warning("Failed to publish events to bus: %s", e)
 
         return recorded

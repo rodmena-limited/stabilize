@@ -13,7 +13,7 @@ workflows with full support for:
 - Configuration validation with JSON Schema
 """
 
-__version__ = "0.18.0"
+__version__ = "0.19.0"
 
 # Assertion helpers
 from stabilize.assertions import (
@@ -82,6 +82,15 @@ from stabilize.handlers import (
     StartWorkflowHandler,
 )
 
+# Agentic ergonomics (additive, opt-in — see docs/guide)
+from stabilize.hitl import (
+    ApprovalTask,
+    approve,
+    get_signal,
+    reject,
+    send_signal,
+)
+
 # Lifecycle management
 from stabilize.lifecycle import (
     LifecycleManager,
@@ -124,11 +133,21 @@ from stabilize.recovery import (
     WorkflowRecovery,
     recover_on_startup,
 )
+from stabilize.reducers import (
+    apply_output_reducers,
+    get_reducer,
+    register_reducer,
+)
 from stabilize.resilience.cancellation import (
     CancellationToken,
     TaskCancelledError,
     is_cancellation_requested,
     raise_if_cancellation_requested,
+)
+from stabilize.streaming import (
+    StreamItem,
+    WorkflowStream,
+    emit_progress,
 )
 
 # Tasks
@@ -309,4 +328,16 @@ __all__ = [
     "get_lifecycle_manager",
     "set_lifecycle_manager",
     "install_shutdown_handlers",
+    # Agentic ergonomics (streaming / HITL / reducers)
+    "WorkflowStream",
+    "StreamItem",
+    "emit_progress",
+    "ApprovalTask",
+    "approve",
+    "reject",
+    "send_signal",
+    "get_signal",
+    "register_reducer",
+    "get_reducer",
+    "apply_output_reducers",
 ]

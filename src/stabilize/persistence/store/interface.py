@@ -363,6 +363,21 @@ class WorkflowStore(ABC):
         # Default implementation: no cleanup
         return 0
 
+    def get_processed_message_ids(self, limit: int | None = None) -> list[str] | None:
+        """
+        Return processed message IDs, for hydrating an in-memory dedup cache.
+
+        Args:
+            limit: Maximum number of IDs to return (None for all)
+
+        Returns:
+            The message IDs, or None when the store cannot enumerate them.
+            Callers receiving None must treat any in-memory dedup cache as
+            non-authoritative and always confirm with is_message_processed().
+        """
+        # Default implementation: enumeration not supported
+        return None
+
     # ========== Optional Methods ==========
 
     def is_healthy(self) -> bool:
