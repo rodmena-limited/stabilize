@@ -51,8 +51,6 @@ class TestCrashConsistencyStoreVsQueue:
 
             from stabilize.persistence.sqlite.transaction import AtomicTransaction
 
-            original_push = AtomicTransaction.push_message
-
             def crashing_push(self: Any, msg: Any, delay: float = 0) -> None:
                 raise RuntimeError("crash between store write and queue push")
 
