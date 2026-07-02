@@ -128,8 +128,9 @@ Not implemented (documented for later): long-term cross-session memory store
 |---|---|---|
 | **Unit + golden (SQLite), all-in** | 973 unit passed / 6 skipped | **1054 passed / 4 skipped / 0 failed** |
 | — core unit suite | 973 | 1040 |
+| **Unit matrix (PostgreSQL, Docker)** | not run | **216 passed / 3 skipped / 0 failed** (1 pre-existing xfail) |
+| Golden-standard (SQLite / PostgreSQL) | green | **green / green** |
 | New regression tests | — | **+67** across 17 files (test-first per fix) |
-| Golden-standard (SQLite) | green | green |
 | Weak-spot coverage tests | (gaps) | **5 passed** (crash-injection, real-DLQ, replay-equivalence, graceful-stop, poison→DLQ) |
 | Audit certification tests | — | **7 passed** (`test_audit_certification.py`) |
 | `ruff check` (changed) | — | clean |
@@ -142,13 +143,17 @@ injection between store write and queue push; DLQ atomicity against the *real*
 with an in-flight task (exactly-once + clean resume); poison-message escalation
 to the DLQ through the live processor.
 
-**Scope caveat — Postgres matrix.** Docker/testcontainers was unavailable in
-the audit environment, so the `[postgres]`-parametrized nodes did not execute
-(same as baseline). All Postgres changes were made **symmetric to SQLite**
-(the `stage_claims` migration, `extend_lock`, `get_processed_message_ids`,
-transaction `acquire_claim`, `default=str` serialization, monitor stats) and
-are structurally verified; they should be run on a Docker-enabled host with
-`make test-postgres` before a production release that targets Postgres.
+**Postgres matrix — executed and green.** With Docker available, the full
+`[postgres]` matrix (testcontainers `postgres:15`, migrated via `mg apply`
+including the new `stage_claims` migration) ran to **216 passed / 3 skipped /
+0 failed** (plus 1 pre-existing intentional xfail); golden-standard tests pass
+on Postgres too. Running it surfaced two Postgres-only defects in the audit's
+own new code — the pool uses psycopg's `dict_row` factory, so integer row
+indexing (`row[0]`) in `acquire_claim`, `get_processed_message_ids`, and the
+new monitor queue-stats query raised `KeyError`; all three now read by column
+name. A backend-specific fault-injection gap in the jump-atomicity repro test
+was also fixed. Both defects were in code added by this audit, not pre-existing
+engine code, and are covered by the now-green matrix.
 
 ---
 
