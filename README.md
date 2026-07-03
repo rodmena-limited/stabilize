@@ -15,6 +15,35 @@ guarantees Stabilize provides. This document is organised around building
 agentic workflows, from a single model call to a multi-agent system, but the
 same primitives apply to any pipeline.
 
+## Build with your coding agent
+
+Stabilize ships its own complete reference for AI coding agents. If you work with
+Claude Code, Cursor, Copilot, or any LLM coding assistant, you don't need to
+teach it the API — point it at the built-in reference and describe what you want:
+
+```bash
+pip install stabilize
+stabilize prompt > stabilize.md      # a self-contained guide, written for coding agents
+```
+
+Then ask your agent, for example:
+
+> Read `stabilize.md`, then build a workflow where three agents research a
+> question in parallel, their findings are gathered, a reviewer scores the
+> result and loops back if confidence is low, and a human approves before it is
+> saved. Stream progress as it runs.
+
+The reference documents the whole API — DAG construction, the built-in tasks, the
+control-flow patterns, and the agentic toolkit (tool-calling LLM agents,
+human-in-the-loop approvals, live streaming, and fan-in reducers) — with runnable
+templates. It is validated end to end: given only `stabilize prompt` and a
+multi-agent task, a model generated a complete, correct workflow on the first
+attempt and ran it — parallel tool-using agents, a quorum join, a durable
+approval gate, and streaming, all from the reference alone.
+
+The rest of this README walks through the same concepts by hand, so you
+understand what your agent is building.
+
 ## Why Stabilize
 
 **Durability is built in, not bolted on.** Every step commits the new workflow
