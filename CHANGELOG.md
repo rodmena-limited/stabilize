@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.19.1]
+
+Documentation and developer-experience release. No engine behavior changes.
+
+### Added
+- **`stabilize prompt` now covers the agentic toolkit.** The built-in reference
+  consumed by AI coding agents gained a full "Agentic Workflows" section:
+  `LLMClient`, one-shot `LLMTask`, tool-calling `AgentLoopTask`, `@tool`/
+  `ToolRegistry`, durable human-in-the-loop approvals (`ApprovalTask` +
+  `approve`/`reject`), live streaming (`WorkflowStream` + `emit_progress`),
+  fan-in reducers (`output_reducers`), agentic control-flow (`jump_to` loops,
+  N-of-M quorum, discriminator race), and a complete runnable template.
+  Validated against glm-5.2: given only `stabilize prompt`, a model generated
+  and ran a complete multi-agent workflow on the first attempt.
+- **New example `examples/research_analyst/`** — a complex multi-agent workflow
+  (parallel ReAct researchers, N-of-M join with reducer, discriminator race,
+  refine loop, human approval, report sub-workflow, and crash recovery),
+  verified end to end on glm-5.2.
+- **Docs:** an "Agentic Workflows" guide and API reference page.
+
+### Changed
+- **README rewritten** around building simple, mid, and complex agentic
+  workflows, and it now leads with pointing a coding agent at `stabilize
+  prompt`. Removed the tool-comparison table.
+
 ## [0.19.0]
 
 Correctness audit (130-agent adversarial review) + agentic ergonomics. All

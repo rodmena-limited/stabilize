@@ -1415,6 +1415,16 @@ from stabilize.models.status import (
 )
 from stabilize.recovery import WorkflowRecovery, recover_on_startup
 
+# Agentic building blocks (NEW) - see Section 20
+from stabilize import (
+    ApprovalTask, approve, reject, send_signal, get_signal,   # human-in-the-loop
+    WorkflowStream, StreamItem, emit_progress,                 # live streaming
+    register_reducer,                                          # fan-in reducers (output_reducers)
+)
+from stabilize.llm import (                                    # LLM agent toolkit (stdlib-only)
+    LLMClient, LLMTask, AgentLoopTask, tool, ToolRegistry,
+)
+
 ===============================================================================
 11. VERIFICATION SYSTEM (NEW)
 ===============================================================================
@@ -2263,6 +2273,206 @@ milestone_ref_id         str|None           None      WCP-18
 milestone_status         str|None           None      WCP-18
 mutex_key                str|None           None      WCP-17,39,40
 cancel_region            str|None           None      WCP-25
+
+===============================================================================
+20. AGENTIC WORKFLOWS (LLM AGENTS, TOOLS, HUMAN-IN-THE-LOOP, STREAMING)
+===============================================================================
+
+Stabilize ships an optional toolkit for building LLM agent systems on top of the
+engine. It is standard-library only and is NOT imported by the core engine, so
+it adds nothing to non-agent workflows. Because agents run on the engine, they
+inherit its durability: a killed process resumes exactly where it stopped, every
+step is event-sourced, and the full control-flow pattern set (Section 19) is
+available.
+
+KEY RULES FOR AGENTIC WORKFLOWS:
+  - Build a model client ONCE and register task INSTANCES that hold it
+    (registry.register("agent", AgentLoopTask(client=client, tools=tools))).
+    Registering the bare class will fail at runtime: it has no client.
+  - API keys come from the environment (OLLAMA_API_KEY / OPENAI_API_KEY).
+    NEVER hard-code a key in generated code.
+  - Prefer the high-level tasks (LLMTask, AgentLoopTask) and helpers
+    (ApprovalTask/approve, emit_progress, output_reducers) over hand-rolling
+    HTTP calls or raw SignalStage.
+
+20.1 MODEL CLIENT
+-----------------
+from stabilize.llm import LLMClient
+
+# Ollama endpoint (local or ollama.com cloud):
+client = LLMClient(model="glm-5.2", base_url="https://ollama.com", api="ollama")
+# OpenAI-compatible endpoint:
+# client = LLMClient(model="gpt-4o", base_url="https://api.openai.com/v1", api="openai")
+# api_key defaults to OLLAMA_API_KEY / OPENAI_API_KEY from the environment.
+
+20.2 ONE-SHOT LLM TASK
+----------------------
+from stabilize.llm import LLMTask
+registry.register("llm", LLMTask(client=client))   # register an INSTANCE holding the client
+
+# Stage CONTEXT keys:  {"prompt": "...", optional "system": "...", optional "temperature": 0.2}
+# Stage OUTPUTS:       {"completion": "<text>", "llm_raw": {...}}
+
+20.3 TOOL-CALLING REACT AGENT
+-----------------------------
+from stabilize.llm import AgentLoopTask, ToolRegistry, tool
+
+@tool
+def knowledge_base(name: str) -> str:
+    """Look up a spec by name."""          # the docstring becomes the tool description
+    return json.dumps(SPECS.get(name, {})) # tools return strings
+
+tools = ToolRegistry().add(knowledge_base)  # .add(fn) per tool; chainable
+registry.register("agent", AgentLoopTask(client=client, tools=tools))
+
+# Stage CONTEXT keys:  {"prompt": "...", optional "max_iterations": 8 (loop cap)}
+# Stage OUTPUTS:       {"answer": "<text>", "tool_invocations": [{"tool","result"}...], "iterations": N}
+# AgentLoopTask runs the WHOLE model->tool-calls->results->model loop inside ONE
+# durable task, bounded by max_iterations. @tool derives the JSON schema from the
+# function signature and docstring; ToolRegistry dispatches the model's calls.
+
+20.4 HUMAN-IN-THE-LOOP APPROVAL (durable, survives restarts)
+------------------------------------------------------------
+from stabilize import ApprovalTask, approve, reject, WorkflowStatus
+registry.register("approval", ApprovalTask)
+
+# An approval stage SUSPENDS durably until a decision arrives. After process_all,
+# find the suspended gate and send the decision:
+gate = next(s for s in store.retrieve(workflow.id).stages if s.ref_id == "approve")
+if gate.status == WorkflowStatus.SUSPENDED:
+    approve(queue, workflow.id, gate.id, {"user": "alice"})   # or reject(queue, ...)
+    processor.process_all(timeout=30)                          # resumes and finishes
+# The suspension is persisted (waits minutes/days, survives a restart). A signal
+# sent BEFORE the stage suspends is buffered, so approvals are never lost.
+# Approved -> stage outputs {"approved": True, "approval": {...payload}}.
+# Rejected -> terminal by default; set context {"approval_reject_continues": True}
+# to continue the pipeline (FAILED_CONTINUE) instead.
+
+20.5 LIVE STREAMING (progress + tokens)
+---------------------------------------
+from stabilize import WorkflowStream, emit_progress
+
+# Inside a task, push progress (any keyword data is carried on the event):
+emit_progress(stage, "researching", agent="researcher:0", percent=40)
+
+# In the caller, consume events live (callback form, non-blocking):
+stream = WorkflowStream(workflow.id)
+stream.on_event(lambda item: print(item.event_type, item.data.get("message", "")))
+# ... run the workflow ...
+stream.close()
+# Progress events have event_type == "custom.progress". Lifecycle events
+# (stage.completed, workflow.completed, ...) flow through the same stream.
+# WorkflowStream(workflow.id, event_store=es).follow(include_history=True) iterates
+# history then live until the workflow ends.
+
+20.6 FAN-IN REDUCERS (combine parallel agent outputs, don't overwrite)
+----------------------------------------------------------------------
+# By default, parallel branches writing the SAME output key overwrite (last wins).
+# On the JOIN stage, set output_reducers to combine each branch's value:
+StageExecution(
+    ref_id="gather",
+    type="synthesizer",
+    join_type=JoinType.AND,                        # or N_OF_M / DISCRIMINATOR
+    requisite_stage_ref_ids={"agent_0", "agent_1", "agent_2"},
+    output_reducers={"finding": "collect"},        # combine "finding" from all branches
+    tasks=[...],
+)
+# Built-in reducers: collect|append (gather into a list), extend (flatten lists),
+# sum, max, min, merge (dict), first, last. Register custom ones with
+# register_reducer("name", fn). In the join task, stage.context["finding"] is the
+# combined value (e.g. a list). Keys without a reducer keep last-writer-wins.
+
+20.7 AGENTIC CONTROL-FLOW ON THE ENGINE (reuse Section 19)
+----------------------------------------------------------
+# Bounded agent loop (retry / refine): a task jumps back to an earlier stage.
+return TaskResult.jump_to("plan", context={"feedback": "tighten the numbers"})
+#   -> resets plan + downstream and re-runs; bounded by execution context "_max_jumps".
+# Proceed on a quorum of parallel agents:  JoinType.N_OF_M, join_threshold=K.
+# Race strategies, first result wins:       JoinType.DISCRIMINATOR.
+# A sub-agent as its own child workflow:    SubWorkflowTask (Section 19).
+
+20.8 COMPLETE AGENTIC TEMPLATE (copy and adapt)
+-----------------------------------------------
+#!/usr/bin/env python3
+"""Fan-out of tool-using agents -> reducer join -> synthesis -> human approval."""
+import json, os
+from stabilize import (
+    Workflow, StageExecution, TaskExecution, TaskRegistry, WorkflowStatus,
+    SqliteWorkflowStore, SqliteQueue, QueueProcessor, Orchestrator, JoinType,
+    ApprovalTask, approve, Task, TaskResult,
+)
+from stabilize.llm import LLMClient, AgentLoopTask, ToolRegistry, tool
+
+SPECS = {"atlas-70b": {"weights_gb": 140}, "h100": {"vram_gb": 80}}
+
+@tool
+def knowledge_base(name: str) -> str:
+    """Look up a spec by name (atlas-70b, h100)."""
+    return json.dumps(SPECS.get(name.lower(), {"error": "unknown"}))
+
+@tool
+def calculate(expression: str) -> str:
+    """Evaluate a simple arithmetic expression like '140 / 80'."""
+    import ast, operator
+    ops = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv}
+    def ev(n):
+        if isinstance(n, ast.Expression): return ev(n.body)
+        if isinstance(n, ast.Constant): return n.value
+        if isinstance(n, ast.BinOp): return ops[type(n.op)](ev(n.left), ev(n.right))
+        raise ValueError("unsupported")
+    return str(ev(ast.parse(expression, mode="eval")))
+
+class Synthesizer(Task):
+    def execute(self, stage):
+        findings = stage.context.get("finding", [])          # reducer-gathered list
+        if isinstance(findings, str): findings = [findings]
+        return TaskResult.success(outputs={"summary": " | ".join(str(f)[:120] for f in findings)})
+
+client = LLMClient(model="glm-5.2", base_url="https://ollama.com", api="ollama")  # OLLAMA_API_KEY from env
+tools = ToolRegistry().add(knowledge_base).add(calculate)
+
+registry = TaskRegistry()
+registry.register("agent", AgentLoopTask(client=client, tools=tools))
+registry.register("synth", Synthesizer)
+registry.register("approval", ApprovalTask)
+
+def _t(name, impl):
+    return TaskExecution.create(name=name, implementing_class=impl, stage_start=True, stage_end=True)
+
+SUBQ = ["How much VRAM do atlas-70b weights need?", "How many h100 GPUs fit the weights?"]
+agents = [
+    StageExecution(ref_id=f"agent_{i}", type="agent", name=f"Agent {i}",
+        context={"prompt": q + " Use knowledge_base and calculate. State the number.", "output_key": "finding"},
+        tasks=[_t(f"a{i}", "agent")])
+    for i, q in enumerate(SUBQ)
+]
+gather = StageExecution(ref_id="gather", type="synth", name="Synthesize",
+    requisite_stage_ref_ids={a.ref_id for a in agents},
+    join_type=JoinType.AND, output_reducers={"finding": "collect"},
+    tasks=[_t("g", "synth")])
+approve_stage = StageExecution(ref_id="approve", type="approval", name="Approve",
+    requisite_stage_ref_ids={"gather"}, tasks=[_t("ap", "approval")])
+
+workflow = Workflow.create(application="agentic-demo", name="Fan-out agents",
+    stages=[*agents, gather, approve_stage])
+
+store = SqliteWorkflowStore("sqlite:///./agentic.db", create_tables=True)   # DISK, never :memory:
+queue = SqliteQueue("sqlite:///./agentic.db"); queue._create_table()
+processor = QueueProcessor(queue, store=store, task_registry=registry)
+orchestrator = Orchestrator(queue, store=store)
+
+store.store(workflow)
+orchestrator.start(workflow)
+processor.process_all(timeout=180)                     # runs until the approval gate suspends
+
+gate = next(s for s in store.retrieve(workflow.id).stages if s.ref_id == "approve")
+if gate.status == WorkflowStatus.SUSPENDED:
+    approve(queue, workflow.id, gate.id, {"user": "alice"})
+    processor.process_all(timeout=30)
+
+result = store.retrieve(workflow.id)
+print("status:", result.status.name)                   # SUCCEEDED
+print("summary:", next(s for s in result.stages if s.ref_id == "gather").outputs.get("summary"))
 
 ===============================================================================
 END OF REFERENCE
