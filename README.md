@@ -1,449 +1,427 @@
 # Stabilize
 
-A lightweight full featured Python workflow execution engine with DAG-based stage orchestration.
+Stabilize is a durable workflow engine for Python. You describe work as a
+directed graph of stages, and the engine runs it — in parallel where the graph
+allows, resuming exactly where it left off after a crash, and recording every
+state transition for audit and replay. It runs embedded in your process on
+SQLite, or against PostgreSQL for multi-node deployments; there is no separate
+server or scheduler to operate.
 
-## Requirements
+The engine was built for reliable orchestration in general, and it turns out to
+be a particularly good foundation for **agentic systems**: LLM agents are
+long-running, make expensive external calls, loop, wait on humans, and must not
+lose progress or repeat side effects when something fails. Those are exactly the
+guarantees Stabilize provides. This document is organised around building
+agentic workflows, from a single model call to a multi-agent system, but the
+same primitives apply to any pipeline.
 
-- Python 3.11+
-- SQLite (included) or PostgreSQL 12+
+## Why Stabilize
+
+**Durability is built in, not bolted on.** Every step commits the new workflow
+state and the message that continues the workflow in a single database
+transaction. A process that is killed mid-run leaves no half-written state and
+no lost work: on restart, recovery re-queues precisely the work that was in
+flight. For an agent that has already spent real time and money on model calls,
+this is the difference between resuming and starting over.
+
+**Control flow is expressive.** Beyond fan-out and fan-in, Stabilize implements
+a large subset of the van der Aalst workflow patterns: proceed when *k of n*
+branches finish, proceed on the *first* branch to finish, mutual exclusion,
+milestones, deferred choice, and dynamic routing that lets a task jump back to
+an earlier stage to form a bounded loop. Agent behaviours that are awkward to
+express as a static graph — retry-until-good, race several strategies, gather a
+quorum of results — map directly onto these primitives.
+
+**Agents are first-class.** A small, dependency-light toolkit ships with the
+engine: a provider-agnostic chat client, a tool-calling ReAct agent that runs as
+a single durable task, human-in-the-loop approvals that survive restarts, live
+progress streaming, and declarative reducers for combining parallel results.
+
+**It stays out of your way.** Stabilize is a library. Import it, point it at a
+SQLite file, and run. There is nothing to deploy.
 
 ## Installation
 
 ```bash
-pip install stabilize            # SQLite support only
-pip install stabilize[postgres]  # PostgreSQL support
-pip install stabilize[all]       # All features
+pip install stabilize            # SQLite backend
+pip install stabilize[postgres]  # add PostgreSQL support
+pip install stabilize[all]       # all optional features
 ```
 
-## Features
+Requires Python 3.11 or newer.
 
-- Message-driven DAG execution engine
-- Parallel and sequential stage execution
-- Synthetic stages (before/after/onFailure)
-- PostgreSQL and SQLite persistence
-- Pluggable task system
-- Retry and timeout support
-- Event sourcing with full audit trail, replay, and projections
-- **20 Workflow Control-Flow Patterns** (van der Aalst et al.)
+## Core concepts
 
+A **workflow** is a set of **stages** connected by dependencies. Each stage runs
+one or more **tasks** — the unit where your code executes. A task returns a
+`TaskResult` (success, failure, suspend, or a jump to another stage) and may
+read from and write to the stage's `context` and `outputs`; a stage's outputs
+flow to its descendants.
 
-## Advanced Workflow Patterns
+Three objects run a workflow:
 
-Stabilize implements 20 of the 43 Workflow Control-Flow Patterns (WCP) from the academic literature:
+- a **store** (`SqliteWorkflowStore` / `PostgresWorkflowStore`) holds durable
+  state;
+- a **queue** (`SqliteQueue` / `PostgresQueue`) holds pending work; and
+- a **`QueueProcessor`** polls the queue and dispatches messages to handlers,
+  while an **`Orchestrator`** submits workflows to it.
 
-### Branching & Synchronization
+Tasks are looked up by name through a `TaskRegistry`. You register the tasks your
+workflow uses; the processor registers the built-in handlers for you.
 
-```python
-from stabilize.models.stage import JoinType, SplitType
+## Building agentic workflows
 
-# OR-Split (WCP-6): Conditional multi-branch activation
-StageExecution(
-    ref_id="triage",
-    split_type=SplitType.OR,
-    split_conditions={
-        "police": "emergency_type == 'crime'",
-        "ambulance": "injury_severity > 0",
-    },
-    ...
-)
+The examples below use the built-in LLM toolkit with a cloud model served over
+an Ollama-compatible endpoint. The client is provider-agnostic — set
+`api="openai"` with a `base_url` for any OpenAI-compatible gateway. API keys are
+read from the environment (`OLLAMA_API_KEY` or `OPENAI_API_KEY`); never hard-code
+them.
 
-# Discriminator Join (WCP-9): Fire on first upstream completion
-StageExecution(
-    ref_id="triage",
-    join_type=JoinType.DISCRIMINATOR,
-    requisite_stage_ref_ids={"check_breathing", "check_pulse"},
-    ...
-)
+### Simple: a single model call
 
-# N-of-M Join (WCP-30): Fire when 3 of 5 complete
-StageExecution(
-    ref_id="proceed",
-    join_type=JoinType.N_OF_M,
-    join_threshold=3,
-    requisite_stage_ref_ids={"r1", "r2", "r3", "r4", "r5"},
-    ...
-)
-```
-
-### Signals & Suspend/Resume
-
-```python
-from stabilize import Task, TaskResult
-
-class ApprovalTask(Task):
-    def execute(self, stage):
-        if stage.context.get("_signal_name") == "approved":
-            return TaskResult.success()
-        return TaskResult.suspend()  # Wait for external signal
-
-# Send signal to resume
-from stabilize.queue.messages import SignalStage
-queue.push(SignalStage(
-    execution_id=workflow.id, stage_id=stage.id,
-    signal_name="approved", signal_data={"user": "alice"},
-    persistent=True,  # Buffered if stage not yet suspended
-))
-```
-
-### Mutual Exclusion, Milestones, Deferred Choice
-
-```python
-# Mutex (WCP-39): Only one stage with same key runs at a time
-StageExecution(ref_id="update_db", mutex_key="shared_db", ...)
-
-# Milestone (WCP-18): Only enabled while milestone stage is RUNNING
-StageExecution(ref_id="change_route", milestone_ref_id="issue_ticket", milestone_status="RUNNING", ...)
-
-# Deferred Choice (WCP-16): First branch to start wins
-StageExecution(ref_id="agent_contact", deferred_choice_group="response", ...)
-StageExecution(ref_id="escalate", deferred_choice_group="response", ...)
-```
-
-See [Flow Control Guide](docs/guide/flow_control.rst) for complete documentation of all supported patterns.
-
-## Comparison to Industry Standards
-
-```txt
-┌───────────────┬────────────────────┬──────────────────────┬───────────────────┐
-│ Feature       │ stabilize          │ Spinnaker (Orca)     │ Airflow           │
-├───────────────┼────────────────────┼──────────────────────┼───────────────────┤
-│ State Storage │ Atomic (DB+Queue)  │ Atomic (Redis/SQL)   │ Atomic (SQL)      │
-│ Concurrency   │ Optimistic Locking │ Distributed Lock     │ Database Row Lock │
-│ Resilience    │ Queue-based (DLQ)  │ Queue-based (DLQ)    │ Scheduler Loop    │
-│ Flow Control  │ 20 WCP Patterns    │ Rigid DAG            │ Rigid DAG         │
-│ Complexity    │ Low (Library)      │ High (Microservices) │ High (Platform)   │
-└───────────────┴────────────────────┴──────────────────────┴───────────────────┘
-```
-
-- If you are looking for a *strictly atomic* and *highly distributed* system, 
-  please take a look into [Highway](https://highway.solutions).
-
-
-## Quick Start
+The smallest useful agent is one stage that calls a model. `LLMTask` reads a
+prompt from the stage context and writes the completion to the stage outputs.
 
 ```python
 from stabilize import (
-    Workflow, StageExecution, TaskExecution,
+    Workflow, StageExecution, TaskExecution, TaskRegistry,
     SqliteWorkflowStore, SqliteQueue, QueueProcessor, Orchestrator,
-    Task, TaskResult, TaskRegistry,
 )
+from stabilize.llm import LLMClient, LLMTask
 
-# Define a custom task
-class HelloTask(Task):
-    def execute(self, stage: StageExecution) -> TaskResult:
-        name = stage.context.get("name", "World")
-        return TaskResult.success(outputs={"greeting": f"Hello, {name}!"})
+client = LLMClient(model="glm-5.2", base_url="https://ollama.com", api="ollama")
 
-# Create a workflow
+store = SqliteWorkflowStore("sqlite:///agent.db", create_tables=True)
+queue = SqliteQueue("sqlite:///agent.db")
+queue._create_table()
+
+registry = TaskRegistry()
+registry.register("llm", LLMTask(client=client))
+
 workflow = Workflow.create(
-    application="my-app",
-    name="Hello Workflow",
+    application="demo",
+    name="One-shot answer",
     stages=[
         StageExecution(
-            ref_id="1",
-            type="hello",
-            name="Say Hello",
-            tasks=[
-                TaskExecution.create(
-                    name="Hello Task",
-                    implementing_class="hello",
-                    stage_start=True,
-                    stage_end=True,
-                ),
-            ],
-            context={"name": "Stabilize"},
+            ref_id="answer",
+            type="llm",
+            name="Answer",
+            context={"prompt": "In one sentence, what is a token bucket rate limiter?"},
+            tasks=[TaskExecution.create(
+                name="answer", implementing_class="llm",
+                stage_start=True, stage_end=True,
+            )],
         ),
     ],
 )
 
-# Setup persistence and queue
-store = SqliteWorkflowStore("sqlite:///:memory:", create_tables=True)
-queue = SqliteQueue("sqlite:///:memory:")
-queue._create_table()
-
-# Register tasks
-registry = TaskRegistry()
-registry.register("hello", HelloTask)
-
-# Create processor (auto-registers all default handlers)
 processor = QueueProcessor(queue, store=store, task_registry=registry)
+orchestrator = Orchestrator(queue, store=store)
 
-orchestrator = Orchestrator(queue)
-
-# Run workflow
 store.store(workflow)
 orchestrator.start(workflow)
-processor.process_all(timeout=10.0)
+processor.process_all(timeout=60)
 
-# Check result
 result = store.retrieve(workflow.id)
-print(f"Status: {result.status}")  # WorkflowStatus.SUCCEEDED
-print(f"Output: {result.stages[0].outputs}")  # {'greeting': 'Hello, Stabilize!'}
+print(result.stages[0].outputs["completion"])
 ```
 
-## Built-in Tasks
+`process_all` runs the workflow to completion synchronously, which is convenient
+for scripts and tests. In a service you would call `processor.start()` and let
+it run in the background.
 
-Stabilize includes ready-to-use tasks for common operations:
+### Mid-level: a tool-using agent with human approval
 
-### ShellTask - Execute Shell Commands
+Real agents use tools and often need a human to sign off before an action takes
+effect. `AgentLoopTask` runs a full ReAct loop — the model calls tools, reads the
+results, and calls more tools until it produces an answer — inside a single
+durable task. `ApprovalTask` suspends the workflow until an approval arrives; the
+suspension is persisted, so the workflow can wait for minutes or days, and
+survives a restart.
 
-```python
-from stabilize import ShellTask
-
-registry.register("shell", ShellTask)
-
-# Use in stage context
-context = {
-    "command": "npm install && npm test",
-    "cwd": "/app",
-    "timeout": 300,
-    "env": {"NODE_ENV": "test"},
-}
-```
-
-### HTTPTask - HTTP/API Requests
+Tools are ordinary functions. The `@tool` decorator derives a JSON schema from
+the signature and docstring so the model knows how to call them.
 
 ```python
-from stabilize import HTTPTask
+from stabilize import (
+    Workflow, StageExecution, TaskExecution, TaskRegistry,
+    SqliteWorkflowStore, SqliteQueue, QueueProcessor, Orchestrator,
+    ApprovalTask, approve, WorkflowStatus,
+)
+from stabilize.llm import LLMClient, AgentLoopTask, ToolRegistry, tool
 
-registry.register("http", HTTPTask)
 
-# GET with JSON parsing
-context = {"url": "https://api.example.com/data", "parse_json": True}
+@tool
+def account_balance(user_id: str) -> str:
+    """Return the current balance for a user id."""
+    return lookup_balance(user_id)
 
-# POST with JSON body
-context = {"url": "https://api.example.com/users", "method": "POST", "json": {"name": "John"}}
 
-# With authentication
-context = {"url": "https://api.example.com/private", "bearer_token": "token"}
+client = LLMClient(model="glm-5.2", base_url="https://ollama.com", api="ollama")
+tools = ToolRegistry().add(account_balance)
 
-# File upload
-context = {"url": "https://api.example.com/upload", "method": "POST", "upload_file": "/path/to/file.pdf"}
-```
+store = SqliteWorkflowStore("sqlite:///agent.db", create_tables=True)
+queue = SqliteQueue("sqlite:///agent.db")
+queue._create_table()
 
-See `examples/` directory for complete examples.
-
-## Parallel Stages
-
-Stages with shared dependencies run in parallel:
-
-```python
-#     Setup
-#    /     \
-#  Test   Lint
-#    \     /
-#    Deploy
+registry = TaskRegistry()
+registry.register("agent", AgentLoopTask(client=client, tools=tools))
+registry.register("approval", ApprovalTask)
 
 workflow = Workflow.create(
-    application="my-app",
-    name="CI/CD Pipeline",
+    application="demo",
+    name="Agent with approval",
     stages=[
-        StageExecution(ref_id="setup", type="setup", name="Setup", ...),
-        StageExecution(ref_id="test", type="test", name="Test",
-                      requisite_stage_ref_ids={"setup"}, ...),
-        StageExecution(ref_id="lint", type="lint", name="Lint",
-                      requisite_stage_ref_ids={"setup"}, ...),
-        StageExecution(ref_id="deploy", type="deploy", name="Deploy",
-                      requisite_stage_ref_ids={"test", "lint"}, ...),
+        StageExecution(
+            ref_id="agent", type="agent", name="Look up balance",
+            context={"prompt": "What is user u_42's balance? Use the tool, then state it."},
+            tasks=[TaskExecution.create(
+                name="a", implementing_class="agent",
+                stage_start=True, stage_end=True)],
+        ),
+        StageExecution(
+            ref_id="approve", type="approval", name="Human sign-off",
+            requisite_stage_ref_ids={"agent"},
+            tasks=[TaskExecution.create(
+                name="ap", implementing_class="approval",
+                stage_start=True, stage_end=True)],
+        ),
     ],
+)
+
+processor = QueueProcessor(queue, store=store, task_registry=registry)
+orchestrator = Orchestrator(queue, store=store)
+
+store.store(workflow)
+orchestrator.start(workflow)
+
+# Run until the approval gate suspends.
+processor.process_all(timeout=90)
+
+gate = next(s for s in store.retrieve(workflow.id).stages if s.ref_id == "approve")
+assert gate.status == WorkflowStatus.SUSPENDED
+
+# ... later, when a human decides ...
+approve(queue, workflow.id, gate.id, {"user": "alice"})
+processor.process_all(timeout=30)   # resumes and finishes
+```
+
+To watch the agent work as it runs, subscribe to the workflow's event stream.
+Tasks emit progress with `emit_progress`, and lifecycle events are published
+automatically:
+
+```python
+from stabilize import WorkflowStream
+
+stream = WorkflowStream(workflow.id)
+stream.on_event(lambda item: print(item.event_type, item.data.get("message", "")))
+```
+
+### Complex: a multi-agent research analyst
+
+Larger agentic systems combine parallelism, quorums, races, loops, human gates,
+and sub-workflows. The `examples/research_analyst/` project is a complete,
+runnable example that does all of this: a planner decomposes a question; three
+tool-using agents research the parts in parallel; the workflow proceeds once a
+quorum of them finishes; two reviewers race and the first verdict wins; a router
+loops back to refine when confidence is low; a human approves; and a child
+workflow writes the report.
+
+```
+                 ┌── researcher 0 (ReAct + tools) ─┐
+   plan ─────────┼── researcher 1 (ReAct + tools) ─┤  proceed on 2 of 3,
+ (planner)  ▲    └── researcher 2 (ReAct + tools) ─┘  gather findings
+            │                                             │
+            │                                             ▼
+            │                                        synthesize
+            │                          ┌── review A ─┐        │
+            │                          └── review B ─┘ first  ▼
+            │                                    verdict → router
+            └──────── loop back to refine ───────────┘  │ accept
+                                                         ▼
+                                          human approval → report (sub-workflow)
+```
+
+Each advanced behaviour is a property on a stage or a return value from a task.
+A join that fires when a quorum finishes, gathering each branch's output into a
+list:
+
+```python
+StageExecution(
+    ref_id="synthesize",
+    join_type=JoinType.N_OF_M,
+    join_threshold=2,
+    requisite_stage_ref_ids={"researcher_0", "researcher_1", "researcher_2"},
+    output_reducers={"finding": "collect"},   # combine, don't overwrite
+    tasks=[...],
 )
 ```
 
-## Dynamic Routing
-
-Stabilize supports dynamic flow control with `TaskResult.jump_to()` for conditional branching and retry loops:
+A join that fires on the first upstream to complete:
 
 ```python
-from stabilize import Task, TaskResult, TransientError
-
-class RouterTask(Task):
-    """Route to different stages based on conditions."""
-    def execute(self, stage: StageExecution) -> TaskResult:
-        if stage.context.get("tests_passed"):
-            return TaskResult.success()
-        else:
-            # Jump to another stage with context
-            return TaskResult.jump_to(
-                "retry_stage",
-                context={"retry_reason": "tests failed"}
-            )
+StageExecution(
+    ref_id="router",
+    join_type=JoinType.DISCRIMINATOR,
+    requisite_stage_ref_ids={"review_a", "review_b"},
+    tasks=[...],
+)
 ```
 
-### Stateful Retries
-
-Preserve progress across transient error retries with `context_update`:
+A bounded loop — the router jumps back to an earlier stage to refine, carrying
+feedback with it:
 
 ```python
-class ProgressTask(Task):
-    def execute(self, stage: StageExecution) -> TaskResult:
-        processed = stage.context.get("processed_items", 0)
-        try:
-            # Process next batch
-            new_processed = process_batch(processed)
-            return TaskResult.success(outputs={"total": new_processed})
-        except RateLimitError:
-            # Preserve progress for next retry
-            raise TransientError(
-                "Rate limited",
-                retry_after=30,
-                context_update={"processed_items": processed + 10}
-            )
+class Router(Task):
+    def execute(self, stage):
+        if stage.context["confidence"] < 0.85 and passes_remaining(stage):
+            return TaskResult.jump_to("plan", context={"feedback": "tighten the numbers"})
+        return TaskResult.success()
 ```
 
-The `context_update` is merged into the stage context before the retry, allowing tasks to resume from where they left off.
+A child workflow, run and awaited as a single stage, via `SubWorkflowTask`.
 
-## Production Hardening (opt-in)
+The example is verified end to end against a real model, including a `--chaos`
+mode that kills the worker mid-run and lets recovery finish the job. See
+`examples/research_analyst/README.md` for the full walkthrough and a feature map.
+`examples/agent_team/` is a second complete example: a team of coding agents that
+build and test a small library.
 
-These features are **disabled by default** — enabling them is the only behavioral
-change, so upgrades are safe. See the [Resilience](docs/guide/resilience.rst) and
-[Persistence](docs/guide/persistence.rst) guides for details.
+## Durability, and why it matters for agents
 
-### Automatic crash recovery
-
-Have the processor re-queue workflows interrupted by a crash/restart, instead of
-calling recovery yourself:
+Each handler commits three things in one transaction: the updated stage or task
+state, the message that advances the workflow, and a deduplication record. There
+is no window in which state is saved but the next step is lost, or a step runs
+twice. When a worker dies, `WorkflowRecovery` inspects durable state on startup
+and re-queues exactly the work that was interrupted.
 
 ```python
 from stabilize.queue.processor.config import QueueProcessorConfig
 
-config = QueueProcessorConfig(
-    recover_on_start=True,           # recover once when start() is called
-    recovery_interval_seconds=60.0,  # periodic sweeps (0 = disabled; for distributed setups)
-)
+config = QueueProcessorConfig(recover_on_start=True)
 processor = QueueProcessor(queue, config=config, store=store, task_registry=registry)
-processor.start()
+processor.start()   # interrupted workflows resume automatically
 ```
 
-### Cooperative cancellation
+For an agent, "resume rather than restart" is not a nicety. A research run that
+made forty tool calls and three model calls before the machine rebooted picks up
+where it stopped, not from the beginning. Combined with the event log, you can
+also replay a completed run to reconstruct its state at any point — useful for
+debugging non-deterministic agent behaviour after the fact.
 
-Let long-running tasks stop early when their stage is canceled (Python can't
-force-kill a thread; use `STABILIZE_ISOLATION_MODE=process` for hard kills):
+## Agentic building blocks
+
+All of the following are additive and opt-in.
+
+**LLM toolkit** (`stabilize.llm`). `LLMClient` speaks the OpenAI and Ollama chat
+APIs. `LLMTask` is a one-shot call; `AgentLoopTask` is a bounded ReAct
+tool-calling loop. `@tool` and `ToolRegistry` turn functions into model tools and
+dispatch the model's calls back to them. The toolkit is standard-library only and
+is never imported by the core engine.
+
+**Human-in-the-loop** (`stabilize.hitl`). `ApprovalTask` plus `approve`, `reject`,
+`send_signal`, and `get_signal` wrap the engine's durable suspend-and-signal
+machinery. A gate can wait indefinitely and survives restarts.
+
+**Streaming** (`stabilize.streaming`). `WorkflowStream` consumes a workflow's
+events live or replays them from the durable log; `emit_progress` lets a task
+push progress or token updates to any listener.
+
+**Fan-in reducers** (`stabilize.reducers`). Set `output_reducers` on a join stage
+to combine parallel branches — `collect`, `sum`, `merge`, or a function you
+register — instead of the default last-writer-wins.
+
+## Built-in tasks
+
+Stabilize is not only for LLM work; it ships tasks for the operations pipelines
+usually need, and you can add your own by subclassing `Task`.
+
+- `ShellTask` — run a shell command with a timeout, environment, and working
+  directory.
+- `HTTPTask` — HTTP requests with JSON handling, authentication, file
+  upload/download, retries, and SSRF guards.
+- `PythonTask` — run a Python callable.
+- `DockerTask`, `SSHTask` — containers and remote hosts.
+- `SubWorkflowTask` — run a child workflow as a stage.
 
 ```python
-from stabilize import Task, TaskResult, is_cancellation_requested
+from stabilize import ShellTask, HTTPTask
 
-class LongTask(Task):
-    def execute(self, stage):
-        for item in items:
-            if is_cancellation_requested():
-                return TaskResult.terminal("Canceled")
-            process(item)
-        return TaskResult.success()
+registry.register("shell", ShellTask)
+registry.register("http", HTTPTask)
+
+# Stage context configures the task:
+{"command": "pytest -q", "cwd": "/app", "timeout": 300}
+{"url": "https://api.example.com/data", "parse_json": True}
 ```
 
-### Distributed task lease
+## General workflows
 
-For multi-process / multi-node deployments, ensure only one worker runs a given
-task at a time. Handlers should remain idempotent — the lease narrows the window,
-it is not exactly-once.
+The same graph model expresses ordinary pipelines. Stages with a shared
+dependency run in parallel; a stage waits for all of its requisites unless you
+choose a different join.
 
-```bash
-export STABILIZE_TASK_LEASE=1
-export STABILIZE_TASK_LEASE_TTL_SECONDS=3600
+```python
+#     setup
+#    /     \
+#  test    lint
+#    \     /
+#    deploy
+
+Workflow.create(application="ci", name="pipeline", stages=[
+    StageExecution(ref_id="setup",  type="shell", name="Setup",  ...),
+    StageExecution(ref_id="test",   type="shell", name="Test",   requisite_stage_ref_ids={"setup"}, ...),
+    StageExecution(ref_id="lint",   type="shell", name="Lint",   requisite_stage_ref_ids={"setup"}, ...),
+    StageExecution(ref_id="deploy", type="shell", name="Deploy", requisite_stage_ref_ids={"test", "lint"}, ...),
+])
 ```
 
-### SQLite WAL mode
+Tasks can preserve progress across transient-error retries by attaching a
+`context_update`, which is merged into the stage context before the next attempt:
 
-The default journal is `DELETE`. Opt into WAL for higher single-node concurrency:
+```python
+raise TransientError("rate limited", retry_after=30,
+                     context_update={"processed_items": done + 10})
+```
+
+## Persistence and operations
+
+**SQLite** needs no setup; the schema is created and migrated in place. For
+higher single-node concurrency, opt into WAL:
 
 ```bash
 export STABILIZE_SQLITE_JOURNAL_MODE=WAL
 ```
 
-SQLite schema is versioned and migrates existing databases in place (see the
-[Persistence guide](docs/guide/persistence.rst)).
+**PostgreSQL** is applied with the CLI:
 
-## Event Sourcing
+```bash
+stabilize mg-up --db-url postgres://user:pass@host:5432/dbname
+stabilize mg-status --db-url postgres://user:pass@host:5432/dbname
+```
 
-Enable full audit trail and event replay with one line:
+**Event sourcing** is one call, after which every transition is recorded:
 
 ```python
 from stabilize.events import configure_event_sourcing, SqliteEventStore
 
-# Enable event sourcing — handlers automatically record all state transitions
-event_store = SqliteEventStore("sqlite:///events.db", create_tables=True)
-configure_event_sourcing(event_store)
-
-# Run workflows as usual — events are recorded automatically
-
-# Subscribe to events for monitoring
-from stabilize.events import get_event_bus, EventType
-bus = get_event_bus()
-bus.subscribe("monitor", lambda e: print(e.event_type.value))
-
-# Replay events to reconstruct state at any point
-from stabilize.events import EventReplayer
-replayer = EventReplayer(event_store)
-state = replayer.rebuild_workflow_state(workflow.id)
-
-# Build analytics with projections
-from stabilize.events import StageMetricsProjection
-metrics = StageMetricsProjection()
-bus.subscribe("metrics", metrics.apply)
-
-# Evolve event schemas over time — register upcasters that are applied on replay
-from stabilize.events import get_event_migrator
-@get_event_migrator().register(from_version=1, to_version=2)
-def _v1_to_v2(event):
-    ...  # transform old payloads to the current shape
+configure_event_sourcing(SqliteEventStore("sqlite:///events.db", create_tables=True))
 ```
 
-Upcasting is a no-op until you register migrations, so replay is unchanged by default.
+**Monitoring.** `stabilize monitor` opens a live terminal dashboard of running
+workflows and queue depth.
 
-See `examples/event-sourcing-example.py` for a complete walkthrough.
+## Documentation, examples, tests
 
-## Database Setup
-
-### SQLite
-
-No setup required. Schema is created automatically.
-
-### PostgreSQL
-
-Apply migrations using the CLI:
+- Guides: `docs/guide/` (getting started, tasks, data flow, flow control,
+  persistence, resilience, event sourcing, agentic workflows).
+- Runnable examples: `examples/` — including `research_analyst/` and
+  `agent_team/` for complex agentic workflows, and smaller examples for shell,
+  HTTP, SSH, Docker, event sourcing, and dynamic routing.
 
 ```bash
-# Using mg.yaml in current directory
-stabilize mg-up
-
-# Using database URL
-stabilize mg-up --db-url postgres://user:pass@host:5432/dbname
-
-# Using environment variable
-MG_DATABASE_URL=postgres://user:pass@host:5432/dbname stabilize mg-up
-
-# Check migration status
-stabilize mg-status
-```
-
-Example mg.yaml:
-
-```yaml
-database:
-  host: localhost
-  port: 5432
-  user: postgres
-  password: postgres
-  dbname: stabilize
-```
-
-## CLI Reference
-
-```
-stabilize mg-up [--db-url URL]      Apply pending PostgreSQL migrations
-stabilize mg-status [--db-url URL]  Show migration status
-stabilize monitor [--db-url URL]    Real-time workflow monitoring dashboard
-stabilize prompt                    Output documentation for pipeline code generation
-```
-
-## Running Tests
-
-```bash
-# All tests (requires Docker for PostgreSQL)
-pytest tests/ -v
-
-# SQLite tests only (no Docker)
-pytest tests/ -v -k sqlite
+pytest tests/ -v            # full suite (PostgreSQL tests require Docker)
+pytest tests/ -v -k sqlite  # SQLite only
 ```
 
 ## License
