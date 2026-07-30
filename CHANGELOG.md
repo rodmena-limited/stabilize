@@ -1,5 +1,67 @@
 # Changelog
 
+## [0.20.0]
+
+Peer-review remediation release. An external 10-finding evaluation of the
+engine (by the RunFlow team) was verified finding-by-finding — all 10
+confirmed — and fixed, alongside a partner-reported migration defect and a
+re-verification of the v0.19.0 audit certificate on this tree (see the
+addendum in `AUDIT.md`).
+
+### Fixed (correctness)
+- **`Orchestrator.cancel()` / `.restart()` / `.unpause()` now work.** The
+  `CancelWorkflow`, `RestartStage`, `ResumeStage` and `PauseTask` messages had
+  no registered handler and were consumed and discarded: cancel returned
+  success while the workflow kept running, and pausing a workflow *lost* its
+  in-flight task. Four new handlers (`stabilize.handlers.workflow_control`)
+  implement the documented contracts; pausing parks the task as `PAUSED` and
+  resume re-arms and re-dispatches it. The engine's own start-time-expiry
+  cancellation path was silently broken by the same gap and now works.
+- **A message with no registered handler is no longer silently acked** — it
+  raises, retries, and escalates to the DLQ, so a lost instruction is loud.
+  The `Invalid*` diagnostic markers get an explicit consuming handler.
+- **Poison messages now reach the DLQ in daemon mode.** The poll loop sweeps
+  attempts-exhausted messages every `dlq_check_interval_seconds` (default
+  30s); previously only `process_all()` swept, so a service using `start()`
+  stalled poisoned work invisibly and `size()`-based drain checks never hit
+  zero.
+- **Invalid stage graphs are rejected at `Workflow.create()`** with named
+  errors — `duplicate_ref`, `self_edge`, `unknown_ref` (naming the typo'd
+  stage and the missing ref), and cycles (naming the members) — instead of
+  surfacing at runtime as "Exceeded max retries waiting for upstream stages".
+- **Recovery's duplicate-guard no longer full-scans the queue.** The
+  leading-wildcard `LIKE` over `payload::text` became an exact, indexed
+  top-level `task_id` lookup on both backends (additive migration
+  `add_queue_task_id_index`), which also removes a nested-substring
+  false-positive.
+
+### Added
+- **`stabilize mg-up`/`mg-status` target schema support** (reported by
+  SponsorSignal): `?schema=` in the db URL, `MG_SCHEMA`, or a `schema:` key in
+  `mg.yaml`. `mg-up` validates the identifier, creates the schema if missing,
+  and applies everything into it; docs cover pointing the runtime at the same
+  schema (`options=-csearch_path`) and moving an existing `public` install.
+- **Opt-in retention sweep** (`retention_sweep_interval_seconds`, default off)
+  cleans `processed_messages` by age and `stage_claims` for **terminal
+  executions only** — a live execution's claim is never deleted, since that
+  would resurrect the mutex/deferred-choice race it prevents.
+- **Startup warning when crash recovery is disabled** on a store-backed
+  processor (`from_handler_config()` does not carry recovery settings, so
+  env-configured embedders were getting recovery silently off).
+- Soft-timeout visibility: thread-mode timeout logs now state the worker
+  thread keeps running, and the resilience guide gained a "Timeout Semantics
+  by Isolation Mode" section.
+
+### Changed
+- `resilient-circuit>=0.4` is declared as a direct dependency (previously
+  imported but only present transitively via `bulkman`).
+- CI runs the full non-postgres suite (`-k "not postgres"`) instead of
+  `-k "sqlite"`, which had been deselecting ~half the tests — including the
+  audit certification suite.
+- Docs corrected: there is no In-Memory store backend (use
+  `sqlite:///:memory:`, per-connection); SQLite journal mode defaults to
+  DELETE with WAL opt-in.
+
 ## [0.19.1]
 
 Documentation and developer-experience release. No engine behavior changes.
