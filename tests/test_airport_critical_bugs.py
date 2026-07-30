@@ -613,57 +613,53 @@ class TestDAGCycleDetection:
     """
 
     def test_direct_cycle_detected(self) -> None:
-        """Test that direct cycles (A -> B -> A) are detected."""
-        from stabilize.dag.topological import CircularDependencyError, topological_sort
-
-        workflow = Workflow.create(
-            application="airport",
-            name="direct-cycle",
-            stages=[
-                StageExecution(
-                    ref_id="a",
-                    name="Stage A",
-                    requisite_stage_ref_ids={"b"},
-                ),
-                StageExecution(
-                    ref_id="b",
-                    name="Stage B",
-                    requisite_stage_ref_ids={"a"},
-                ),
-            ],
-        )
+        """Direct cycles (A -> B -> A) are rejected at Workflow.create."""
+        from stabilize.dag.topological import CircularDependencyError
 
         with pytest.raises(CircularDependencyError):
-            topological_sort(workflow.stages)
+            Workflow.create(
+                application="airport",
+                name="direct-cycle",
+                stages=[
+                    StageExecution(
+                        ref_id="a",
+                        name="Stage A",
+                        requisite_stage_ref_ids={"b"},
+                    ),
+                    StageExecution(
+                        ref_id="b",
+                        name="Stage B",
+                        requisite_stage_ref_ids={"a"},
+                    ),
+                ],
+            )
 
     def test_indirect_cycle_detected(self) -> None:
-        """Test that indirect cycles (A -> B -> C -> A) are detected."""
-        from stabilize.dag.topological import CircularDependencyError, topological_sort
-
-        workflow = Workflow.create(
-            application="airport",
-            name="indirect-cycle",
-            stages=[
-                StageExecution(
-                    ref_id="a",
-                    name="Stage A",
-                    requisite_stage_ref_ids={"c"},
-                ),
-                StageExecution(
-                    ref_id="b",
-                    name="Stage B",
-                    requisite_stage_ref_ids={"a"},
-                ),
-                StageExecution(
-                    ref_id="c",
-                    name="Stage C",
-                    requisite_stage_ref_ids={"b"},
-                ),
-            ],
-        )
+        """Indirect cycles (A -> B -> C -> A) are rejected at Workflow.create."""
+        from stabilize.dag.topological import CircularDependencyError
 
         with pytest.raises(CircularDependencyError):
-            topological_sort(workflow.stages)
+            Workflow.create(
+                application="airport",
+                name="indirect-cycle",
+                stages=[
+                    StageExecution(
+                        ref_id="a",
+                        name="Stage A",
+                        requisite_stage_ref_ids={"c"},
+                    ),
+                    StageExecution(
+                        ref_id="b",
+                        name="Stage B",
+                        requisite_stage_ref_ids={"a"},
+                    ),
+                    StageExecution(
+                        ref_id="c",
+                        name="Stage C",
+                        requisite_stage_ref_ids={"b"},
+                    ),
+                ],
+            )
 
 
 # =============================================================================
@@ -712,30 +708,41 @@ class TestDuplicateRefIdDetection:
     ) -> None:
         """Test that database correctly rejects duplicate ref_ids per execution.
 
-        The database has a UNIQUE constraint on (execution_id, ref_id) which
-        prevents duplicate ref_ids. This is the correct behavior - the bug
-        was in the topological sort not validating this BEFORE hitting the DB.
+        Workflow.create() now rejects duplicate ref_ids at submit time (the
+        fix this test's docstring used to wish for). The DB's UNIQUE
+        constraint on (execution_id, ref_id) remains the defense-in-depth
+        layer, so build the workflow via the raw constructor to reach it.
         """
         import sqlite3
 
-        workflow = Workflow.create(
+        from stabilize.dag.topological import InvalidStageGraphError
+        from stabilize.models.workflow import Trigger
+
+        duplicate_stages = [
+            StageExecution(
+                ref_id="duplicate",
+                name="Stage 1",
+                context={"order": 1},
+            ),
+            StageExecution(
+                ref_id="duplicate",
+                name="Stage 2",
+                context={"order": 2},
+            ),
+        ]
+
+        # Layer 1: submit-time validation refuses the graph outright.
+        with pytest.raises(InvalidStageGraphError):
+            Workflow.create(application="airport", name="duplicate-ref-test", stages=duplicate_stages)
+
+        # Layer 2: the DB constraint still rejects a workflow that skipped
+        # validation (raw constructor).
+        workflow = Workflow(
             application="airport",
             name="duplicate-ref-test",
-            stages=[
-                StageExecution(
-                    ref_id="duplicate",
-                    name="Stage 1",
-                    context={"order": 1},
-                ),
-                StageExecution(
-                    ref_id="duplicate",
-                    name="Stage 2",
-                    context={"order": 2},
-                ),
-            ],
+            stages=duplicate_stages,
+            trigger=Trigger(),
         )
-
-        # Database correctly rejects duplicate ref_ids
         with pytest.raises((sqlite3.IntegrityError, Exception)):
             repository.store(workflow)
 
