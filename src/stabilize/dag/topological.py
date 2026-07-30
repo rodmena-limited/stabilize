@@ -134,6 +134,49 @@ def validate_dag(stages: list[StageExecution]) -> bool:
     return True
 
 
+class InvalidStageGraphError(ValueError):
+    """Raised at submit time for a structurally invalid stage graph.
+
+    Distinguishes the defects that Kahn's algorithm would otherwise lump
+    together as "circular": duplicate ref_ids, requisites naming unknown
+    refs, and self-edges each get their own message naming the stages
+    involved, so a typo'd ref reads as a typo and not as contention.
+    """
+
+
+def validate_stage_graph(stages: list[StageExecution]) -> None:
+    """Validate a stage graph at submit time.
+
+    Checks, in order: duplicate ref_ids, self-edges, requisites naming
+    unknown refs, and cycles (via Kahn's algorithm, naming the members).
+    Only top-level stages are considered; synthetic stages are injected
+    later by the engine.
+
+    Raises:
+        InvalidStageGraphError: duplicate ref, unknown ref, or self-edge.
+        CircularDependencyError: the graph contains a cycle.
+    """
+    top_level = [s for s in stages if s.parent_stage_id is None]
+
+    seen: set[str] = set()
+    for stage in top_level:
+        if stage.ref_id in seen:
+            raise InvalidStageGraphError(f"duplicate_ref: ref_id '{stage.ref_id}' is used by more than one stage")
+        seen.add(stage.ref_id)
+
+    for stage in top_level:
+        if stage.ref_id in stage.requisite_stage_ref_ids:
+            raise InvalidStageGraphError(f"self_edge: stage '{stage.ref_id}' lists itself as a requisite")
+        unknown = set(stage.requisite_stage_ref_ids) - seen
+        if unknown:
+            raise InvalidStageGraphError(
+                f"unknown_ref: stage '{stage.ref_id}' requires nonexistent stage(s) {sorted(unknown)}"
+            )
+
+    # Structure is sound; anything Kahn cannot order now is a genuine cycle.
+    topological_sort(stages)
+
+
 def find_initial_stages(stages: list[StageExecution]) -> list[StageExecution]:
     """
     Find all initial stages (those with no dependencies and not synthetic).

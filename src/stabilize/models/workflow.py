@@ -312,6 +312,13 @@ class Workflow:
         Returns:
             A new Workflow instance
         """
+        from stabilize.dag.topological import validate_stage_graph
+
+        # Fail at submit time: a cycle or a typo'd requisite ref discovered
+        # at runtime surfaces as "Exceeded max retries waiting for upstream
+        # stages", indistinguishable from legitimate contention.
+        validate_stage_graph(stages)
+
         execution = cls(
             application=application,
             name=name,

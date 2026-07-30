@@ -6,7 +6,12 @@ import os
 import sys
 from typing import TYPE_CHECKING, Any
 
-from stabilize.cli.config import MIGRATION_TABLE, load_config, parse_db_url
+from stabilize.cli.config import (
+    MIGRATION_TABLE,
+    load_config,
+    parse_db_url,
+    validate_schema_name,
+)
 from stabilize.cli.migrations import (
     compute_checksum,
     extract_up_migration,
@@ -34,6 +39,12 @@ def mg_up(db_url: str | None = None) -> None:
     else:
         config = load_config()
 
+    # Optional target schema (db URL ?schema=, mg.yaml schema key, or MG_SCHEMA).
+    # Validated before any connection is opened.
+    schema = config.get("schema")
+    if schema:
+        schema = validate_schema_name(schema)
+
     # Connect to database
     conninfo = (
         f"host={config['host']} port={config.get('port', 5432)} "
@@ -44,6 +55,12 @@ def mg_up(db_url: str | None = None) -> None:
     try:
         with psycopg.connect(conninfo) as conn:
             with conn.cursor() as cur:
+                if schema:
+                    cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+                    cur.execute(f'SET search_path TO "{schema}"')
+                    conn.commit()
+                    print(f"Target schema: {schema}")
+
                 # Ensure migration tracking table exists
                 cur.execute(f"""
                     CREATE TABLE IF NOT EXISTS {MIGRATION_TABLE} (
@@ -197,6 +214,10 @@ def mg_status(db_url: str | None = None) -> None:
     else:
         config = load_config()
 
+    schema = config.get("schema")
+    if schema:
+        schema = validate_schema_name(schema)
+
     conninfo = (
         f"host={config['host']} port={config.get('port', 5432)} "
         f"user={config.get('user', 'postgres')} password={config.get('password', '')} "
@@ -207,15 +228,27 @@ def mg_status(db_url: str | None = None) -> None:
         with psycopg.connect(conninfo) as conn:
             with conn.cursor() as cur:
                 # Check if tracking table exists
-                cur.execute(
-                    """
-                    SELECT EXISTS (
-                        SELECT FROM information_schema.tables
-                        WHERE table_name = %s
+                if schema:
+                    cur.execute(f'SET search_path TO "{schema}"')
+                    cur.execute(
+                        """
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables
+                            WHERE table_name = %s AND table_schema = %s
+                        )
+                    """,
+                        (MIGRATION_TABLE, schema),
                     )
-                """,
-                    (MIGRATION_TABLE,),
-                )
+                else:
+                    cur.execute(
+                        """
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables
+                            WHERE table_name = %s
+                        )
+                    """,
+                        (MIGRATION_TABLE,),
+                    )
                 row = cur.fetchone()
                 table_exists = row[0] if row else False
 

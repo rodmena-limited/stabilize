@@ -449,6 +449,14 @@ class PostgresWorkflowStore(WorkflowStore):
         """Clean up old processed message records."""
         return _cleanup_old_processed_messages(self._pool, max_age_hours)
 
+    def cleanup_completed_stage_claims(self) -> int:
+        """Delete stage claims of executions in terminal states."""
+        from stabilize.persistence.postgres.operations import (
+            cleanup_completed_stage_claims as _cleanup_claims,
+        )
+
+        return _cleanup_claims(self._pool)
+
     def get_processed_message_ids(self, limit: int | None = None) -> list[str] | None:
         """Return processed message IDs, for hydrating an in-memory dedup cache."""
         return _get_processed_message_ids(self._pool, limit)

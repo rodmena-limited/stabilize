@@ -410,6 +410,23 @@ sweep manually at any time:
 
 Recovery failures never disrupt message processing; they are caught and logged.
 
+Timeout Semantics by Isolation Mode
+-----------------------------------
+
+**Thread mode (the default) enforces soft timeouts only.** When a task exceeds
+its timeout the engine raises ``TaskTimeoutError`` and the workflow proceeds
+down the failure path — but the worker thread executing the task **cannot be
+killed and keeps running** until the task function returns on its own. A hung
+task therefore occupies one of the processor's ``max_workers`` slots
+indefinitely, and the engine's duplicate-execution guard prevents the same task
+from being retried for up to an hour. The engine logs a warning naming the
+leaked thread whenever this happens.
+
+For hard timeouts — the task is forcibly killed at the deadline — run with
+``STABILIZE_ISOLATION_MODE=process``, which executes tasks in a subprocess. For
+thread mode, prefer tasks that honor cooperative cancellation (below) so a
+cancel or timeout can actually stop the work.
+
 Cooperative Cancellation
 ------------------------
 

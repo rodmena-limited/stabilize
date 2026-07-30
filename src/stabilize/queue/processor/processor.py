@@ -45,7 +45,7 @@ class QueueProcessor(QueueProcessorMixin):
     messages to appropriate handlers. Handlers run in a thread pool
     for concurrent processing.
 
-    When ``store`` and ``task_registry`` are both provided, all 12 default
+    When ``store`` and ``task_registry`` are both provided, all default
     handlers are registered automatically — no manual registration needed.
 
     Example:
@@ -194,6 +194,15 @@ class QueueProcessor(QueueProcessorMixin):
         # prevent the processor from starting.
         if self.config.recover_on_start:
             self.run_recovery()
+        elif self._store is not None and self.config.recovery_interval_seconds <= 0:
+            # from_handler_config() does not carry recovery settings, so an
+            # embedder configuring via environment gets recovery silently off.
+            # Make the state visible at startup instead.
+            logger.warning(
+                "Crash recovery is disabled (recover_on_start=False, "
+                "recovery_interval_seconds=0): workflows interrupted by a "
+                "crash will not be re-queued until recovery is enabled"
+            )
 
         self._running = True
         self._executor = ThreadPoolExecutor(max_workers=self.config.max_workers)
@@ -312,9 +321,41 @@ class QueueProcessor(QueueProcessorMixin):
         shutdown is requested.
         """
         poll_interval = self.config.poll_frequency_ms / 1000.0
+        dlq_interval = getattr(self.config, "dlq_check_interval_seconds", 0.0)
+        retention_interval = getattr(self.config, "retention_sweep_interval_seconds", 0.0)
+        last_dlq_check = time.monotonic()
+        last_retention_sweep = time.monotonic()
 
         while self._running:
             try:
+                # Periodically move poisoned (attempts-exhausted) messages to
+                # the DLQ. Without this a daemon using start() never sweeps:
+                # poisoned work stalls invisibly and size()-based drain checks
+                # can never reach zero.
+                if dlq_interval > 0 and time.monotonic() - last_dlq_check >= dlq_interval:
+                    last_dlq_check = time.monotonic()
+                    self._check_dlq()
+
+                if (
+                    retention_interval > 0
+                    and self._store is not None
+                    and time.monotonic() - last_retention_sweep >= retention_interval
+                ):
+                    last_retention_sweep = time.monotonic()
+                    try:
+                        removed = self._store.cleanup_old_processed_messages(
+                            max_age_hours=self.config.processed_messages_max_age_hours
+                        )
+                        claims = self._store.cleanup_completed_stage_claims()
+                        if removed or claims:
+                            logger.info(
+                                "Retention sweep removed %d processed-message record(s), %d stage claim(s)",
+                                removed,
+                                claims,
+                            )
+                    except Exception as e:
+                        logger.warning("Retention sweep failed: %s", e)
+
                 # Hold lock while checking stopping flag AND polling to prevent race
                 # condition where a message could be submitted after stop is requested
                 message = None

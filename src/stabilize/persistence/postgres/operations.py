@@ -165,3 +165,29 @@ def cleanup_old_processed_messages(pool: Any, max_age_hours: float = 24.0) -> in
             deleted: int = cur.rowcount or 0
         conn.commit()
         return deleted
+
+
+def cleanup_completed_stage_claims(pool: Any) -> int:
+    """Delete stage claims belonging to executions in terminal states.
+
+    Claims of live executions are never touched: removing one would
+    resurrect the mutex/deferred-choice race the claim exists to prevent.
+    """
+    from stabilize.models.status import WorkflowStatus
+
+    terminal = [s.name for s in WorkflowStatus if s.is_complete]
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM stage_claims
+                WHERE execution_id IN (
+                    SELECT id FROM pipeline_executions
+                    WHERE status = ANY(%(statuses)s)
+                )
+                """,
+                {"statuses": terminal},
+            )
+            deleted: int = cur.rowcount or 0
+        conn.commit()
+        return deleted

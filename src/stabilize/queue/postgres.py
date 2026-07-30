@@ -289,7 +289,7 @@ class PostgresQueue(Queue):
                     f"UPDATE {self.table_name} SET locked_until = %(locked_until)s WHERE id = %(id)s",
                     {"locked_until": locked_until, "id": msg_id},
                 )
-                extended = cur.rowcount == 1
+                extended = bool(cur.rowcount == 1)
             conn.commit()
         return extended
 
@@ -371,17 +371,18 @@ class PostgresQueue(Queue):
         Returns:
             True if a pending message exists for this task
         """
-        escaped_id = task_id.replace("%", r"\%").replace("_", r"\_")
         pool = self._get_pool()
         with pool.connection() as conn:
             with conn.cursor() as cur:
+                # Exact top-level match; served by the expression index
+                # idx_<table>_task_id (see add_queue_task_id_index migration).
                 cur.execute(
                     f"""
                     SELECT 1 FROM {self.table_name}
-                    WHERE payload::text LIKE %s ESCAPE '\\'
+                    WHERE payload ->> 'task_id' = %s
                     LIMIT 1
                     """,
-                    (f'%"task_id": "{escaped_id}"%',),
+                    (task_id,),
                 )
                 return cur.fetchone() is not None
 

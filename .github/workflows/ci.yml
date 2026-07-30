@@ -30,25 +30,16 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: pip install -e ".[dev]"
-      - name: Run SQLite tests
-        run: python -m pytest tests/ -v --tb=short -k "sqlite" --timeout=120
+      - name: Run tests (SQLite + all backend-independent tests)
+        # "not postgres" rather than "sqlite": a bare "sqlite" filter drops
+        # every test not parameterized by the backend fixture (~half the
+        # suite, including the audit certification tests).
+        run: python -m pytest tests/ -v --tb=short -k "not postgres" --timeout=120
 
   test-postgres:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: stabilize
-          POSTGRES_PASSWORD: stabilize
-          POSTGRES_DB: stabilize_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
+    # The suite starts its own postgres via testcontainers (tests/conftest.py);
+    # a service container and STABILIZE_POSTGRES_URL were never read.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -57,8 +48,6 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
       - name: Run PostgreSQL tests
-        env:
-          STABILIZE_POSTGRES_URL: postgresql://stabilize:stabilize@localhost:5432/stabilize_test
         run: python -m pytest tests/ -v --tb=short -k "postgres" --timeout=120
 
   golden-tests-sqlite:

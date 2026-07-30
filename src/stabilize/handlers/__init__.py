@@ -18,6 +18,12 @@ from stabilize.handlers.start_stage import StartStageHandler
 from stabilize.handlers.start_task import StartTaskHandler
 from stabilize.handlers.start_waiting_workflows import StartWaitingWorkflowsHandler
 from stabilize.handlers.start_workflow import StartWorkflowHandler
+from stabilize.handlers.workflow_control import (
+    CancelWorkflowHandler,
+    PauseTaskHandler,
+    RestartStageHandler,
+    ResumeStageHandler,
+)
 
 __all__ = [
     "MessageHandler",
@@ -37,6 +43,10 @@ __all__ = [
     "SignalStageHandler",
     "CancelRegionHandler",
     "AddMultiInstanceHandler",
+    "CancelWorkflowHandler",
+    "RestartStageHandler",
+    "ResumeStageHandler",
+    "PauseTaskHandler",
 ]
 
 

@@ -23,7 +23,8 @@ classifiers = [
 dependencies = [
     "python-ulid>=2.0",
     "pydantic>=2.0",
-    "bulkman>=0.1.0"
+    "bulkman>=0.1.0",
+    "resilient-circuit>=0.4",
 ]
 
 [project.optional-dependencies]

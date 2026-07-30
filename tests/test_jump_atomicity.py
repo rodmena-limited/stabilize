@@ -31,7 +31,9 @@ def _task(status: WorkflowStatus) -> TaskExecution:
     return task
 
 
-def _forward_jump_workflow(repository: WorkflowStore) -> tuple[Workflow, StageExecution, StageExecution, StageExecution]:
+def _forward_jump_workflow(
+    repository: WorkflowStore,
+) -> tuple[Workflow, StageExecution, StageExecution, StageExecution]:
     """source(RUNNING) -> middle(NOT_STARTED) -> target(NOT_STARTED)."""
     source = StageExecution(ref_id="source", name="Source", tasks=[_task(WorkflowStatus.RUNNING)])
     source.status = WorkflowStatus.RUNNING

@@ -24,6 +24,30 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class _DiagnosticMarkerHandler(MessageHandler[Any]):
+    """Consumes Invalid* diagnostic marker messages after logging them.
+
+    These markers are pushed by handlers when a referenced entity is
+    missing; their lifecycle ends here. Without a registered handler
+    they would trip the unregistered-type hard error and cycle through
+    retries into the DLQ.
+    """
+
+    def __init__(self, message_type: type[Message]) -> None:
+        self._message_type = message_type
+
+    @property
+    def message_type(self) -> type[Message]:
+        return self._message_type
+
+    def handle(self, message: Message) -> None:
+        logger.error(
+            "Diagnostic marker: %s (execution=%s)",
+            get_message_type_name(message),
+            getattr(message, "execution_id", "?"),
+        )
+
+
 class QueueProcessorMixin:
     """Mixin providing handler registration, message handling, and DLQ management."""
 
@@ -56,11 +80,15 @@ class QueueProcessorMixin:
             AddMultiInstanceHandler,
             CancelRegionHandler,
             CancelStageHandler,
+            CancelWorkflowHandler,
             CompleteStageHandler,
             CompleteTaskHandler,
             CompleteWorkflowHandler,
             ContinueParentStageHandler,
             JumpToStageHandler,
+            PauseTaskHandler,
+            RestartStageHandler,
+            ResumeStageHandler,
             RunTaskHandler,
             SignalStageHandler,
             SkipStageHandler,
@@ -93,7 +121,21 @@ class QueueProcessorMixin:
             CompleteTaskHandler(queue, store),
             CompleteStageHandler(queue, store, task_registry=task_registry),
             CompleteWorkflowHandler(queue, store),
+            CancelWorkflowHandler(queue, store),
+            RestartStageHandler(queue, store),
+            ResumeStageHandler(queue, store),
+            PauseTaskHandler(queue, store),
         ]
+
+        from stabilize.queue.messages import (
+            InvalidStageId,
+            InvalidTaskId,
+            InvalidTaskType,
+            InvalidWorkflowId,
+        )
+
+        for marker_type in (InvalidWorkflowId, InvalidStageId, InvalidTaskId, InvalidTaskType):
+            all_handlers.append(_DiagnosticMarkerHandler(marker_type))
 
         for h in all_handlers:
             handler = cast("MessageHandler[Any]", h)
@@ -114,8 +156,11 @@ class QueueProcessorMixin:
         handler = self._handlers.get(message_type)
 
         if handler is None:
-            logger.warning("No handler registered for %s", get_message_type_name(message))
-            return
+            # A silently-acked unhandled message is a lost instruction
+            # (e.g. a cancel that never cancels). Raise so the processor's
+            # error path retries it and escalates to the DLQ, where it is
+            # visible, instead of consuming and discarding it.
+            raise RuntimeError(f"No handler registered for {get_message_type_name(message)}")
 
         # Check for duplicate message (idempotency)
         message_id = getattr(message, "message_id", None)

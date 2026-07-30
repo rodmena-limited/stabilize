@@ -242,7 +242,11 @@ class TestPoisonMessageToDLQ:
             # A handler that always raises for StartWorkflow.
             processor = QueueProcessor(
                 queue,
-                config=QueueProcessorConfig(poll_frequency_ms=15, retry_delay=timedelta(seconds=0)),
+                config=QueueProcessorConfig(
+                    poll_frequency_ms=15,
+                    retry_delay=timedelta(seconds=0),
+                    dlq_check_interval_seconds=0.2,
+                ),
                 store=store,
             )
 
@@ -257,10 +261,50 @@ class TestPoisonMessageToDLQ:
             while time.time() < deadline:
                 if queue.dlq_size() >= 1:
                     break
-                queue.check_and_move_expired()
+                # Deliberately no manual check_and_move_expired() here: the
+                # processor's own poll-loop sweep (dlq_check_interval_seconds)
+                # must escalate the message, or this test must fail.
                 time.sleep(0.1)
             processor.stop()
 
             assert queue.dlq_size() >= 1, "poison message never escalated to the DLQ"
+        finally:
+            SingletonMeta.reset(ConnectionManager)
+
+    def test_sweep_disabled_leaves_poison_stalled(self, tmp_path: Any) -> None:
+        """Both directions: with the sweep disabled the poison message stays
+        out of the DLQ, proving the green test's signal comes from the
+        processor sweep and not from some other path."""
+        from datetime import timedelta
+
+        SingletonMeta.reset(ConnectionManager)
+        try:
+            url = f"sqlite:///{tmp_path}/poison_off.db"
+            store = SqliteWorkflowStore(url, create_tables=True)
+            queue = SqliteQueue(url, lock_duration=timedelta(seconds=0.15), max_attempts=2)
+            queue._create_table()
+
+            processor = QueueProcessor(
+                queue,
+                config=QueueProcessorConfig(
+                    poll_frequency_ms=15,
+                    retry_delay=timedelta(seconds=0),
+                    dlq_check_interval_seconds=0.0,
+                ),
+                store=store,
+            )
+
+            def always_fail(message: Any) -> None:
+                raise RuntimeError("poison")
+
+            processor.register_handler_func(StartWorkflow, always_fail)
+            queue.push(StartWorkflow(execution_type="PIPELINE", execution_id="e1"))
+
+            processor.start()
+            time.sleep(2.0)
+            processor.stop()
+
+            assert queue.dlq_size() == 0, "sweep disabled but something still escalated"
+            assert queue.size() >= 1, "poison message should remain stalled in the queue"
         finally:
             SingletonMeta.reset(ConnectionManager)

@@ -224,3 +224,87 @@ python examples/agent_team/main.py --chaos    # kill + recover
 code-verified and remediated test-first. This certificate is valid for commit
 `528acda` and supersedes no prior guarantees. Re-run section 7 to re-establish
 it on any later commit.*
+
+---
+
+## Addendum — re-verification and peer-review remediation (2026-07-30)
+
+The certificate above was re-established on the post-v0.19.1 tree, and two
+peer reports received over agent-mail were verified and remediated in the same
+pass. This addendum records what changed and exactly what was exercised.
+
+### Certificate claims that did NOT hold on this tree (fixed)
+
+- **mypy.** The audit's own mypy command (section 7) failed with 5 errors
+  (8 across `src/` under mypy 1.19.1) — type-check drift, not engine defects.
+  All fixed; `mypy src/` is now fully clean (215 files).
+- **Lint.** `make lint` had 13 pre-existing errors in test files. Fixed.
+- **CI enforcement.** `.github/workflows/ci.yml` ran `pytest -k "sqlite"` /
+  `-k "postgres"`, which deselects every test not parameterized by backend —
+  including `test_audit_certification.py` itself. The executable certificate
+  was green locally but **not continuously enforced**. CI now runs
+  `-k "not postgres"` plus the postgres matrix.
+
+### Peer findings verified and fixed (credit: runflow, sponsorsignal)
+
+A 10-finding external evaluation from the RunFlow team was verified
+finding-by-finding by running their reproductions: **all 10 confirmed, 0
+refuted**, and all 10 fixed on this tree, most notably:
+
+1. `CancelWorkflow`/`RestartStage`/`ResumeStage`/`PauseTask` had **no
+   registered handler** — `Orchestrator.cancel()` returned success while the
+   message was consumed and discarded; pausing a workflow *lost* its in-flight
+   task. Four handlers added (`handlers/workflow_control.py`); unregistered
+   message types now raise (retry → DLQ) instead of ack-dropping
+   (`tests/test_workflow_control.py`, 6 tests incl. live cancel-mid-run).
+2. Poison messages never reached the DLQ in daemon mode (`_check_dlq` only
+   ran in `process_all()`); the weak-spot test claiming otherwise performed
+   the sweep itself — a self-confirming check. Poll-loop sweep added
+   (`dlq_check_interval_seconds`); test re-pointed at the live processor with
+   a both-directions companion.
+3. `processed_messages` and `stage_claims` grew without bound. Opt-in
+   retention sweep added; stage claims are deleted **only for terminal
+   executions** (deleting a live claim would resurrect the WCP-16/17 race).
+4. No submit-time DAG validation — a typo'd requisite surfaced at runtime as
+   fake contention. `Workflow.create()` now rejects duplicate refs,
+   self-edges, unknown refs (naming the typo), and cycles (naming members).
+5. Recovery silently disabled via `from_handler_config`; a startup warning
+   now names the state. 6. Recovery's duplicate-guard full-scan LIKE replaced
+   with exact indexed lookups on both backends (+ additive migration).
+   7. Soft thread-mode timeouts documented prominently; timeout log names the
+   leaked thread. 8. `resilient-circuit` declared as a direct dependency.
+   10. CLAUDE.md drift fixed (no In-Memory store exists; WAL is opt-in).
+
+Separately, SponsorSignal reported `stabilize mg-up` landing tables in
+`public` regardless of a dedicated schema: confirmed and fixed (`?schema=` /
+`MG_SCHEMA` / mg.yaml `schema:`; `CREATE SCHEMA IF NOT EXISTS` +
+`search_path`; live-verified against Postgres 15 in
+`tests/test_cli_schema.py`, both directions).
+
+### Evidence (all local, SQLite + Postgres 15 via testcontainers)
+
+- Full unit suite, both backends, before the control-handler work:
+  **1268 passed / 7 skipped / 1 xfailed / 0 failed**. After it: 1289 passed /
+  1 failed — the failure was a test-liveness bug introduced by a lint fix in
+  this session (weakref keep-alive), itself fixed. The final tree's full run
+  is enforced by CI on this commit and re-run locally.
+- Certification suite **7/7**; weak spots **6/6**; golden-standard **2+2**
+  (both backends); new regression tests: **+37** (`test_cli_schema` 15,
+  `test_workflow_control` 6, `test_runflow_findings` 10, weak-spot companion
+  1, plus 5 graph-validation cases counted in `test_runflow_findings`).
+- `ruff` clean over `src/ tests/ golden_standard_tests/`; `mypy src/` clean.
+- E2E agentic proof (`examples/agent_team/`): offline-stub **normal and
+  chaos runs PASS** (SUCCEEDED, event-replay equivalence, SIGKILL + recovery,
+  generated-library tests green). **Not exercised:** the cloud-LLM leg — the
+  Ollama account's weekly quota was exhausted (verified by direct API probe);
+  the original certificate's glm-5.2 cloud evidence stands as of 2026-07-02.
+
+### Residuals (tracked, honest)
+
+- HTTP SSRF DNS-rebinding TOCTOU: still deferred, now genuinely tracked
+  (issuedb #3) — it was previously "tracked" nowhere.
+- Condition-aware reachability validation (can a node ever run under any
+  assignment of upstream terminal states): enhancement beyond the fixed
+  submit-time checks, tracked in issuedb #4.
+- Not exercised in this pass: sustained multi-process load, the cloud-LLM
+  e2e leg, and long-horizon retention sweeps under production data volumes.

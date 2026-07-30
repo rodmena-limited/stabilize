@@ -3,8 +3,6 @@
 import threading
 import time
 
-from stabilize.models.status import WorkflowStatus
-
 import pytest
 
 from stabilize.finalizers import (
@@ -13,6 +11,7 @@ from stabilize.finalizers import (
     get_finalizer_registry,
     reset_finalizer_registry,
 )
+from stabilize.models.status import WorkflowStatus
 
 
 @pytest.fixture(autouse=True)

@@ -176,7 +176,7 @@ class PostgresTransaction(StoreTransaction):
                     """,
                     params,
                 )
-                return cur.rowcount == 1
+                return bool(cur.rowcount == 1)
 
             # The pool uses dict_row, so rows are dict-like: access by name.
             owner_id = row["stage_id"]
@@ -204,7 +204,7 @@ class PostgresTransaction(StoreTransaction):
                         """,
                         {**params, "owner_id": owner_id},
                     )
-                    return cur.rowcount == 1
+                    return bool(cur.rowcount == 1)
 
             return False
 

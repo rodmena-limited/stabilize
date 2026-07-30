@@ -10,7 +10,6 @@ fast-path checks pass for both siblings (as they do when both reads happen
 before either write) and require the claim transaction itself to serialize.
 """
 
-from typing import Any
 
 import pytest
 

@@ -429,6 +429,35 @@ stabilize mg-up --db-url postgres://user:pass@host:5432/dbname
 stabilize mg-status --db-url postgres://user:pass@host:5432/dbname
 ```
 
+By default tables land in the connection's default schema (usually `public`).
+To keep stabilize's tables in a dedicated schema, add `?schema=` to the URL
+(or set `MG_SCHEMA`, or a `schema:` key under `database:` in `mg.yaml`) —
+`mg-up` creates the schema if missing and applies everything into it:
+
+```bash
+stabilize mg-up --db-url "postgres://user:pass@host:5432/dbname?schema=stabilize"
+
+# Point the runtime at the same schema via a search_path option in the DSN:
+# postgres://user:pass@host:5432/dbname?options=-csearch_path%3Dstabilize
+```
+
+To move an existing install out of `public`, run once (then use the
+schema-qualified URLs above from then on):
+
+```sql
+CREATE SCHEMA IF NOT EXISTS stabilize;
+DO $$ DECLARE t text;
+BEGIN
+  FOR t IN SELECT table_name FROM information_schema.tables
+           WHERE table_schema = 'public' AND (table_name LIKE 'stabilize%'
+              OR table_name IN ('pipeline_executions','stage_executions','task_executions',
+                                'queue_messages','queue_messages_dlq','processed_messages',
+                                'stage_claims','workflow_signals'))
+  LOOP EXECUTE format('ALTER TABLE public.%I SET SCHEMA stabilize', t);
+  END LOOP;
+END $$;
+```
+
 **Event sourcing** is one call, after which every transition is recorded:
 
 ```python

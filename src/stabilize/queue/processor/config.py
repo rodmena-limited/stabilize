@@ -55,6 +55,19 @@ class QueueProcessorConfig:
     # Seconds between heartbeats. None derives half the queue's lock_duration.
     lock_heartbeat_interval_seconds: float | None = None
 
+    # Seconds between poison-message sweeps in the polling loop: messages
+    # past max_attempts are moved to the DLQ so they stay visible instead of
+    # stalling invisibly (poll skips them but size() still counts them).
+    # 0 disables the periodic sweep (process_all() still sweeps per drain).
+    dlq_check_interval_seconds: float = 30.0
+
+    # Opt-in retention sweep for the processed_messages dedup table, which
+    # otherwise accrues one row per message for the life of the database.
+    # Disabled by default: deleting dedup records narrows the redelivery
+    # window they guard, so enabling it is an operator decision.
+    retention_sweep_interval_seconds: float = 0.0
+    processed_messages_max_age_hours: float = 24.0
+
     # --- Automatic crash recovery (opt-in; all default to disabled) ---
     # Run a one-shot recovery sweep when start() is called. This re-queues
     # workflows that were interrupted by a crash/restart. Requires a store.

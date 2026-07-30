@@ -172,3 +172,27 @@ def cleanup_old_processed_messages(
     )
     conn.commit()
     return cursor.rowcount
+
+
+def cleanup_completed_stage_claims(conn: sqlite3.Connection) -> int:
+    """Delete stage claims belonging to executions in terminal states.
+
+    Claims of live executions are never touched: removing one would
+    resurrect the mutex/deferred-choice race the claim exists to prevent.
+    """
+    from stabilize.models.status import WorkflowStatus
+
+    terminal = [s.name for s in WorkflowStatus if s.is_complete]
+    placeholders = ", ".join("?" for _ in terminal)
+    cursor = conn.execute(
+        f"""
+        DELETE FROM stage_claims
+        WHERE execution_id IN (
+            SELECT id FROM pipeline_executions
+            WHERE status IN ({placeholders})
+        )
+        """,
+        terminal,
+    )
+    conn.commit()
+    return cursor.rowcount

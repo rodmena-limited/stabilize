@@ -35,6 +35,11 @@ def create_queue_tables(conn: sqlite3.Connection, table_name: str) -> None:
         CREATE INDEX IF NOT EXISTS idx_{table_name}_locked
         ON {table_name}(locked_until)
     """)
+    # Serves recovery's has_pending_message_for_task exact-match lookup.
+    conn.execute(f"""
+        CREATE INDEX IF NOT EXISTS idx_{table_name}_task_id
+        ON {table_name}(json_extract(payload, '$.task_id'))
+    """)
 
     # Dead Letter Queue table
     conn.execute(f"""

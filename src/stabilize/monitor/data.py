@@ -395,9 +395,10 @@ class MonitorDataFetcher:
             # ConnectionManager+connection_string pair. Query the same stats
             # so `stabilize monitor` is not blank on Postgres deployments.
             if hasattr(self.queue, "_get_pool") or hasattr(self.queue, "_pool"):
-                pool = self.queue._get_pool() if hasattr(self.queue, "_get_pool") else self.queue._pool
+                pool_getter = getattr(self.queue, "_get_pool", None)
+                pool = pool_getter() if pool_getter is not None else getattr(self.queue, "_pool")
                 table = getattr(self.queue, "table_name", "queue_messages")
-                stuck_threshold = datetime.fromtimestamp(
+                stuck_threshold_dt = datetime.fromtimestamp(
                     int(time.time()) - self.stuck_threshold_seconds
                 )
                 with pool.connection() as conn:
@@ -417,7 +418,7 @@ class MonitorDataFetcher:
                         cur.execute(
                             f"SELECT COUNT(*) AS n FROM {table} "
                             "WHERE locked_until IS NOT NULL AND locked_until < %(threshold)s",
-                            {"threshold": stuck_threshold},
+                            {"threshold": stuck_threshold_dt},
                         )
                         stuck = _count(cur.fetchone())
                 return QueueStats(pending=pending, processing=processing, stuck=stuck)

@@ -14,7 +14,6 @@ from stabilize.models.workflow import Workflow
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue import Queue
 
-
 # ============ B1: Streaming ============
 
 
@@ -51,7 +50,9 @@ class TestStreaming:
             stage_a = StageExecution(ref_id="a", name="A", tasks=[])
             stage_b = StageExecution(ref_id="b", name="B", tasks=[])
             wf_a = Workflow.create(application="t", name="a", stages=[stage_a])
-            wf_b = Workflow.create(application="t", name="b", stages=[stage_b])
+            # Binds stage_b to a different workflow id than the stream watches.
+            # The reference must stay alive: stage.execution is a weakref.
+            _wf_b = Workflow.create(application="t", name="b", stages=[stage_b])
 
             seen: list[Any] = []
             stream = WorkflowStream(wf_a.id)
@@ -71,9 +72,8 @@ class TestStreaming:
 
 class TestApprovalTask:
     def _run(self, repository: WorkflowStore, queue: Queue, decision: str, extra_ctx: dict | None = None):
-        from tests.conftest import setup_stabilize
-
         from stabilize.hitl import ApprovalTask, approve, reject
+        from tests.conftest import setup_stabilize
 
         processor, runner, _ = setup_stabilize(
             repository, queue, extra_tasks={"approval": ApprovalTask}
@@ -161,10 +161,9 @@ class TestReducers:
     ) -> None:
         """Two parallel branches writing the same scalar key are gathered into
         a list at the join instead of clobbering."""
-        from tests.conftest import setup_stabilize
-
         from stabilize.tasks.interface import Task
         from stabilize.tasks.result import TaskResult
+        from tests.conftest import setup_stabilize
 
         class EmitTask(Task):
             def execute(self, stage: StageExecution) -> TaskResult:

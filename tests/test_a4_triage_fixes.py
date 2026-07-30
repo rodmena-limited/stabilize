@@ -2,10 +2,7 @@
 Tests for the A4-triage fixes (audit findings confirmed by re-inspection).
 """
 
-from datetime import UTC, datetime, timedelta
 from typing import Any
-
-import pytest
 
 from stabilize.models.stage import StageExecution
 from stabilize.persistence.connection import ConnectionManager, SingletonMeta

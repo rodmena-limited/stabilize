@@ -13,8 +13,7 @@ from typing import Any
 
 import pytest
 
-from stabilize.events import SqliteEventStore, get_event_bus, reset_event_bus
-from stabilize.events import EventQuery, EventType
+from stabilize.events import EventQuery, EventType, SqliteEventStore, get_event_bus, reset_event_bus
 from stabilize.events.recorder import EventRecorder
 from stabilize.handlers import CompleteStageHandler
 from stabilize.models.stage import StageExecution

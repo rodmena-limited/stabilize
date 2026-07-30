@@ -71,6 +71,24 @@ Required for "Airport Grade" production deployments.
     export MG_DATABASE_URL="postgres://user:pass@localhost:5432/stabilize"
     stabilize mg-up
 
+By default tables are created in the connection's default schema (usually
+``public``). To keep them in a dedicated schema, add ``?schema=`` to the URL
+(or set ``MG_SCHEMA``, or a ``schema:`` key under ``database:`` in
+``mg.yaml``); ``mg-up`` creates the schema if missing and applies all
+migrations into it. Point the runtime store at the same schema with a
+``search_path`` option in the DSN:
+
+.. code-block:: bash
+
+    export MG_DATABASE_URL="postgres://user:pass@localhost:5432/stabilize?schema=stabilize"
+    stabilize mg-up
+
+.. code-block:: python
+
+    store = PostgresWorkflowStore(
+        "postgres://user:pass@localhost:5432/stabilize?options=-csearch_path%3Dstabilize"
+    )
+
 .. code-block:: python
 
     store = PostgresWorkflowStore("postgres://user:pass@localhost:5432/stabilize")

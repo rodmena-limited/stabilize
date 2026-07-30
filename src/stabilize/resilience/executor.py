@@ -114,8 +114,16 @@ def execute_with_resilience(
         ) from e
 
     except BulkheadTimeoutError as e:
-        # Task exceeded timeout
-        logger.warning("Task '%s' timed out: %s", task_name, e)
+        # Task exceeded timeout. In thread mode this is a SOFT timeout: the
+        # worker thread cannot be killed and keeps running, occupying one of
+        # max_workers slots until the task function returns on its own. Only
+        # STABILIZE_ISOLATION_MODE=process enforces a hard kill.
+        logger.warning(
+            "Task '%s' timed out: %s — worker thread keeps running (soft "
+            "timeout); set STABILIZE_ISOLATION_MODE=process for hard kills",
+            task_name,
+            e,
+        )
         raise TaskTimeoutError(
             f"Task exceeded timeout: {e}",
             task_name=task_name,

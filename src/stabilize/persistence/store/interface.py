@@ -333,6 +333,19 @@ class WorkflowStore(ABC):
         # Default implementation: no deduplication (always returns False)
         return False
 
+    def cleanup_completed_stage_claims(self) -> int:
+        """
+        Delete stage claims of executions in terminal states.
+
+        Claims of live executions must never be removed: doing so would
+        resurrect the mutex/deferred-choice race the claim prevents.
+
+        Returns:
+            Number of claim rows removed (0 for stores without claims)
+        """
+        # Default implementation: nothing to clean
+        return 0
+
     def mark_message_processed(
         self,
         message_id: str,

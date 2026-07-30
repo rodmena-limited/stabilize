@@ -107,7 +107,7 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         transaction and is NOT committed here (the caller commits).
         """
         external_connection = connection is not None
-        conn = connection if external_connection else self._get_connection()
+        conn = connection if connection is not None else self._get_connection()
         deliver_at = datetime.now(UTC)
         if delay:
             deliver_at += delay
@@ -339,14 +339,13 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         Returns:
             True if a pending message exists for this task
         """
-        escaped_id = task_id.replace("%", r"\%").replace("_", r"\_")
         conn = self._get_connection()
         result = conn.execute(
             f"""
             SELECT 1 FROM {self.table_name}
-            WHERE payload LIKE :pattern ESCAPE '\\'
+            WHERE json_extract(payload, '$.task_id') = :task_id
             LIMIT 1
             """,
-            {"pattern": f'%"task_id": "{escaped_id}"%'},
+            {"task_id": task_id},
         )
         return result.fetchone() is not None
