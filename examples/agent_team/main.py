@@ -247,7 +247,9 @@ def run_normal(db_path: str) -> Workflow:
     processor = QueueProcessor(queue, store=store, task_registry=registry)
     processor.start()
 
-    deadline = time.time() + 180
+    # Slower models (or a reviewer revision cycle) can exceed 180s of pure
+    # generation time; the workflow itself is fine, so let the watcher wait.
+    deadline = time.time() + float(os.getenv("AGENT_TEAM_DEADLINE", "180"))
     while time.time() < deadline:
         wf = store.retrieve(workflow.id)
         if wf.status.is_complete:
@@ -289,7 +291,7 @@ def run_chaos(db_path: str) -> Workflow:
     processor = QueueProcessor(queue, config=config, store=store, task_registry=registry)
     processor.start()
 
-    deadline = time.time() + 180
+    deadline = time.time() + float(os.getenv("AGENT_TEAM_DEADLINE", "180"))
     while time.time() < deadline:
         wf = store.retrieve(workflow.id)
         if wf.status.is_complete:

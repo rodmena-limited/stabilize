@@ -294,10 +294,16 @@ Separately, SponsorSignal reported `stabilize mg-up` landing tables in
   1, plus 5 graph-validation cases counted in `test_runflow_findings`).
 - `ruff` clean over `src/ tests/ golden_standard_tests/`; `mypy src/` clean.
 - E2E agentic proof (`examples/agent_team/`): offline-stub **normal and
-  chaos runs PASS** (SUCCEEDED, event-replay equivalence, SIGKILL + recovery,
-  generated-library tests green). **Not exercised:** the cloud-LLM leg — the
-  Ollama account's weekly quota was exhausted (verified by direct API probe);
-  the original certificate's glm-5.2 cloud evidence stands as of 2026-07-02.
+  chaos runs PASS**, and the cloud-LLM leg was subsequently re-established on
+  **ollama.com `deepseek-v4-flash`**: normal run `RESULT: PASS` (SUCCEEDED,
+  event-replay equivalence, generated-library tests green) and chaos run
+  `RESULT: PASS` (worker SIGKILLed mid-run; fresh processor with
+  `recover_on_start` drove it to SUCCEEDED). One additional real-model run
+  exercised the reviewer's `jump_to` revision loop live (tester FAIL →
+  reviewer sent work back → coder re-implemented); it exceeded the example
+  harness's fixed 180s watch window while still mid-loop, so the example's
+  deadline is now tunable via `AGENT_TEAM_DEADLINE` — a harness limit, not an
+  engine defect, as the completed runs above show.
 
 ### Residuals (tracked, honest)
 
@@ -306,5 +312,5 @@ Separately, SponsorSignal reported `stabilize mg-up` landing tables in
 - Condition-aware reachability validation (can a node ever run under any
   assignment of upstream terminal states): enhancement beyond the fixed
   submit-time checks, tracked in issuedb #4.
-- Not exercised in this pass: sustained multi-process load, the cloud-LLM
-  e2e leg, and long-horizon retention sweeps under production data volumes.
+- Not exercised in this pass: sustained multi-process load and long-horizon
+  retention sweeps under production data volumes.
