@@ -66,3 +66,6 @@ next-steps.md
 CERTIFICATION_AUDIT_REPORT.md
 
 *.md
+.claude/settings.local.json
+.omo/
+
