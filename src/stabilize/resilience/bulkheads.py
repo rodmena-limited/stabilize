@@ -7,6 +7,7 @@ Provides per-task-type bulkheads using BulkheadThreading from bulkman.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Callable
 from typing import Any, TypeVar
@@ -55,6 +56,13 @@ class TaskBulkheadManager:
         """
         self._bulkheads: dict[str, BulkheadThreading] = {}
         self._config = config
+        # bulkman >=2.0.0 makes shutdown terminal: a later execute raises rather
+        # than returning an ExecutionResult. Track the transition here so callers
+        # can refuse dispatch *before* entering a circuit breaker — bulkman 2.0.1's
+        # BulkheadShutdownError classifies the race correctly, but an exception
+        # raised from inside a protected call is still recorded as a failure
+        # against that circuit, which a shutdown must not do.
+        self._shutdown = threading.Event()
 
         # Create a bulkhead for each configured task type
         for task_type, bulkhead_config in config.bulkheads:
@@ -96,6 +104,18 @@ class TaskBulkheadManager:
             or the default bulkhead if type is unknown
         """
         return self._bulkheads.get(task_type, self._default_bulkhead)
+
+    @property
+    def is_shutdown(self) -> bool:
+        """
+        Whether shutdown() has been entered on this manager.
+
+        Once true, every underlying bulkhead is terminal: an execute attempt
+        raises RuntimeError instead of returning an ExecutionResult. Callers
+        use this to classify that RuntimeError as a shutdown race (retryable)
+        rather than a task failure (permanent).
+        """
+        return self._shutdown.is_set()
 
     def execute_with_timeout(
         self,
@@ -140,11 +160,18 @@ class TaskBulkheadManager:
 
         Distributes timeout budget across bulkheads. If a bulkhead finishes
         quickly, remaining time is redistributed to subsequent bulkheads.
+        Under bulkman >=2.0.0 the per-bulkhead timeout is actually honored, so
+        this budget bounds total shutdown time rather than merely describing it.
+
+        Idempotent: calling this more than once is safe.
 
         Args:
             wait: Whether to wait for pending tasks to complete
             timeout: Maximum time to wait for shutdown (total across all bulkheads)
         """
+        # Mark terminal before touching the bulkheads, so a concurrent
+        # execute_with_timeout that loses the race can still be classified.
+        self._shutdown.set()
 
         start = time.monotonic()
         remaining = timeout

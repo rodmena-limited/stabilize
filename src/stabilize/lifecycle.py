@@ -317,12 +317,20 @@ class LifecycleManager:
             except Exception as e:
                 logger.warning("Error stopping processor: %s", e)
 
-        # Step 4: Shutdown bulkhead managers
+        # Step 4: Shutdown bulkhead managers.
+        # bulkman >=2.0.0 honors the shutdown timeout instead of blocking until
+        # every task finishes, so the remaining budget must actually be passed
+        # down — otherwise a stuck task holds the whole shutdown open forever
+        # despite the advertised shutdown_timeout.
         for manager in bulkheads:
             try:
                 if hasattr(manager, "shutdown"):
-                    manager.shutdown(wait=True)
-                    logger.debug("Shutdown TaskBulkheadManager")
+                    elapsed = time.monotonic() - start_time
+                    remaining = max(0.0, self.shutdown_timeout - elapsed)
+                    manager.shutdown(wait=remaining > 0, timeout=remaining)
+                    logger.debug(
+                        "Shutdown TaskBulkheadManager (budget %.2fs)", remaining
+                    )
             except Exception as e:
                 logger.warning("Error shutting down bulkhead manager: %s", e)
 

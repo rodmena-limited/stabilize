@@ -91,6 +91,17 @@ class TestMessageDeduplicationRace:
             test_store.close()
             test_queue.close()
 
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "KNOWN BUG: is_message_processed() -> mark_message_processed() is "
+            "check-then-act with no atomicity, so two workers can both pass the "
+            "check and process the same message. Handlers must be idempotent. "
+            "strict=True: if the race is ever fixed this test XPASSes and fails "
+            "the suite, forcing this marker to be removed deliberately rather "
+            "than outliving the bug it describes."
+        ),
+    )
     def test_race_between_check_and_mark_demonstrates_bug(
         self, repository: WorkflowStore, queue: Queue, backend: str
     ) -> None:
@@ -178,15 +189,21 @@ class TestMessageDeduplicationRace:
             futures = [executor.submit(simulate_handler_processing) for _ in range(2)]
             [f.result() for f in as_completed(futures)]
 
-        # BUG DEMONSTRATION: processing_count might be 2 if both threads
-        # passed the is_processed check before either marked it processed
-        # This test documents that handlers MUST be idempotent
-        if processing_count > 1:
-            # This is the bug case - document it
-            pytest.xfail(
-                f"KNOWN BUG: Message processed {processing_count} times due to race condition. "
-                "Handlers must be idempotent to handle this."
-            )
+        # Assert the DESIRED behavior: deduplication should admit exactly one
+        # worker. It currently does not, so this assertion fails and the strict
+        # xfail marker above records that. Asserting the correct contract (rather
+        # than asserting the bug) is what makes a future fix visible: the day the
+        # race is closed, this passes, XPASSes against strict=True, and fails the
+        # suite until someone removes the marker on purpose.
+        #
+        # Previously this was `if processing_count > 1: pytest.xfail(...)`, which
+        # was green whether the race reproduced or not — it could not fail, so it
+        # was evidence of nothing.
+        assert processing_count == 1, (
+            f"Message processed {processing_count} times: both workers passed "
+            "is_message_processed() before either called mark_message_processed(). "
+            "Deduplication must admit exactly one worker."
+        )
 
     def test_handler_idempotency_is_required(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         """

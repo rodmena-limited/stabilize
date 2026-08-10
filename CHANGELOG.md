@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.21.0]
+
+### Changed (dependencies)
+- **Adopted `bulkman>=2.0.1,<3`** (was `>=0.1.0`), so the 2.0.x major is taken
+  deliberately rather than picked up incidentally by a lock refresh. The direct
+  `resilient-circuit` requirement moves to `>=0.4.6,<0.5` to match the floor
+  bulkman itself requires, so a resolver cannot select a version bulkman
+  rejects. Verified against the wheels PyPI actually serves.
+- **Shutdown races are now classified on exception type.** bulkman 2.0.1 adds
+  `BulkheadShutdownError`, raised on post-shutdown execute by both the
+  deterministic and the submit-race paths (confirmed against the published
+  wheel). The interim workaround — a bare `except RuntimeError` gated on our own
+  terminal-state flag — is removed. The pre-dispatch `is_shutdown` check is
+  deliberately **kept**: it refuses before the call enters the circuit breaker,
+  and a shutdown raised from inside a protected call is recorded by
+  `resilient-circuit` as a failure (measured: the circuit opens after 2), which
+  would trip circuits for workflows that never failed during a rolling restart.
+
+### Fixed (test integrity)
+- **Two tests that could not report a failure now can.** Neither was flaky; both were
+  green regardless of the state of the code they covered.
+  - `test_race_between_check_and_mark_demonstrates_bug` recorded the known message-
+    deduplication race with an imperative `pytest.xfail()` inside an `if`, so it
+    xfailed when the race reproduced and *passed silently* when it did not — and would
+    have stayed green if the race were fixed, or if it got worse. It now asserts the
+    desired contract (deduplication admits exactly one worker) under
+    `@pytest.mark.xfail(strict=True)`, so closing the race makes it XPASS and fail the
+    suite, forcing the marker to be retired deliberately. **The underlying race is
+    unchanged and still open** — handlers must remain idempotent.
+  - The SQLite thread-local connection test called `pytest.skip("Too many SQLite lock
+    failures ... test inconclusive")` at runtime when too few threads obtained a
+    connection — disarming itself under exactly the condition it exists to detect. A
+    regression in thread-local connection creation reported *skipped*, not *failed*.
+    It now asserts, and reports the observed lock errors.
+
+### Fixed
+- **Graceful shutdown now bounds bulkhead shutdown.** `LifecycleManager` called
+  `TaskBulkheadManager.shutdown(wait=True)` without passing any timeout, so a
+  single stuck task held shutdown open indefinitely despite the advertised
+  `shutdown_timeout` (measured: still blocked after 6s with a 30s task). The
+  remaining budget is now passed down, and an exhausted budget shuts the manager
+  down without waiting. This was latent under bulkman 1.x, which ignored the
+  timeout argument entirely; bulkman 2.0.0 honors it.
+- **A shutdown race no longer permanently fails a task.** bulkman 2.0.0 makes
+  shutdown terminal and surfaces a later execute as a bare `RuntimeError` from
+  `concurrent.futures`, which callers cannot distinguish from a task's own
+  error. `TaskBulkheadManager` now exposes `is_shutdown`, and
+  `execute_with_resilience` refuses dispatch to a terminal manager with a
+  retryable `TransientError` instead of burning the task's attempts.
+
 ## [0.20.0]
 
 Peer-review remediation release. An external 10-finding evaluation of the

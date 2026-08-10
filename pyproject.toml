@@ -1,6 +1,6 @@
 [project]
 name = "stabilize"
-version = "0.20.0"
+version = "0.21.0"
 description = "Stabilize Workflow Orchestration - Agentic Parallel Workflows"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,8 +23,12 @@ classifiers = [
 dependencies = [
     "python-ulid>=2.0",
     "pydantic>=2.0",
-    "bulkman>=0.1.0",
-    "resilient-circuit>=0.4",
+    # 2.0.1 adds BulkheadShutdownError; the shutdown-race classification in
+    # stabilize.resilience.executor depends on that type existing.
+    "bulkman>=2.0.1,<3",
+    # bulkman 2.0.0 requires resilient-circuit >=0.4.6,<0.5; keep our direct
+    # floor at or above theirs so a resolver cannot pick one bulkman rejects.
+    "resilient-circuit>=0.4.6,<0.5",
 ]
 
 [project.optional-dependencies]

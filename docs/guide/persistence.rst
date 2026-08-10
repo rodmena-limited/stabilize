@@ -89,6 +89,30 @@ migrations into it. Point the runtime store at the same schema with a
         "postgres://user:pass@localhost:5432/stabilize?options=-csearch_path%3Dstabilize"
     )
 
+Without ``?schema=``, both the migrator and the runtime store use the
+connection's default schema and the DSN needs no options:
+
 .. code-block:: python
 
     store = PostgresWorkflowStore("postgres://user:pass@localhost:5432/stabilize")
+
+.. warning::
+
+   Scope ``search_path`` to the connections Stabilize owns — the workflow
+   store, the queue, and the event store. Do **not** apply it to a database URL
+   that non-Stabilize application code also uses.
+
+   In a hybrid deployment (application tables in ``public``, Stabilize tables in
+   ``stabilize``) a globally applied ``search_path`` silently re-resolves every
+   unqualified application query whose table name Stabilize also uses. The
+   reported case is ``snapshots``: an application register table of that name
+   and the event store's own ``snapshots`` table both exist, so a bare
+   ``SELECT ... FROM snapshots`` in the application starts reading the event
+   store instead. Nothing errors — the query simply returns the wrong rows.
+
+   For the same reason, administrative or housekeeping queries that read
+   Stabilize tables over an unscoped pool must schema-qualify their table names
+   (``stabilize.pipeline_executions``, not ``pipeline_executions``).
+
+   A Stabilize-only database has no such collision, and can set the option on
+   the single shared DSN.

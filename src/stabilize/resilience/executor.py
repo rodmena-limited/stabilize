@@ -15,6 +15,7 @@ from bulkman.config import ExecutionResult
 from bulkman.exceptions import (
     BulkheadCircuitOpenError,
     BulkheadFullError,
+    BulkheadShutdownError,
     BulkheadTimeoutError,
 )
 from resilient_circuit import CircuitProtectorPolicy
@@ -64,12 +65,22 @@ def execute_with_resilience(
         The result of the function
 
     Raises:
-        TransientError: For bulkhead full, circuit open (retry later)
+        TransientError: For bulkhead full, circuit open, or a manager that is
+            shutting down (retry later)
         TaskTimeoutError: For timeout exceeded
         Exception: Any other exception from the function itself
     """
     if func_kwargs is None:
         func_kwargs = {}
+
+    # A manager that has already shut down cannot accept work: under bulkman
+    # >=2.0.0 shutdown is terminal. Refuse before entering the circuit so the
+    # attempt is not recorded as a task failure against it.
+    if bulkhead_manager.is_shutdown:
+        raise TransientError(
+            f"Bulkhead manager is shutting down; {task_type} task not dispatched",
+            retry_after=5,
+        )
 
     try:
         # Wrap execution with circuit breaker
@@ -110,6 +121,23 @@ def execute_with_resilience(
         raise TransientError(
             f"Circuit breaker open for {task_type}: {e}",
             retry_after=30,  # Suggest retry after cooldown period
+            cause=e,
+        ) from e
+
+    except BulkheadShutdownError as e:
+        # The manager shut down between the pre-dispatch check above and the
+        # submit. bulkman >=2.0.1 signals this with a dedicated type, so the
+        # race is classified on the type alone — no message matching, and no
+        # risk of swallowing a failure raised by the task itself (those arrive
+        # as BulkheadError, which is this exception's parent, not its subclass).
+        logger.debug(
+            "Bulkhead manager shut down mid-dispatch for task type '%s': %s",
+            task_type,
+            e,
+        )
+        raise TransientError(
+            f"Bulkhead manager shut down while dispatching {task_type}: {e}",
+            retry_after=5,
             cause=e,
         ) from e
 

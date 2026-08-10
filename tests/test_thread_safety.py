@@ -15,8 +15,6 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-import pytest
-
 from stabilize.models.stage import StageExecution
 from stabilize.models.task import TaskExecution
 from stabilize.models.workflow import Workflow
@@ -218,10 +216,16 @@ class TestSQLiteThreadSafety:
         for t in threads:
             t.join()
 
-        # Some connections might fail due to SQLite locking - that's OK
-        # as long as the ones that succeed are unique
-        if len(connections) < 3:
-            pytest.skip(f"Too many SQLite lock failures ({len(errors)} errors), test inconclusive")
+        # A shortage of connections must FAIL, not skip. Skipping here would
+        # disarm the test under exactly the condition it exists to detect: if
+        # thread-local connection creation regressed and threads stopped getting
+        # connections, the old `pytest.skip(...)` reported "skipped" rather than
+        # "failed", and a broken invariant read as an absent one.
+        assert len(connections) >= 3, (
+            f"Only {len(connections)} of 5 threads obtained a SQLite connection "
+            f"({len(errors)} lock errors: {errors}). Thread-local connections are "
+            "created per thread and should not contend on the database lock."
+        )
 
         # Each thread should have gotten a different connection object
         # (thread-local means separate connections)
