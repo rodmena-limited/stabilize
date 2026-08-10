@@ -325,6 +325,48 @@ class TestWorkflowCircuitFactory:
 
         assert isinstance(factory._storage, InMemoryStorage)
 
+    def test_postgres_url_passes_tls_params_through(self) -> None:
+        """TLS query params on a postgres URL survive _create_storage.
+
+        Regression for the resilient-circuit pin widen: hand-parsing the URL
+        into libpq `host=... dbname=...` used to drop sslmode/sslcert/sslkey,
+        silently forcing the breaker onto in-memory storage on TLS databases.
+        """
+        tls_url = (
+            "postgresql://user:pass@db.example:5432/stabilize"
+            "?sslmode=verify-full&sslcert=/etc/ssl/client.crt&sslkey=/etc/ssl/client.key"
+        )
+        config = ResilienceConfig(database_url=tls_url)
+
+        with patch("resilient_circuit.storage.PostgresStorage") as mock_storage:
+            factory = WorkflowCircuitFactory(config)
+            factory.get_circuit("wf1", "http")
+
+        # PostgresStorage must receive the URL verbatim (only the +psycopg
+        # driver suffix stripped) so psycopg sees the TLS query params.
+        assert mock_storage.called
+        conn_arg = mock_storage.call_args.kwargs.get("connection_string")
+        if conn_arg is None:
+            conn_arg = mock_storage.call_args[0][0]
+        assert conn_arg == tls_url
+        assert "sslmode=verify-full" in conn_arg
+        assert "sslcert=" in conn_arg and "sslkey=" in conn_arg
+
+    def test_postgres_plus_psycopg_scheme_stripped(self) -> None:
+        """postgresql+psycopg:// scheme is normalized to postgresql://."""
+        url = "postgresql+psycopg://user:pass@db.example:5432/stabilize?sslmode=require"
+        config = ResilienceConfig(database_url=url)
+
+        with patch("resilient_circuit.storage.PostgresStorage") as mock_storage:
+            factory = WorkflowCircuitFactory(config)
+            factory.get_circuit("wf1", "http")
+
+        assert mock_storage.called
+        conn_arg = mock_storage.call_args.kwargs.get("connection_string")
+        if conn_arg is None:
+            conn_arg = mock_storage.call_args[0][0]
+        assert conn_arg == "postgresql://user:pass@db.example:5432/stabilize?sslmode=require"
+
 
 # =============================================================================
 # Test Execute With Resilience

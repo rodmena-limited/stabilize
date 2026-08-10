@@ -1,6 +1,6 @@
 [project]
 name = "stabilize"
-version = "0.21.0"
+version = "0.21.1"
 description = "Stabilize Workflow Orchestration - Agentic Parallel Workflows"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,9 +26,13 @@ dependencies = [
     # 2.0.1 adds BulkheadShutdownError; the shutdown-race classification in
     # stabilize.resilience.executor depends on that type existing.
     "bulkman>=2.0.1,<3",
-    # bulkman 2.0.0 requires resilient-circuit >=0.4.6,<0.5; keep our direct
-    # floor at or above theirs so a resolver cannot pick one bulkman rejects.
-    "resilient-circuit>=0.4.6,<0.5",
+    # bulkman 2.0.1 requires resilient-circuit >=0.4.6,<0.5; bulkman 2.0.2
+    # requires >=0.5.0,<0.6. Keep our floor at or above bulkman 2.0.1's so a
+    # resolver cannot pick one bulkman rejects, and keep the cap wide enough
+    # to admit resilient-circuit 0.7.x (RC_DB_DSN / RC_DB_SSL* — the only way
+    # to reach a TLS-mandatory breaker database). With bulkman 2.0.2 present
+    # the resolver picks 0.5.x; without it, 0.7.x.
+    "resilient-circuit>=0.4.6,<0.8",
 ]
 
 [project.optional-dependencies]

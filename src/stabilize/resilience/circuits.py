@@ -59,34 +59,14 @@ def _create_storage(database_url: str | None) -> CircuitBreakerStorage:
         try:
             from resilient_circuit.storage import PostgresStorage
 
-            # Convert SQLAlchemy-style URL to psycopg format if needed
-            # postgresql+psycopg://user:pass@host/db -> host=host dbname=db user=user password=pass
-            conn_string = database_url
-            if "+psycopg" in conn_string:
-                conn_string = conn_string.replace("+psycopg", "")
-            if "postgresql://" in conn_string:
-                conn_string = conn_string.replace("postgresql://", "")
-
-            # Parse URL format: user:pass@host:port/dbname
-            # Convert to libpq format: host=X dbname=Y user=Z password=W
-            if "@" in conn_string:
-                auth, hostdb = conn_string.split("@", 1)
-                if ":" in auth:
-                    user, password = auth.split(":", 1)
-                else:
-                    user, password = auth, ""
-
-                if "/" in hostdb:
-                    hostport, dbname = hostdb.rsplit("/", 1)
-                else:
-                    hostport, dbname = hostdb, "stabilize"
-
-                if ":" in hostport:
-                    host, port = hostport.rsplit(":", 1)
-                else:
-                    host, port = hostport, "5432"
-
-                conn_string = f"host={host} port={port} dbname={dbname} user={user} password={password}"
+            # Pass the connection string through verbatim. psycopg3 accepts
+            # both `postgresql://` URLs and libpq conninfo, and RC's
+            # PostgresStorage forwards it straight to psycopg.connect() — so a
+            # URL's query string survives intact. Hand-parsing the URL into
+            # `host=... dbname=...` here used to drop TLS options (sslmode,
+            # sslcert, sslkey, sslrootcert), silently forcing the breaker onto
+            # in-memory storage on TLS-mandatory databases.
+            conn_string = database_url.replace("+psycopg", "")
 
             logger.info("Using PostgreSQL storage for circuit breakers")
             return PostgresStorage(connection_string=conn_string)
