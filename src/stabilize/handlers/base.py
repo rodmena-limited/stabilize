@@ -421,6 +421,16 @@ class StabilizeHandler(MessageHandler[M], ABC):
             entity_id=stage.id,
         )
         stage.status = new_status
+        if new_status.is_complete:
+            discarded = stage.context.pop("_buffered_signals", None)
+            if discarded:
+                logger.warning(
+                    "Discarding %d buffered signal(s) on stage %s (ref_id=%s) entering %s",
+                    len(discarded),
+                    stage.id,
+                    stage.ref_id,
+                    new_status,
+                )
 
     def set_task_status(
         self,

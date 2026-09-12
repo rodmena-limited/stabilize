@@ -64,6 +64,7 @@ class HandlerConfig:
         STABILIZE_ERROR_JITTER: Jitter for error handling (default: 0.3)
 
         STABILIZE_MAX_STAGE_WAIT_RETRIES: Max retries waiting for stages (default: 240)
+        STABILIZE_SIGNAL_BUFFER_MAX: Max buffered persistent signals per stage (default: 1000)
         STABILIZE_DEFAULT_TASK_TIMEOUT_S: Default task timeout in seconds (default: 14400 = 4 hours)
         STABILIZE_TASK_BACKOFF_MIN_MS: Task retry min delay in ms (default: 1000)
         STABILIZE_TASK_BACKOFF_MAX_MS: Task retry max delay in ms (default: 60000)
@@ -88,6 +89,8 @@ class HandlerConfig:
 
         max_stage_wait_retries: Max retries waiting for upstream stages
             (with 15s delay, 240 retries = 1 hour)
+        signal_buffer_max: Max persistent signals buffered on one stage before
+            further signals are refused and dead-lettered
         default_task_timeout_seconds: Default timeout for tasks that don't specify one
         task_backoff_min_delay_ms: Min backoff for task retries
         task_backoff_max_delay_ms: Max backoff for task retries
@@ -115,6 +118,8 @@ class HandlerConfig:
 
     # Long-running retry limits
     max_stage_wait_retries: int = 240  # With 15s delay = 1 hour
+
+    signal_buffer_max: int = 1000
 
     # Task execution
     # Default timeout for task execution (4 hours for long-running workflows)
@@ -156,6 +161,7 @@ class HandlerConfig:
             error_handling_jitter=float(os.getenv("STABILIZE_ERROR_JITTER", "0.3")),
             # Stage wait retry settings
             max_stage_wait_retries=int(os.getenv("STABILIZE_MAX_STAGE_WAIT_RETRIES", "240")),
+            signal_buffer_max=int(os.getenv("STABILIZE_SIGNAL_BUFFER_MAX", "1000")),
             # Task execution settings (4 hours default for long-running workflows)
             default_task_timeout_seconds=float(os.getenv("STABILIZE_DEFAULT_TASK_TIMEOUT_S", "14400")),
             task_backoff_min_delay_ms=int(os.getenv("STABILIZE_TASK_BACKOFF_MIN_MS", "1000")),

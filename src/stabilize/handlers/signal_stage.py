@@ -13,6 +13,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.handlers.base import StabilizeHandler
+from stabilize.handlers.signal_refusal import RefusalTracker
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import RunTask, SignalStage, StartStage
 from stabilize.resilience.config import HandlerConfig
@@ -46,6 +47,7 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
         event_recorder: EventRecorder | None = None,
     ) -> None:
         super().__init__(queue, repository, retry_delay, handler_config, event_recorder=event_recorder)
+        self._refusals = RefusalTracker()
 
     @property
     def message_type(self) -> type[SignalStage]:
@@ -116,15 +118,21 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
 
             # Stage is not SUSPENDED
             if message.persistent:
-                # WCP-24: Buffer the signal for later consumption
+                if stage.status.is_complete:
+                    self._refuse_undeliverable(message, stage)
+                    return
+
+                buffered = stage.context.get("_buffered_signals", [])
+                if len(buffered) >= self.handler_config.signal_buffer_max:
+                    self._refuse_overflow(message, stage, len(buffered))
+                    return
+
                 logger.info(
                     "Buffering persistent signal '%s' for stage %s (current status: %s)",
                     message.signal_name,
                     stage.name,
                     stage.status,
                 )
-                # Store signal in stage context buffer
-                buffered = stage.context.get("_buffered_signals", [])
                 buffered.append(
                     {
                         "signal_name": message.signal_name,
@@ -158,3 +166,62 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
                         )
 
         self.with_stage(message, on_stage)
+
+    def _mark_processed(self, message: SignalStage) -> None:
+        if not message.message_id:
+            return
+        with self.repository.transaction(self.queue) as txn:
+            txn.mark_message_processed(
+                message_id=message.message_id,
+                handler_type="SignalStage",
+                execution_id=message.execution_id,
+            )
+
+    def _refuse_undeliverable(self, message: SignalStage, stage: StageExecution) -> None:
+        count, emit = self._refusals.record(message.execution_id, stage.ref_id)
+        log = logger.warning if emit else logger.debug
+        log(
+            "Refused %d persistent signal(s) for stage %s (ref_id=%s, execution=%s): "
+            "stage status %s is complete and can never consume them; "
+            "most recent signal_name=%s",
+            count,
+            stage.name,
+            stage.ref_id,
+            message.execution_id,
+            stage.status,
+            message.signal_name,
+        )
+        self._mark_processed(message)
+
+    def _refuse_overflow(self, message: SignalStage, stage: StageExecution, depth: int) -> None:
+        count, emit = self._refusals.record(message.execution_id, stage.ref_id)
+        log = logger.warning if emit else logger.debug
+        log(
+            "Refused %d persistent signal(s) for stage %s (ref_id=%s, execution=%s): "
+            "buffer holds %d signals, at the STABILIZE_SIGNAL_BUFFER_MAX limit of %d; "
+            "most recent signal_name=%s, dead-lettered",
+            count,
+            stage.name,
+            stage.ref_id,
+            message.execution_id,
+            depth,
+            self.handler_config.signal_buffer_max,
+            message.signal_name,
+        )
+        dlq = getattr(self.queue, "move_to_dlq", None)
+        if dlq is not None and message.message_id:
+            try:
+                dlq(
+                    message.message_id,
+                    error=(
+                        f"signal_buffer_full: stage {stage.ref_id} holds {depth} buffered "
+                        f"signals (limit {self.handler_config.signal_buffer_max})"
+                    ),
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to dead-letter overflowed signal '%s' for stage %s",
+                    message.signal_name,
+                    stage.ref_id,
+                )
+        self._mark_processed(message)

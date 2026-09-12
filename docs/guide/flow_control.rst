@@ -363,6 +363,59 @@ enters ``SUSPENDED`` status:
 Signal data is available in the resumed task via ``stage.context["_signal_name"]``
 and ``stage.context["_signal_data"]``.
 
+.. warning::
+
+   **A signal that is re-sent on a timer must be transient.** Persistence is for
+   signals that are sent **once** and must not be missed. A repeated signal is
+   already its own retry, so buffering it is buffering forever: losing one
+   transient wake costs a single poll interval, while buffering every wake costs
+   unbounded storage for as long as the producer runs.
+
+   Use ``persistent=True`` for a one-shot event (an approval, a batch landing).
+   Use ``persistent=False`` for anything a poller emits on a schedule.
+
+Bounds on buffering
+^^^^^^^^^^^^^^^^^^^
+
+Two limits keep the buffer from growing without end:
+
+*   A signal targeting a stage whose status is **complete** (``SUCCEEDED``,
+    ``TERMINAL``, ``CANCELED``, ``STOPPED``, ``SKIPPED``, ``FAILED_CONTINUE``)
+    is **refused**, not buffered. Such a stage can never re-enter ``SUSPENDED``,
+    so the entry could never be consumed. The refusal is logged at ``WARNING``
+    on the first occurrence per stage and then at decade boundaries
+    (1, 10, 100, 1000, ...), carrying the running count.
+
+*   The buffer holds at most ``STABILIZE_SIGNAL_BUFFER_MAX`` entries per stage
+    (default ``1000``). A signal arriving at a full buffer is refused and moved
+    to the dead-letter queue with reason ``signal_buffer_full``, so it remains
+    inspectable and replayable rather than silently dropped.
+
+A stage's buffer is cleared when the stage reaches a complete status. To reclaim
+buffers already stranded in a database by an earlier version:
+
+.. code-block:: bash
+
+    stabilize prune-signals --db-url postgres://... --dry-run
+    stabilize prune-signals --db-url postgres://...
+
+``--dry-run`` reports how many stage rows carry a buffer without modifying them.
+By default only completed stages are stripped; ``--include-active`` also strips
+stages that could still consume their buffer.
+
+For a staged rollout against a large database, ``--status`` narrows the blast
+radius to named statuses (repeatable), so a small set of rows can be cleaned and
+inspected before the rest:
+
+.. code-block:: bash
+
+    stabilize prune-signals --db-url ... --status SUCCEEDED --dry-run
+    stabilize prune-signals --db-url ... --status SUCCEEDED
+    stabilize prune-signals --db-url ... --status CANCELED --status TERMINAL
+
+An unrecognised status name is rejected rather than matching no rows, so a typo
+cannot report a successful cleanup of zero.
+
 
 Iteration Patterns
 ------------------

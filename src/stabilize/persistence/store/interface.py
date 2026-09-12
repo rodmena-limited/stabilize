@@ -346,6 +346,40 @@ class WorkflowStore(ABC):
         # Default implementation: nothing to clean
         return 0
 
+    def count_buffered_signal_stages(
+        self,
+        only_complete: bool = True,
+        statuses: list[str] | None = None,
+    ) -> int:
+        """
+        Count stage rows carrying a WCP-24 persistent-signal buffer.
+
+        Args:
+            only_complete: When True, count only stages whose status is complete.
+
+        Returns:
+            Number of stage rows carrying a buffer (0 for stores without contexts)
+        """
+        return 0
+
+    def cleanup_buffered_signals(
+        self,
+        only_complete: bool = True,
+        statuses: list[str] | None = None,
+    ) -> int:
+        """
+        Remove the WCP-24 persistent-signal buffer from stage contexts.
+
+        Args:
+            only_complete: When True, restrict removal to stages whose status
+                is complete, whose buffer can never be consumed. When False,
+                every stage carrying a buffer is stripped.
+
+        Returns:
+            Number of stage rows modified (0 for stores without contexts)
+        """
+        return 0
+
     def mark_message_processed(
         self,
         message_id: str,

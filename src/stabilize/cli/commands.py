@@ -274,3 +274,48 @@ def mg_status(db_url: str | None = None) -> None:
     except psycopg.Error as e:
         print(f"Database error: {e}")
         sys.exit(1)
+
+
+def prune_signals(
+    db_url: str | None,
+    include_active: bool = False,
+    dry_run: bool = False,
+    statuses: list[str] | None = None,
+) -> None:
+    """Remove unconsumable WCP-24 persistent-signal buffers from stage contexts."""
+    from stabilize.persistence.factory import create_repository
+    from stabilize.persistence.signal_scope import UnknownStatusError
+
+    if db_url is None:
+        print("Error: --db-url is required")
+        print("Use sqlite:///path or postgres://...")
+        sys.exit(1)
+
+    if statuses:
+        scope = f"stages in {', '.join(statuses)}"
+    elif include_active:
+        scope = "all stages"
+    else:
+        scope = "completed stages"
+
+    store = create_repository(db_url, create_tables=False)
+    try:
+        if dry_run:
+            count = store.count_buffered_signal_stages(
+                only_complete=not include_active, statuses=statuses
+            )
+            print(f"{count} stage row(s) in {scope} carry a _buffered_signals buffer")
+            print("Re-run without --dry-run to strip them")
+            return
+
+        rows = store.cleanup_buffered_signals(
+            only_complete=not include_active, statuses=statuses
+        )
+        print(f"Stripped _buffered_signals from {rows} stage row(s) in {scope}")
+    except UnknownStatusError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+    finally:
+        close = getattr(store, "close", None)
+        if close is not None:
+            close()

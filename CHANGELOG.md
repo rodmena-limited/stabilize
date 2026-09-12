@@ -1,5 +1,87 @@
 # Changelog
 
+## [0.22.0]
+
+### Fixed
+- **Persistent signals (WCP-24) no longer accumulate without bound in
+  `stage_executions.context`.** `SignalStageHandler` buffered a persistent signal
+  whenever the target stage was not `SUSPENDED`, and the only drain
+  (`handlers/run_task/result.py`) pops one entry on a suspend *edge*. A stage in a
+  complete status can never reach another suspend edge, so every signal sent to it
+  was appended to a JSON list that nothing could ever read. Reported by
+  ci.rodmena.co.uk against 0.21.1 on PostgreSQL: 1,259,015 buffered entries across
+  105 stage rows, of which 1,258,972 (99.997%) sat on 39 CANCELED or TERMINAL rows,
+  the largest holding 112,901 copies of the same 46-byte object. The row was 93 kB
+  on disk and 5,405 kB uncompressed — a 58x TOAST ratio, because the entries are
+  identical — and PostgreSQL sent the uncompressed value as a bind parameter on
+  every state transition, logging it each time.
+
+  Measured by infra-manager on the affected host (pg-nano-03, shared by six
+  databases): ~5.1 GiB of free space consumed in about 36 hours to 2026-09-06,
+  peaking at 1.66 GiB per 6-hour window (~6.6 GiB/day at the filesystem, against
+  a ~0.25 GiB/day baseline), and 3.76 GiB reclaimed on remediation. Free space
+  bottomed at 14.46 GiB of 38 GB. No other database on the host was degraded.
+  A separate outage on that host on 2026-09-12 was an unrelated memory
+  misconfiguration and is not attributable to this defect.
+
+  Three bounds, none of which changes behaviour for a stage that is genuinely
+  waiting:
+  - A persistent signal for a stage whose status `is_complete` is **refused**, not
+    buffered. It is marked processed so it is neither redelivered nor retried.
+  - The buffer holds at most `STABILIZE_SIGNAL_BUFFER_MAX` entries per stage
+    (default 1000). Overflow is refused and moved to the dead-letter queue with
+    reason `signal_buffer_full`, so it stays inspectable and replayable rather than
+    silently dropped.
+  - A stage's buffer is cleared when the stage reaches a complete status.
+
+- **`SignalStageHandler` ignored an injected `HandlerConfig`.** It was constructed
+  without one in `queue/processor/mixins.py`, so programmatic configuration was
+  silently discarded and only the environment variable took effect.
+
+### Added
+- **`stabilize prune-signals`** reclaims buffers already stranded in a database by
+  an earlier version — the new bounds stop the growth but cannot reach rows whose
+  stage has already completed. `--dry-run` reports the count without writing,
+  `--status` narrows to named statuses for a staged rollout, and `--include-active`
+  extends to stages that could still consume their buffer. An unrecognised status
+  name is rejected rather than matching no rows, so a typo cannot report a
+  successful cleanup of zero. Backed by `cleanup_buffered_signals()` and
+  `count_buffered_signal_stages()` on `WorkflowStore`.
+- **`STABILIZE_SIGNAL_BUFFER_MAX`** (default 1000) caps buffered persistent signals
+  per stage. The cap is on **array length**, not serialised size: identical entries
+  TOAST-compress ~58x, so a byte-based cap sized from `pg_column_size` would admit
+  far more than intended, while the real cost — bind-parameter size, parse time and
+  WAL per transition — tracks the uncompressed form.
+
+### Changed
+- **Refusal logging is rate-bounded.** A log line per refused signal would fire at
+  the signal rate and reproduce, at the logging layer, the unbounded growth the
+  refusal prevents. Refusals are counted per stage and emitted at WARNING on counts
+  1, 10, 100, 1000, ... and on every multiple of 100,000, carrying the running
+  total. Decade spacing alone leaves a live producer effectively silent as the gap
+  grows geometrically (104 days, then 1,040, at 6 signals/min); the floor bounds it
+  so an ongoing problem never looks like a stopped one. Measured: 112,901 refusals
+  cost 6 lines, 10,000,000 cost 105. The tracker is LRU-bounded to 1024 stages.
+
+### Fixed (PostgreSQL)
+- **`count_buffered_signal_stages` raised `KeyError: 0` on PostgreSQL.** It indexed
+  a row positionally against psycopg's `dict_row` factory, so
+  `prune-signals --dry-run` — the read-only command — would have crashed on the
+  backend it is most needed on. It passed mypy and ruff; no test exercised the
+  counting path under the postgres fixture until one was added.
+
+### Known
+- Dead-lettering on cap overflow is not itself bounded: a producer hammering a
+  stage that is live but never suspends writes a DLQ row per overflow. This is
+  row-per-message in a dedicated table with an existing `clear_dlq()`, is the
+  storage shape this area is moving toward, and is not reachable by the reported
+  incident, whose stages were complete and therefore refused without storing.
+- `workflow_signals` — migrated in `01KGHWCP1M2QSDE3TN4GUBLV8A`, indexed, with a
+  complete SQLite implementation at `persistence/sqlite/signals.py` — is still
+  unwired; confirmed empty in production. Moving buffering onto it is tracked
+  separately and deliberately not shipped alongside an incident remediation,
+  because it touches the hot path of every suspended stage.
+
 ## [0.21.0]
 
 ### Changed (dependencies)

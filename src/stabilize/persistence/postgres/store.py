@@ -22,20 +22,11 @@ from stabilize.persistence.postgres.converters import (
     row_to_task,
 )
 from stabilize.persistence.postgres.helpers import insert_stage, upsert_tasks_bulk
+from stabilize.persistence.postgres.maintenance import PostgresMaintenanceMixin
 from stabilize.persistence.postgres.operations import (
     cancel_execution,
     pause_execution,
     resume_execution,
-)
-from stabilize.persistence.postgres.operations import (
-    cleanup_old_processed_messages as _cleanup_old_processed_messages,
-)
-from stabilize.persistence.postgres.operations import (
-    get_processed_message_ids as _get_processed_message_ids,
-)
-from stabilize.persistence.postgres.operations import is_message_processed as _is_message_processed
-from stabilize.persistence.postgres.operations import (
-    mark_message_processed as _mark_message_processed,
 )
 from stabilize.persistence.postgres.queries import get_all_pending_workflows as _get_all_pending_workflows
 from stabilize.persistence.postgres.queries import get_downstream_stages as _get_downstream_stages
@@ -63,7 +54,7 @@ from stabilize.persistence.store import (
 logger = logging.getLogger(__name__)
 
 
-class PostgresWorkflowStore(WorkflowStore):
+class PostgresWorkflowStore(PostgresMaintenanceMixin, WorkflowStore):
     """
     PostgreSQL implementation of WorkflowStore.
 
@@ -431,35 +422,6 @@ class PostgresWorkflowStore(WorkflowStore):
     def cancel(self, execution_id: str, canceled_by: str, reason: str) -> None:
         """Cancel an execution."""
         cancel_execution(self._pool, execution_id, canceled_by, reason)
-
-    def is_message_processed(self, message_id: str) -> bool:
-        """Check if a message has already been processed."""
-        return _is_message_processed(self._pool, message_id)
-
-    def mark_message_processed(
-        self,
-        message_id: str,
-        handler_type: str | None = None,
-        execution_id: str | None = None,
-    ) -> None:
-        """Mark a message as successfully processed."""
-        _mark_message_processed(self._pool, message_id, handler_type, execution_id)
-
-    def cleanup_old_processed_messages(self, max_age_hours: float = 24.0) -> int:
-        """Clean up old processed message records."""
-        return _cleanup_old_processed_messages(self._pool, max_age_hours)
-
-    def cleanup_completed_stage_claims(self) -> int:
-        """Delete stage claims of executions in terminal states."""
-        from stabilize.persistence.postgres.operations import (
-            cleanup_completed_stage_claims as _cleanup_claims,
-        )
-
-        return _cleanup_claims(self._pool)
-
-    def get_processed_message_ids(self, limit: int | None = None) -> list[str] | None:
-        """Return processed message IDs, for hydrating an in-memory dedup cache."""
-        return _get_processed_message_ids(self._pool, limit)
 
     def is_healthy(self) -> bool:
         """Check if the database connection is healthy."""

@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from stabilize.cli.commands import mg_status, mg_up, monitor, prompt
+from stabilize.cli.commands import mg_status, mg_up, monitor, prompt, prune_signals
 
 
 def main() -> None:
@@ -62,6 +62,33 @@ def main() -> None:
         help="Filter workflows by status (default: all)",
     )
 
+    # prune-signals command
+    prune_parser = subparsers.add_parser(
+        "prune-signals",
+        help="Strip unconsumable WCP-24 persistent-signal buffers from stage contexts",
+    )
+    prune_parser.add_argument(
+        "--db-url",
+        help="Database URL (postgres://... or sqlite:///...)",
+    )
+    prune_parser.add_argument(
+        "--include-active",
+        action="store_true",
+        help="Also strip buffers from stages that are not complete",
+    )
+    prune_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report how many stage rows carry a buffer without modifying them",
+    )
+    prune_parser.add_argument(
+        "--status",
+        action="append",
+        dest="statuses",
+        metavar="STATUS",
+        help="Restrict to stages in this status (repeatable, e.g. --status SUCCEEDED)",
+    )
+
     args = parser.parse_args()
 
     if args.command == "mg-up":
@@ -72,6 +99,8 @@ def main() -> None:
         prompt()
     elif args.command == "monitor":
         monitor(args.db_url, args.app, args.refresh, args.status)
+    elif args.command == "prune-signals":
+        prune_signals(args.db_url, args.include_active, args.dry_run, args.statuses)
     else:
         parser.print_help()
         sys.exit(1)

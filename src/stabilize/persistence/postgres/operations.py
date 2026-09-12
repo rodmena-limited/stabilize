@@ -10,6 +10,7 @@ from typing import Any
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.workflow import PausedDetails
 from stabilize.persistence.postgres.converters import paused_to_dict
+from stabilize.persistence.signal_scope import signal_status_filter as _signal_status_filter
 
 logger = logging.getLogger(__name__)
 
@@ -191,3 +192,52 @@ def cleanup_completed_stage_claims(pool: Any) -> int:
             deleted: int = cur.rowcount or 0
         conn.commit()
         return deleted
+
+
+def cleanup_buffered_signals(
+    pool: Any,
+    only_complete: bool = True,
+    statuses: list[str] | None = None,
+) -> int:
+    """Strip _buffered_signals from stage contexts that can never consume them."""
+    sql = """
+        UPDATE stage_executions
+        SET context = context - '_buffered_signals'
+        WHERE context ? '_buffered_signals'
+    """
+    selected = _signal_status_filter(only_complete, statuses)
+    params: dict[str, Any] = {}
+    if selected is not None:
+        sql += " AND status = ANY(%(statuses)s)"
+        params["statuses"] = selected
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            count = cur.rowcount
+        conn.commit()
+    return int(count or 0)
+
+
+def count_buffered_signal_stages(
+    pool: Any,
+    only_complete: bool = True,
+    statuses: list[str] | None = None,
+) -> int:
+    """Count stage rows carrying a _buffered_signals buffer."""
+    sql = (
+        "SELECT COUNT(*) AS n FROM stage_executions WHERE context ? '_buffered_signals'"
+    )
+    selected = _signal_status_filter(only_complete, statuses)
+    params: dict[str, Any] = {}
+    if selected is not None:
+        sql += " AND status = ANY(%(statuses)s)"
+        params["statuses"] = selected
+
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            row = cur.fetchone()
+    if row is None:
+        return 0
+    return int(row["n"] if isinstance(row, dict) else row[0])

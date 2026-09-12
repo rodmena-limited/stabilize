@@ -106,7 +106,7 @@ class QueueProcessorMixin:
             CancelStageHandler(queue, store),
             ContinueParentStageHandler(queue, store),
             JumpToStageHandler(queue, store),
-            SignalStageHandler(queue, store),
+            SignalStageHandler(queue, store, handler_config=handler_config),
             CancelRegionHandler(queue, store),
             AddMultiInstanceHandler(queue, store),
             StartTaskHandler(queue, store, task_registry),

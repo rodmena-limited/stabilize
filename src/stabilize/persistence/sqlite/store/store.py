@@ -188,6 +188,30 @@ class SqliteWorkflowStore(
 
         return _cleanup_claims(self._get_connection())
 
+    def cleanup_buffered_signals(
+        self,
+        only_complete: bool = True,
+        statuses: list[str] | None = None,
+    ) -> int:
+        """Strip unconsumable WCP-24 signal buffers from stage contexts."""
+        from stabilize.persistence.sqlite.operations import (
+            cleanup_buffered_signals as _cleanup_signals,
+        )
+
+        return _cleanup_signals(self._get_connection(), only_complete, statuses)
+
+    def count_buffered_signal_stages(
+        self,
+        only_complete: bool = True,
+        statuses: list[str] | None = None,
+    ) -> int:
+        """Count stage rows carrying a WCP-24 signal buffer."""
+        from stabilize.persistence.sqlite.operations import (
+            count_buffered_signal_stages as _count_signals,
+        )
+
+        return _count_signals(self._get_connection(), only_complete, statuses)
+
     def get_processed_message_ids(self, limit: int | None = None) -> list[str] | None:
         """Return processed message IDs, for hydrating an in-memory dedup cache."""
         return _get_processed_message_ids(self._get_connection(), limit)

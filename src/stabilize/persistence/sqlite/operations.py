@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.workflow import PausedDetails
+from stabilize.persistence.signal_scope import signal_status_filter as _signal_status_filter
 from stabilize.persistence.sqlite.converters import paused_to_dict
 
 logger = logging.getLogger(__name__)
@@ -196,3 +197,45 @@ def cleanup_completed_stage_claims(conn: sqlite3.Connection) -> int:
     )
     conn.commit()
     return cursor.rowcount
+
+
+def cleanup_buffered_signals(
+    conn: sqlite3.Connection,
+    only_complete: bool = True,
+    statuses: list[str] | None = None,
+) -> int:
+    """Strip _buffered_signals from stage contexts that can never consume them."""
+    sql = """
+        UPDATE stage_executions
+        SET context = json_remove(context, '$._buffered_signals')
+        WHERE json_extract(context, '$._buffered_signals') IS NOT NULL
+    """
+    selected = _signal_status_filter(only_complete, statuses)
+    params: list[str] = []
+    if selected is not None:
+        sql += f" AND status IN ({', '.join('?' for _ in selected)})"
+        params = selected
+
+    cursor = conn.execute(sql, params)
+    conn.commit()
+    return cursor.rowcount or 0
+
+
+def count_buffered_signal_stages(
+    conn: sqlite3.Connection,
+    only_complete: bool = True,
+    statuses: list[str] | None = None,
+) -> int:
+    """Count stage rows carrying a _buffered_signals buffer."""
+    sql = """
+        SELECT COUNT(*) FROM stage_executions
+        WHERE json_extract(context, '$._buffered_signals') IS NOT NULL
+    """
+    selected = _signal_status_filter(only_complete, statuses)
+    params: list[str] = []
+    if selected is not None:
+        sql += f" AND status IN ({', '.join('?' for _ in selected)})"
+        params = selected
+
+    row = conn.execute(sql, params).fetchone()
+    return int(row[0]) if row else 0

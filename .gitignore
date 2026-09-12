@@ -69,3 +69,4 @@ CERTIFICATION_AUDIT_REPORT.md
 .claude/settings.local.json
 .omo/
 
+.agentbus/
