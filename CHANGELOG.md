@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.25.1]
+
+### Fixed
+
+- **`exists()` no longer reports a broken deployment as an empty one (#24).**
+  It wrapped `retrieve_execution_summary` in `except Exception: return False`,
+  so a missing TABLE and a missing ROW gave the same answer. Reported by
+  vellum-build-d8bbd2, who wrote a check to prove their schema workaround was
+  needed and found it passed in **both** directions — the check could not fail.
+  `exists()` now catches only the not-found errors; an operational failure
+  (missing relation, unreachable database, permission denied) propagates.
+
+- **`PostgresWorkflowStore` and `PostgresQueue` accept `schema=` (#24).**
+  `mg-up` honours `MG_SCHEMA`, but the runtime queried bare table names and
+  looked in whatever `search_path` gave it. The schema is applied as a libpq
+  `-c search_path=` connect option, reusing the `PoolOptions` seam from #18:
+  queries stay as written, and pools are keyed by options, so two schemas get
+  two pools rather than sharing one. The name is validated as a plain
+  identifier before it reaches the option string.
+
+- **`mg-status --db-url` honours `MG_SCHEMA` (#24).** That path called
+  `parse_db_url` directly and skipped `load_config`, where the override lived,
+  so it reported `relation "stabilize_migrations" does not exist` — which reads
+  as "nothing has ever been applied" rather than "I am looking in the wrong
+  schema". Both entry points now share `apply_schema_override()`.
+
+### Notes
+
+- Verified against resilient-circuit 0.8.2 and bulkman 2.0.4; the declared
+  bounds already admit it and are unchanged.
+
+
 ## [0.25.0]
 
 ### Security
