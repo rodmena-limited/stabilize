@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, quote, unquote
 
+from stabilize.redaction import redact_db_url as redact_db_url
+
 if TYPE_CHECKING:
     from typing import Any
 
@@ -59,47 +61,6 @@ def load_config() -> dict[str, Any]:
     if schema:
         config["schema"] = schema
     return config
-
-
-_KV_SECRET_RE = re.compile(
-    r"(?i)\b(password|passfile|sslpassword)\s*=\s*('(?:[^'\\]|\\.)*'|\S*)"
-)
-
-_ECHO_LIMIT = 200
-
-
-def _redact_userinfo(url: str) -> str:
-    scheme, separator, rest = url.partition("://")
-    if not separator:
-        rest = url
-
-    userinfo, at_sign, hostpart = rest.rpartition("@")
-    if not at_sign:
-        return url
-
-    user, colon, _password = userinfo.partition(":")
-    if not colon:
-        return url
-
-    prefix = f"{scheme}://" if separator else ""
-    return f"{prefix}{user}:***@{hostpart}"
-
-
-def redact_db_url(url: str) -> str:
-    """Return *url* safe to echo in an error message.
-
-    Covers both DSN forms an operator may supply. Userinfo is split on the
-    LAST ``@`` so a password containing ``@`` or ``/`` -- neither of which a
-    malformed URL is obliged to percent-encode -- is covered rather than
-    partially echoed, and libpq keyword/value secrets are scrubbed too.
-    Control characters are escaped so a crafted value cannot forge a second
-    log line, and the result is length-capped.
-    """
-    redacted = _KV_SECRET_RE.sub(r"\1=***", _redact_userinfo(url))
-    redacted = redacted.encode("unicode_escape").decode("ascii")
-    if len(redacted) > _ECHO_LIMIT:
-        redacted = f"{redacted[:_ECHO_LIMIT]}... (truncated)"
-    return redacted
 
 
 def connection_params(config: dict[str, Any]) -> dict[str, Any]:

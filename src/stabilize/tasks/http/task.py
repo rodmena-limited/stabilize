@@ -30,6 +30,7 @@ from urllib.request import BaseHandler, HTTPRedirectHandler, HTTPSHandler, build
 from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
 from resilient_circuit.exceptions import RetryLimitReached
 
+from stabilize.redaction import redact_userinfo
 from stabilize.tasks.http.constants import (
     DEFAULT_RETRY_ON_STATUS,
     DEFAULT_TIMEOUT,
@@ -61,18 +62,58 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("172.16.0.0/12"),
     ipaddress.ip_network("192.168.0.0/16"),
     ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("100.64.0.0/10"),
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("fc00::/7"),
     ipaddress.ip_network("fe80::/10"),
 ]
 
+_ALLOWED_SCHEMES = {"http", "https"}
+
+
+def _normalize_address(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> (
+    ipaddress.IPv4Address | ipaddress.IPv6Address
+):
+    """Collapse IPv4-mapped and 6to4 IPv6 forms to the IPv4 address they denote.
+
+    ``::ffff:127.0.0.1`` is loopback, but matches no IPv4 CIDR and is not
+    caught by IPv6Address.is_loopback, so it must be unwrapped before any
+    range check.
+    """
+    if isinstance(addr, ipaddress.IPv6Address):
+        if addr.ipv4_mapped is not None:
+            return addr.ipv4_mapped
+        if addr.sixtofour is not None:
+            return addr.sixtofour
+        if addr.teredo is not None:
+            return addr.teredo[1]
+    return addr
+
+
+def _is_blocked(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Whether *addr* is one an outbound workflow request must never reach."""
+    addr = _normalize_address(addr)
+    if (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_multicast
+        or addr.is_reserved
+        or addr.is_unspecified
+    ):
+        return True
+    return any(addr in net for net in _BLOCKED_NETWORKS)
+
 
 def _validate_url_safety(url: str) -> None:
     """Raise ValueError if URL resolves to a private/loopback address (SSRF protection)."""
     parsed = urlparse(url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in _ALLOWED_SCHEMES:
+        raise ValueError(f"SSRF blocked: scheme '{scheme}' is not permitted (use http or https)")
     hostname = parsed.hostname
     if not hostname:
-        raise ValueError(f"Cannot extract hostname from URL: {url}")
+        raise ValueError(f"Cannot extract hostname from URL: {redact_userinfo(url)}")
     try:
         addr = ipaddress.ip_address(hostname)
     except ValueError:
@@ -80,17 +121,23 @@ def _validate_url_safety(url: str) -> None:
         try:
             resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
             addrs = {ipaddress.ip_address(r[4][0]) for r in resolved}
-        except socket.gaierror:
-            return  # DNS failure will be caught by urllib later
+        except socket.gaierror as exc:
+            # Fail closed: an unresolvable name must not pass the guard and be
+            # resolved again, differently, by the connection itself.
+            raise ValueError(f"SSRF blocked: cannot resolve host '{hostname}': {exc}") from exc
+        if not addrs:
+            raise ValueError(f"SSRF blocked: host '{hostname}' resolved to no addresses")
         for addr in addrs:
-            for net in _BLOCKED_NETWORKS:
-                if addr in net:
-                    raise ValueError(f"SSRF blocked: URL '{url}' resolves to private address {addr}")
+            if _is_blocked(addr):
+                raise ValueError(
+                    f"SSRF blocked: URL '{redact_userinfo(url)}' resolves to blocked address {addr}"
+                )
         return
 
-    for net in _BLOCKED_NETWORKS:
-        if addr in net:
-            raise ValueError(f"SSRF blocked: URL '{url}' targets private address {addr}")
+    if _is_blocked(addr):
+        raise ValueError(
+            f"SSRF blocked: URL '{redact_userinfo(url)}' targets blocked address {addr}"
+        )
 
 
 class _SafeRedirectHandler(HTTPRedirectHandler):
@@ -268,7 +315,7 @@ class HTTPTask(Task):
         timeout = context.get("timeout", DEFAULT_TIMEOUT)
 
         # Logging (mask secrets)
-        log_url = mask_secrets(url, context, secrets)
+        log_url = redact_userinfo(mask_secrets(url, context, secrets))
         logger.debug("HTTPTask %s %s", method, log_url)
 
         # Execute with retries using resilient-circuit
@@ -381,11 +428,11 @@ class HTTPTask(Task):
             if continue_on_failure:
                 return TaskResult.failed_continue(
                     error=error_msg,
-                    outputs={"elapsed_ms": elapsed_ms, "url": url},
+                    outputs={"elapsed_ms": elapsed_ms, "url": redact_userinfo(url)},
                 )
             return TaskResult.terminal(
                 error=error_msg,
-                context={"elapsed_ms": elapsed_ms, "url": url},
+                context={"elapsed_ms": elapsed_ms, "url": redact_userinfo(url)},
             )
 
         # Process response

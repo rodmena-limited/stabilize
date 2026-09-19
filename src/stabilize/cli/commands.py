@@ -12,7 +12,6 @@ from stabilize.cli.config import (
     connection_params,
     load_config,
     parse_db_url,
-    redact_db_url,
     validate_schema_name,
 )
 from stabilize.cli.migrations import (
@@ -21,6 +20,7 @@ from stabilize.cli.migrations import (
     get_migrations,
 )
 from stabilize.cli.prompt_text import PROMPT_TEXT
+from stabilize.redaction import redact_db_url
 
 if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore

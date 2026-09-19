@@ -9,6 +9,7 @@ from http.client import HTTPResponse
 from typing import Any
 from urllib.error import HTTPError
 
+from stabilize.redaction import redact_userinfo
 from stabilize.tasks.http.constants import CHUNK_SIZE, DEFAULT_MAX_RESPONSE_SIZE
 from stabilize.tasks.http.utils import get_charset
 from stabilize.tasks.result import TaskResult
@@ -58,7 +59,9 @@ def process_response(
         content_length = 0  # malformed header must not crash response handling
 
     # Get final URL (after redirects)
-    final_url = response_obj.geturl() if hasattr(response_obj, "geturl") else url
+    final_url = redact_userinfo(
+        response_obj.geturl() if hasattr(response_obj, "geturl") else url
+    )
 
     # Download to file or read body
     download_to = context.get("download_to")
