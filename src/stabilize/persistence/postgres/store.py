@@ -17,6 +17,7 @@ from stabilize.models.workflow import Workflow
 from stabilize.persistence.pool_options import (
     DEFAULT_HEALTH_TIMEOUT_SECONDS,
     PoolOptions,
+    with_schema,
 )
 from stabilize.persistence.postgres.converters import (
     execution_to_dict,
@@ -70,6 +71,7 @@ class PostgresWorkflowStore(PostgresMaintenanceMixin, WorkflowStore):
     def __init__(
         self,
         connection_string: str,
+        schema: str | None = None,
         options: PoolOptions | None = None,
         health_timeout: float = DEFAULT_HEALTH_TIMEOUT_SECONDS,
     ) -> None:
@@ -77,6 +79,10 @@ class PostgresWorkflowStore(PostgresMaintenanceMixin, WorkflowStore):
 
         Args:
             connection_string: PostgreSQL connection string
+            schema: PostgreSQL schema holding the engine's tables. Applied as a
+                search_path connect option, so a deployment whose migrations
+                ran with MG_SCHEMA does not need the caller to hand-write one
+                into the DSN.
             options: Pool and connection options. With none supplied,
                 connections inherit the server defaults and carry no
                 statement_timeout and no lock_timeout.
@@ -87,7 +93,9 @@ class PostgresWorkflowStore(PostgresMaintenanceMixin, WorkflowStore):
         self.connection_string = connection_string
         self._manager = get_connection_manager()
         self._health_timeout = health_timeout
-        self._pool = self._manager.get_postgres_pool(connection_string, options=options)
+        self.schema = schema
+        resolved_options = with_schema(options, schema)
+        self._pool = self._manager.get_postgres_pool(connection_string, options=resolved_options)
 
     def close(self) -> None:
         """Close the connection pool via connection manager."""

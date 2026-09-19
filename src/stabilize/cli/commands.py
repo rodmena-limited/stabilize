@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.cli.config import (
     MIGRATION_TABLE,
+    apply_schema_override,
     build_db_url,
     connection_params,
     load_config,
@@ -38,7 +39,7 @@ def mg_up(db_url: str | None = None) -> None:
 
     # Load config
     if db_url:
-        config = parse_db_url(db_url)
+        config = apply_schema_override(parse_db_url(db_url))
     else:
         config = load_config()
 
@@ -203,7 +204,7 @@ def mg_status(db_url: str | None = None) -> None:
 
     # Load config
     if db_url:
-        config = parse_db_url(db_url)
+        config = apply_schema_override(parse_db_url(db_url))
     else:
         config = load_config()
 

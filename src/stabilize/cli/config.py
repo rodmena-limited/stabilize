@@ -57,10 +57,7 @@ def load_config() -> dict[str, Any]:
         print("Either create mg.yaml or set MG_DATABASE_URL environment variable")
         sys.exit(1)
 
-    schema = os.environ.get("MG_SCHEMA")
-    if schema:
-        config["schema"] = schema
-    return config
+    return apply_schema_override(config)
 
 
 def connection_params(config: dict[str, Any]) -> dict[str, Any]:
@@ -96,6 +93,20 @@ def build_db_url(config: dict[str, Any]) -> str:
     port = config.get("port", 5432)
     dbname = quote(str(config.get("dbname", "stabilize")), safe="")
     return f"postgres://{userinfo}@{host}:{port}/{dbname}"
+
+
+def apply_schema_override(config: dict[str, Any]) -> dict[str, Any]:
+    """Apply MG_SCHEMA to *config* when the URL did not carry a schema.
+
+    Shared by both entry points. load_config() applied this and the --db-url
+    path did not, so `MG_SCHEMA=x stabilize mg-status --db-url ...` silently
+    looked in public and reported the migration table as nonexistent, which
+    reads as "nothing has ever been applied" rather than "wrong schema".
+    """
+    schema = os.environ.get("MG_SCHEMA")
+    if schema:
+        config["schema"] = schema
+    return config
 
 
 def parse_db_url(url: str) -> dict[str, Any]:

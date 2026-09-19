@@ -16,6 +16,15 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
+from stabilize.errors.workflow import WorkflowNotFoundError as _WorkflowNotFoundErrorModel
+from stabilize.persistence.store.criteria import (
+    WorkflowNotFoundError as _WorkflowNotFoundErrorStore,
+)
+
+# Both spellings exist in the tree and different backends raise different
+# ones; exists() must treat either as "absent" and nothing else.
+WORKFLOW_ABSENT_ERRORS = (_WorkflowNotFoundErrorStore, _WorkflowNotFoundErrorModel)
+
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
@@ -452,17 +461,25 @@ class WorkflowStore(ABC):
         """
         Check if a workflow exists.
 
+        Only a genuine absence returns False. An operational failure -- a
+        missing table, an unreachable database, a permission error -- is
+        propagated, because reporting a broken deployment as an empty one
+        makes this method, and every check built on it, unable to fail.
+
         Args:
             execution_id: The workflow ID to check
 
         Returns:
-            True if the workflow exists, False otherwise
+            True if the workflow exists, False if it is absent
+
+        Raises:
+            Any operational error from the underlying store.
         """
         try:
             self.retrieve_execution_summary(execution_id)
-            return True
-        except Exception:
+        except WORKFLOW_ABSENT_ERRORS:
             return False
+        return True
 
     @contextmanager
     def transaction(self, queue: Queue | None = None) -> Iterator[StoreTransaction]:

@@ -16,6 +16,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from stabilize.persistence.pool_options import with_schema
 from stabilize.queue.interface import Queue
 from stabilize.queue.messages import (
     Message,
@@ -45,6 +46,7 @@ class PostgresQueue(Queue):
         table_name: str = "queue_messages",
         lock_duration: timedelta = timedelta(seconds=60),
         max_attempts: int = 10,
+        schema: str | None = None,
     ) -> None:
         """
         Initialize the PostgreSQL queue.
@@ -52,6 +54,8 @@ class PostgresQueue(Queue):
         Args:
             connection_string: PostgreSQL connection string
             table_name: Name of the queue table
+            schema: PostgreSQL schema holding the queue tables. Applied as a
+                search_path connect option.
             lock_duration: How long to lock messages during processing.
                 THE DEFAULT ASSUMES AN ACTIVE LEASE RENEWER. QueueProcessor
                 renews it from start()/the poll loop, but the SYNCHRONOUS path
@@ -71,6 +75,8 @@ class PostgresQueue(Queue):
         self.table_name = table_name
         self.lock_duration = lock_duration
         self.max_attempts = max_attempts
+        self.schema = schema
+        self._pool_options = with_schema(None, schema)
         self._manager = get_connection_manager()
         self._pending: dict[int, dict[str, Any]] = {}
         # Size caching
@@ -80,7 +86,9 @@ class PostgresQueue(Queue):
 
     def _get_pool(self) -> Any:
         """Get the shared connection pool from ConnectionManager."""
-        return self._manager.get_postgres_pool(self.connection_string)
+        return self._manager.get_postgres_pool(
+            self.connection_string, options=self._pool_options
+        )
 
     def close(self) -> None:
         """Close the connection pool via connection manager."""

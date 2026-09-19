@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -56,3 +57,37 @@ class PoolOptions:
 
 
 DEFAULT_POOL_OPTIONS = PoolOptions()
+
+
+_SCHEMA_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def validate_schema_name(schema: str) -> str:
+    """Validate a schema name before it reaches a connection option string."""
+    if not _SCHEMA_NAME_RE.match(schema) or len(schema) > 63:
+        raise ValueError(
+            f"Invalid schema name {schema!r}: expected a plain PostgreSQL identifier "
+            "(letters, digits, underscore; max 63 chars)"
+        )
+    return schema
+
+
+def with_schema(options: PoolOptions | None, schema: str | None) -> PoolOptions | None:
+    """Return *options* with a search_path for *schema* merged in.
+
+    Delivered as a libpq connect option rather than by schema-qualifying every
+    statement: the queries stay as written, and pools are keyed by options, so
+    two schemas get two pools instead of silently sharing one.
+
+    A caller who already set their own ``options`` string keeps it; theirs is
+    assumed deliberate and is not second-guessed.
+    """
+    if schema is None:
+        return options
+    validate_schema_name(schema)
+    base = options or PoolOptions()
+    if "options" in base.connect_kwargs:
+        return base
+    merged = dict(base.connect_kwargs)
+    merged["options"] = f"-c search_path={schema}"
+    return replace(base, connect_kwargs=merged)
