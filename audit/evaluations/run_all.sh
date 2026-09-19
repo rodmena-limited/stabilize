@@ -23,6 +23,7 @@ PROBES=(
     audit/evaluations/probe_pool_options.py
     audit/evaluations/probe_ssrf_rebinding.py
     audit/evaluations/probe_schema_and_exists.py
+    audit/evaluations/probe_secret_redaction.py
 )
 
 failures=0
