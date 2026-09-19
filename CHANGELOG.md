@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.24.0]
+
+### Changed
+
+- **`resilient-circuit` is now `>=0.5.0,<3.0.0` and `bulkman` is `>=2.0.4,<3.0.0`.**
+  The previous `resilient-circuit<0.8` cap was the binding constraint estate-wide,
+  because stabilize is pulled in transitively nearly everywhere. It was held while
+  `_create_storage()` silently swallowed `SchemaNotReady`; 0.23.0 and 0.23.1 removed
+  that, so the cap is no longer a safety hold.
+
+  **The `bulkman` floor moves to 2.0.4 for a reason that is easy to miss:** every
+  earlier 2.x caps `resilient-circuit` below 0.8 — 2.0.1 at `<0.5`, 2.0.2 at `<0.6`,
+  2.0.3 at `<0.8`. Raising only the `resilient-circuit` cap would let a resolver pick
+  a bulkman that forbids 0.8.x, producing an environment that satisfies neither
+  intent. Verified in a clean venv: `pip install stabilize` now resolves
+  bulkman 2.0.4 with resilient-circuit 0.8.1, and `pip check` is clean.
+
+  Under resilient-circuit 0.8.x, `PostgresStorage` no longer issues DDL at
+  construction and raises `SchemaNotReady` on a database that has not been through
+  `resilient-circuit-cli pg-setup`. stabilize reports that as an ERROR naming the
+  consequence, and `STABILIZE_CIRCUIT_STORAGE_STRICT=1` turns it into a startup
+  failure rather than process-local breaker state. Deployments that relied on the
+  old auto-create behaviour can set `RC_DB_AUTO_CREATE=1`, or run `pg-setup`.
+
+  Verified against resilient-circuit 0.8.1 and bulkman 2.0.4: full suite
+  1431 passed, 7 skipped, 1 xfailed.
+
+
 ## [0.23.1]
 
 ### Fixed

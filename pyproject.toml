@@ -1,6 +1,6 @@
 [project]
 name = "stabilize"
-version = "0.23.1"
+version = "0.24.0"
 description = "Stabilize Workflow Orchestration - Agentic Parallel Workflows"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,15 +24,19 @@ dependencies = [
     "python-ulid>=2.0",
     "pydantic>=2.0",
     # 2.0.1 adds BulkheadShutdownError; the shutdown-race classification in
-    # stabilize.resilience.executor depends on that type existing.
-    "bulkman>=2.0.1,<3",
-    # bulkman 2.0.1 requires resilient-circuit >=0.4.6,<0.5; bulkman 2.0.2
-    # requires >=0.5.0,<0.6. Keep our floor at or above bulkman 2.0.1's so a
-    # resolver cannot pick one bulkman rejects, and keep the cap wide enough
-    # to admit resilient-circuit 0.7.x (RC_DB_DSN / RC_DB_SSL* — the only way
-    # to reach a TLS-mandatory breaker database). With bulkman 2.0.2 present
-    # the resolver picks 0.5.x; without it, 0.7.x.
-    "resilient-circuit>=0.4.6,<0.8",
+    # stabilize.resilience.executor depends on that type existing. The floor is
+    # 2.0.4 because every earlier 2.x caps resilient-circuit below 0.8 — 2.0.1
+    # at <0.5, 2.0.2 at <0.6, 2.0.3 at <0.8 — so admitting 0.8.x here without
+    # also raising this floor lets a resolver pick a bulkman that forbids it.
+    "bulkman>=2.0.4,<3.0.0",
+    # Floor matches bulkman 2.0.4's own floor so a resolver cannot pick a
+    # resilient-circuit that bulkman rejects. 0.8.x changed PostgresStorage to
+    # stop issuing DDL at construction; it raises SchemaNotReady on a database
+    # that has not been through `resilient-circuit-cli pg-setup`. stabilize
+    # reports that as an ERROR naming the consequence, and
+    # STABILIZE_CIRCUIT_STORAGE_STRICT=1 turns it into a startup failure rather
+    # than process-local breaker state. Verified against 0.8.1.
+    "resilient-circuit>=0.5.0,<3.0.0",
 ]
 
 [project.optional-dependencies]
