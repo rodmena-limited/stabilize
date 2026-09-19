@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.25.0]
+
+### Security
+
+- **HTTPTask refuses SSRF at connect time, on the real peer address (#3).**
+  Validating a hostname and letting urllib resolve it again is a TOCTOU: an
+  attacker controlling DNS answers the validation lookup with a public address
+  and the connect lookup with a private one. Guarded connection classes now
+  check `getpeername()` after connect and before any request bytes are written.
+  Checking the live peer rather than pinning a pre-resolved IP keeps TLS
+  hostname verification and SNI intact, which naive pinning breaks.
+
+  Found while building the probe: HTTPTask revalidates the URL immediately
+  before `open()` at two sites, that revalidation raises `ValueError`, and
+  neither `except` clause caught it — so a rebinding attempt escaped
+  `execute()` as an **unhandled exception** rather than returning a terminal
+  result. A blocked request crashed the task. Both sites now catch it, and an
+  SSRF refusal is never retried, since a retry is the attacker's next
+  resolution.
+
+### Added
+
+- **Caller-supplied PostgreSQL pool options (#18).** `PoolOptions` carries
+  libpq connect kwargs, a psycopg `configure` callback, pool sizes and an
+  acquisition timeout. Pools are keyed by connection string **and** options, so
+  callers asking for different options no longer silently share whichever pool
+  was created first. With no options, connections inherit the server defaults
+  and carry **no `statement_timeout` and no `lock_timeout`** — now documented
+  rather than implied.
+- **A synchronous processor warns when nothing renews the queue lease (#21).**
+  `process_all()`/`process_one()` start no lock heartbeat, so a handler
+  outliving `lock_duration` makes its message visible mid-flight and a later
+  poll can execute it again — silent double execution. The first synchronous
+  poll now warns once, naming the queue, the duration and both remedies. This
+  makes the condition detectable; it does not prevent it, which needs either a
+  renewal thread or an operator-sized lease.
+
+### Fixed
+
+- **A pool is no longer closed out from under other holders (#19).** Pools are
+  holder-counted: a store and a queue built on one DSN no longer close each
+  other's pool, and the pool still closes when the last holder releases it.
+- **`is_healthy()` answers within a bounded interval (#22).** It borrowed with
+  psycopg_pool's 30s default, so the failure path — the only path it exists for
+  — read as a probe timeout rather than a negative answer. Default bound is now
+  2.0s, configurable per store. Measured: 1.000s against an unreachable
+  database, where it previously took ~30s.
+- **An unreachable N_OF_M join is refused at submit time (#4).** A join whose
+  threshold exceeds its upstream count can never become ready. The engine
+  already detected this in `recovery.py`, during a crash-recovery sweep, long
+  after the workflow had run and stalled.
+
+### Tests
+
+- Two DLQ tests stopped skipping SQLite on an unmeasured claim (#13). The
+  stated reason — "SQLite doesn't handle high-concurrency DLQ operations
+  reliably" — was never true: the fixture was `:memory:`, which is
+  per-connection, so ten threads addressed ten databases. Both now run on
+  SQLite and pass. Half the backend matrix had silently never run.
+
+
 ## [0.24.0]
 
 ### Changed
