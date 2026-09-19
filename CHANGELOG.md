@@ -1,5 +1,70 @@
 # Changelog
 
+## [0.22.1]
+
+### Security
+
+- **`mg-up` / `mg-status` no longer print the database password.** On a URL
+  that failed to parse, `parse_db_url()` echoed the whole DSN — password
+  included — to stdout, on both the `--db-url` and `MG_DATABASE_URL` paths.
+  Reported by provenance-50ca06 and independently reproduced by
+  infra-manager-c13110 against 0.22.0 from PyPI in a clean venv; one database
+  credential was rotated as a result. Errors now print the DSN with the
+  password replaced by `***`, covering `postgres://` userinfo, a host-less
+  `user:password`, and libpq keyword/value secrets (`password=`, `passfile=`,
+  `sslpassword=`). Control characters are escaped so a crafted DSN cannot
+  forge a second log line, and the echo is length-capped.
+
+- **The mg CLI no longer corrupts its own connection parameters.** The libpq
+  conninfo was built by string interpolation, and a URL carrying no password
+  substituted `""`, producing the text `password= dbname=<db>`. libpq skips
+  whitespace after `=`, so the password swallowed the next parameter. One
+  defect, four symptoms: `dbname` vanished entirely and libpq defaulted the
+  database to the *username*; the forged password overrode `PGPASSWORD`; a
+  password containing a space raised `ProgrammingError`; and a password
+  containing `dbname=evil` redirected the connection. Connection parameters
+  are now passed as a mapping to `psycopg.connect(**params)`, so no conninfo
+  string is built and an absent password is omitted rather than sent as `""`.
+
+  The defect had two independent maskers, either sufficient to hide it: a
+  permissive `pg_hba.conf` fails authentication before the database is
+  checked, and an exported `PGDATABASE` silently supplies the missing name.
+
+- **Userinfo in a database URL is now percent-decoded.** A password
+  containing `@` or `/` must be percent-encoded in a URL, and was previously
+  sent to the server literally (`pw%20with%20space`).
+
+- **HTTPTask SSRF guard rewritten around address classification.** The
+  blocklist was a hand-maintained CIDR list and missed whole classes:
+  IPv4-mapped IPv6 (`::ffff:127.0.0.1`, `::ffff:169.254.169.254`) matched no
+  IPv4 CIDR and is not reported as loopback by `IPv6Address.is_loopback`, so
+  loopback and cloud-metadata targets passed outright; `0.0.0.0` and `::`
+  were unblocked; so were `100.64.0.0/10`, multicast and reserved ranges.
+  A DNS resolution failure returned early and **allowed** the URL. There was
+  no scheme allowlist, so `ftp://` and `gopher://` reached urllib. Addresses
+  are now normalised before checking, classified with the stdlib's own
+  predicates, DNS failure fails closed, and only `http`/`https` are permitted.
+
+- **HTTPTask no longer persists credentials from a request URL.** The URL,
+  including any userinfo password, was written into stage `outputs` and the
+  debug log. Outputs propagate to downstream stages and the monitor, so the
+  engine amplified an author-supplied secret beyond the stage that declared
+  it. Outputs and logs now carry the redacted URL. A URL in the stage's own
+  `context` is unchanged, because that is the stage definition needed to
+  execute or replay it — credentials belong in headers or `secrets`.
+
+### Added
+
+- `stabilize.redaction` with `redact_userinfo()` and `redact_db_url()`,
+  shared by the CLI and the HTTP task.
+- `audit/evaluations/` probe harness with `run_all.sh`. `probe_mg_conninfo.py`
+  verifies connection parameters against a PostgreSQL wire-protocol listener,
+  reporting the startup packet and password message, so neither the `pg_hba`
+  nor the `PGDATABASE` masker can hide a regression. `probe_ssrf_guard.py`
+  tests the guard in both directions. `probe_http_credential_persistence.py`
+  drives a real workflow and reads state back through `WorkflowStore`.
+
+
 ## [0.22.0]
 
 ### Fixed
