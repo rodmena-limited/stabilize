@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.23.0]
+
+### Fixed
+
+- **Circuit-breaker storage no longer degrades silently.** A `postgresql://`
+  URL is an explicit request for breaker state SHARED across instances.
+  When `PostgresStorage` could not be constructed, `_create_storage()` caught
+  the exception, logged a single WARNING, and returned `InMemoryStorage()` —
+  so circuit state silently became process-local and a breaker open on one
+  worker stayed closed on every other one. Reported by infra-manager-c13110
+  in the context of resilient-circuit 0.8.x, where a missing or drifted
+  breaker table raises `SchemaNotReady` on a database that has not been
+  through `pg-setup`.
+
+  The failure is now logged at ERROR and names the consequence explicitly.
+
+- **The log no longer claims a backend it does not have.** `Using PostgreSQL
+  storage for circuit breakers` was emitted at INFO *before* construction was
+  attempted, so it appeared even when construction then failed. An operator
+  grepping for that line got a false confirmation. It is now emitted only
+  after the storage object exists.
+
+### Added
+
+- `STABILIZE_CIRCUIT_STORAGE_STRICT=1` makes an unusable PostgreSQL breaker
+  store abort startup with `CircuitStorageUnavailableError` instead of
+  degrading. Unset (the default), behaviour is unchanged apart from the log
+  level, so this release is safe to take without a configuration change.
+- `audit/evaluations/probe_circuit_storage_honesty.py`, which tests both
+  directions: that degradation is loud and names its consequence, and that
+  strict mode fails closed.
+
+### Unchanged
+
+- The `resilient-circuit>=0.4.6,<0.8` bound is **deliberately not moved** in
+  this release. Widening it is an estate-wide decision, and on any database
+  not put through `pg-setup` it would produce process-local breakers unless
+  `STABILIZE_CIRCUIT_STORAGE_STRICT` is set.
+
+
 ## [0.22.1]
 
 ### Security

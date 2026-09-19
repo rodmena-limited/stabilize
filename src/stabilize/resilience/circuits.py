@@ -8,6 +8,7 @@ from resilient_circuit.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections import OrderedDict
 from datetime import timedelta
@@ -45,6 +46,39 @@ def _should_trip_circuit(error: Exception | None) -> bool:
 logger = logging.getLogger(__name__)
 
 
+class CircuitStorageUnavailableError(RuntimeError):
+    """Raised when shared breaker storage was requested but cannot be created."""
+
+
+def _strict_storage_required() -> bool:
+    """Whether an unusable PostgreSQL breaker store must abort startup."""
+    return os.environ.get("STABILIZE_CIRCUIT_STORAGE_STRICT", "").lower() in {"1", "true", "yes"}
+
+
+def _degrade_or_raise(reason: str, error: BaseException) -> CircuitBreakerStorage:
+    """Handle a PostgreSQL breaker-store failure.
+
+    A ``postgresql://`` URL is an explicit request for circuit state SHARED
+    across instances. Silently substituting process-local state means a
+    breaker that should be open everywhere stays closed on every other
+    worker, so the failure is reported at ERROR, and raises outright when
+    STABILIZE_CIRCUIT_STORAGE_STRICT is set.
+    """
+    if _strict_storage_required():
+        raise CircuitStorageUnavailableError(
+            f"PostgreSQL circuit breaker storage is unavailable ({reason}) and "
+            "STABILIZE_CIRCUIT_STORAGE_STRICT is set"
+        ) from error
+    logger.error(
+        "PostgreSQL circuit breaker storage unavailable (%s). Falling back to IN-MEMORY "
+        "storage: circuit state is now PROCESS-LOCAL and is NOT shared across instances, "
+        "so a breaker open on this worker stays closed on every other one. Set "
+        "STABILIZE_CIRCUIT_STORAGE_STRICT=1 to fail startup instead.",
+        reason,
+    )
+    return InMemoryStorage()
+
+
 def _create_storage(database_url: str | None) -> CircuitBreakerStorage:
     """
     Create circuit breaker storage based on database URL.
@@ -68,14 +102,16 @@ def _create_storage(database_url: str | None) -> CircuitBreakerStorage:
             # in-memory storage on TLS-mandatory databases.
             conn_string = database_url.replace("+psycopg", "")
 
-            logger.info("Using PostgreSQL storage for circuit breakers")
-            return PostgresStorage(connection_string=conn_string)
-        except ImportError:
-            logger.warning("psycopg not available, falling back to in-memory circuit breaker storage")
-            return InMemoryStorage()
-        except Exception as e:
-            logger.warning("Failed to create PostgreSQL storage: %s, falling back to in-memory storage", e)
-            return InMemoryStorage()
+            storage = PostgresStorage(connection_string=conn_string)
+        except ImportError as exc:
+            return _degrade_or_raise("psycopg/resilient-circuit not available", exc)
+        except Exception as exc:
+            return _degrade_or_raise(f"{type(exc).__name__}: {exc}", exc)
+        # Logged only once construction has actually succeeded: an INFO line
+        # emitted before the attempt reads as confirmation of a backend that
+        # may never have been created.
+        logger.info("Using PostgreSQL storage for circuit breakers")
+        return storage
     else:
         # SQLite or no database: use in-memory storage
         # Circuit state is per-process only (not shared across instances)
