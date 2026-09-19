@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qs, urlsplit
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -61,6 +62,8 @@ DEFAULT_POOL_OPTIONS = PoolOptions()
 
 _SCHEMA_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+_KV_OPTIONS_RE = re.compile(r"(?i)(?:^|\s)options\s*=")
+
 
 def validate_schema_name(schema: str) -> str:
     """Validate a schema name before it reaches a connection option string."""
@@ -72,22 +75,42 @@ def validate_schema_name(schema: str) -> str:
     return schema
 
 
-def with_schema(options: PoolOptions | None, schema: str | None) -> PoolOptions | None:
+def dsn_sets_options(connection_string: str | None) -> bool:
+    """Whether *connection_string* already carries a libpq ``options`` value.
+
+    A psycopg keyword argument BEATS the conninfo, so a schema= that ignored
+    this would silently replace the caller's own search_path rather than defer
+    to it. Covers both DSN spellings: a URL query parameter and a
+    keyword/value string.
+    """
+    if not connection_string:
+        return False
+    if "://" in connection_string:
+        return "options" in parse_qs(urlsplit(connection_string).query)
+    return bool(_KV_OPTIONS_RE.search(connection_string))
+
+
+def with_schema(
+    options: PoolOptions | None,
+    schema: str | None,
+    connection_string: str | None = None,
+) -> PoolOptions | None:
     """Return *options* with a search_path for *schema* merged in.
 
     Delivered as a libpq connect option rather than by schema-qualifying every
     statement: the queries stay as written, and pools are keyed by options, so
     two schemas get two pools instead of silently sharing one.
 
-    A caller who already set their own ``options`` string keeps it; theirs is
-    assumed deliberate and is not second-guessed.
+    A caller who already set their own ``options`` keeps it, whether they set
+    it in PoolOptions.connect_kwargs or in the DSN itself. Both are deliberate
+    and neither is second-guessed.
     """
     if schema is None:
         return options
     validate_schema_name(schema)
     base = options or PoolOptions()
-    if "options" in base.connect_kwargs:
-        return base
+    if "options" in base.connect_kwargs or dsn_sets_options(connection_string):
+        return options
     merged = dict(base.connect_kwargs)
     merged["options"] = f"-c search_path={schema}"
     return replace(base, connect_kwargs=merged)

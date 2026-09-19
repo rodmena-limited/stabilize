@@ -94,7 +94,7 @@ class PostgresWorkflowStore(PostgresMaintenanceMixin, WorkflowStore):
         self._manager = get_connection_manager()
         self._health_timeout = health_timeout
         self.schema = schema
-        resolved_options = with_schema(options, schema)
+        resolved_options = with_schema(options, schema, connection_string)
         self._pool = self._manager.get_postgres_pool(connection_string, options=resolved_options)
 
     def close(self) -> None:

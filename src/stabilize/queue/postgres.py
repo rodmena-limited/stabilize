@@ -76,7 +76,7 @@ class PostgresQueue(Queue):
         self.lock_duration = lock_duration
         self.max_attempts = max_attempts
         self.schema = schema
-        self._pool_options = with_schema(None, schema)
+        self._pool_options = with_schema(None, schema, connection_string)
         self._manager = get_connection_manager()
         self._pending: dict[int, dict[str, Any]] = {}
         # Size caching

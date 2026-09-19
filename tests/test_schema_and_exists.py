@@ -105,3 +105,57 @@ class TestMgSchemaOverride:
 
         monkeypatch.delenv("MG_SCHEMA", raising=False)
         assert "schema" not in apply_schema_override({})
+
+
+class TestDsnOptionsPrecedence:
+    """A DSN carrying its own `options` must beat schema=.
+
+    psycopg's keyword argument beats the conninfo, so a schema= that ignored
+    the DSN would silently replace the caller's search_path. Reported by
+    vellum-build-d8bbd2 against the first version of this fix, where the
+    precedence guard inspected PoolOptions only.
+    """
+
+    URL = "postgresql://u:p@h/db?options=-csearch_path%3Dalpha"
+    KV = "host=h dbname=db options=-csearch_path=alpha"
+
+    def test_url_dsn_options_are_detected(self) -> None:
+        from stabilize.persistence.pool_options import dsn_sets_options
+
+        assert dsn_sets_options(self.URL) is True
+
+    def test_keyword_value_dsn_options_are_detected(self) -> None:
+        from stabilize.persistence.pool_options import dsn_sets_options
+
+        assert dsn_sets_options(self.KV) is True
+
+    @pytest.mark.parametrize(
+        "dsn",
+        [
+            "postgresql://u:p@h/db",
+            "postgresql://u:p@h/db?sslmode=require",
+            "host=h dbname=db user=u",
+            "",
+            None,
+        ],
+    )
+    def test_dsn_without_options_is_not_detected(self, dsn: str | None) -> None:
+        """Without this, the guard could defer always and schema= would be dead."""
+        from stabilize.persistence.pool_options import dsn_sets_options
+
+        assert dsn_sets_options(dsn) is False
+
+    def test_schema_defers_to_a_url_dsn(self) -> None:
+        assert with_schema(None, "beta", self.URL) is None
+
+    def test_schema_defers_to_a_keyword_value_dsn(self) -> None:
+        assert with_schema(None, "beta", self.KV) is None
+
+    def test_schema_still_applies_on_a_plain_dsn(self) -> None:
+        result = with_schema(None, "beta", "postgresql://u:p@h/db")
+        assert result is not None
+        assert result.connect_kwargs["options"] == "-c search_path=beta"
+
+    def test_pool_options_precedence_is_unchanged(self) -> None:
+        explicit = PoolOptions(connect_kwargs={"options": "-c search_path=alpha"})
+        assert with_schema(explicit, "beta", "postgresql://u:p@h/db") is explicit
