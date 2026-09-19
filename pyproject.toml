@@ -1,6 +1,6 @@
 [project]
 name = "stabilize"
-version = "0.25.2"
+version = "0.26.0"
 description = "Stabilize Workflow Orchestration - Agentic Parallel Workflows"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,20 +23,24 @@ classifiers = [
 dependencies = [
     "python-ulid>=2.0",
     "pydantic>=2.0",
-    # 2.0.1 adds BulkheadShutdownError; the shutdown-race classification in
-    # stabilize.resilience.executor depends on that type existing. The floor is
-    # 2.0.4 because every earlier 2.x caps resilient-circuit below 0.8 — 2.0.1
-    # at <0.5, 2.0.2 at <0.6, 2.0.3 at <0.8 — so admitting 0.8.x here without
-    # also raising this floor lets a resolver pick a bulkman that forbids it.
-    "bulkman>=2.0.4,<3.0.0",
-    # Floor matches bulkman 2.0.4's own floor so a resolver cannot pick a
-    # resilient-circuit that bulkman rejects. 0.8.x changed PostgresStorage to
-    # stop issuing DDL at construction; it raises SchemaNotReady on a database
-    # that has not been through `resilient-circuit-cli pg-setup`. stabilize
-    # reports that as an ERROR naming the consequence, and
-    # STABILIZE_CIRCUIT_STORAGE_STRICT=1 turns it into a startup failure rather
-    # than process-local breaker state. Verified against 0.8.1.
-    "resilient-circuit>=0.5.0,<3.0.0",
+    # NO UPPER BOUNDS on the house libraries. A cap here is the binding
+    # constraint estate-wide, because stabilize is pulled in transitively
+    # almost everywhere, and it blocks their fixes from reaching anyone.
+    #
+    # Floors are kept and are not caps: bulkman 2.0.1 added
+    # BulkheadShutdownError, which resilience/executor.py's shutdown-race
+    # classification requires, and every bulkman before 2.0.4 itself caps
+    # resilient-circuit below 0.8, so a lower floor would let a resolver pick
+    # one that forbids the version we want. resilient-circuit's floor matches
+    # bulkman 2.0.4's own.
+    #
+    # The tradeoff, stated rather than hidden: a future breaking major will
+    # install silently. The engine is built to survive that rather than to
+    # prevent it — a breaker store it cannot construct is reported at ERROR
+    # naming the consequence, and STABILIZE_CIRCUIT_STORAGE_STRICT=1 turns it
+    # into a startup failure instead of process-local state.
+    "bulkman>=2.0.4",
+    "resilient-circuit>=0.8.2",
 ]
 
 [project.optional-dependencies]

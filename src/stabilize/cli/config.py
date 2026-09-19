@@ -67,13 +67,20 @@ def connection_params(config: dict[str, Any]) -> dict[str, Any]:
     quoted or concatenated, so no value can alter another parameter, and an
     absent password is expressed by omitting the key so libpq falls back to
     PGPASSWORD/.pgpass.
+
+    Query parameters carried on the URL -- sslmode, sslrootcert, sslcert,
+    sslkey, connect_timeout, application_name and the rest -- are passed
+    through. The URL's own components win over a same-named query parameter.
     """
-    params: dict[str, Any] = {
-        "host": config["host"],
-        "port": config.get("port", 5432),
-        "user": config.get("user", "postgres"),
-        "dbname": config["dbname"],
-    }
+    params: dict[str, Any] = dict(config.get("connect_params") or {})
+    params.update(
+        {
+            "host": config["host"],
+            "port": config.get("port", 5432),
+            "user": config.get("user", "postgres"),
+            "dbname": config["dbname"],
+        }
+    )
     password = config.get("password")
     if password:
         params["password"] = password
@@ -134,7 +141,14 @@ def parse_db_url(url: str) -> dict[str, Any]:
 
     query = match.group("query")
     if query:
-        schema_values = parse_qs(query).get("schema")
+        parsed = parse_qs(query, keep_blank_values=True)
+        schema_values = parsed.pop("schema", None)
         if schema_values:
             config["schema"] = schema_values[-1]
+        # Every remaining query parameter is a libpq connection parameter and
+        # must survive. Dropping them silently contacted a TLS-mandatory
+        # database with no TLS settings at all -- a security control the
+        # operator had asked for, discarded without a word.
+        if parsed:
+            config["connect_params"] = {key: values[-1] for key, values in parsed.items()}
     return config

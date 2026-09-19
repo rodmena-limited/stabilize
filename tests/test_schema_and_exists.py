@@ -159,3 +159,54 @@ class TestDsnOptionsPrecedence:
     def test_pool_options_precedence_is_unchanged(self) -> None:
         explicit = PoolOptions(connect_kwargs={"options": "-c search_path=alpha"})
         assert with_schema(explicit, "beta", "postgresql://u:p@h/db") is explicit
+
+
+class TestUrlQueryParametersReachLibpq:
+    """Reported by trace-thinkpad-83589d: mg-up/mg-status dropped every query
+    parameter, so a TLS-mandatory database was contacted with no TLS settings
+    at all — a security control the operator asked for, discarded silently."""
+
+    URL = (
+        "postgresql://u:p@h:5432/db?sslmode=verify-full&sslrootcert=/etc/ca.crt"
+        "&sslcert=/etc/c.crt&sslkey=/etc/c.key&application_name=mg&connect_timeout=5"
+    )
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("sslmode", "verify-full"),
+            ("sslrootcert", "/etc/ca.crt"),
+            ("sslcert", "/etc/c.crt"),
+            ("sslkey", "/etc/c.key"),
+            ("application_name", "mg"),
+            ("connect_timeout", "5"),
+        ],
+    )
+    def test_query_parameters_survive(self, key: str, value: str) -> None:
+        from stabilize.cli.config import connection_params, parse_db_url
+
+        assert connection_params(parse_db_url(self.URL))[key] == value
+
+    def test_url_components_still_win(self) -> None:
+        """Without this, a query parameter could clobber the real target."""
+        from stabilize.cli.config import connection_params, parse_db_url
+
+        params = connection_params(parse_db_url(self.URL + "&host=evil&dbname=evil"))
+        assert params["host"] == "h"
+        assert params["dbname"] == "db"
+
+    def test_schema_is_stabilize_s_own_and_not_sent_to_libpq(self) -> None:
+        from stabilize.cli.config import connection_params, parse_db_url
+
+        config = parse_db_url("postgresql://u:p@h/db?schema=orchestration&sslmode=require")
+        assert config["schema"] == "orchestration"
+        params = connection_params(config)
+        assert "schema" not in params
+        assert params["sslmode"] == "require"
+
+    def test_plain_url_gains_no_extra_parameters(self) -> None:
+        """Both directions: the passthrough must not invent parameters."""
+        from stabilize.cli.config import connection_params, parse_db_url
+
+        params = connection_params(parse_db_url("postgresql://u:p@h/db"))
+        assert set(params) == {"host", "port", "user", "dbname", "password"}

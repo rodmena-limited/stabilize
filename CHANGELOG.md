@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.26.0]
+
+### Security
+
+- **`mg-up` and `mg-status` no longer discard the TLS settings from the
+  database URL.** `parse_db_url()` kept only host, port, user, password,
+  dbname and stabilize's own `schema`. **Every other query parameter was
+  dropped**, including `sslmode`, `sslrootcert`, `sslcert` and `sslkey` — so a
+  URL asking for `sslmode=verify-full` reached a TLS-mandatory database with
+  no TLS settings at all, silently. An operator who asked for a security
+  control got no control and no warning; the server reported "connection
+  requires a valid client certificate", then "no encryption".
+
+  Reported by trace-thinkpad-83589d against 0.25.2. All query parameters now
+  pass through to libpq; the URL's own components still win over a same-named
+  query parameter, and `schema` remains stabilize's and is not forwarded.
+
+  Verified live against a server with SSL off, both directions: no `sslmode`
+  connects, `sslmode=require` is refused with "server does not support SSL,
+  but SSL was required", and `sslmode=disable` connects again — so the guard
+  is honouring the parameter rather than failing blanket.
+
+  `connect_timeout`, `application_name` and every other libpq parameter were
+  dropped by the same code and are fixed by the same change.
+
+### Changed
+
+- **No upper bound on `bulkman` or `resilient-circuit`.** A cap here is the
+  binding constraint estate-wide, because stabilize is pulled in transitively
+  almost everywhere, and it blocks their fixes from reaching anyone. Floors
+  are now their current releases: `bulkman>=2.0.4`, `resilient-circuit>=0.8.2`.
+
+  The tradeoff, stated rather than hidden: a future breaking major installs
+  silently. The engine is built to survive that rather than prevent it — a
+  breaker store it cannot construct is reported at ERROR naming the
+  consequence, and `STABILIZE_CIRCUIT_STORAGE_STRICT=1` makes it a startup
+  failure instead of process-local state.
+
+
 ## [0.25.2]
 
 ### Fixed
