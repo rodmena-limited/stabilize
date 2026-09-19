@@ -52,7 +52,15 @@ class PostgresQueue(Queue):
         Args:
             connection_string: PostgreSQL connection string
             table_name: Name of the queue table
-            lock_duration: How long to lock messages during processing
+            lock_duration: How long to lock messages during processing.
+                THE DEFAULT ASSUMES AN ACTIVE LEASE RENEWER. QueueProcessor
+                renews it from start()/the poll loop, but the SYNCHRONOUS path
+                (process_all/process_one) starts no heartbeat: a handler that
+                outlives this duration makes its message visible to another
+                consumer while it is still running, and a later poll can
+                execute it again. Embedders driving the queue synchronously
+                should size this above their worst-case single message, e.g.
+                lock_duration=timedelta(minutes=30).
             max_attempts: Maximum retry attempts before dropping message
         """
         from stabilize.persistence.connection import get_connection_manager

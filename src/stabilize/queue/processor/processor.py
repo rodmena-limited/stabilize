@@ -23,6 +23,7 @@ from stabilize.queue import Queue
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.processor.config import QueueProcessorConfig
 from stabilize.queue.processor.handler_base import MessageHandler
+from stabilize.queue.processor.lease_guard import check_sync_lease, start_lock_heartbeat
 from stabilize.queue.processor.mixins import QueueProcessorMixin
 from stabilize.resilience.config import HandlerConfig
 
@@ -82,6 +83,7 @@ class QueueProcessor(QueueProcessorMixin):
             circuit_factory: Optional circuit breaker factory for workflow-level circuit breaking.
         """
         self.queue = queue
+        self._sync_lease_warned = False
         # Use explicit config if provided, otherwise create from handler_config
         if config is not None:
             self.config = config
@@ -387,45 +389,8 @@ class QueueProcessor(QueueProcessorMixin):
                 time.sleep(poll_interval)
 
     def _start_lock_heartbeat(self, message: Message) -> threading.Event | None:
-        """Start a heartbeat that renews the message's queue lock while its
-        handler executes.
-
-        Without renewal, a handler outliving the queue's lock_duration lets
-        the message become visible again and a second worker re-executes
-        still-running, side-effecting work. Returns the stop event, or None
-        when heartbeating is disabled or unsupported by the queue.
-        """
-        if not getattr(self.config, "enable_lock_heartbeat", False):
-            return None
-        if getattr(message, "message_id", None) is None:
-            return None
-        extend = getattr(self.queue, "extend_lock", None)
-        if extend is None or not callable(extend):
-            return None
-
-        interval = self.config.lock_heartbeat_interval_seconds
-        if interval is None:
-            lock_duration = getattr(self.queue, "lock_duration", None)
-            interval = lock_duration.total_seconds() / 2.0 if lock_duration is not None else 30.0
-        interval = max(0.05, float(interval))
-
-        stop = threading.Event()
-
-        def beat() -> None:
-            while not stop.wait(interval):
-                try:
-                    if not extend(message):
-                        return  # message gone (acked/moved); nothing to renew
-                except Exception as e:
-                    logger.warning(
-                        "Lock heartbeat failed for %s: %s",
-                        get_message_type_name(message),
-                        e,
-                    )
-                    return
-
-        threading.Thread(target=beat, daemon=True, name="stabilize-lock-heartbeat").start()
-        return stop
+        """Renew this message's queue lock while its handler executes."""
+        return start_lock_heartbeat(self.queue, self.config, message)
 
     def _submit_message(self, message: Message) -> None:
         """Submit a message to the thread pool for processing.
@@ -475,6 +440,15 @@ class QueueProcessor(QueueProcessorMixin):
         if self._executor is not None:
             self._executor.submit(process_and_ack)
 
+    def _warn_once_if_lease_unrenewed(self) -> None:
+        """Warn at the first synchronous poll when nothing renews the lease."""
+        if self._sync_lease_warned:
+            return
+        self._sync_lease_warned = True
+        warning = check_sync_lease(self.queue)
+        if warning is not None:
+            logger.warning("%s", warning)
+
     def process_one(self) -> bool:
         """
         Process a single message synchronously.
@@ -484,6 +458,7 @@ class QueueProcessor(QueueProcessorMixin):
         Returns:
             True if a message was processed, False otherwise
         """
+        self._warn_once_if_lease_unrenewed()
         message = self.queue.poll_one()
         if message:
             try:
