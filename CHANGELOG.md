@@ -122,10 +122,11 @@
   caller registering the same name still takes precedence. This also fixes
   `WaitStageBuilder`, whose `WaitTask` existed but was never registered.
 
-  **Nested loops are not yet supported.** Two loops whose bodies share a variable
-  name give the inner loop-back two ancestors offering it, and which one wins is
-  decided by the ancestor merge, whose order is not deterministic (#26). This is
-  documented at the source rather than worked around.
+  Nested loops work too (#32): an inner loop gets a full, independent budget on
+  every pass of the outer loop. That needed the deterministic merge above, and
+  the loop condition publishing its iteration counter — a loop-back was
+  otherwise counting up from its own copy, left over from the previous outer
+  pass, and reaching a tight inner bound early.
 
 - **The ancestor-output merge is deterministic across processes (#26).** Both
   backends seeded a topological sort from a `set`, and Python randomises string

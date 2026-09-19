@@ -14,11 +14,12 @@ entry) publishes the loop's variables as outputs so the body hydrates from them;
 the loop-back carries them in its jump context, because the condition sits
 upstream of the body and cannot otherwise observe what the body produced.
 
-Nested loops are NOT yet supported. Two loops whose bodies share a variable name
-give the inner loop-back two ancestors offering that name -- the inner body and
-the outer condition -- and which one wins is decided by the ancestor merge,
-whose order is not deterministic (issuedb #26). Until that is fixed, a nested
-inner loop can observe the outer loop's stale value instead of its own.
+Nested loops work. Two things make them work, and both were found by
+measurement: the ancestor merge is deterministic (issuedb #26), so an inner
+loop-back no longer reads the enclosing loop's value at random; and the
+condition publishes the iteration counter, so a loop-back re-entered from an
+enclosing loop takes the condition's reset value rather than continuing to count
+up from its own stale copy.
 """
 
 from __future__ import annotations
@@ -157,11 +158,20 @@ class LoopConditionTask(Task):
                 outputs={"loop_iterations": iteration},
             )
 
-        # Publish the loop variables as outputs so the body hydrates from them.
-        # The body's own persisted copy is stale from the previous iteration.
+        # Publish the loop variables as outputs so the body hydrates from them:
+        # the body's own persisted copy is stale from the previous iteration.
+        #
+        # The iteration counter is published too. The loop-back stage holds its
+        # own copy, which on re-entry from an enclosing loop is left over from
+        # the previous pass; without this it would keep counting up from there
+        # and the inner loop would reach its bound early.
         return TaskResult.success(
             context={LOOP_ITERATION: iteration, LOOP_TOKEN: None},
-            outputs={**_loop_variables(stage), "loop_iteration": iteration},
+            outputs={
+                **_loop_variables(stage),
+                LOOP_ITERATION: iteration,
+                "loop_iteration": iteration,
+            },
         )
 
     def _repeat_until(
@@ -206,7 +216,11 @@ class LoopEntryTask(Task):
     def execute(self, stage: StageExecution) -> TaskResult:
         iteration = int(stage.context.get(LOOP_ITERATION, 0) or 0)
         return TaskResult.success(
-            outputs={**_loop_variables(stage), "loop_iteration": iteration},
+            outputs={
+                **_loop_variables(stage),
+                LOOP_ITERATION: iteration,
+                "loop_iteration": iteration,
+            },
         )
 
 class LoopBackTask(Task):

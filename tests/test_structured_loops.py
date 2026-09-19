@@ -4,9 +4,8 @@ LoopBuilder emitted stages referencing LoopConditionTask and LoopBackTask, which
 existed nowhere, so every loop died on TaskNotFoundError at its first condition
 check. These tests drive the documented builder API end to end.
 
-Nested loops are deliberately not tested as working: they are blocked on the
-hash-randomised ancestor merge (#26). See the module docstring of
-stabilize.tasks.loop.
+Nested loops are covered too (#32): the inner loop must get a full, independent
+budget on every pass of the outer loop.
 """
 
 from __future__ import annotations
@@ -167,3 +166,51 @@ def test_undefined_identifier_in_condition_fails_loudly(engine) -> None:
     condition = _stage_by_ref(result, "U_condition")
     assert condition.status == WorkflowStatus.TERMINAL
     assert counter.seen == []
+
+
+class Bump(Task):
+    """Advances the outer counter and re-arms the inner one."""
+
+    def execute(self, stage: StageExecution) -> TaskResult:
+        return TaskResult.success(
+            outputs={"o": int(stage.context.get("o", 0) or 0) + 1, "i": 0}
+        )
+
+
+@pytest.mark.parametrize(("outer_n", "inner_n"), [(3, 2), (2, 3), (1, 4)])
+def test_nested_loops_run_the_inner_body_on_every_outer_pass(
+    repository: WorkflowStore, queue: Queue, outer_n: int, inner_n: int
+) -> None:
+    counter = Counter()
+    registry = TaskRegistry()
+    registry.register("body", counter)
+    registry.register("bump", Bump())
+    processor = QueueProcessor(queue, store=repository, task_registry=registry)
+    runner = Orchestrator(queue, store=repository)
+    try:
+        # The inner bound is deliberately tight. A loop-back that kept counting
+        # from its own stale copy across outer passes would reach it early and
+        # cut the last pass short; a generous bound would hide that entirely.
+        inner = LoopBuilder.while_loop(
+            f"i < {inner_n}", [_body()], "IN", inner_n + 1, {"i": 0}
+        )
+        bump = StageExecution(
+            ref_id="bump",
+            type="bump",
+            name="bump",
+            tasks=[TaskExecution.create("bump", "bump", stage_start=True, stage_end=True)],
+        )
+        stages = LoopBuilder.while_loop(
+            f"o < {outer_n}", [*inner, bump], "OUT", outer_n + 1, {"o": 0, "i": 0}
+        )
+        workflow = Workflow.create(application="loops", name="nested", stages=stages)
+        repository.store(workflow)
+        runner.start(workflow)
+        processor.process_all(timeout=120.0)
+        result = repository.retrieve(workflow.id)
+
+        assert len(counter.seen) == outer_n * inner_n
+        assert counter.seen == list(range(inner_n)) * outer_n
+        assert result.status == WorkflowStatus.SUCCEEDED
+    finally:
+        processor.stop(wait=True)
