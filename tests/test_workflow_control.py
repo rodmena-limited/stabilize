@@ -102,11 +102,21 @@ class TestCancelWorkflow:
             assert SlowTask.started.wait(timeout=10.0), "slow task never started"
             runner.cancel(execution, user="tester", reason="unit test cancel")
 
-            deadline = time.monotonic() + 15.0
+            # A wall-clock budget makes this test a load meter rather than a
+            # correctness check: under a full-suite run it has reported
+            # RUNNING purely because the machine was busy. The budget is sized
+            # for a loaded CI box, and a timeout is reported as a timeout
+            # rather than as a wrong terminal status.
+            deadline = time.monotonic() + 120.0
             result = repository.retrieve(execution.id)
             while not result.status.is_complete and time.monotonic() < deadline:
-                time.sleep(0.1)
+                time.sleep(0.05)
                 result = repository.retrieve(execution.id)
+            assert result.status.is_complete, (
+                f"workflow never reached a terminal status within 120s "
+                f"(last seen {result.status}); this is a timeout, not a "
+                f"cancellation defect"
+            )
         finally:
             SlowTask.release.set()
             processor.stop()

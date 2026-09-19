@@ -119,10 +119,16 @@ class TestDLQAtomicity:
             store.close()
             test_queue.close()
 
-    def test_concurrent_move_to_dlq_same_message(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
-        """Concurrent move_to_dlq calls: only one succeeds, no duplicates in DLQ."""
-        if backend == "sqlite":
-            pytest.skip("SQLite uses thread-local connections; concurrent DLQ tested via file-based DB")
+    def test_concurrent_move_to_dlq_same_message(
+        self, file_repository: WorkflowStore, file_queue: Queue, backend: str
+    ) -> None:
+        """Concurrent move_to_dlq calls: only one succeeds, no duplicates in DLQ.
+
+        Runs on both backends. SQLite's thread-local connections are only a
+        problem for a `:memory:` database, which is per-connection; a
+        file-backed one is shared, and file_queue supplies it.
+        """
+        queue = file_queue
 
         queue.clear_dlq()
 
@@ -219,14 +225,22 @@ class TestDLQAtomicity:
             store.close()
             test_queue.close()
 
-    def test_dlq_operations_under_load(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
+    def test_dlq_operations_under_load(
+        self, file_repository: WorkflowStore, file_queue: Queue, backend: str
+    ) -> None:
         """
         Stress test DLQ operations with concurrent message processing failures.
 
         Push many messages, have them all fail, and verify DLQ is consistent.
+
+        Runs on BOTH backends. The previous skip claimed "SQLite doesn't handle
+        high-concurrency DLQ operations reliably", which was never measured and
+        was not the reason: the regular sqlite fixture is `:memory:`, which is
+        per-connection, so ten worker threads addressed ten separate databases.
+        A file-backed database is what the concurrency here requires, and the
+        file_queue fixture already provides one.
         """
-        if backend == "sqlite":
-            pytest.skip("SQLite doesn't handle high-concurrency DLQ operations reliably")
+        queue = file_queue
 
         # Clear DLQ to ensure clean state
         queue.clear_dlq()
