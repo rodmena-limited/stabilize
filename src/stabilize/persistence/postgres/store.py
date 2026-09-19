@@ -14,6 +14,10 @@ from contextlib import contextmanager
 from typing import Any
 
 from stabilize.models.workflow import Workflow
+from stabilize.persistence.pool_options import (
+    DEFAULT_HEALTH_TIMEOUT_SECONDS,
+    PoolOptions,
+)
 from stabilize.persistence.postgres.converters import (
     execution_to_dict,
     paused_to_dict,
@@ -63,13 +67,27 @@ class PostgresWorkflowStore(PostgresMaintenanceMixin, WorkflowStore):
     execution tracking.
     """
 
-    def __init__(self, connection_string: str) -> None:
-        """Initialize the repository."""
+    def __init__(
+        self,
+        connection_string: str,
+        options: PoolOptions | None = None,
+        health_timeout: float = DEFAULT_HEALTH_TIMEOUT_SECONDS,
+    ) -> None:
+        """Initialize the repository.
+
+        Args:
+            connection_string: PostgreSQL connection string
+            options: Pool and connection options. With none supplied,
+                connections inherit the server defaults and carry no
+                statement_timeout and no lock_timeout.
+            health_timeout: Bound on is_healthy()'s wait for a connection.
+        """
         from stabilize.persistence.connection import get_connection_manager
 
         self.connection_string = connection_string
         self._manager = get_connection_manager()
-        self._pool = self._manager.get_postgres_pool(connection_string)
+        self._health_timeout = health_timeout
+        self._pool = self._manager.get_postgres_pool(connection_string, options=options)
 
     def close(self) -> None:
         """Close the connection pool via connection manager."""
@@ -423,10 +441,21 @@ class PostgresWorkflowStore(PostgresMaintenanceMixin, WorkflowStore):
         """Cancel an execution."""
         cancel_execution(self._pool, execution_id, canceled_by, reason)
 
-    def is_healthy(self) -> bool:
-        """Check if the database connection is healthy."""
+    def is_healthy(self, timeout: float | None = None) -> bool:
+        """Whether the database answers, within a bounded interval.
+
+        The failure path is the only path this method exists for, so it must
+        not inherit the pool's 30s acquisition default: a liveness probe with a
+        5s budget records a timeout rather than a negative answer, and the
+        caller cannot then tell "unhealthy" from "did not reply".
+
+        Worst case is ``timeout`` seconds (default
+        ``DEFAULT_HEALTH_TIMEOUT_SECONDS``) waiting for a connection, plus the
+        round trip of ``SELECT 1`` on a connection already borrowed.
+        """
+        budget = self._health_timeout if timeout is None else timeout
         try:
-            with self._pool.connection() as conn:
+            with self._pool.connection(timeout=budget) as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT 1")
             return True

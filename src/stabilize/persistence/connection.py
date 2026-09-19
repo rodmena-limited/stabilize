@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from psycopg import Connection
     from psycopg.rows import DictRow
     from psycopg_pool import ConnectionPool
+
+
+from stabilize.persistence.pool_options import DEFAULT_POOL_OPTIONS, PoolOptions
 
 
 class SingletonMeta(type):
@@ -63,7 +67,9 @@ class ConnectionManager(metaclass=SingletonMeta):
     """
 
     def __init__(self) -> None:
-        self._postgres_pools: dict[str, ConnectionPool[Connection[DictRow]]] = {}
+        self._postgres_pools: dict[Any, ConnectionPool[Connection[DictRow]]] = {}
+        self._postgres_holders: dict[Any, int] = {}
+        self._postgres_keys_by_dsn: dict[str, list[Any]] = {}
         self._postgres_lock = threading.Lock()
 
         self._sqlite_local = threading.local()
@@ -73,38 +79,69 @@ class ConnectionManager(metaclass=SingletonMeta):
     def get_postgres_pool(
         self,
         connection_string: str,
-        min_size: int = 5,
-        max_size: int = 15,
+        min_size: int | None = None,
+        max_size: int | None = None,
+        options: PoolOptions | None = None,
     ) -> ConnectionPool[Connection[DictRow]]:
         """
         Get or create a PostgreSQL connection pool.
 
+        Pools are shared between callers asking for the same connection string
+        AND the same options. Each call registers a holder; the pool is closed
+        only when every holder has released it, so a store and a queue built on
+        one DSN no longer close each other's pool.
+
+        With no options, connections inherit the server's defaults and carry no
+        ``statement_timeout`` and no ``lock_timeout``. Supply them through
+        ``PoolOptions.connect_kwargs``, a ``configure`` callback, or an
+        ``options=-c statement_timeout=...`` parameter on the DSN.
+
         Args:
             connection_string: PostgreSQL connection string
-            min_size: Minimum pool size
-            max_size: Maximum pool size
+            min_size: Minimum pool size (overrides options.min_size)
+            max_size: Maximum pool size (overrides options.max_size)
+            options: Connection and pool options
 
         Returns:
-            Shared ConnectionPool instance for this connection string
+            Shared ConnectionPool instance for this connection string+options
         """
-        if connection_string not in self._postgres_pools:
-            with self._postgres_lock:
-                if connection_string not in self._postgres_pools:
-                    from psycopg.rows import dict_row
-                    from psycopg_pool import ConnectionPool
+        resolved = options or DEFAULT_POOL_OPTIONS
+        if min_size is not None or max_size is not None:
+            resolved = replace(
+                resolved,
+                min_size=resolved.min_size if min_size is None else min_size,
+                max_size=resolved.max_size if max_size is None else max_size,
+            )
+        key = (connection_string, resolved.key())
 
-                    pool = cast(
-                        "ConnectionPool[Connection[DictRow]]",
-                        ConnectionPool(
-                            connection_string,
-                            min_size=min_size,
-                            max_size=max_size,
-                            open=True,
-                            kwargs={"row_factory": dict_row},
-                        ),
-                    )
-                    self._postgres_pools[connection_string] = pool
-        return self._postgres_pools[connection_string]
+        with self._postgres_lock:
+            pool = self._postgres_pools.get(key)
+            if pool is None:
+                from psycopg.rows import dict_row
+                from psycopg_pool import ConnectionPool
+
+                kwargs: dict[str, Any] = {"row_factory": dict_row}
+                kwargs.update(resolved.connect_kwargs)
+                pool_kwargs: dict[str, Any] = {
+                    "min_size": resolved.min_size,
+                    "max_size": resolved.max_size,
+                    "open": True,
+                    "kwargs": kwargs,
+                }
+                if resolved.acquire_timeout is not None:
+                    pool_kwargs["timeout"] = resolved.acquire_timeout
+                if resolved.configure is not None:
+                    pool_kwargs["configure"] = resolved.configure
+
+                pool = cast(
+                    "ConnectionPool[Connection[DictRow]]",
+                    ConnectionPool(connection_string, **pool_kwargs),
+                )
+                self._postgres_pools[key] = pool
+                self._postgres_keys_by_dsn.setdefault(connection_string, []).append(key)
+
+            self._postgres_holders[key] = self._postgres_holders.get(key, 0) + 1
+            return pool
 
     def get_sqlite_connection(self, connection_string: str) -> sqlite3.Connection:
         """
@@ -160,11 +197,24 @@ class ConnectionManager(metaclass=SingletonMeta):
         return connection_string
 
     def close_postgres_pool(self, connection_string: str) -> None:
-        """Close a specific PostgreSQL pool."""
+        """Release this caller's hold on the pools for *connection_string*.
+
+        A pool is closed only once every holder has released it. Closing a
+        store no longer closes the pool a queue on the same DSN is still using.
+        """
         with self._postgres_lock:
-            if connection_string in self._postgres_pools:
-                pool = self._postgres_pools.pop(connection_string)
-                pool.close()
+            for key in list(self._postgres_keys_by_dsn.get(connection_string, [])):
+                holders = self._postgres_holders.get(key, 0)
+                if holders > 1:
+                    self._postgres_holders[key] = holders - 1
+                    continue
+                self._postgres_holders.pop(key, None)
+                pool = self._postgres_pools.pop(key, None)
+                self._postgres_keys_by_dsn[connection_string].remove(key)
+                if pool is not None:
+                    pool.close()
+            if not self._postgres_keys_by_dsn.get(connection_string):
+                self._postgres_keys_by_dsn.pop(connection_string, None)
 
     def close_sqlite_connection(self, connection_string: str) -> None:
         """Close SQLite connection for current thread."""
@@ -183,6 +233,8 @@ class ConnectionManager(metaclass=SingletonMeta):
             for pool in self._postgres_pools.values():
                 pool.close()
             self._postgres_pools.clear()
+            self._postgres_holders.clear()
+            self._postgres_keys_by_dsn.clear()
 
         # Close SQLite connections for current thread
         if hasattr(self._sqlite_local, "connections"):

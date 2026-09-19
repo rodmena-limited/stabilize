@@ -20,6 +20,7 @@ PROBES=(
     audit/evaluations/probe_ssrf_guard.py
     audit/evaluations/probe_http_credential_persistence.py
     audit/evaluations/probe_circuit_storage_honesty.py
+    audit/evaluations/probe_pool_options.py
 )
 
 failures=0
