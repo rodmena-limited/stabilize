@@ -144,11 +144,34 @@ class InvalidStageGraphError(ValueError):
     """
 
 
+def _validate_join_reachability(stage: StageExecution) -> None:
+    """Refuse a join that no assignment of upstream states can satisfy.
+
+    An N_OF_M join needs N of its M upstreams. When N exceeds M the stage can
+    never become ready, whatever every upstream does. The engine already
+    detects this — in recovery.py, during a crash-recovery sweep — which is
+    far too late: the workflow has already run, stalled, and been picked up by
+    a sweep before anyone learns the graph was impossible.
+    """
+    from stabilize.models.stage.enums import JoinType
+
+    if stage.join_type != JoinType.N_OF_M:
+        return
+    upstreams = len(stage.requisite_stage_ref_ids)
+    if stage.join_threshold > upstreams:
+        raise InvalidStageGraphError(
+            f"unreachable_join: stage '{stage.ref_id}' has an N_OF_M join with "
+            f"join_threshold={stage.join_threshold} but only {upstreams} upstream(s), "
+            "so it can never become ready under any assignment of upstream states"
+        )
+
+
 def validate_stage_graph(stages: list[StageExecution]) -> None:
     """Validate a stage graph at submit time.
 
-    Checks, in order: duplicate ref_ids, self-edges, requisites naming
-    unknown refs, and cycles (via Kahn's algorithm, naming the members).
+    Checks, in order: duplicate ref_ids, unreachable N_OF_M joins,
+    self-edges, requisites naming unknown refs, and cycles (via Kahn's
+    algorithm, naming the members).
     Only top-level stages are considered; synthetic stages are injected
     later by the engine.
 
@@ -163,6 +186,9 @@ def validate_stage_graph(stages: list[StageExecution]) -> None:
         if stage.ref_id in seen:
             raise InvalidStageGraphError(f"duplicate_ref: ref_id '{stage.ref_id}' is used by more than one stage")
         seen.add(stage.ref_id)
+
+    for stage in top_level:
+        _validate_join_reachability(stage)
 
     for stage in top_level:
         if stage.ref_id in stage.requisite_stage_ref_ids:
