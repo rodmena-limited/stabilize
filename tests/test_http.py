@@ -193,7 +193,16 @@ def http_server():
 
 @pytest.fixture(autouse=True)
 def _allow_private_urls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let these tests reach the local test server.
+
+    SSRF is now enforced at TWO layers: the URL pre-flight, and the peer
+    address the socket actually connected to (ticket #3). Neutering only the
+    first leaves the second refusing every request to 127.0.0.1, so both are
+    relaxed here. A production caller uses allow_private_urls=True, which
+    skips both together.
+    """
     monkeypatch.setattr("stabilize.tasks.http.task._validate_url_safety", lambda url: None)
+    monkeypatch.setattr("stabilize.tasks.http.task._is_blocked", lambda addr: False)
 
 
 @pytest.fixture
