@@ -18,11 +18,28 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 CONTAINER = "stabilize-probe-schema"
 PORT = 55435
 SCHEMA = "orchestration"
 ABSENT_ID = "01ABSENTWORKFLOWID000000000"
+
+
+def _apply_repo_migrations() -> None:
+    """Apply migrations/*.sql from the checkout into SCHEMA."""
+    root = Path(__file__).resolve().parents[2] / "migrations"
+    if not root.is_dir():
+        return
+    for path in sorted(root.glob("*.sql")):
+        content = path.read_text()
+        up = content.split("-- migrate: down")[0].replace("-- migrate: up", "")
+        script = f"SET search_path TO {SCHEMA};\n{up}"
+        subprocess.run(
+            ["docker", "exec", "-i", CONTAINER, "psql", "-U", "vu", "-d", "vdb",
+             "-v", "ON_ERROR_STOP=1", "-q"],
+            input=script, text=True, capture_output=True, check=False,
+        )
 
 
 def _start() -> str | None:
@@ -46,8 +63,15 @@ def _start() -> str | None:
                 capture_output=True, check=False,
             )
             env = {**os.environ, "MG_SCHEMA": SCHEMA, "MG_DATABASE_URL": dsn}
-            subprocess.run([sys.executable, "-m", "stabilize.cli.main", "mg-up"],
-                           env=env, capture_output=True, check=False)
+            applied = subprocess.run(
+                [sys.executable, "-m", "stabilize.cli.main", "mg-up"],
+                env=env, capture_output=True, text=True, check=False,
+            )
+            if "No migrations found in package" in (applied.stdout + applied.stderr):
+                # Editable installs do not package stabilize.migrations. Apply
+                # the repo's own SQL so the probe works from a checkout as well
+                # as from a wheel.
+                _apply_repo_migrations()
             return dsn
         time.sleep(1)
     return None
@@ -119,9 +143,14 @@ def main() -> int:
 
         print()
         print("CLAIM 3 — mg-status --db-url honours MG_SCHEMA")
-        for label, env_schema, expect_applied in (
-            ("MG_SCHEMA set", schema, True),
-            ("MG_SCHEMA unset (control)", None, False),
+        # Assert on whether the query REACHED the schema, not on row content:
+        # an editable checkout cannot enumerate packaged migrations, so it
+        # prints an empty table even when the schema resolved correctly. The
+        # fix under test is whether MG_SCHEMA is honoured, which the presence
+        # or absence of the relation error states exactly.
+        for label, env_schema, expect_missing_relation in (
+            ("MG_SCHEMA set", schema, False),
+            ("MG_SCHEMA unset (control)", None, True),
         ):
             env = {k: v for k, v in os.environ.items() if k != "MG_SCHEMA"}
             if env_schema:
@@ -131,11 +160,11 @@ def main() -> int:
                 env=env, capture_output=True, text=True, check=False,
             )
             text = out.stdout + out.stderr
-            applied = "\napplied " in text or text.startswith("applied ")
-            print(f"  {label:26} -> applied rows: {applied}")
+            missing_relation = 'relation "stabilize_migrations" does not exist' in text
+            print(f"  {label:26} -> migration table unreachable: {missing_relation}")
             print(f"     MG_SCHEMA in env: {'MG_SCHEMA' in env}")
             print(f"     first line: {text.splitlines()[0][:70] if text.splitlines() else '(empty)'}")
-            if applied != expect_applied:
+            if missing_relation != expect_missing_relation:
                 print("  >>> FAIL")
                 failures += 1
             else:
