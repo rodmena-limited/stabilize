@@ -8,8 +8,11 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.cli.config import (
     MIGRATION_TABLE,
+    build_db_url,
+    connection_params,
     load_config,
     parse_db_url,
+    redact_db_url,
     validate_schema_name,
 )
 from stabilize.cli.migrations import (
@@ -46,14 +49,10 @@ def mg_up(db_url: str | None = None) -> None:
         schema = validate_schema_name(schema)
 
     # Connect to database
-    conninfo = (
-        f"host={config['host']} port={config.get('port', 5432)} "
-        f"user={config.get('user', 'postgres')} password={config.get('password', '')} "
-        f"dbname={config['dbname']}"
-    )
+    params = connection_params(config)
 
     try:
-        with psycopg.connect(conninfo) as conn:
+        with psycopg.connect(**params) as conn:
             with conn.cursor() as cur:
                 if schema:
                     cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
@@ -145,13 +144,7 @@ def monitor(
         # Try to load from config
         try:
             config = load_config()
-            db_url = (
-                f"postgres://{config.get('user', 'postgres')}:"
-                f"{config.get('password', '')}@"
-                f"{config.get('host', 'localhost')}:"
-                f"{config.get('port', 5432)}/"
-                f"{config.get('dbname', 'stabilize')}"
-            )
+            db_url = build_db_url(config)
         except SystemExit:
             print("Error: No database configuration found.")
             print("Provide --db-url or set up mg.yaml / MG_DATABASE_URL")
@@ -185,11 +178,11 @@ def monitor(
             print("Install with: pip install stabilize[postgres]")
             sys.exit(1)
     else:
-        print(f"Error: Unsupported database URL: {db_url}")
+        print(f"Error: Unsupported database URL: {redact_db_url(db_url)}")
         print("Use sqlite:///path or postgres://...")
         sys.exit(1)
 
-    print(f"Connecting to {db_url[:50]}...")
+    print(f"Connecting to {redact_db_url(db_url)}")
     run_monitor(
         store=store,
         queue=queue,
@@ -218,14 +211,10 @@ def mg_status(db_url: str | None = None) -> None:
     if schema:
         schema = validate_schema_name(schema)
 
-    conninfo = (
-        f"host={config['host']} port={config.get('port', 5432)} "
-        f"user={config.get('user', 'postgres')} password={config.get('password', '')} "
-        f"dbname={config['dbname']}"
-    )
+    params = connection_params(config)
 
     try:
-        with psycopg.connect(conninfo) as conn:
+        with psycopg.connect(**params) as conn:
             with conn.cursor() as cur:
                 # Check if tracking table exists
                 if schema:
