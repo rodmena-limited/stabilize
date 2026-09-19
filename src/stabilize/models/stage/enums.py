@@ -33,6 +33,9 @@ class JoinType(Enum):
     AND: Wait for ALL upstreams (default, WCP-3).
     OR: Wait only for activated branches from a paired OR-split (WCP-7).
     MULTI_MERGE: Fire once per upstream completion, no sync (WCP-8).
+        Firings are serialised, outputs hold the last one (history in
+        context['_mm_firings']), and the merge's own downstream still
+        runs once -- the multiplicity does not propagate past it.
     DISCRIMINATOR: Fire on first upstream completion, ignore rest (WCP-9).
     N_OF_M: Fire when N of M upstreams complete (WCP-30).
     """

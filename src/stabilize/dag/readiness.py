@@ -86,6 +86,9 @@ class ReadinessResult:
 
 PRUNED_FROM = "_pruned_from"
 PRUNED = "_pruned"
+MM_CONSUMED = "_mm_consumed"
+MM_TRIGGER = "_mm_trigger"
+MM_FIRINGS = "_mm_firings"
 
 
 def _is_dead_edge(stage: StageExecution, upstream: StageExecution) -> bool:
@@ -307,29 +310,46 @@ def _evaluate_or_join(
     )
 
 
+def multi_merge_candidates(
+    stage: StageExecution,
+    upstream_stages: list[StageExecution],
+) -> list[str]:
+    """Live upstreams whose completion this stage has not yet fired for.
+
+    Ordered by ref_id so the firing sequence is reproducible. Only live
+    upstreams count: a pruned branch never carried a token.
+    """
+    from stabilize.models.status import CONTINUABLE_STATUSES
+
+    consumed = set(stage.context.get(MM_CONSUMED) or ())
+    return sorted(
+        u.ref_id
+        for u in upstream_stages
+        if u is not None and u.status in CONTINUABLE_STATUSES and u.ref_id not in consumed
+    )
+
+
 def _evaluate_multi_merge(
     stage: StageExecution,
     upstream_stages: list[StageExecution],
 ) -> ReadinessResult:
-    """Multi-merge (WCP-8): Fire once per upstream completion.
+    """Multi-merge (WCP-8): fire once per upstream completion.
 
-    Returns READY immediately - each upstream completion triggers a separate
-    StartStage message. The stage is re-executable (reset after each firing).
-    The caller is responsible for tracking which upstream triggered this evaluation.
+    Stateful in the same way as DISCRIMINATOR and N_OF_M, which read the
+    `_join_fired` flag their caller writes after claiming. Here the caller
+    records which upstreams have already been fired for, so a completion that
+    has been consumed does not trigger another firing.
     """
-    from stabilize.models.status import CONTINUABLE_STATUSES, HALT_STATUSES
+    from stabilize.models.status import HALT_STATUSES
 
-    # Check if at least one upstream has completed
-    for upstream in upstream_stages:
-        if upstream is None:
-            continue
-        if upstream.status in CONTINUABLE_STATUSES:
-            return ReadinessResult(
-                phase=PredicatePhase.READY,
-                reason=f"Multi-merge: upstream {upstream.id} completed",
-            )
+    candidates = multi_merge_candidates(stage, upstream_stages)
+    if candidates:
+        return ReadinessResult(
+            phase=PredicatePhase.READY,
+            reason=f"Multi-merge: unconsumed upstream {candidates[0]} completed",
+        )
 
-    # Check if all upstreams halted
+    # Nothing left to fire for: halted-only means skip, otherwise keep waiting.
     all_halted = all(u.status in HALT_STATUSES for u in upstream_stages if u is not None)
     if all_halted:
         return ReadinessResult(
@@ -340,7 +360,7 @@ def _evaluate_multi_merge(
 
     return ReadinessResult(
         phase=PredicatePhase.NOT_READY,
-        reason="No upstream stages have completed yet",
+        reason="No unconsumed upstream completion",
         active_upstream_ids=[u.id for u in upstream_stages if u is not None],
     )
 

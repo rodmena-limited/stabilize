@@ -12,7 +12,14 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from stabilize.dag.readiness import PRUNED, PredicatePhase, evaluate_readiness
+from stabilize.dag.readiness import (
+    MM_CONSUMED,
+    MM_TRIGGER,
+    PRUNED,
+    PredicatePhase,
+    evaluate_readiness,
+    multi_merge_candidates,
+)
 from stabilize.errors import ConcurrencyError, is_transient
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.handlers.start_stage.conditions import StartStageConditionsMixin
@@ -508,6 +515,21 @@ class StartStageHandler(
         # WCP-30: N-of-M - mark as fired after claiming
         if stage.join_type == JoinType.N_OF_M:
             stage.context["_join_fired"] = True
+
+        # WCP-8: Multi-merge - record which upstream this firing consumes, so a
+        # later completion of a different upstream fires again and the same one
+        # never fires twice.
+        if stage.join_type == JoinType.MULTI_MERGE:
+            upstreams = self.repository.get_upstream_stages(stage.execution.id, stage.ref_id) or []
+            candidates = multi_merge_candidates(stage, upstreams)
+            trigger = message.triggering_upstream_ref_id
+            if trigger not in candidates:
+                trigger = candidates[0] if candidates else ""
+            if trigger:
+                consumed = list(stage.context.get(MM_CONSUMED) or ())
+                consumed.append(trigger)
+                stage.context[MM_CONSUMED] = consumed
+                stage.context[MM_TRIGGER] = trigger
 
         # Now we have exclusive ownership - safe to do expensive planning
         try:

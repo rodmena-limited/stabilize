@@ -31,6 +31,7 @@ PROBES=(
     audit/evaluations/probe_event_commit_watermark.py
     audit/evaluations/probe_event_coverage.py
     audit/evaluations/probe_branch_pruning.py
+    audit/evaluations/probe_multi_merge.py
 )
 
 failures=0

@@ -189,6 +189,31 @@
   MULTI_MERGE (WCP-8) still fires once rather than once per upstream completion;
   that needs a separate re-arm design and is not part of this change.
 
+- **MULTI_MERGE (WCP-8) fires once per upstream completion (#34).** It was
+  implemented as a readiness predicate that returned READY whenever *any*
+  upstream completed, with the firing bookkeeping delegated to a caller branch
+  that was never written — so the 2nd..Nth triggers were swallowed and the stage
+  behaved as an AND-join that ignored its other parents.
+
+      before:  mm ran 1x for 3 upstreams
+      after:   mm ran 3x, each upstream consumed exactly once
+
+  `start_stage/handler.py` has a post-claim, per-join-type firing hook with
+  branches for DISCRIMINATOR and N_OF_M; it has had none for MULTI_MERGE since
+  the commit that created all three. The re-arm happens at **completion**, not
+  when the next token arrives: the token typically arrives while the stage is
+  still RUNNING, and `RestartStage` already refuses to re-arm a non-terminal
+  stage for exactly that reason. `StartStage` gained a trailing defaulted
+  `triggering_upstream_ref_id`, so a firing can tell which branch triggered it
+  via `context["_mm_trigger"]`.
+
+  Three limits, now stated in the guide, the enum docstring and the agent-facing
+  prompt rather than implied: firings are **serialised**, not concurrent;
+  `stage.outputs` holds the **last** firing with earlier ones archived in
+  `context["_mm_firings"]`; and the multiplicity **does not propagate** — the
+  merge stage's own downstream runs once, since carrying a thread of control per
+  token would need a separate stage row per token.
+
 ### Security
 
 - **Stage-level messages are now scoped to the workflow they name (#25).**

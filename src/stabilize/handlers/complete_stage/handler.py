@@ -14,7 +14,7 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from stabilize.dag.readiness import PRUNED_FROM
+from stabilize.dag.readiness import MM_FIRINGS, MM_TRIGGER, PRUNED_FROM, multi_merge_candidates
 from stabilize.errors import is_transient
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.handlers.complete_stage.planner import CompleteStagePlannerMixin
@@ -138,6 +138,60 @@ class CompleteStageHandler(
                 stage,
                 source_handler="CompleteStageHandler",
             )
+
+    def _rearm_multi_merge(self, stage, execution, txn) -> bool:  # type: ignore[no-untyped-def]
+        """Re-arm a multi-merge stage for its next upstream. True if re-armed.
+
+        Archives the firing that just completed, then resets the row in place.
+        The status assignment is direct because VALID_TRANSITIONS has no edge out
+        of SUCCEEDED; reset_stage_for_retry sets the same precedent.
+        """
+        from stabilize.models.stage import JoinType
+
+        if stage.join_type != JoinType.MULTI_MERGE:
+            return False
+
+        upstreams = self.repository.get_upstream_stages(execution.id, stage.ref_id) or []
+        candidates = multi_merge_candidates(stage, upstreams)
+        if not candidates:
+            return False
+
+        firings = list(stage.context.get(MM_FIRINGS) or ())
+        firings.append(
+            {
+                "trigger": stage.context.get(MM_TRIGGER),
+                "status": stage.status.name,
+                "outputs": dict(stage.outputs or {}),
+            }
+        )
+        stage.context[MM_FIRINGS] = firings
+
+        stage.status = WorkflowStatus.NOT_STARTED
+        stage.start_time = None
+        stage.end_time = None
+        stage.outputs = {}
+        for task in stage.tasks:
+            task.status = WorkflowStatus.NOT_STARTED
+            task.start_time = None
+            task.end_time = None
+
+        txn.store_stage(stage)
+        txn.push_message(
+            StartStage(
+                execution_type=execution.type.value,
+                execution_id=execution.id,
+                stage_id=stage.id,
+                triggering_upstream_ref_id=candidates[0],
+            )
+        )
+        logger.info(
+            "Multi-merge %s re-armed for upstream %s (%d firing(s) so far)",
+            stage.name,
+            candidates[0],
+            len(firings),
+        )
+        return True
+
 
     def _handle_with_retry(self, message: CompleteStage) -> None:
         """Inner handle logic to be retried."""
@@ -427,6 +481,15 @@ class CompleteStageHandler(
                                 handler_type="CompleteStage",
                                 execution_id=message.execution_id,
                             )
+
+                        # WCP-8: a multi-merge stage fires once per upstream.
+                        # Re-arming happens HERE, at completion, not when the
+                        # next token arrives: the token typically arrives while
+                        # the stage is still RUNNING, and resetting a live
+                        # execution tears its state. RestartStage refuses a
+                        # non-terminal stage for the same reason.
+                        if self._rearm_multi_merge(stage, execution, txn):
+                            return
 
                         logger.debug(
                             "CompleteStage decision for %s: down=%d (act=%d, skip=%d), phase=%s, parent=%s",

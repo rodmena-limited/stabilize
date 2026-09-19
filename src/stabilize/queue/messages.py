@@ -154,9 +154,15 @@ class StartStage(StageLevel):
     Message to start a stage.
 
     Checks if upstream stages are complete, then plans and starts the stage.
+
+    Attributes:
+        triggering_upstream_ref_id: The upstream whose completion pushed this
+            message, where one did. MULTI_MERGE (WCP-8) fires once per upstream,
+            so it needs to know which token this is; every other join type
+            ignores it.
     """
 
-    pass
+    triggering_upstream_ref_id: str = ""
 
 
 @dataclass

@@ -149,8 +149,8 @@ branches are ignored.
 Multi-Merge (WCP-8)
 ~~~~~~~~~~~~~~~~~~~~
 
-Each upstream completion independently triggers the downstream stage — no
-synchronization:
+Each upstream completion independently triggers the merge stage — no
+synchronization. Three upstreams means the merge stage runs three times:
 
 .. code-block:: python
 
@@ -160,6 +160,18 @@ synchronization:
         requisite_stage_ref_ids={"foundations", "materials", "laborers"},
         ...
     )
+
+Each firing can tell which branch triggered it via
+``stage.context["_mm_trigger"]``.
+
+Three limits, stated rather than implied:
+
+* Firings are **serialised**, not concurrent.
+* ``stage.outputs`` holds the **last** firing; earlier ones are archived in
+  ``stage.context["_mm_firings"]``.
+* The multiplicity **does not propagate**: the merge stage's own downstream runs
+  once, not once per firing. Carrying a thread of control per token would need a
+  separate stage row per token, which this model does not have.
 
 Discriminator / 1-out-of-N Join (WCP-9)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

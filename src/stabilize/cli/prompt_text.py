@@ -2072,7 +2072,9 @@ from stabilize.models.stage import JoinType
 
 JoinType.AND           # (Default) Wait for ALL upstreams (WCP-3)
 JoinType.OR            # Wait only for activated branches from OR-split (WCP-7)
-JoinType.MULTI_MERGE   # Fire once per upstream completion, no sync (WCP-8)
+JoinType.MULTI_MERGE   # Fire once per upstream completion, no sync (WCP-8).
+                       # Serialised; outputs hold the last firing; the
+                       # merge's downstream still runs once.
 JoinType.DISCRIMINATOR # Fire on first upstream completion, ignore rest (WCP-9)
 JoinType.N_OF_M        # Fire when N of M upstreams complete (WCP-30)
 
