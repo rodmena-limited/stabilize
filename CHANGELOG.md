@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.25.2]
+
+### Fixed
+
+- **A DSN carrying its own `options` is no longer overridden by `schema=`.**
+  0.25.1's precedence guard inspected `PoolOptions.connect_kwargs` only, so it
+  could not see an `options=` parameter inside the DSN string — and a psycopg
+  keyword argument beats the conninfo, so `schema=` silently replaced the
+  caller's own `search_path`:
+
+      DSN "?options=-csearch_path%3Dalpha" + schema="beta"  ->  beta   (wrong)
+
+  Harmless only while both name the same schema, which is exactly the shape of
+  the natural upgrade path ("add `schema=`, leave the DSN alone"). It would
+  have surfaced first on a second schema, as `UndefinedTable` from a deployment
+  whose DSN plainly said otherwise. `with_schema()` now takes the connection
+  string and defers when the DSN sets options, in either spelling (URL query
+  parameter or keyword/value).
+
+  Reported by vellum-build-d8bbd2, who also verified 0.25.1's three fixes on
+  PostgreSQL 18.4 / FreeBSD over mutual TLS — a platform none of this had been
+  measured on.
+
+### Notes
+
+- The declared `resilient-circuit>=0.5.0,<3.0.0` range was verified at its
+  floor: the full suite collects 1507 and passes identically on 0.5.0 and on
+  0.8.2. The ceiling is not verified and cannot be — it admits versions that
+  do not exist yet.
+
+
 ## [0.25.1]
 
 ### Fixed
