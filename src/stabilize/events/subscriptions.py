@@ -40,6 +40,7 @@ class DurableSubscription:
     enabled: bool = True
     error_count: int = 0
     max_errors: int = 10
+    last_commit_cursor: str = "0"
 
     def matches(self, event: Event) -> bool:
         """Check if this subscription should receive the event."""
@@ -203,6 +204,7 @@ class SubscriptionManager:
             entity_filter=data.get("entity_filter"),
             last_sequence=data.get("last_sequence", 0),
             webhook_url=data.get("webhook_url"),
+            last_commit_cursor=str(data.get("last_commit_cursor") or "0"),
         )
 
         with self._lock:
@@ -271,14 +273,35 @@ class SubscriptionManager:
                         subscription.error_count,
                     )
 
+    def _uses_commit_cursor(self) -> bool:
+        """Whether the store can deliver in commit order."""
+        if not hasattr(self._event_store, "get_events_since_committed"):
+            return False
+        supports = getattr(self._event_store, "supports_commit_cursor", None)
+        return bool(supports()) if callable(supports) else True
+
     def _process_subscription(self, subscription: DurableSubscription) -> None:
         """Process events for a single subscription."""
-        events = self._event_store.get_events_since(
-            subscription.last_sequence,
-            limit=self._batch_size,
-        )
+        commit_ordered = self._uses_commit_cursor()
+        next_cursor = subscription.last_commit_cursor
+
+        if commit_ordered:
+            events, next_cursor = getattr(self._event_store, "get_events_since_committed")(
+                subscription.last_commit_cursor,
+                limit=self._batch_size,
+            )
+        else:
+            events = self._event_store.get_events_since(
+                subscription.last_sequence,
+                limit=self._batch_size,
+            )
 
         if not events:
+            if commit_ordered and next_cursor != subscription.last_commit_cursor:
+                # Nothing to deliver, but the frontier moved; persisting it stops
+                # the same empty range being re-scanned forever.
+                subscription.last_commit_cursor = next_cursor
+                self._persist_position(subscription)
             return
 
         processed_sequence = subscription.last_sequence
@@ -301,13 +324,26 @@ class SubscriptionManager:
 
         # Update position
         subscription.last_sequence = processed_sequence
+        if commit_ordered:
+            subscription.last_commit_cursor = next_cursor
         subscription.error_count = 0  # Reset on success
 
-        # Persist position
+        self._persist_position(subscription)
+
+    def _persist_position(self, subscription: DurableSubscription) -> None:
+        """Persist a subscription's delivery position."""
+        update_cursor = getattr(self._event_store, "update_subscription_cursor", None)
+        if callable(update_cursor):
+            update_cursor(
+                subscription.id,
+                subscription.last_sequence,
+                subscription.last_commit_cursor,
+            )
+            return
         if hasattr(self._event_store, "update_subscription_sequence"):
             getattr(self._event_store, "update_subscription_sequence")(
                 subscription.id,
-                processed_sequence,
+                subscription.last_sequence,
             )
 
     def process_once(self) -> int:

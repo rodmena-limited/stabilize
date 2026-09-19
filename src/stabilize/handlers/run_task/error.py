@@ -222,6 +222,18 @@ def _handle_transient_retry(
     # Create new message with incremented attempt count
     retry_message = message.copy_with_attempts(next_attempt)
 
+    def _record_retry() -> None:
+        from stabilize.events.recorder import get_event_recorder
+
+        recorder = get_event_recorder()
+        if recorder is not None:
+            recorder.record_task_retried(
+                task=task_model,
+                workflow_id=message.execution_id,
+                attempt=next_attempt,
+                source_handler="RunTaskHandler",
+            )
+
     # Check for context_update from TransientError (stateful retries)
     # Note: bulkman wraps exceptions in BulkheadError, so we need to
     # check __cause__ chain to find the original TransientError
@@ -245,6 +257,7 @@ def _handle_transient_retry(
                 txn_helper.execute_atomic(
                     messages_to_push=[(retry_message, delay.total_seconds())],
                     handler_name="RunTask",
+                    during_txn=_record_retry,
                 )
                 return
             fresh_stage.context.update(context_update)
@@ -253,6 +266,7 @@ def _handle_transient_retry(
                 stage=fresh_stage,
                 messages_to_push=[(retry_message, delay.total_seconds())],
                 handler_name="RunTask",
+                during_txn=_record_retry,
             )
 
         retry_on_concurrency_error(
@@ -264,6 +278,7 @@ def _handle_transient_retry(
         txn_helper.execute_atomic(
             messages_to_push=[(retry_message, delay.total_seconds())],
             handler_name="RunTask",
+            during_txn=_record_retry,
         )
 
     logger.debug(

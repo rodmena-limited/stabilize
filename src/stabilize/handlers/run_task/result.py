@@ -236,11 +236,19 @@ def _handle_suspended(
         return
 
     # No buffered signals - stay suspended (no continuation message)
+    def _record_suspension() -> None:
+        from stabilize.events.recorder import get_event_recorder
+
+        recorder = get_event_recorder()
+        if recorder is not None:
+            recorder.record_stage_suspended(stage, source_handler="RunTaskHandler")
+
     txn_helper.execute_atomic(
         stage=stage,
         source_message=message,
         messages_to_push=[],
         handler_name="RunTask",
+        during_txn=_record_suspension,
     )
 
 

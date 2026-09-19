@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from typing import Any
 
 from stabilize.events.store.interface import EventStore
 from stabilize.events.store.sqlite.events import SqliteEventStoreMixin
@@ -69,4 +70,19 @@ class SqliteEventStore(
         conn.executescript(EVENTS_SCHEMA)
         conn.executescript(SNAPSHOTS_SCHEMA)
         conn.executescript(SUBSCRIPTIONS_SCHEMA)
+        self._add_missing_columns(conn)
+
+    @staticmethod
+    def _add_missing_columns(conn: Any) -> None:
+        """Add columns absent from databases created by an earlier version.
+
+        CREATE TABLE IF NOT EXISTS does not alter an existing table, so a
+        schema addition never reaches a database that already exists.
+        """
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(event_subscriptions)")}
+        if "last_commit_cursor" not in existing:
+            conn.execute(
+                "ALTER TABLE event_subscriptions ADD COLUMN last_commit_cursor TEXT DEFAULT '0'"
+            )
+            conn.commit()
         conn.commit()

@@ -33,6 +33,7 @@ from stabilize.handlers.jump_to_stage.traversal import (
     get_resettable_downstream_stages,
     get_skipped_stages,
 )
+from stabilize.handlers.start_stage.planner import HYDRATED_KEYS
 from stabilize.models.status import WorkflowStatus
 from stabilize.persistence.transaction import TransactionHelper
 from stabilize.queue.messages import (
@@ -104,6 +105,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
         mutations: list[tuple[str, Any]],
         message: JumpToStage,
         messages_to_push: list[Any],
+        jump_event: tuple[str, str, str] | None = None,
     ) -> None:
         """Apply every stage mutation of a jump plus its follow-on messages in
         ONE transaction.
@@ -132,6 +134,17 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                     )
                 for msg in messages_to_push:
                     txn.push_message(msg)
+
+                if jump_event is not None and self.event_recorder:
+                    from_stage_id, to_stage_id, jump_type = jump_event
+                    self.set_event_context(message.execution_id)
+                    self.event_recorder.record_jump_executed(
+                        workflow_id=message.execution_id,
+                        from_stage_id=from_stage_id,
+                        to_stage_id=to_stage_id,
+                        jump_type=jump_type,
+                        source_handler="JumpToStageHandler",
+                    )
 
         self.retry_on_concurrency_error(attempt, "applying jump atomically")
 
@@ -218,6 +231,16 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             # Merge jump context into target stage
             if message.jump_context:
                 target_stage.context.update(message.jump_context)
+                # A jump writes these keys deliberately, so they are not the
+                # stale ancestor copies that re-entry hydration replaces. Drop
+                # them from the hydrated set for the next plan only; that plan
+                # re-records the set from its own ancestors, so ordinary
+                # ancestor precedence resumes afterwards.
+                hydrated = target_stage.context.get(HYDRATED_KEYS)
+                if isinstance(hydrated, list):
+                    target_stage.context[HYDRATED_KEYS] = [
+                        key for key in hydrated if key not in message.jump_context
+                    ]
 
             # Make jump outputs available via special context key
             if message.jump_outputs:
@@ -299,6 +322,11 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                         stage_id=target_stage.id,
                     )
                 ],
+                jump_event=(
+                    source_stage.id,
+                    target_stage.id,
+                    "self_loop" if is_self_loop else ("backward" if is_backward_jump else "forward"),
+                ),
             )
 
         self.with_stage(message, on_stage)

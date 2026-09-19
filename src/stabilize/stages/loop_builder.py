@@ -75,6 +75,11 @@ class LoopBuilder:
                 "_loop_max_iterations": max_iterations,
                 "_loop_iteration": 0,
                 "_loop_type": "while",
+                "_loop_exit_ref_id": f"{loop_ref_prefix}_loopback",
+                "_loop_scope": loop_ref_prefix,
+                # Belt and braces: the loop bounds itself by _loop_iteration and
+                # resets _jump_count on every jump, so this should never bind.
+                "_max_jumps": max_iterations + 2,
             },
         )
         # The condition check task evaluates the expression and either
@@ -93,6 +98,7 @@ class LoopBuilder:
         prev_ref = condition_ref
         for i, body_stage in enumerate(body_stages):
             body_stage.requisite_stage_ref_ids = {prev_ref}
+            body_stage.context["_loop_scope"] = loop_ref_prefix
             prev_ref = body_stage.ref_id
             stages.append(body_stage)
 
@@ -104,6 +110,9 @@ class LoopBuilder:
             ref_id=loopback_ref,
             context={
                 "_loop_target_ref_id": condition_ref,
+                "_loop_max_iterations": max_iterations,
+                "_loop_scope": loop_ref_prefix,
+                "_max_jumps": max_iterations + 2,
             },
         )
         loopback_stage.requisite_stage_ref_ids = {prev_ref}
@@ -155,14 +164,25 @@ class LoopBuilder:
                 **(context or {}),
                 "_loop_iteration": 0,
                 "_loop_type": "repeat_until",
+                "_loop_scope": loop_ref_prefix,
+                "_max_jumps": max_iterations + 2,
             },
         )
+        entry_stage.tasks = [
+            TaskExecution.create(
+                name="Loop Entry",
+                implementing_class="LoopEntryTask",
+                stage_start=True,
+                stage_end=True,
+            ),
+        ]
         stages.append(entry_stage)
 
         # Body stages
         prev_ref = entry_ref
         for body_stage in body_stages:
             body_stage.requisite_stage_ref_ids = {prev_ref}
+            body_stage.context["_loop_scope"] = loop_ref_prefix
             prev_ref = body_stage.ref_id
             stages.append(body_stage)
 
@@ -177,6 +197,8 @@ class LoopBuilder:
                 "_loop_max_iterations": max_iterations,
                 "_loop_target_ref_id": entry_ref,
                 "_loop_type": "repeat_until",
+                "_loop_scope": loop_ref_prefix,
+                "_max_jumps": max_iterations + 2,
             },
         )
         condition_stage.requisite_stage_ref_ids = {prev_ref}

@@ -158,6 +158,9 @@ class SnapshotPolicy:
         """Record that an event was added for an entity."""
         current = self._events_since_snapshot.get(entity_id, 0)
         self._events_since_snapshot[entity_id] = current + 1
+        # Seed the baseline on first sight, or the time threshold can never
+        # elapse for an entity that has not yet been snapshotted.
+        self._last_snapshot_time.setdefault(entity_id, datetime.now(UTC))
 
 
 class SnapshotStore:

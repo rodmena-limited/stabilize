@@ -257,11 +257,15 @@ class SignalStage(StageLevel):
         signal_name: Name/type of the signal
         signal_data: Payload data carried by the signal
         persistent: If True, buffer signal when stage not ready (WCP-24)
+        user: Who sent the signal, recorded as the event actor. Carried on the
+            message rather than in signal_data, which tasks expose verbatim in
+            their outputs.
     """
 
     signal_name: str = ""
     signal_data: dict[str, Any] = field(default_factory=dict)
     persistent: bool = False
+    user: str = ""
 
 
 @dataclass

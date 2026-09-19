@@ -34,6 +34,7 @@ from stabilize.queue.messages import (
     StartStage,
     TaskLevel,
     WorkflowLevel,
+    get_message_type_name,
 )
 from stabilize.resilience.config import HandlerConfig, get_handler_config
 
@@ -108,7 +109,13 @@ class StabilizeHandler(MessageHandler[M], ABC):
 
         return get_event_recorder()
 
-    def set_event_context(self, workflow_id: str) -> None:
+    def set_event_context(
+        self,
+        workflow_id: str,
+        *,
+        actor: str | None = None,
+        causation_id: str | None = None,
+    ) -> None:
         """Set event context for correlation tracking.
 
         Call this at the start of handler processing to establish
@@ -116,10 +123,17 @@ class StabilizeHandler(MessageHandler[M], ABC):
 
         Args:
             workflow_id: The workflow ID for correlation.
+            actor: Who triggered this action, where a real identity is known.
+                Defaults to "system".
+            causation_id: The id of the event that caused this action.
         """
         from stabilize.events.recorder import set_event_context
 
-        set_event_context(correlation_id=workflow_id)
+        set_event_context(
+            correlation_id=workflow_id,
+            causation_id=causation_id,
+            actor=actor or "system",
+        )
 
     # ========== Execution Retrieval ==========
 
@@ -196,7 +210,49 @@ class StabilizeHandler(MessageHandler[M], ABC):
             logger.error("Failed to retrieve stage %s: %s", message.stage_id, e)
             raise
 
+        if not self._stage_belongs_to_message(stage, message):
+            return
+
         block(stage)
+
+    def _stage_belongs_to_message(
+        self,
+        stage: StageExecution,
+        message: StageLevel,
+    ) -> bool:
+        """Return True when the stage belongs to message.execution_id.
+
+        Otherwise refuse the message: mark it processed and emit InvalidStageId.
+        """
+        owner_id = stage.execution.id if stage.has_execution() else None
+        if owner_id == message.execution_id:
+            return True
+
+        logger.warning(
+            "Refusing %s for stage %s: message claims workflow %s but the "
+            "stage belongs to %s",
+            get_message_type_name(message),
+            message.stage_id,
+            message.execution_id,
+            owner_id or "<no workflow>",
+        )
+
+        message_id = getattr(message, "message_id", None)
+        with self.repository.transaction(self.queue) as txn:
+            if message_id:
+                txn.mark_message_processed(
+                    message_id=message_id,
+                    handler_type="with_stage",
+                    execution_id=message.execution_id,
+                )
+            txn.push_message(
+                InvalidStageId(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
+                )
+            )
+        return False
 
     def with_task(
         self,

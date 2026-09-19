@@ -64,6 +64,10 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
         """Inner handle logic to be retried."""
 
         def on_stage(stage: StageExecution) -> None:
+            # Attribute anything recorded while handling this signal to whoever
+            # sent it, rather than to "system".
+            self.set_event_context(message.execution_id, actor=message.user or None)
+
             if stage.status == WorkflowStatus.SUSPENDED:
                 # Stage is waiting for a signal - deliver it
                 logger.info(
@@ -94,6 +98,12 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
                             message_id=message.message_id,
                             handler_type="SignalStage",
                             execution_id=message.execution_id,
+                        )
+                    if self.event_recorder:
+                        self.event_recorder.record_stage_resumed(
+                            stage,
+                            signal_name=message.signal_name,
+                            source_handler="SignalStageHandler",
                         )
                     if suspended_task:
                         # Push RunTask to re-execute the suspended task

@@ -56,6 +56,9 @@ class PredicatePhase(Enum):
     SKIP = "SKIP"
     """Conditions not met (upstream halted), skip this stage."""
 
+    PRUNE = "PRUNE"
+    """Every incoming edge is dead; no token can reach this stage."""
+
     UNDEFINED = "UNDEFINED"
     """Error during evaluation or inconsistent state."""
 
@@ -78,6 +81,28 @@ class ReadinessResult:
     reason: str = ""
     failed_upstream_ids: list[str] = field(default_factory=list)
     active_upstream_ids: list[str] = field(default_factory=list)
+
+
+
+PRUNED_FROM = "_pruned_from"
+PRUNED = "_pruned"
+
+
+def _is_dead_edge(stage: StageExecution, upstream: StageExecution) -> bool:
+    """Whether the edge from `upstream` into `stage` carries no token.
+
+    An edge is dead when the upstream split recorded this stage as one it did
+    not activate, or when the upstream was itself pruned. The `_pruned` marker
+    only counts alongside SKIPPED: a stage carrying the marker that ran anyway
+    was reached by some other live edge and does carry a token.
+    """
+    from stabilize.models.status import WorkflowStatus
+
+    pruned_from = stage.context.get(PRUNED_FROM) or ()
+    if upstream.ref_id in pruned_from:
+        return True
+
+    return bool(upstream.context.get(PRUNED)) and upstream.status == WorkflowStatus.SKIPPED
 
 
 def evaluate_readiness(
@@ -113,20 +138,31 @@ def evaluate_readiness(
             reason="No upstream dependencies",
         )
 
+    # Drop edges a split de-selected, and edges from stages that were
+    # themselves pruned. Absence of a marker means live, so a graph written by
+    # an earlier version behaves exactly as it did before.
+    live_upstreams = [u for u in upstream_stages if u is not None and not _is_dead_edge(stage, u)]
+
+    if not live_upstreams:
+        return ReadinessResult(
+            phase=PredicatePhase.PRUNE,
+            reason="No live upstream branch reaches this stage",
+        )
+
     # Dispatch based on join type
     join_type = stage.join_type
 
     if join_type == JoinType.OR:
-        return _evaluate_or_join(stage, upstream_stages)
+        return _evaluate_or_join(stage, live_upstreams)
     elif join_type == JoinType.MULTI_MERGE:
-        return _evaluate_multi_merge(stage, upstream_stages)
+        return _evaluate_multi_merge(stage, live_upstreams)
     elif join_type == JoinType.DISCRIMINATOR:
-        return _evaluate_discriminator(stage, upstream_stages)
+        return _evaluate_discriminator(stage, live_upstreams)
     elif join_type == JoinType.N_OF_M:
-        return _evaluate_n_of_m(stage, upstream_stages)
+        return _evaluate_n_of_m(stage, live_upstreams)
     else:
         # Default: AND join
-        return _evaluate_and_join(stage, upstream_stages)
+        return _evaluate_and_join(stage, live_upstreams)
 
 
 def _evaluate_and_join(

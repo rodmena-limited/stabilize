@@ -26,6 +26,7 @@ from stabilize.tasks.result import TaskResult
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
+    from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
 
 # Canonical signal names for approvals.
@@ -76,6 +77,21 @@ class ApprovalTask(Task):
         return TaskResult.suspend()
 
 
+def _assert_stage_in_execution(store: WorkflowStore, execution_id: str, stage_id: str) -> None:
+    """Raise unless ``stage_id`` belongs to ``execution_id``."""
+    try:
+        stage = store.retrieve_stage(stage_id)
+    except Exception as exc:
+        raise ValueError(f"Stage {stage_id} could not be resolved: {exc}") from exc
+
+    owner_id = stage.execution.id if stage.has_execution() else None
+    if owner_id != execution_id:
+        raise ValueError(
+            f"Stage {stage_id} belongs to workflow {owner_id or '<no workflow>'}, "
+            f"not {execution_id}; refusing to signal across workflows"
+        )
+
+
 def send_signal(
     queue: Queue,
     execution_id: str,
@@ -85,6 +101,8 @@ def send_signal(
     *,
     execution_type: str = "PIPELINE",
     persistent: bool = True,
+    store: WorkflowStore | None = None,
+    user: str = "",
 ) -> None:
     """Send a resume signal to a (possibly not-yet-)suspended stage.
 
@@ -97,7 +115,22 @@ def send_signal(
         execution_type: Workflow type value (default "PIPELINE").
         persistent: Buffer the signal if the stage has not suspended yet
             (WCP-24). True by default so an early approval is not lost.
+        store: Optional workflow store. When given, the stage is checked to
+            belong to ``execution_id`` before the signal is queued, so a
+            mis-addressed approval raises here instead of being refused
+            silently by the handler.
+        user: Who is sending the signal. Recorded as the event actor, so an
+            approval has a durable record of who granted it. Carried on the
+            message rather than merged into ``signal_data``, which tasks expose
+            verbatim in their outputs.
+
+    Raises:
+        ValueError: If ``store`` is given and the stage belongs to a different
+            workflow, or does not exist.
     """
+    if store is not None:
+        _assert_stage_in_execution(store, execution_id, stage_id)
+
     queue.push(
         SignalStage(
             execution_type=execution_type,
@@ -106,6 +139,7 @@ def send_signal(
             signal_name=signal_name,
             signal_data=signal_data or {},
             persistent=persistent,
+            user=user,
         )
     )
 
@@ -117,8 +151,14 @@ def approve(
     data: dict[str, Any] | None = None,
     *,
     execution_type: str = "PIPELINE",
+    store: WorkflowStore | None = None,
+    user: str = "",
 ) -> None:
-    """Approve a stage waiting on an :class:`ApprovalTask`."""
+    """Approve a stage waiting on an :class:`ApprovalTask`.
+
+    Pass ``store`` to have a stage belonging to another workflow rejected here
+    with a ``ValueError`` rather than refused silently by the handler.
+    """
     send_signal(
         queue,
         execution_id,
@@ -126,6 +166,8 @@ def approve(
         APPROVE_SIGNAL,
         data,
         execution_type=execution_type,
+        store=store,
+        user=user,
     )
 
 
@@ -136,8 +178,14 @@ def reject(
     data: dict[str, Any] | None = None,
     *,
     execution_type: str = "PIPELINE",
+    store: WorkflowStore | None = None,
+    user: str = "",
 ) -> None:
-    """Reject a stage waiting on an :class:`ApprovalTask`."""
+    """Reject a stage waiting on an :class:`ApprovalTask`.
+
+    Pass ``store`` to have a stage belonging to another workflow rejected here
+    with a ``ValueError`` rather than refused silently by the handler.
+    """
     send_signal(
         queue,
         execution_id,
@@ -145,6 +193,8 @@ def reject(
         REJECT_SIGNAL,
         data,
         execution_type=execution_type,
+        store=store,
+        user=user,
     )
 
 

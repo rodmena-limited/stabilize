@@ -121,6 +121,54 @@ class StageEventsMixin:
         )
         return self._record(event, connection)
 
+    def record_stage_suspended(
+        self,
+        stage: StageExecution,
+        connection: Any | None = None,
+        source_handler: str | None = None,
+    ) -> Event:
+        """Record that a stage is waiting on a signal (WCP-23/24).
+
+        Without this a human-approval wait is an unexplained silence between
+        task.started and task.completed, and replay shows the stage RUNNING.
+        """
+        event = create_stage_event(
+            event_type=EventType.STAGE_SUSPENDED,
+            stage_id=stage.id,
+            workflow_id=stage.execution.id if stage.execution else "",
+            version=stage.version,
+            data={
+                "ref_id": stage.ref_id,
+                "type": stage.type,
+                "name": stage.name,
+            },
+            metadata=get_event_metadata(source_handler),
+        )
+        return self._record(event, connection)
+
+    def record_stage_resumed(
+        self,
+        stage: StageExecution,
+        signal_name: str = "",
+        connection: Any | None = None,
+        source_handler: str | None = None,
+    ) -> Event:
+        """Record that a suspended stage was resumed by a signal."""
+        event = create_stage_event(
+            event_type=EventType.STAGE_RESUMED,
+            stage_id=stage.id,
+            workflow_id=stage.execution.id if stage.execution else "",
+            version=stage.version,
+            data={
+                "ref_id": stage.ref_id,
+                "type": stage.type,
+                "name": stage.name,
+                "signal_name": signal_name,
+            },
+            metadata=get_event_metadata(source_handler),
+        )
+        return self._record(event, connection)
+
     def record_stage_canceled(
         self,
         stage: StageExecution,

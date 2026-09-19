@@ -13,7 +13,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from stabilize.events.base import EntityType, Event, EventType, get_event_migrator
+from stabilize.events.base import (
+    CURRENT_SCHEMA_VERSION,
+    EntityType,
+    Event,
+    EventType,
+    get_event_migrator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +223,15 @@ class EventReplayer:
         migrations registered (the default) the event is returned unchanged, so
         behavior is identical to before.
         """
+        if event.schema_version > CURRENT_SCHEMA_VERSION:
+            logger.warning(
+                "Skipping event %s during replay: schema v%d is newer than this build's v%d",
+                event.event_id,
+                event.schema_version,
+                CURRENT_SCHEMA_VERSION,
+            )
+            return
+
         event = get_event_migrator().migrate(event, strict=False)
         if event.entity_type == EntityType.WORKFLOW:
             self._apply_workflow_event(state, event)
@@ -283,6 +298,12 @@ class EventReplayer:
             stage["end_time"] = event.timestamp.isoformat()
             if "outputs" in event.data:
                 stage["outputs"] = event.data["outputs"]
+
+        elif event.event_type == EventType.STAGE_SUSPENDED:
+            stage["status"] = "SUSPENDED"
+
+        elif event.event_type == EventType.STAGE_RESUMED:
+            stage["status"] = "RUNNING"
 
         elif event.event_type == EventType.STAGE_FAILED:
             stage["status"] = event.data.get("status", "TERMINAL")

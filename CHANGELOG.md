@@ -1,5 +1,229 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **A re-entered stage now observes fresh upstream outputs (#27).** `_plan_stage`
+  merged ancestor outputs, let the stage's own context override them, then
+  persisted the merged result back onto the stage — so the first value a stage
+  ever saw for a key was frozen into its row and shadowed every later upstream
+  output.
+
+  This made every jump-based retry loop structurally unable to observe progress.
+  Reproduced through the documented `jump_to` pattern (WCP-10), no `LoopBuilder`
+  involved:
+
+      upstream produced attempts = 11
+      checker observed each pass = [1,1,1,1,1,1,1,1,1,1,1]
+      workflow = TERMINAL
+
+  The upstream had incremented to 11 and its persisted outputs said so; the
+  downstream saw 1 on all eleven passes, so its exit condition could never become
+  true. It exhausted the jump budget and the workflow failed with a misleading
+  "Max jump count exceeded". Callers could not work around it — the stage is
+  reloaded from the store before a task's result is processed, so in-place
+  context mutation is discarded.
+
+  Hydration now records which keys came from ancestors; on a later plan those
+  keys yield to the current ancestor value. A key set directly on the stage still
+  wins, and a stage planned only once is unaffected — the new path is reached
+  only on re-entry. After: `[1, 2, 3]`, three iterations, `SUCCEEDED`.
+
+- **The event read path tolerates events written by a newer build (#28).** Five
+  unguarded `EventType(...)` sites raised `ValueError` on an unrecognised string,
+  and the exception escaped row-to-event conversion — so a single unknown row
+  failed the *entire* query, taking out replay, `WorkflowStream` and every
+  durable subscription over that store, not just that event. Separately,
+  `EventMigrator.migrate` walked only forward, so an event from a newer schema
+  fell through unchanged and was applied with the wrong field layout, silently.
+
+  Unrecognised types now resolve to `EventType.UNKNOWN` with the original string
+  preserved in `data["_raw_event_type"]`; a newer schema is refused under strict
+  migration and skipped during replay.
+
+  No behaviour change — no code path today can produce either condition. This
+  ships ahead of any new event type deliberately: without it, a rolling deploy or
+  a mixed-version fleet would have older readers crash on rows newer writers
+  produce.
+
+- **PostgreSQL durable subscriptions no longer lose an event whose transaction
+  commits out of sequence order (#29).** `events.sequence` is `BIGSERIAL`,
+  assigned at INSERT and not at COMMIT, so a reader advancing its cursor to the
+  highest visible sequence stepped over a lower sequence still held open by
+  another transaction. When that transaction committed, its event sat below the
+  cursor and was never delivered — silently and permanently. Because events join
+  the workflow state transaction, those transactions are long-lived, so the
+  window was wide rather than theoretical.
+
+  Reproduced on PostgreSQL 16; the probe shows both strategies in one run:
+
+      delivered (commit cursor):   ['slow-09a63f', 'fast-90d330']
+      delivered (sequence cursor): ['fast-90d330']
+
+  Delivery is now ordered by a `commit_xid` column against a
+  `pg_snapshot_xmin()` watermark — the lowest transaction id still in progress,
+  and therefore a frontier nothing can later commit beneath. Events written
+  before the column exists remain deliverable.
+
+  Requires PostgreSQL 13+ for `xid8`; below that the engine keeps the sequence
+  cursor and logs a warning naming the loss mode. SQLite is unaffected, its
+  write lock having always made commit order equal sequence order.
+
+  The tradeoff, stated rather than hidden: delivery is held behind the oldest
+  in-flight write transaction, so one long workflow transaction delays
+  subscription delivery.
+
+- **The event log now records suspension, jumps, retries and who acted (#30).**
+  Seven recorder methods shipped with live replay branches and **zero call
+  sites**, and there was no event type for suspension at all. The operational
+  consequences: a human-approval wait was an unexplained silence between
+  `task.started` and `task.completed` and replayed as RUNNING, so an operator
+  could not tell "waiting on a person" from "stuck"; a workflow that looped
+  forty times replayed as though it ran once; and a retry storm was invisible.
+
+  Separately, every event in the system was attributed to `"system"` — the
+  recorder's context function accepted an actor, but the handler wrapper
+  dropped it — so "who released the production gate" had no answer on any
+  surface.
+
+  Now recorded: `stage.suspended`, `stage.resumed` (carrying the signal name),
+  `jump.executed` (with the jump type, including restarts), and `task.retried`.
+  Each is written inside the transaction that commits the state it describes,
+  so a rollback cannot leave a phantom event. `hitl.approve`/`reject`/
+  `send_signal` take an optional `user=`, carried on the message rather than
+  merged into `signal_data` — which tasks expose verbatim as outputs — and
+  recorded as the event actor. Replay understands suspension, so a waiting
+  workflow replays as SUSPENDED rather than RUNNING.
+
+  Actions with no known identity still record as `"system"`; no actor is
+  invented.
+
+- **Structured loops (WCP-21) execute for the first time (#31).**
+  `LoopBuilder` emitted stages naming `LoopConditionTask` and `LoopBackTask` —
+  classes that existed nowhere in the codebase — so every loop built by the
+  public API died at its first condition check with `Task type not found` and
+  the workflow went TERMINAL. `LoopBuilder` is exported, documented in the
+  guide, and emitted verbatim by `stabilize prompt`, the reference the README
+  tells you to hand your coding agent. It had no tests.
+
+      while_loop("i < 3")     -> body ran with i = [0, 1, 2]   SUCCEEDED
+      while_loop("i < 0")     -> body ran 0 times              SUCCEEDED
+      while_loop(max_iter=4)  -> 4 runs, FAILED_CONTINUE       SUCCEEDED
+      repeat_until("i >= 2")  -> body ran with i = [0, 1]      SUCCEEDED
+
+  Reaching `max_iterations` now exits the loop and continues past it, carrying
+  `loop_exhausted` downstream and recording the failure in the terminating
+  stage's status, rather than exhausting the generic jump budget and failing the
+  workflow with a misleading "Max jump count exceeded". A condition referencing
+  an identifier nothing publishes fails loudly instead of spinning to the bound.
+
+  `TaskRegistry` now seeds the task classes the engine's own builders emit; a
+  caller registering the same name still takes precedence. This also fixes
+  `WaitStageBuilder`, whose `WaitTask` existed but was never registered.
+
+  **Nested loops are not yet supported.** Two loops whose bodies share a variable
+  name give the inner loop-back two ancestors offering it, and which one wins is
+  decided by the ancestor merge, whose order is not deterministic (#26). This is
+  documented at the source rather than worked around.
+
+- **The ancestor-output merge is deterministic across processes (#26).** Both
+  backends seeded a topological sort from a `set`, and Python randomises string
+  hashing per process — so which ancestor won a key collision in a diamond
+  depended on which worker planned the stage. Two replays of the same workflow
+  could disagree:
+
+      before:  4 from_b / 4 from_c    across 8 hash seeds
+      after:   8 from_c               deterministic
+
+  The algorithm was duplicated verbatim in both backends and is now shared, so
+  they cannot drift apart again.
+
+  A stable tie-break alone would not be enough: with a total order imposed, the
+  winner becomes whichever `ref_id` sorts last, so renaming two branches would
+  silently change which value survives. The merge now also **reports** a
+  collision between ancestors with no path between them, naming both ancestors
+  and both values, and stating that the tie-break is a convention rather than a
+  semantic. `STABILIZE_MERGE_STRICT=1` raises instead of warning.
+
+  The repository's own guard against this ran all ten of its iterations inside
+  one interpreter, where hash order is fixed, so it could never fail. It now
+  spawns subprocesses.
+
+- **A jump's context survives re-entry hydration.** The re-entry fix above makes
+  a stage prefer its ancestor's value over its own stale copy, which is right in
+  general — but a jump's carried context is a deliberate write, not a stale copy,
+  and was being overwritten by it. A loop-back carrying a fresh counter had it
+  reset to the enclosing scope's value. The jump now exempts the keys it writes,
+  for the following plan only.
+
+- **A de-selected branch no longer executes, and a join with no live branch no
+  longer fires (#33).** An OR-split marked its non-activated children SKIPPED,
+  but SKIPPED counts as "upstream satisfied" — so the rest of that branch ran
+  anyway. A documented XOR-split gate was therefore not a gate: a disabled
+  production deploy still deployed. A join whose every upstream branch had been
+  de-selected also fired, executing a merge point on a path no token reached.
+
+      before:  two-deep split   -> ran ['dead2', 'live', 'live2', 'root']
+               all-pruned join  -> ran ['live', 'orjoin', 'root']
+      after:   two-deep split   -> ran ['live', 'live2', 'root']
+               all-pruned join  -> ran ['live', 'root']
+               diamond control  -> ran ['join', 'left', 'root']
+
+  The decision is made at each child's own readiness evaluation, the only place
+  where all of that child's upstreams are visible — a child with another live
+  parent still carries a token. Pruned stages become SKIPPED, so there is no new
+  status and no change to persisted shapes, and absence of a marker means live,
+  so a workflow upgraded mid-run behaves exactly as before.
+
+  Also removed `_record_activated_branches`, which iterated a partial workflow
+  that never contained the downstream join — so it wrote nothing — and wrote
+  outside its caller's transaction.
+
+  **Behaviour change:** a join with no live branch is now SKIPPED rather than
+  executed, and a de-selected subtree no longer runs. `stageEnabled=False`
+  deliberately still does not prune, so a disabled stage in a linear pipeline
+  continues to let its successor run.
+
+  MULTI_MERGE (WCP-8) still fires once rather than once per upstream completion;
+  that needs a separate re-arm design and is not part of this change.
+
+### Security
+
+- **Stage-level messages are now scoped to the workflow they name (#25).**
+  `with_stage` resolved `message.stage_id` by primary key and never compared the
+  resolved stage's workflow to `message.execution_id`, and no handler did either.
+  Every `StageLevel` message was affected: `SignalStage`, `CancelStage`,
+  `SkipStage`, `JumpToStage`, `RestartStage`, `ResumeStage`, `AddMultiInstance`.
+
+  Reproduced through the public API alone — two workflows each suspended on an
+  `ApprovalTask`, then
+  `hitl.approve(queue, execution_id=B.id, stage_id=<A's stage id>)` released
+  **workflow A's** approval gate:
+
+      before: A=SUSPENDED B=SUSPENDED
+      after:  A=SUCCEEDED outputs={'approved': True, 'approval': {'by': 'caller-in-B'}}
+
+  The gate was the only thing separating two workflows' human approvals, because
+  an approval URL has to carry an internal stage ULID — `hitl` offers no
+  correlation-key alternative. The dedup row was also written under the *sending*
+  workflow's id, so the trail attributed A's approval to B.
+
+  A mismatched message is now refused: the stage is not mutated, the message is
+  marked processed so it is not redelivered, an `InvalidStageId` marker is
+  emitted, and a WARNING names both the claimed and the actual workflow. No
+  shipped code path passes a deliberately mismatched `execution_id`, so
+  correctly addressed messages are unaffected — verified in both directions on
+  SQLite and PostgreSQL.
+
+  `hitl.send_signal`, `approve` and `reject` accept an optional `store=`; when
+  given, a cross-workflow stage id raises `ValueError` at the call site instead
+  of being refused asynchronously. This is additive and opt-in.
+
+  Found by the refutation pass of the 2026-09-19 orchestration audit. Probe:
+  `audit/evaluations/probe_stage_message_ownership.py`, registered in
+  `run_all.sh` and verified to go red with the guard removed.
+
 ## [0.26.0]
 
 ### Security

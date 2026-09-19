@@ -7,6 +7,7 @@ import sqlite3
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
+from stabilize.dag.merge import merge_ancestor_outputs, topological_order
 from stabilize.persistence.sqlite.converters import row_to_stage, row_to_task
 from stabilize.persistence.store import WorkflowCriteria
 
@@ -245,44 +246,16 @@ def get_merged_ancestor_outputs(
                 ancestors.add(req)
                 queue.append(req)
 
-    # Topological sort of ancestors
-    sorted_ancestors = []
+    requisites_of = {aid: set(nodes[aid]["requisites"]) for aid in ancestors}
+    outputs_of = {aid: nodes[aid]["outputs"] for aid in ancestors}
+    sorted_ancestors = topological_order(ancestors, requisites_of)
 
-    # Calculate in-degrees within the subgraph of ancestors
-    in_degree = {aid: 0 for aid in ancestors}
-    graph: dict[str, list[str]] = {aid: [] for aid in ancestors}
-
-    for aid in ancestors:
-        for req in nodes[aid]["requisites"]:
-            if req in ancestors:
-                graph[req].append(aid)
-                in_degree[aid] += 1
-
-    # Kahn's algorithm
-    queue = [aid for aid in ancestors if in_degree[aid] == 0]
-    while queue:
-        u = queue.pop(0)
-        sorted_ancestors.append(u)
-        for v in graph[u]:
-            in_degree[v] -= 1
-            if in_degree[v] == 0:
-                queue.append(v)
-
-    # Merge outputs
-    merged_result: dict[str, Any] = {}
-    for aid in sorted_ancestors:
-        outputs = nodes[aid]["outputs"]
-        for key, value in outputs.items():
-            if key in merged_result and isinstance(merged_result[key], list) and isinstance(value, list):
-                # Concatenate lists
-                existing = merged_result[key]
-                for item in value:
-                    if item not in existing:
-                        existing.append(item)
-            else:
-                merged_result[key] = value
-
-    return merged_result
+    return merge_ancestor_outputs(
+        sorted_ancestors,
+        outputs_of,
+        requisites_of,
+        stage_ref_id=stage_ref_id,
+    )
 
 
 def retrieve_by_pipeline_config_id(

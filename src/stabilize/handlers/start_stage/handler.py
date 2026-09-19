@@ -12,7 +12,7 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from stabilize.dag.readiness import PredicatePhase, evaluate_readiness
+from stabilize.dag.readiness import PRUNED, PredicatePhase, evaluate_readiness
 from stabilize.errors import ConcurrencyError, is_transient
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.handlers.start_stage.conditions import StartStageConditionsMixin
@@ -112,6 +112,34 @@ class StartStageHandler(
                         readiness.reason,
                     )
                     self._start_if_ready(stage, message)
+                    return
+
+                if readiness.phase == PredicatePhase.PRUNE:
+                    logger.info(
+                        "Pruning stage %s (%s): %s",
+                        stage.name,
+                        stage.id,
+                        readiness.reason,
+                    )
+                    with self.repository.transaction(self.queue) as txn:
+                        stage.context[PRUNED] = True
+                        txn.store_stage(stage)
+                        if message.message_id:
+                            txn.mark_message_processed(
+                                message_id=message.message_id,
+                                handler_type="StartStage",
+                                execution_id=message.execution_id,
+                            )
+                        # SkipStage performs the SKIPPED transition, records the
+                        # event, and fans out to this stage's own children, which
+                        # then evaluate their own edges and prune in turn.
+                        txn.push_message(
+                            SkipStage(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=stage.id,
+                            )
+                        )
                     return
 
                 if readiness.phase == PredicatePhase.SKIP:

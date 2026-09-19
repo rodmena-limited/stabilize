@@ -25,6 +25,12 @@ PROBES=(
     audit/evaluations/probe_schema_and_exists.py
     audit/evaluations/probe_secret_redaction.py
     audit/evaluations/probe_dsn_ssl_params.py
+    audit/evaluations/probe_stage_message_ownership.py
+    audit/evaluations/probe_stage_context_rehydration.py
+    audit/evaluations/probe_event_read_forward_compat.py
+    audit/evaluations/probe_event_commit_watermark.py
+    audit/evaluations/probe_event_coverage.py
+    audit/evaluations/probe_branch_pruning.py
 )
 
 failures=0

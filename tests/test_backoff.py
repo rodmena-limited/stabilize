@@ -1,66 +1,154 @@
-"""Tests for exponential backoff with jitter.
+"""Tests for exponential backoff with jitter, and transient-error classification.
 
-These tests ensure that the backoff period calculation works correctly
-with exponential growth and jitter.
+The backoff tests drive the engine's own calculator and ``get_backoff_period``
+rather than re-deriving the formula, so they fail if the engine's behaviour
+changes.
 """
 
+import tempfile
+from datetime import timedelta
+
+from resilient_circuit import ExponentialDelay
+
+from stabilize import RunTaskHandler, SqliteQueue, SqliteWorkflowStore
 from stabilize.errors import PermanentError, TransientError, is_transient
+from stabilize.handlers.run_task.result import get_backoff_period
+from stabilize.models.stage import StageExecution
+from stabilize.models.task import TaskExecution
+from stabilize.queue.messages import RunTask
+from stabilize.resilience.config import HandlerConfig
+from stabilize.tasks.interface import RetryableTask
+from stabilize.tasks.registry import TaskRegistry
+from stabilize.tasks.result import TaskResult
+
+
+def _live_run_task_handler() -> RunTaskHandler:
+    """A RunTaskHandler wired to throwaway infrastructure."""
+    tmp = tempfile.mkdtemp()
+    url = f"sqlite:///{tmp}/backoff.db"
+    store = SqliteWorkflowStore(url, create_tables=True)
+    queue = SqliteQueue(url, table_name="queue_messages")
+    queue._create_table()
+    return RunTaskHandler(queue, store, TaskRegistry())
+
+
+def _retry_fixture(
+    implementing_class: str = "noop",
+) -> tuple[StageExecution, TaskExecution, RunTask]:
+    """A stage/task/message triple shaped like a task about to be retried."""
+    task_model = TaskExecution.create(
+        name="t",
+        implementing_class=implementing_class,
+        stage_start=True,
+        stage_end=True,
+    )
+    task_model.start_time = 0
+    stage = StageExecution(ref_id="s", type="test", name="S", tasks=[task_model])
+    message = RunTask(
+        execution_type="PIPELINE",
+        execution_id="e",
+        stage_id=stage.id,
+        task_id=task_model.id,
+        task_type=implementing_class,
+    )
+    return stage, task_model, message
 
 
 class TestExponentialBackoff:
-    """Tests for exponential backoff calculation."""
+    """Backoff as the engine actually computes it.
 
-    def test_first_attempt_around_one_second(self) -> None:
-        """First attempt should have ~1 second backoff (±25% jitter)."""
-        # The backoff for attempt 1 is: 2^0 = 1 second, with ±25% jitter
-        # So range is 0.75 to 1.25 seconds
+    These exercise ``RunTaskHandler``'s own delay calculator and
+    ``get_backoff_period``. An earlier version of this class re-implemented the
+    formula inline and asserted Python arithmetic against itself, so it passed
+    whatever the engine did.
+    """
 
-        # We can't directly test the private method, but we verify the formula
-        # base_delay = min(2 ** (attempt - 1), 60) = min(1, 60) = 1
-        # jitter = 1 * random(-0.25, 0.25) = -0.25 to 0.25
-        # delay = 1 + jitter = 0.75 to 1.25
-        base_delay = min(2 ** (1 - 1), 60)
-        assert base_delay == 1
+    @staticmethod
+    def _engine_delay(jitter: float | None = None) -> ExponentialDelay:
+        """The delay calculator a live RunTaskHandler holds.
 
-    def test_exponential_growth(self) -> None:
-        """Backoff should grow exponentially: 1, 2, 4, 8, 16, 32..."""
-        expected = [1, 2, 4, 8, 16, 32, 60, 60, 60, 60]  # Capped at 60
-        for attempt, expected_base in enumerate(expected, start=1):
-            base_delay = min(2 ** (attempt - 1), 60)
-            assert base_delay == expected_base, f"Attempt {attempt} should have base delay {expected_base}"
+        Taken off a real handler rather than rebuilt, so a change to how the
+        handler configures its backoff fails these tests.
+        """
+        handler = _live_run_task_handler()
+        delay = handler._task_backoff
+        if jitter is None:
+            return delay
+        return ExponentialDelay(
+            min_delay=delay.min_delay,
+            max_delay=delay.max_delay,
+            factor=delay.factor,
+            jitter=jitter,
+        )
 
-    def test_backoff_capped_at_60_seconds(self) -> None:
-        """Backoff should be capped at 60 seconds."""
-        # At attempt 7: 2^6 = 64, but capped to 60
-        base_delay = min(2 ** (7 - 1), 60)
-        assert base_delay == 60
+    def test_growth_and_cap_come_from_configured_delay(self) -> None:
+        delay = self._engine_delay(jitter=0.0)
+        observed = [delay.for_attempt(n) for n in range(1, 9)]
+        assert observed == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0, 60.0]
 
-        # At attempt 10: 2^9 = 512, but capped to 60
-        base_delay = min(2 ** (10 - 1), 60)
-        assert base_delay == 60
+    def test_jitter_stays_within_the_configured_band(self) -> None:
+        config = HandlerConfig()
+        delay = self._engine_delay()
+        base = self._engine_delay(jitter=0.0).for_attempt(3)
+        samples = [delay.for_attempt(3) for _ in range(200)]
 
-    def test_jitter_range(self) -> None:
-        """Jitter should be ±25% of base delay."""
-        import random
+        assert min(samples) >= base * (1 - config.concurrency_jitter)
+        assert max(samples) <= base * (1 + config.concurrency_jitter)
+        assert len(set(samples)) > 1
 
-        # For a base delay of 1 second
-        base_delay = 1
-        min_jitter = base_delay * -0.25
-        max_jitter = base_delay * 0.25
+    def test_get_backoff_period_uses_the_configured_delay(self) -> None:
+        stage, task_model, message = _retry_fixture()
+        period = get_backoff_period(
+            stage,
+            task_model,
+            message,
+            attempt=3,
+            task_registry=TaskRegistry(),
+            task_backoff=self._engine_delay(jitter=0.0),
+            current_time_fn=lambda: 0,
+        )
+        assert period == timedelta(seconds=4.0)
 
-        # Simulate many jitter values
-        random.seed(42)  # For reproducibility
-        for _ in range(100):
-            jitter = base_delay * random.uniform(-0.25, 0.25)
-            assert min_jitter <= jitter <= max_jitter
+    def test_get_backoff_period_escalates_with_attempt(self) -> None:
+        stage, task_model, message = _retry_fixture()
+        registry = TaskRegistry()
+        backoff = self._engine_delay(jitter=0.0)
+        periods = [
+            get_backoff_period(
+                stage, task_model, message, n, registry, backoff, lambda: 0
+            )
+            for n in range(1, 6)
+        ]
+        assert periods == sorted(periods)
+        assert periods[0] < periods[-1]
 
-    def test_minimum_delay_is_one_second(self) -> None:
-        """Final delay should never be less than 1 second."""
-        # Even with maximum negative jitter, delay should be >= 1
-        # base_delay = 1, jitter = -0.25, delay = 0.75
-        # max(1.0, 0.75) = 1.0
-        delay = max(1.0, 1 - 0.25)
-        assert delay >= 1.0
+    def test_retryable_task_backoff_overrides_the_configured_delay(self) -> None:
+        class SlowRetryable(RetryableTask):
+            def execute(self, stage: StageExecution) -> TaskResult:
+                return TaskResult.success()
+
+            def get_timeout(self) -> timedelta:
+                return timedelta(seconds=60)
+
+            def get_backoff_period(
+                self, stage: StageExecution, duration: timedelta
+            ) -> timedelta:
+                return timedelta(seconds=42)
+
+        registry = TaskRegistry()
+        registry.register("slow", SlowRetryable)
+        stage, task_model, message = _retry_fixture(implementing_class="slow")
+
+        period = get_backoff_period(
+            stage,
+            task_model,
+            message,
+            attempt=1,
+            task_registry=registry,
+            task_backoff=self._engine_delay(jitter=0.0),
+            current_time_fn=lambda: 0,
+        )
+        assert period == timedelta(seconds=42)
 
 
 class TestIsTransient:

@@ -75,6 +75,21 @@ class TaskRegistry:
         self._aliases: dict[str, str] = {}
         # Stores either Verifier instances or callable functions
         self._verifiers: dict[str, Verifier | VerifierCallable] = {}
+        self._builtin_names: set[str] = set()
+        self._seed_builtins()
+
+    def _seed_builtins(self) -> None:
+        """Register the tasks the engine's own stage builders emit.
+
+        Written directly rather than through register() so that seeding neither
+        warns about overwriting nor instantiates the classes to read aliases.
+        """
+        from stabilize.tasks.builtins import BUILTIN_ALIASES, BUILTIN_TASKS
+
+        for name, task in BUILTIN_TASKS.items():
+            self._tasks[name] = task
+            self._builtin_names.add(name)
+        self._aliases.update(BUILTIN_ALIASES)
 
     def register(
         self,
@@ -102,7 +117,10 @@ class TaskRegistry:
         if name in self._tasks:
             if strict:
                 raise ValueError(f"Task '{name}' is already registered")
-            logger.warning("Overwriting existing task registration: %s", name)
+            if name not in self._builtin_names:
+                logger.warning("Overwriting existing task registration: %s", name)
+
+        self._builtin_names.discard(name)
 
         self._tasks[name] = task
 
@@ -237,10 +255,12 @@ class TaskRegistry:
         return list(self._tasks.keys())
 
     def clear(self) -> None:
-        """Clear all registrations."""
+        """Clear all registrations, then re-seed the engine's built-ins."""
         self._tasks.clear()
         self._aliases.clear()
         self._verifiers.clear()
+        self._builtin_names.clear()
+        self._seed_builtins()
 
     # ========== Verifier Registry Methods ==========
 

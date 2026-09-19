@@ -8,11 +8,14 @@ workflow state at any point in time.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def _generate_event_id() -> str:
@@ -57,12 +60,15 @@ class EventType(Enum):
     STAGE_FAILED = "stage.failed"
     STAGE_SKIPPED = "stage.skipped"
     STAGE_CANCELED = "stage.canceled"
+    STAGE_SUSPENDED = "stage.suspended"
+    STAGE_RESUMED = "stage.resumed"
 
     # Task lifecycle
     TASK_STARTED = "task.started"
     TASK_COMPLETED = "task.completed"
     TASK_FAILED = "task.failed"
     TASK_RETRIED = "task.retried"
+    TASK_SUSPENDED = "task.suspended"
 
     # State changes
     STATUS_CHANGED = "status.changed"
@@ -73,6 +79,26 @@ class EventType(Enum):
     # Custom / streaming progress emitted by tasks (e.g. LLM token chunks,
     # agent step narration). Carries a free-form payload in Event.data.
     CUSTOM = "custom.progress"
+
+    # An event_type this build does not recognise, typically written by a newer
+    # version. The original string is preserved in Event.data["_raw_event_type"].
+    UNKNOWN = "unknown.event"
+
+
+RAW_EVENT_TYPE = "_raw_event_type"
+
+
+def parse_event_type(value: str) -> EventType:
+    """Resolve an event_type string, yielding UNKNOWN rather than raising.
+
+    A stored event written by a newer version must not break the read path for
+    every other event in the same query.
+    """
+    try:
+        return EventType(value)
+    except ValueError:
+        logger.debug("Unrecognised event_type %r; surfacing as UNKNOWN", value)
+        return EventType.UNKNOWN
 
 
 class EntityType(Enum):
@@ -198,16 +224,22 @@ class Event:
         elif timestamp is None:
             timestamp = _utc_now()
 
+        raw_type = data.get("event_type", "status.changed")
+        parsed_type = parse_event_type(raw_type)
+        payload = data.get("data", {})
+        if parsed_type is EventType.UNKNOWN:
+            payload = {**payload, RAW_EVENT_TYPE: raw_type}
+
         return cls(
             event_id=data.get("event_id", _generate_event_id()),
-            event_type=EventType(data.get("event_type", "status.changed")),
+            event_type=parsed_type,
             timestamp=timestamp,
             sequence=data.get("sequence", 0),
             entity_type=EntityType(data.get("entity_type", "workflow")),
             entity_id=data.get("entity_id", ""),
             workflow_id=data.get("workflow_id", ""),
             version=data.get("version", 0),
-            data=data.get("data", {}),
+            data=payload,
             metadata=EventMetadata.from_dict(data.get("metadata", {})),
             schema_version=data.get("schema_version", 1),
         )
@@ -355,6 +387,18 @@ class EventMigrator:
 
         current = event.schema_version
         if current == target_version:
+            return event
+
+        if current > target_version:
+            # Written by a newer build. Applying it would use the wrong field
+            # layout, so refuse rather than silently misinterpret it.
+            message = (
+                f"Event {event.event_id} has schema v{current}, newer than this "
+                f"build's v{target_version}; refusing to apply it"
+            )
+            if strict:
+                raise ValueError(message)
+            logger.warning("%s", message)
             return event
 
         # Walk the migration chain

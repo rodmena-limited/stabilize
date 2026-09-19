@@ -14,18 +14,17 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
+from stabilize.dag.readiness import PRUNED_FROM
 from stabilize.errors import is_transient
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.handlers.complete_stage.planner import CompleteStagePlannerMixin
 from stabilize.handlers.complete_stage.split_logic import CompleteStagesSplitMixin
-from stabilize.models.stage import SplitType
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
     CancelStage,
     CompleteStage,
     CompleteWorkflow,
     ContinueParentStage,
-    SkipStage,
     StartStage,
 )
 from stabilize.resilience.config import HandlerConfig
@@ -413,10 +412,6 @@ class CompleteStageHandler(
                     # Apply split logic to determine which downstreams to activate
                     activated_downstreams, skipped_downstreams = self._apply_split_logic(stage, downstream_stages)
 
-                    # Track activated branches for OR-join (WCP-7)
-                    if stage.split_type == SplitType.OR and activated_downstreams:
-                        self._record_activated_branches(stage, activated_downstreams)
-
                     # Handle discriminator/N-of-M context updates on upstream completion
                     self._update_join_tracking(stage, downstream_stages)
 
@@ -452,10 +447,19 @@ class CompleteStageHandler(
                                         stage_id=downstream.id,
                                     )
                                 )
-                            # Skip non-activated downstream stages (OR-split)
+                            # Mark the edge into each non-activated child dead,
+                            # then start it like any other. A child with another
+                            # live parent still carries a token, so the decision
+                            # belongs at the child's own readiness evaluation
+                            # where all of its upstreams are visible -- not here,
+                            # where only this edge is.
                             for downstream in skipped_downstreams:
+                                dead_edges = set(downstream.context.get(PRUNED_FROM) or ())
+                                dead_edges.add(stage.ref_id)
+                                downstream.context[PRUNED_FROM] = sorted(dead_edges)
+                                txn.store_stage(downstream)
                                 txn.push_message(
-                                    SkipStage(
+                                    StartStage(
                                         execution_type=execution.type.value,
                                         execution_id=execution.id,
                                         stage_id=downstream.id,

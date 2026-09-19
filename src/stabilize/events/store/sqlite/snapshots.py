@@ -36,7 +36,7 @@ class SqliteSnapshotsMixin:
         """Save a snapshot of entity state."""
         conn = self._get_connection()
 
-        state_json = json.dumps(state)
+        state_json = json.dumps(state, default=str)
         state_hash = hashlib.sha256(json.dumps(state, sort_keys=True, default=str).encode()).hexdigest()
         conn.execute(
             """

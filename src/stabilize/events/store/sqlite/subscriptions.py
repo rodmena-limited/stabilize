@@ -10,11 +10,19 @@ import json
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
-from stabilize.events.base import EventType
+from stabilize.events.base import EventType, parse_event_type
 
 if TYPE_CHECKING:
     pass
 
+
+def _row_value(row: Any, column: str, default: str = "0") -> str:
+    """Read a column that may be absent from an older database file."""
+    try:
+        value = row[column]
+    except (IndexError, KeyError):
+        return default
+    return default if value is None else str(value)
 
 class SqliteSubscriptionsMixin:
     """Mixin providing subscription CRUD operations."""
@@ -67,7 +75,11 @@ class SqliteSubscriptionsMixin:
             return None
 
         try:
-            event_types = [EventType(et) for et in json.loads(row["event_types"])] if row["event_types"] else None
+            event_types = (
+                [parse_event_type(et) for et in json.loads(row["event_types"])]
+                if row["event_types"]
+                else None
+            )
         except (json.JSONDecodeError, TypeError):
             event_types = None
 
@@ -82,7 +94,29 @@ class SqliteSubscriptionsMixin:
             "entity_filter": entity_filter,
             "last_sequence": row["last_sequence"],
             "webhook_url": row["webhook_url"],
+            "last_commit_cursor": _row_value(row, "last_commit_cursor"),
         }
+
+    def update_subscription_cursor(
+        self,
+        subscription_id: str,
+        last_sequence: int,
+        last_commit_cursor: str,
+    ) -> None:
+        """Persist both delivery positions for a subscription."""
+        conn = self._get_connection()
+
+        conn.execute(
+            """
+            UPDATE event_subscriptions
+            SET last_sequence = ?,
+                last_commit_cursor = ?,
+                updated_at = datetime('now', 'utc')
+            WHERE id = ?
+            """,
+            (last_sequence, last_commit_cursor, subscription_id),
+        )
+        conn.commit()
 
     def update_subscription_sequence(self, subscription_id: str, last_sequence: int) -> None:
         """Update the last processed sequence for a subscription."""

@@ -83,30 +83,6 @@ class CompleteStagesSplitMixin:
 
         return activated, skipped
 
-    def _record_activated_branches(
-        self,
-        stage: StageExecution,
-        activated_downstreams: list[StageExecution],
-    ) -> None:
-        """Record activated branch ref_ids for paired OR-join stages (WCP-7).
-
-        Finds downstream stages that have join_type=OR and sets their
-        '_activated_branches' context with the ref_ids of activated branches.
-        """
-        activated_ref_ids = [d.ref_id for d in activated_downstreams]
-
-        # Look for OR-join stages downstream that need branch tracking
-        execution = stage.execution
-        for s in execution.stages:
-            if s.join_type == JoinType.OR:
-                # Check if any of this stage's activated downstreams are upstream of the OR-join
-                if s.requisite_stage_ref_ids & set(activated_ref_ids):
-                    # This OR-join depends on some of our activated branches
-                    existing = s.context.get("_activated_branches", [])
-                    merged = list(set(existing) | set(activated_ref_ids))
-                    s.context["_activated_branches"] = merged
-                    self.repository.store_stage(s)
-
     def _update_join_tracking(
         self,
         stage: StageExecution,

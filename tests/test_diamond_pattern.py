@@ -26,10 +26,14 @@ These tests run on both SQLite and PostgreSQL backends.
 
 from __future__ import annotations
 
+import os
 import random
+import subprocess
+import sys
 import threading
 import time
 from collections import Counter
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -597,6 +601,58 @@ class TestOutputMerging:
                 f"conflict_key values across 10 runs: {counter}\n"
                 f"This indicates the merge order of parallel branches is not stable."
             )
+
+    def test_merge_winner_is_stable_across_processes(self, tmp_path: Path) -> None:
+        """The sibling that wins a key collision must not depend on hash seed.
+
+        test_conflicting_keys_in_parallel_branches runs its iterations inside one
+        interpreter, where str hashing is fixed for the process lifetime, so it
+        cannot observe this. Each iteration here is a fresh interpreter.
+        """
+        worker = tmp_path / "merge_worker.py"
+        worker.write_text(
+            "import tempfile\n"
+            "from stabilize import SqliteWorkflowStore, StageExecution, Workflow\n"
+            "tmp = tempfile.mkdtemp()\n"
+            "store = SqliteWorkflowStore(f'sqlite:///{tmp}/m.db', create_tables=True)\n"
+            "stages = [\n"
+            "    StageExecution(ref_id='stage_a', type='t', name='A'),\n"
+            "    StageExecution(ref_id='stage_b', type='t', name='B',"
+            " requisite_stage_ref_ids={'stage_a'}),\n"
+            "    StageExecution(ref_id='stage_c', type='t', name='C',"
+            " requisite_stage_ref_ids={'stage_a'}),\n"
+            "    StageExecution(ref_id='stage_d', type='t', name='D',"
+            " requisite_stage_ref_ids={'stage_b', 'stage_c'}),\n"
+            "]\n"
+            "wf = Workflow.create(application='merge', name='diamond', stages=stages)\n"
+            "store.store(wf)\n"
+            "for s in store.retrieve(wf.id).stages:\n"
+            "    if s.ref_id == 'stage_b':\n"
+            "        s.outputs = {'conflict_key': 'from_b'}\n"
+            "        store.store_stage(s)\n"
+            "    elif s.ref_id == 'stage_c':\n"
+            "        s.outputs = {'conflict_key': 'from_c'}\n"
+            "        store.store_stage(s)\n"
+            "print(store.get_merged_ancestor_outputs(wf.id, 'stage_d').get('conflict_key'))\n"
+        )
+
+        winners = []
+        for seed in range(8):
+            env = {**os.environ, "PYTHONHASHSEED": str(seed)}
+            proc = subprocess.run(
+                [sys.executable, str(worker)],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=120,
+            )
+            assert proc.returncode == 0, f"worker failed (seed={seed}): {proc.stderr}"
+            winners.append(proc.stdout.strip())
+
+        assert all(w in {"from_b", "from_c"} for w in winners), winners
+        assert len(set(winners)) == 1, (
+            f"merge winner varies with PYTHONHASHSEED: {Counter(winners)}"
+        )
 
     def test_list_outputs_concatenated(self, file_repository: WorkflowStore, file_queue: Queue, backend: str) -> None:
         """List outputs from parallel branches should be concatenated."""

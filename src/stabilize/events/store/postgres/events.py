@@ -9,7 +9,14 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from stabilize.events.base import EntityType, Event, EventMetadata, EventType
+from stabilize.events.base import (
+    RAW_EVENT_TYPE,
+    EntityType,
+    Event,
+    EventMetadata,
+    EventType,
+    parse_event_type,
+)
 from stabilize.events.store.interface import EventQuery
 
 if TYPE_CHECKING:
@@ -214,6 +221,44 @@ class PostgresEventsMixin:
                 )
                 return [self._row_to_event(row) for row in cur.fetchall()]
 
+    def get_events_since_committed(
+        self,
+        cursor: str,
+        limit: int = 1000,
+    ) -> tuple[list[Event], str]:
+        """Get committed events after `cursor`, ordered by commit, with the next cursor.
+
+        `sequence` is assigned at INSERT and not at COMMIT, so a cursor that
+        advances by sequence can step over an event whose transaction had not
+        committed yet, losing it permanently. pg_snapshot_xmin() is the lowest
+        transaction id still in progress, so nothing below it can commit later:
+        it is a monotone, gap-free frontier.
+
+        Events written before the commit_xid column exists carry NULL and are
+        coalesced to '0'::xid8, which keeps them deliverable.
+        """
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT pg_snapshot_xmin(pg_current_snapshot())::text AS wm")
+                row = cur.fetchone()
+                if row is None:
+                    return [], cursor or "0"
+                watermark = str(row["wm"] if isinstance(row, dict) else row[0])
+
+                cur.execute(
+                    """
+                    SELECT * FROM events
+                    WHERE coalesce(commit_xid, '0'::xid8) >= %(cursor)s::xid8
+                      AND coalesce(commit_xid, '0'::xid8) < %(watermark)s::xid8
+                    ORDER BY coalesce(commit_xid, '0'::xid8) ASC, sequence ASC
+                    LIMIT %(limit)s
+                    """,
+                    {"cursor": cursor or "0", "watermark": watermark, "limit": limit},
+                )
+                events = [self._row_to_event(row) for row in cur.fetchall()]
+
+        return events, watermark
+
     def get_event_by_id(self, event_id: str) -> Event | None:
         """Get a single event by its ID."""
         with self._pool.connection() as conn:
@@ -311,9 +356,13 @@ class PostgresEventsMixin:
         elif event_data is None:
             event_data = {}
 
+        parsed_type = parse_event_type(data["event_type"])
+        if parsed_type is EventType.UNKNOWN:
+            event_data = {**event_data, RAW_EVENT_TYPE: data["event_type"]}
+
         return Event(
             event_id=data["event_id"],
-            event_type=EventType(data["event_type"]),
+            event_type=parsed_type,
             timestamp=timestamp,
             sequence=data["sequence"],
             entity_type=EntityType(data["entity_type"]),

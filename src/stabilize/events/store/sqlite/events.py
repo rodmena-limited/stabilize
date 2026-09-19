@@ -12,7 +12,14 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from stabilize.events.base import EntityType, Event, EventMetadata, EventType
+from stabilize.events.base import (
+    RAW_EVENT_TYPE,
+    EntityType,
+    Event,
+    EventMetadata,
+    EventType,
+    parse_event_type,
+)
 from stabilize.events.store.interface import EventQuery
 
 if TYPE_CHECKING:
@@ -204,6 +211,30 @@ class SqliteEventStoreMixin:
 
         return [self._row_to_event(row) for row in cursor]
 
+    def get_events_since_committed(
+        self,
+        cursor: str,
+        limit: int = 1000,
+    ) -> tuple[list[Event], str]:
+        """Get committed events after `cursor`, with the next cursor.
+
+        SQLite serialises commits behind its write lock, so commit order is
+        sequence order and the sequence cursor is already gap-free. This exists
+        so subscription code can use one call on both backends.
+        """
+        try:
+            start = int(cursor or 0)
+        except (TypeError, ValueError):
+            start = 0
+
+        events = self.get_events_since(start, limit=limit)
+        next_cursor = str(events[-1].sequence) if events else str(start)
+        return events, next_cursor
+
+    def supports_commit_cursor(self) -> bool:
+        """SQLite commit order equals sequence order, so this is always safe."""
+        return True
+
     def get_event_by_id(self, event_id: str) -> Event | None:
         """Get a single event by its ID."""
         conn = self._get_connection()
@@ -280,9 +311,13 @@ class SqliteEventStoreMixin:
         except (IndexError, KeyError):
             pass
 
+        parsed_type = parse_event_type(row["event_type"])
+        if parsed_type is EventType.UNKNOWN:
+            data = {**data, RAW_EVENT_TYPE: row["event_type"]}
+
         return Event(
             event_id=row["event_id"],
-            event_type=EventType(row["event_type"]),
+            event_type=parsed_type,
             timestamp=timestamp,
             sequence=row["sequence"],
             entity_type=EntityType(row["entity_type"]),

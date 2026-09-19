@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -131,6 +131,8 @@ class TransactionHelper:
         messages_to_push: Sequence[tuple[Message, float | None]] | None = None,
         handler_name: str = "UnknownHandler",
         require_atomic: bool = False,
+        *,
+        during_txn: Callable[[], None] | None = None,
     ) -> None:
         """
         Execute an atomic transaction to update state and queue messages.
@@ -147,6 +149,9 @@ class TransactionHelper:
                            does not provide true database-level atomicity.
                            Use this for critical operations that must not
                            leave partial state on failure.
+            during_txn: Optional callable invoked inside the transaction, after
+                        the stage write and before the message pushes. A retried
+                        attempt rolled back, so it must be safe to repeat.
 
         Raises:
             RuntimeError: If require_atomic=True and transaction is not atomic
@@ -176,6 +181,9 @@ class TransactionHelper:
                         handler_type=handler_name,
                         execution_id=execution_id,
                     )
+
+                if during_txn is not None:
+                    during_txn()
 
                 for msg, delay in messages_to_push:
                     txn.push_message(msg, delay or 0)

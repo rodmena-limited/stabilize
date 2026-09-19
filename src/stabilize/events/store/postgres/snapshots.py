@@ -34,7 +34,7 @@ class PostgresSnapshotsMixin:
         """Save a snapshot of entity state."""
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
-                state_json = json.dumps(state)
+                state_json = json.dumps(state, default=str)
                 state_hash = hashlib.sha256(json.dumps(state, sort_keys=True, default=str).encode()).hexdigest()
                 cur.execute(
                     """

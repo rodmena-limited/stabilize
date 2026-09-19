@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from stabilize.events.base import EventType
+from stabilize.events.base import EventType, parse_event_type
 
 if TYPE_CHECKING:
     from psycopg import Connection
@@ -84,7 +84,7 @@ class PostgresSubscriptionsMixin:
 
                 event_types = None
                 if data["event_types"]:
-                    event_types = [EventType(et) for et in data["event_types"]]
+                    event_types = [parse_event_type(et) for et in data["event_types"]]
 
                 entity_filter = data["entity_filter"]
                 if isinstance(entity_filter, str):
@@ -99,6 +99,7 @@ class PostgresSubscriptionsMixin:
                     "entity_filter": entity_filter,
                     "last_sequence": data["last_sequence"],
                     "webhook_url": data["webhook_url"],
+                    "last_commit_cursor": data.get("last_commit_cursor", "0"),
                 }
 
     def update_subscription_sequence(self, subscription_id: str, last_sequence: int) -> None:
@@ -112,6 +113,31 @@ class PostgresSubscriptionsMixin:
                     WHERE id = %(id)s
                     """,
                     {"id": subscription_id, "last_sequence": last_sequence},
+                )
+            conn.commit()
+
+    def update_subscription_cursor(
+        self,
+        subscription_id: str,
+        last_sequence: int,
+        last_commit_cursor: str,
+    ) -> None:
+        """Persist both delivery positions for a subscription."""
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE event_subscriptions
+                    SET last_sequence = %(last_sequence)s,
+                        last_commit_cursor = %(last_commit_cursor)s,
+                        updated_at = NOW()
+                    WHERE id = %(id)s
+                    """,
+                    {
+                        "id": subscription_id,
+                        "last_sequence": last_sequence,
+                        "last_commit_cursor": last_commit_cursor,
+                    },
                 )
             conn.commit()
 
