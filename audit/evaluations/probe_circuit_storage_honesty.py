@@ -60,8 +60,56 @@ def _attempt(strict: bool) -> tuple[str, str]:
     return outcome, stream.getvalue()
 
 
+def _dsn_classification() -> list[tuple[str, str, bool]]:
+    """Which DSN forms reach the PostgreSQL branch, observed by spying on it."""
+    import resilient_circuit.storage as rcs
+
+    from stabilize.resilience import circuits
+
+    attempted: list[object] = []
+
+    class Spy:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            attempted.append(kwargs.get("connection_string"))
+
+    original = rcs.PostgresStorage
+    rcs.PostgresStorage = Spy  # type: ignore[misc,assignment]
+    results = []
+    try:
+        for url, why, expected in _DSN_CASES:
+            attempted.clear()
+            circuits._create_storage(url)
+            results.append((url or "<None>", why, bool(attempted) == expected))
+    finally:
+        rcs.PostgresStorage = original  # type: ignore[misc]
+    return results
+
+
+_DSN_CASES: list[tuple[str | None, str, bool]] = [
+    ("postgresql://u:p@h/db", "canonical", True),
+    ("postgresql+psycopg://u:p@h/db", "sqlalchemy style", True),
+    ("postgres://u:p@h/db", "postgres:// -- emitted by build_db_url", True),
+    ("POSTGRESQL://u:p@h/db", "upper-case scheme", True),
+    ("  postgresql://u:p@h/db  ", "surrounding whitespace", True),
+    ("host=h dbname=d user=u", "libpq keyword/value", True),
+    ("sqlite:///x", "sqlite must NOT reach PG", False),
+    (None, "no DSN must NOT reach PG", False),
+    ("", "empty DSN must NOT reach PG", False),
+]
+
+
 def main() -> int:
     failures = 0
+
+    print("=" * 72)
+    print("DSN CLASSIFICATION — a form misread as 'no database' silently selects")
+    print("process-local circuit state. Both directions, so it cannot pass by")
+    print("simply routing everything to PostgreSQL.")
+    for url, why, ok in _dsn_classification():
+        print(f"  {'ok  ' if ok else 'FAIL'} {url!r:34} {why}")
+        if not ok:
+            failures += 1
+    print()
 
     print("=" * 72)
     print("CONTROL: a working backend must be reported, and reported ONLY on success")

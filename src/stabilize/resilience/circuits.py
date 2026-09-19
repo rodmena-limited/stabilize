@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 from collections import OrderedDict
 from datetime import timedelta
@@ -50,6 +51,33 @@ class CircuitStorageUnavailableError(RuntimeError):
     """Raised when shared breaker storage was requested but cannot be created."""
 
 
+_POSTGRES_SCHEMES = {"postgres", "postgresql"}
+
+_LIBPQ_KEYWORD_RE = re.compile(r"(?i)\b(host|hostaddr|dbname|service)\s*=")
+
+
+def _is_postgres_dsn(database_url: str | None) -> bool:
+    """Whether *database_url* addresses PostgreSQL, in any form libpq accepts.
+
+    A prefix test against "postgresql" alone misses three forms this codebase
+    itself produces or accepts -- ``postgres://`` (emitted by build_db_url and
+    accepted by parse_db_url), an upper-case scheme, and a libpq keyword/value
+    string -- and each miss silently selects process-local circuit state.
+    """
+    if not database_url:
+        return False
+
+    candidate = database_url.strip()
+    scheme, separator, _rest = candidate.partition("://")
+    if separator:
+        base_scheme = scheme.lower().partition("+")[0]
+        return base_scheme in _POSTGRES_SCHEMES
+
+    if candidate.lower().startswith("sqlite"):
+        return False
+    return bool(_LIBPQ_KEYWORD_RE.search(candidate))
+
+
 def _strict_storage_required() -> bool:
     """Whether an unusable PostgreSQL breaker store must abort startup."""
     return os.environ.get("STABILIZE_CIRCUIT_STORAGE_STRICT", "").lower() in {"1", "true", "yes"}
@@ -89,7 +117,7 @@ def _create_storage(database_url: str | None) -> CircuitBreakerStorage:
     Returns:
         PostgresStorage for PostgreSQL, InMemoryStorage otherwise
     """
-    if database_url and database_url.startswith("postgresql"):
+    if _is_postgres_dsn(database_url):
         try:
             from resilient_circuit.storage import PostgresStorage
 
@@ -100,7 +128,7 @@ def _create_storage(database_url: str | None) -> CircuitBreakerStorage:
             # `host=... dbname=...` here used to drop TLS options (sslmode,
             # sslcert, sslkey, sslrootcert), silently forcing the breaker onto
             # in-memory storage on TLS-mandatory databases.
-            conn_string = database_url.replace("+psycopg", "")
+            conn_string = (database_url or "").strip().replace("+psycopg", "")
 
             storage = PostgresStorage(connection_string=conn_string)
         except ImportError as exc:
@@ -115,7 +143,10 @@ def _create_storage(database_url: str | None) -> CircuitBreakerStorage:
     else:
         # SQLite or no database: use in-memory storage
         # Circuit state is per-process only (not shared across instances)
-        logger.info("Using in-memory storage for circuit breakers (SQLite or no database)")
+        logger.info(
+            "Using in-memory storage for circuit breakers (no PostgreSQL DSN configured); "
+            "circuit state is process-local"
+        )
         return InMemoryStorage()
 
 

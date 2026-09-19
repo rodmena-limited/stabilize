@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.23.1]
+
+### Fixed
+
+- **`postgres://` and libpq keyword/value DSNs no longer select process-local
+  circuit-breaker state.** `_create_storage()` gated on
+  `database_url.startswith("postgresql")`, which misses three forms:
+  `postgres://` (short form), an upper-case scheme, and a libpq keyword/value
+  string. Each miss fell through to `InMemoryStorage()` and logged
+  `Using in-memory storage for circuit breakers (SQLite or no database)`.
+
+  `postgres://` is not an exotic spelling: stabilize's own `parse_db_url()`
+  accepts it (`postgres(?:ql)?://`) and its own `build_db_url()` **emits** it.
+  So the engine produced a DSN that its own breaker selector then classified
+  as "no database", and said so in the log. Anyone using that form has had
+  process-local breakers on every version, with a log line asserting they had
+  no database configured.
+
+  The scheme is now parsed rather than prefix-matched (`postgres`/`postgresql`,
+  optional `+driver`, case-insensitive, whitespace-tolerant) and a libpq
+  keyword/value DSN is detected by keyword (`host`, `hostaddr`, `dbname`,
+  `service`).
+
+- **The in-memory log line no longer claims SQLite for every case.** It said
+  "SQLite or no database" whatever the reason, including for PostgreSQL DSNs
+  it had just misclassified. It now states only what is true: no PostgreSQL
+  DSN was configured, and circuit state is process-local.
+
+### Notes
+
+- `probe_circuit_storage_honesty.py` now asserts DSN classification in both
+  directions — `sqlite`, `None` and `""` must **not** reach the PostgreSQL
+  branch, so the probe cannot pass by routing everything there.
+- The `resilient-circuit>=0.4.6,<0.8` bound is again deliberately unchanged.
+
+
 ## [0.23.0]
 
 ### Fixed

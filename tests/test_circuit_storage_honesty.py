@@ -74,3 +74,58 @@ class TestStrictModeFailsClosed:
         monkeypatch.setenv("STABILIZE_CIRCUIT_STORAGE_STRICT", "1")
         storage = circuits._create_storage("sqlite:///x")
         assert type(storage).__name__ == "InMemoryStorage"
+
+
+class TestDsnClassification:
+    """A PostgreSQL DSN misread as 'no database' silently selects
+    process-local circuit state."""
+
+    @pytest.fixture
+    def spy(self, monkeypatch: pytest.MonkeyPatch) -> list[object]:
+        import resilient_circuit.storage as rcs
+
+        attempted: list[object] = []
+
+        class Spy:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                attempted.append(kwargs.get("connection_string"))
+
+        monkeypatch.setattr(rcs, "PostgresStorage", Spy)
+        return attempted
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "postgresql://u:p@h/db",
+            "postgresql+psycopg://u:p@h/db",
+            "postgres://u:p@h/db",
+            "POSTGRESQL://u:p@h/db",
+            "  postgresql://u:p@h/db  ",
+            "host=h dbname=d user=u",
+            "HOST=h DBNAME=d",
+            "service=mysvc",
+        ],
+    )
+    def test_postgres_forms_reach_the_postgres_branch(
+        self, spy: list[object], url: str
+    ) -> None:
+        circuits._create_storage(url)
+        assert spy, f"{url!r} did not reach the PostgreSQL branch"
+
+    @pytest.mark.parametrize("url", ["sqlite:///x", "sqlite:///:memory:", None, "", "   "])
+    def test_non_postgres_forms_do_not(self, spy: list[object], url: str | None) -> None:
+        """Without this the test above passes by routing everything to PostgreSQL."""
+        circuits._create_storage(url)
+        assert not spy, f"{url!r} wrongly reached the PostgreSQL branch"
+
+    def test_postgres_url_is_passed_through_intact(self, spy: list[object]) -> None:
+        circuits._create_storage("postgresql://u:p@h/db?sslmode=verify-full")
+        assert spy[0] == "postgresql://u:p@h/db?sslmode=verify-full"
+
+    def test_in_memory_log_no_longer_claims_sqlite_for_every_case(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.INFO):
+            circuits._create_storage(None)
+        assert "SQLite or no database" not in caplog.text
+        assert "process-local" in caplog.text
