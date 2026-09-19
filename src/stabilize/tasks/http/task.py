@@ -36,6 +36,7 @@ from stabilize.tasks.http.constants import (
     DEFAULT_TIMEOUT,
     SUPPORTED_METHODS,
 )
+from stabilize.tasks.http.guarded_opener import BlockedPeerError, build_guarded_handlers
 from stabilize.tasks.http.request import build_request
 from stabilize.tasks.http.response import process_response
 from stabilize.tasks.http.ssl_context import build_ssl_context
@@ -294,11 +295,18 @@ class HTTPTask(Task):
         # Build SSL context
         ssl_context = build_ssl_context(context)
 
-        # Build opener with SSRF-safe redirect handler
+        # Build opener with SSRF-safe redirect handling AND connect-time peer
+        # enforcement. Validating the hostname alone is a TOCTOU: urllib
+        # resolves the name again when it connects, so a rebinding attacker can
+        # answer the two lookups differently. The guarded handlers check the
+        # address the socket actually reached.
         allow_private = context.get("allow_private_urls", False)
         opener_handlers: list[BaseHandler] = [_SafeRedirectHandler(allow_private=allow_private)]
-        if ssl_context:
-            opener_handlers.append(HTTPSHandler(context=ssl_context))
+        if allow_private:
+            if ssl_context:
+                opener_handlers.append(HTTPSHandler(context=ssl_context))
+        else:
+            opener_handlers.extend(build_guarded_handlers(_is_blocked, ssl_context))
         _opener = build_opener(*opener_handlers)
 
         # Retry configuration
@@ -341,6 +349,10 @@ class HTTPTask(Task):
 
         def should_retry(e: Exception) -> bool:
             """Check if error should trigger retry."""
+            if isinstance(e, ValueError | BlockedPeerError):
+                # An SSRF refusal is deterministic; retrying re-resolves the
+                # name, which is the attacker's second chance.
+                return False
             if isinstance(e, RetryableStatusError):
                 return True
             if isinstance(e, HTTPError) and e.code in retry_on_status:
@@ -404,6 +416,10 @@ class HTTPTask(Task):
             except RetryableStatusError as e:
                 # Shouldn't happen, but handle gracefully
                 last_response = e.response
+            except ValueError as e:
+                # An SSRF refusal from the pre-connect revalidation is not
+                # retryable and must not escape as an unhandled exception.
+                last_error = e
         else:
             # No retries configured - single attempt
             try:
@@ -417,6 +433,12 @@ class HTTPTask(Task):
                 last_response = response
             except HTTPError as e:
                 last_response = e
+            except ValueError as e:
+                # The pre-connect revalidation and the connect-time peer guard
+                # both refuse by raising. Without this the task would escape
+                # execute() with an unhandled exception rather than returning a
+                # terminal TaskResult, turning a blocked request into a crash.
+                last_error = e
             except (URLError, TimeoutError, OSError) as e:
                 last_error = e
 

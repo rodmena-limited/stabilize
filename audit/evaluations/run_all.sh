@@ -21,6 +21,7 @@ PROBES=(
     audit/evaluations/probe_http_credential_persistence.py
     audit/evaluations/probe_circuit_storage_honesty.py
     audit/evaluations/probe_pool_options.py
+    audit/evaluations/probe_ssrf_rebinding.py
 )
 
 failures=0
