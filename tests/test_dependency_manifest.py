@@ -30,9 +30,10 @@ GUARDED_IMPORT_EXTRAS = {
 
 DYNAMIC_IMPORTS = {"structlog"}
 
-DECLARED_PENDING_USE = {
-    "pydantic": "issue 41 - contract validation at the deserialization boundaries",
-}
+# Empty on purpose. pydantic lived here while issue 41 was open; it is now
+# imported by queue/messages.py, and the stale-exemption test below is what
+# caught that the entry had outlived its reason.
+DECLARED_PENDING_USE: dict[str, str] = {}
 
 
 def _canonical(name: str) -> str:

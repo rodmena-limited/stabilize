@@ -137,6 +137,14 @@ def create_tables(conn: sqlite3.Connection) -> None:
             conn.execute(statement)
     conn.commit()
 
+    # workflow_signals holds WCP-24 persistent signals. It lives outside the
+    # baseline SCHEMA because it was added later and its DDL is owned by
+    # signals.py; without this call the helper was dead code and the table was
+    # never created on SQLite at all.
+    from stabilize.persistence.sqlite.signals import create_signals_table
+
+    create_signals_table(conn)
+
     # Stamp baseline version and apply any pending forward migrations.
     from stabilize.persistence.sqlite.migrations import apply_migrations
 

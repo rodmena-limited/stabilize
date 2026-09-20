@@ -37,6 +37,7 @@ PROBES=(
     audit/evaluations/probe_event_store_no_ddl_by_default.py
     audit/evaluations/probe_multi_instance_cancel_remaining.py
     audit/evaluations/probe_message_contract.py
+    audit/evaluations/probe_engine_key_census.py
 )
 
 failures=0

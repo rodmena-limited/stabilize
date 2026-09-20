@@ -39,6 +39,10 @@ def _keys_referenced_in_source() -> dict[str, set[str]]:
     for path in sorted(SRC_ROOT.rglob("*.py")):
         if path.name == "engine_keys.py":
             continue
+        if path.relative_to(SRC_ROOT).parts[0] == "events":
+            # Event.data carries its own underscore keys (_raw_event_type); they
+            # are not StageExecution.context and are not this inventory's subject.
+            continue
         text = path.read_text(encoding="utf-8")
         for pattern in (_SUBSCRIPT_WRITE, _GET_READ, _CONSTANT_DEF):
             for match in pattern.finditer(text):

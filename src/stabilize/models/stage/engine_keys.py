@@ -32,6 +32,21 @@ CONFIGURATION_KEYS = frozenset(
     }
 )
 
+LOOP_KEYS = frozenset(
+    {
+        "_loop_condition",
+        "_loop_exhausted",
+        "_loop_exit",
+        "_loop_exit_ref_id",
+        "_loop_iteration",
+        "_loop_max_iterations",
+        "_loop_scope",
+        "_loop_target_ref_id",
+        "_loop_token",
+        "_loop_type",
+    }
+)
+
 CONTROL_FLOW_KEYS = frozenset(
     {
         "_activated_branches",
@@ -42,15 +57,18 @@ CONTROL_FLOW_KEYS = frozenset(
         "_jump_count",
         "_jump_history",
         "_jump_outputs",
-        "_loop_scope",
         "_max_jumps",
         "_max_recursion_depth",
         "_mi_instance_count",
         "_mi_instance_index",
         "_mi_parent_ref_id",
+        "_mm_consumed",
         "_mm_firings",
+        "_mm_trigger",
         "_on_failure_planned",
         "_parent_workflow_id",
+        "_pruned",
+        "_pruned_from",
         "_recursion_depth",
         "_sub_workflow_config",
         "_sub_workflow_id",
@@ -66,7 +84,7 @@ SIGNAL_KEYS = frozenset(
 )
 
 ENGINE_CONTEXT_KEYS = (
-    HYDRATION_KEYS | CONFIGURATION_KEYS | CONTROL_FLOW_KEYS | SIGNAL_KEYS
+    HYDRATION_KEYS | CONFIGURATION_KEYS | CONTROL_FLOW_KEYS | LOOP_KEYS | SIGNAL_KEYS
 )
 
 TASK_VISIBLE_KEYS = frozenset(
