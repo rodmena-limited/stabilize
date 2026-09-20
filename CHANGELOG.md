@@ -1,5 +1,68 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **Schema verification asserted existence, not resolution (#43).** SHIPPED IN
+  0.28.0 and reproduced against that published wheel. `_verify_schema` queried
+  `information_schema` with no schema filter, so it was satisfied by a table in
+  a schema the engine would never touch — a check that passes while resolving
+  elsewhere, which is worse than no check because it converts absent protection
+  into false confidence.
+
+  Getting it right took four steps, each of the first three looking complete:
+
+  1. `information_schema`, no schema filter — what 0.28.0 shipped
+  2. `to_regclass` — right question, but only "resolves to anything"
+  3. namespace compared against `schema=` — fires only when `schema=` is set,
+     and a DSN `options` segment beats `schema=`, so callers following our own
+     documented advice set no schema and got no protection
+  4. with no schema configured, all tables must resolve to ONE namespace; a
+     shadow of a single table splits them and is refused, naming which
+
+  A fifth case is a **boundary, not a defect**, and is documented as one: a
+  shadow of ALL the tables resolves consistently and passes — measured,
+  `resolved_schema()` returning `'public'` while the real tables sit elsewhere.
+  No engine-side check can close that without a configured expectation, so
+  `PostgresEventStore.resolved_schema()` is exposed and its docstring states
+  plainly that reading it is the only cover.
+
+  Note for anyone writing a similar check: `to_regclass(name)::text` renders
+  UNQUALIFIED exactly when the schema is on the search_path — the healthy case —
+  so asserting a qualified name fails when everything is correct, and the
+  obvious repair then accepts a shadow in any schema. Assert the namespace from
+  `pg_class`/`pg_namespace`, never a rendered name.
+
+- **Persistent signals move out of stage context into `workflow_signals` (#16).**
+  Buffering appended to `stage_executions.context["_buffered_signals"]`, the
+  structure issue 15 had to cap at 1000 entries because it grew unbounded, and
+  which every consumer reading that column can see. `create_signals_table` and
+  the buffer/consume/pending helpers existed and had **no callers at all**, so
+  the table was created by migration on PostgreSQL and did not exist on SQLite.
+
+  `WorkflowStore` gains `buffer_signal`, `consume_signal`,
+  `pending_signal_count`, `discard_signals` and `supports_signal_storage`, all
+  concrete with `0`/`None`/`False` defaults rather than abstract, so an
+  out-of-tree store keeps importing and falls back to the context buffer.
+
+  Consumption **dual-reads, context first**: a signal buffered before this
+  change drains rather than sitting behind everything written since. Nothing
+  rewrites rows that still carry `_buffered_signals`.
+
+  PostgreSQL consumption is a single statement — `UPDATE ... WHERE id = (SELECT
+  ... FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING` — so two workers racing on one
+  suspended stage cannot both claim a signal, and a crash between claim and read
+  cannot consume one without delivering it.
+
+### Consumer impact
+
+- `context->'_buffered_signals'` stops appearing on NEW rows. Existing rows keep
+  theirs and nothing rewrites them, so a query reading that key by name will
+  quietly return null for new rows while continuing to work for old ones —
+  the shape that produces a wrong conclusion rather than an error.
+
+
 ## [0.28.0] - 2026-09-20
 
 Nine defects, every one reproduced against the PUBLISHED 0.27.0 artifact from
