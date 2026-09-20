@@ -142,3 +142,30 @@ run: appending one comment line made it exit 1; restoring the line made it exit
 swallowed the tree -- also exits 0.
 
 Agreement is treated as the end of an investigation. It is the start of one.
+
+### It recurred in the same session, with a control attached
+
+Four hours after writing the rule above, this repo told a peer not to file a
+defect against migretti, citing a measurement with a known-positive control:
+
+    grep ImportError across migretti  ->  NONE
+    control: the same grep finds `import psycopg`  ->  the tree is visible
+
+The measurement was sound and the artifact was wrong. It read migretti 0.9.4,
+which happened to be in this repo's dev venv. PyPI ships 0.10.0, and
+`pip install stabilize==0.28.2` pulls 0.10.0. The peer had independently read
+the 0.10.0 source, so between the two the shipped version was covered -- by
+accident, because one of us cited the wrong version and the other happened to
+read the right one.
+
+Re-run against the published 0.10.0 wheel: also clean. The conclusion held; the
+evidence for it did not.
+
+The lesson is narrower than the rule and worse:
+
+    A MEASUREMENT WITH A CONTROL ATTACHED IS MORE PERSUASIVE THAN AN ASSERTION,
+    SO BEING WRONG ABOUT ITS SUBJECT PROPAGATES FURTHER.
+
+The control proves the instrument works. It says nothing about what the
+instrument was pointed at. Name the artifact and its version in the finding, or
+the control is decoration.
