@@ -76,8 +76,37 @@ lint-fix:
 type-check:
 	mypy src/
 
-# Run all quality checks
-check: lint type-check test
+# =============================================================================
+# Audit probes
+# =============================================================================
+# The probe suite is this repo's audit evidence. Until now no Makefile target
+# ran it, so it was a check that existed and was never executed -- the failure
+# mode the probes themselves exist to catch.
+#
+# Split the way the tests are split: 24 probes need nothing but Python, 6 need
+# a live PostgreSQL container. A probe that CANNOT run is reported as SKIPPED,
+# never as a failure.
+
+# Docker-free probes (safe in check)
+probes-sqlite:
+	PROBE_SET=sqlite ./audit/evaluations/run_all.sh
+
+# Probes needing a PostgreSQL container
+probes-postgres:
+	PROBE_SET=postgres ./audit/evaluations/run_all.sh
+
+# Every probe
+probes:
+	PROBE_SET=all ./audit/evaluations/run_all.sh
+
+# Run all quality checks.
+# On success, record a stamp keyed to a fingerprint of the source tree so a
+# release does not re-run a gate that is provably still green. Change any
+# source file and the fingerprint moves, the stamp stops matching, and the
+# tests run again.
+check: GATE_FP := $(shell .venv/bin/python scripts/gate_stamp.py fingerprint)
+check: lint type-check test probes-sqlite
+	@.venv/bin/python scripts/gate_stamp.py write --results "lint+type-check+test+probes-sqlite" --expect "$(GATE_FP)"
 
 # =============================================================================
 # Development Helpers

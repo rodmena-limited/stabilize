@@ -291,6 +291,23 @@ class CancelStageHandler(StabilizeHandler):
 # =============================================================================
 
 
+def _gate_already_green() -> dict | None:
+    """The gate stamp, if it was recorded against this exact source tree.
+
+    Running the gate and then re-running a subset of it inside the release
+    costs minutes and proves nothing new. Skipping on an assertion
+    (--skip-tests) cannot tell a verified tree from an untouched one. The stamp
+    is the middle: a skip backed by evidence that these bytes passed.
+    """
+    try:
+        sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+        from gate_stamp import read_valid
+
+        return read_valid()
+    except Exception:
+        return None
+
+
 def create_release_workflow(
     dry_run: bool = False,
     test_pypi: bool = False,
@@ -336,6 +353,15 @@ def create_release_workflow(
     )
 
     # Stage 2: Run tests (or skip)
+    stamp = None if skip_tests else _gate_already_green()
+    if stamp is not None:
+        skip_tests = True
+        print(
+            f"  Gate stamp matches this tree (recorded {stamp['recorded_at']}, "
+            f"HEAD {stamp['head']}): {stamp['results']}"
+        )
+        print("  Tests skipped because they are provably redundant, not by assertion.")
+
     if skip_tests:
         stages.append(
             StageExecution(

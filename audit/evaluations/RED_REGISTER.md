@@ -48,6 +48,30 @@ output on every artifact anyone has run them against. Each needs a known-positiv
 — an artifact old enough to carry its defect, or a deliberate local mutation —
 before its green means anything.
 
+## RED OBSERVED — a full transition on one artifact
+
+    probe_signal_storage_degrades
+
+Recorded 2026-09-20. This is the first probe in this suite whose red was
+observed against a defect **this repo shipped**, rather than against an older
+published release.
+
+`supports_signal_storage()` latched False permanently (0.28.2). Case E was added
+to ask the question cases A-D never asked: A-D use two DIFFERENT roles, so they
+test the BLOCK direction twice and call it "both directions". Case E takes ONE
+store through the whole cycle.
+
+    before=False        blocked
+    CONTROL             the role demonstrably regained read access
+    immediate=False     the cooldown holds (no re-probe storm)
+    after=True          the cooldown expires and storage resumes
+
+    against the latching code   FAIL, 1 of 7
+    against the fix             PASS, 8 checks
+
+The control is what makes the red mean anything: without it, `after=False` is
+equally consistent with a GRANT that never landed.
+
 ## RED CLAIMED BUT NOT RECORDED HERE
 
     probe_event_store_no_ddl_by_default

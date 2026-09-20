@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 
 import psycopg
 from testcontainers.postgres import PostgresContainer
@@ -41,6 +42,9 @@ from stabilize import (  # noqa: E402
     TaskRegistry,
     Workflow,
     WorkflowStatus,
+)
+from stabilize.persistence.postgres.signals import (  # noqa: E402
+    SIGNAL_STORAGE_RETRY_SECONDS,
 )
 
 ENGINE_TABLES = (
@@ -167,6 +171,53 @@ def main() -> int:
             "workflow succeeds with the grant",
             status_g == WorkflowStatus.SUCCEEDED,
             f"{status_g} err={err_g!r}",
+        ))
+
+        print()
+        print("=== E. THE RELEASE DIRECTION: does ONE store RECOVER? ===")
+        print("    A-D use two different roles, so they only ever test the BLOCK")
+        print("    direction twice. This is the question the guard actually raises:")
+        print("    one store, made unusable, then made usable again.")
+
+        recov = PostgresWorkflowStore(ungranted)
+        before = recov.supports_signal_storage()
+        print(f"    1. ungranted store reports usable: {before}")
+
+        with psycopg.connect(admin, autocommit=True) as conn:
+            conn.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON workflow_signals TO ungranted")
+
+        print("    2. grant RESTORED on the live database")
+
+        with psycopg.connect(ungranted) as conn:
+            can_read = conn.execute("SELECT count(*) FROM workflow_signals").fetchone() is not None
+        print(f"    CONTROL: the role can now genuinely read the table: {can_read}")
+
+        immediate = recov.supports_signal_storage()
+        print(f"    3. SAME store, checked IMMEDIATELY: {immediate}")
+        print(f"       (expected False -- the {SIGNAL_STORAGE_RETRY_SECONDS}s cooldown")
+        print("        must hold, or every stage completion re-probes a dead table)")
+
+        print(f"    4. waiting out the cooldown ({SIGNAL_STORAGE_RETRY_SECONDS}s)...")
+        time.sleep(SIGNAL_STORAGE_RETRY_SECONDS + 2.0)
+
+        after = recov.supports_signal_storage()
+        print(f"    5. SAME store, after the cooldown: {after}")
+        recov.close()
+
+        results.append((
+            "the role really regained access (control)",
+            can_read is True,
+            str(can_read),
+        ))
+        results.append((
+            "the cooldown HOLDS: no re-probe before it expires",
+            immediate is False,
+            f"immediate={immediate}",
+        ))
+        results.append((
+            "the cooldown EXPIRES: an unusable store RECOVERS once reachable",
+            after is True,
+            f"before={before} immediate={immediate} after={after}",
         ))
 
     print()

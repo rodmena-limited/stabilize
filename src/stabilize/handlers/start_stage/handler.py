@@ -26,6 +26,7 @@ from stabilize.handlers.start_stage.conditions import StartStageConditionsMixin
 from stabilize.handlers.start_stage.orchestration import StartStageOrchestrationMixin
 from stabilize.handlers.start_stage.planner import StartStagePlannerMixin
 from stabilize.models.stage import JoinType
+from stabilize.models.stage.stage import PLANNING_FAILED
 from stabilize.models.status import ACTIVE_STATUSES, WorkflowStatus
 from stabilize.queue.messages import (
     CancelStage,
@@ -256,7 +257,7 @@ class StartStageHandler(
                     fresh_stage.context["exception"] = {
                         "details": {"error": error_str},
                     }
-                    fresh_stage.context["beforeStagePlanningFailed"] = True
+                    fresh_stage.context[PLANNING_FAILED] = True
 
                     # Atomic: store stage + push CompleteStage together
                     with self.repository.transaction(self.queue) as txn:

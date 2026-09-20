@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 SIGNAL_TABLE = "workflow_signals"
+
+SIGNAL_STORAGE_RETRY_SECONDS = 30.0
 
 GRANT_HINT = (
     f"GRANT SELECT, INSERT, UPDATE, DELETE ON {SIGNAL_TABLE} TO <runtime_role>; "
@@ -29,6 +32,7 @@ class PostgresSignalMixin:
     """
 
     _signal_storage_usable: bool | None = None
+    _signal_storage_retry_at: float = 0.0
 
     def _signal_storage_unusable(self, exc: Exception) -> None:
         if self._signal_storage_usable is not False:
@@ -46,10 +50,23 @@ class PostgresSignalMixin:
                 GRANT_HINT,
             )
         self._signal_storage_usable = False
+        self._signal_storage_retry_at = time.monotonic() + SIGNAL_STORAGE_RETRY_SECONDS
 
     def supports_signal_storage(self) -> bool:
-        if self._signal_storage_usable is not None:
-            return self._signal_storage_usable
+        """Whether workflow_signals is reachable by this connection.
+
+        A negative answer expires. The table can become reachable again -- a
+        grant applied, a pool recovered, a migration finished -- and a store
+        that refused permanently would degrade to context buffering for the
+        life of the worker, reintroducing the growth issue 15 capped.
+        """
+        if self._signal_storage_usable is True:
+            return True
+        if (
+            self._signal_storage_usable is False
+            and time.monotonic() < self._signal_storage_retry_at
+        ):
+            return False
 
         try:
             with self._pool.connection() as conn:  # type: ignore[attr-defined]
@@ -61,6 +78,8 @@ class PostgresSignalMixin:
             self._signal_storage_unusable(exc)
             return False
 
+        if self._signal_storage_usable is False:
+            logger.info("Signal storage recovered: %s is reachable again", SIGNAL_TABLE)
         self._signal_storage_usable = True
         return True
 

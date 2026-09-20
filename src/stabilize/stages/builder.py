@@ -10,8 +10,10 @@ Stage definition builders are responsible for:
 
 from __future__ import annotations
 
+import logging
+import os
 from abc import ABC
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from stabilize.dag.graph import StageGraphBuilder
 from stabilize.models.task import TaskExecution
@@ -179,6 +181,59 @@ class WaitStageBuilder(StageDefinitionBuilder):
                 stage_end=True,
             ),
         ]
+
+
+logger = logging.getLogger(__name__)
+
+STRICT_STAGE_TYPE_ENV = "STABILIZE_STRICT_STAGE_TYPES"
+
+
+class UnregisteredStageTypeError(Exception):
+    """A stage produced no work and no builder is registered for its type."""
+
+
+def _strict_stage_types() -> bool:
+    return os.environ.get(STRICT_STAGE_TYPE_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def report_empty_unregistered_stage(stage: Any) -> None:
+    """Report a stage that will complete having done nothing.
+
+    `stage.type` is a free-form label, not a required registry key: most stages
+    carry explicit tasks and never consult a builder, and a taskless stage is a
+    legitimate coordinator (a multi-instance parent exists only so its instances
+    can depend on it). So this cannot refuse by default without breaking correct
+    workflows.
+
+    What it can do is stop the case being SILENT. A stage with no tasks, no
+    registered builder and no coordinator declaration completes as SUCCEEDED
+    having run nothing, and the likeliest cause is a builder that was written
+    and never registered.
+
+    Follows STABILIZE_MERGE_STRICT's shape: warn by default, raise under
+    STABILIZE_STRICT_STAGE_TYPES for callers who have no coordinator stages and
+    want the guarantee.
+    """
+    if getattr(stage, "mi_config", None) is not None:
+        return
+
+    message = (
+        f"Stage {getattr(stage, 'ref_id', '?')!r} (type {getattr(stage, 'type', '?')!r}) "
+        f"has no tasks and no StageDefinitionBuilder is registered for that type, "
+        f"so it will complete as SUCCEEDED having run nothing. If a builder was "
+        f"meant to supply its tasks, register it with "
+        f"stabilize.stages.builder.register_builder(). If the stage is "
+        f"deliberately empty, give it type 'noop' to say so. Set "
+        f"{STRICT_STAGE_TYPE_ENV}=1 to make this an error."
+    )
+    if _strict_stage_types():
+        raise UnregisteredStageTypeError(message)
+    logger.warning("%s", message)
 
 
 class StageDefinitionBuilderFactory:

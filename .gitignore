@@ -70,3 +70,4 @@ CERTIFICATION_AUDIT_REPORT.md
 .omo/
 
 .agentbus/
+.gate-stamp.json

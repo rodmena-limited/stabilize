@@ -32,6 +32,10 @@ if TYPE_CHECKING:
     from stabilize.models.workflow import Workflow
 
 
+PLANNING_FAILED = "beforeStagePlanningFailed"
+"""Set when planning raised before any task existed to carry the failure."""
+
+
 @dataclass
 class StageExecution(StageNavigationMixin):
     """
@@ -264,6 +268,12 @@ class StageExecution(StageNavigationMixin):
                         return WorkflowStatus.RUNNING
                     if WorkflowStatus.TERMINAL in after_stage_statuses:
                         return WorkflowStatus.TERMINAL
+                if self.context.get(PLANNING_FAILED):
+                    # Planning raised before any task was built, so there is no
+                    # task status to carry the failure. Without this the stage
+                    # reports SUCCEEDED having run nothing, with the real error
+                    # sitting in context where nothing reads it.
+                    return self.failure_status()
                 return WorkflowStatus.SUCCEEDED
             return WorkflowStatus.NOT_STARTED
 

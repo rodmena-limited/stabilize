@@ -1,5 +1,82 @@
 # Changelog
 
+## [0.29.0] - 2026-09-20
+
+### Upgrade notes — observable behaviour change
+
+- **A stage whose planning fails now reports failure instead of success (#50).**
+  This is the one item here that can change what an existing pipeline reports.
+
+  When planning a stage raised — a `StageDefinitionBuilder` that throws, an
+  unknown reducer name, an ancestor-output failure — the engine recorded the
+  error in `stage.context["exception"]`, set
+  `context["beforeStagePlanningFailed"] = True`, and then completed the stage as
+  **SUCCEEDED**. The flag was written at one site and read by none, and
+  `determine_status()` returns SUCCEEDED for a RUNNING stage with no tasks.
+
+  So the workflow reported success having run nothing, with the real error
+  sitting in context where nothing looked.
+
+  `determine_status()` now consults that marker and classifies through the
+  existing `failure_status()`, so `continuePipelineOnFailure` and `failPipeline`
+  are honoured as they are for any other failure.
+
+  **What this means for you:** a pipeline that has been failing to plan and
+  reporting green will now report red. The failure was always there; only the
+  reporting changes. If a workflow turns red on this upgrade, read
+  `stage.context["exception"]` — the cause has been recorded all along.
+
+  This also corrects a claim made in the 0.28.x notes: an unknown reducer name
+  was said to fail the workflow at runtime. It did not. It succeeded silently.
+
+### Fixed
+
+- **Signal storage latched off permanently after one transient fault (#48).**
+  Shipped in 0.28.2. `supports_signal_storage()` cached a negative answer with
+  no expiry, so a pool blip, a momentary permission change during a migration or
+  a brief network stall degraded signal storage for the **life of the worker
+  process** — reintroducing the unbounded `stage_executions.context` growth that
+  issue 15 capped, with the warning firing once.
+
+  A negative answer now expires after a 30s cooldown and the table is re-probed;
+  recovery is logged at INFO. The guard blocks *and* releases.
+
+  The probe that covered this tested only the block direction: it used two
+  different roles, which reads as "both directions" and is not. It now takes one
+  store through revoke → unusable → restore → **resumes**.
+
+- **An unregistered stage type silently produced a no-op stage (#49).** A stage
+  whose type has no registered `StageDefinitionBuilder` fell back to
+  `NoOpStageBuilder`, so a caller who wrote a builder and forgot
+  `register_builder()` got zero tasks and a SUCCEEDED workflow.
+
+  `stage.type` is a free-form label and a multi-instance parent is legitimately
+  taskless, so refusing unregistered types is not available — it would break
+  essentially every workflow. Instead, following `STABILIZE_MERGE_STRICT`'s
+  shape: the engine now **warns**, naming the stage, the type and the remedy.
+  Set `STABILIZE_STRICT_STAGE_TYPES=1` to make it an error. Declared
+  coordinators (`mi_config`) are exempt.
+
+- **`examples/benchmark-overhead.py` could never pass.** It targets its own
+  loopback server, which `HTTPTask`'s SSRF guard blocks by design. It now opts
+  in with `allow_private_urls`, which is what a caller targeting a private
+  address is supposed to do. The engine was correct; the example was not.
+
+### Changed
+
+- `audit/evaluations/run_all.sh` distinguishes **skipped** from **failed**. A
+  probe needing a PostgreSQL container on a machine without Docker reported
+  identically to a probe that failed.
+- New `make probes-sqlite` / `probes-postgres` / `probes`, and `make check` now
+  runs the Docker-free probe set. The probe suite — this repo's audit evidence —
+  was previously run by no target at all.
+- `make check` records a gate stamp keyed to a fingerprint of the source tree,
+  and `scripts/release.py` skips its test stage when that stamp matches. A skip
+  now rests on evidence that these exact bytes passed, rather than on
+  `--skip-tests` asserting it. The stamp is refused if the tree changes while
+  the gate runs.
+
+
 ## [0.28.2] - 2026-09-20
 
 ### Fixed

@@ -214,7 +214,15 @@ for i in range(NUM_TASKS):
             name=f"HTTP-{i}",
             tasks=[TaskExecution.create(name=f"HTTP-{i}", implementing_class="http", stage_start=True, stage_end=True)],
             requisite_stage_ref_ids={"trigger"},
-            context={"url": f"{BASE_URL}/stabilize/{i}", "parse_json": True, "timeout": 10},
+            context={
+                "url": f"{BASE_URL}/stabilize/{i}",
+                "parse_json": True,
+                "timeout": 10,
+                # The benchmark serves from its own loopback server, which the
+                # SSRF guard blocks by default. Opting in is what a caller
+                # targeting a private address must do.
+                "allow_private_urls": True,
+            },
         ),
     )
 

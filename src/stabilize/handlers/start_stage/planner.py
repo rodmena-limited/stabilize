@@ -9,7 +9,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from stabilize.dag.graph import StageGraphBuilder
-from stabilize.stages.builder import get_default_factory
+from stabilize.stages.builder import (
+    get_default_factory,
+    report_empty_unregistered_stage,
+)
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -80,6 +83,8 @@ class StartStagePlannerMixin:
         # Build tasks if none exist
         if not stage.tasks:
             stage.tasks = builder.build_tasks(stage)
+            if not stage.tasks and not get_default_factory().has(stage.type):
+                report_empty_unregistered_stage(stage)
 
         # Set task-stage back-references and mark first/last tasks
         if stage.tasks:
