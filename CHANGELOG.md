@@ -1,6 +1,39 @@
 # Changelog
 
-## [Unreleased]
+## [0.27.0] - 2026-09-20
+
+Ten orchestration defects, found by a three-pass adversarial audit. Every one was
+reproduced through the public API before being fixed, and each carries a probe in
+`audit/evaluations/` that has been shown to fail as well as pass.
+
+### Upgrade notes — observable behaviour changes
+
+These are corrections to defects, but they change what existing workflows do.
+Read these before upgrading:
+
+- **A de-selected branch no longer runs, and neither does anything behind it.**
+  Previously a branch deeper than one stage ran even when its split de-selected
+  it, because SKIPPED counted as "upstream satisfied". If a pipeline was relying
+  on that, the branch it wants must now be selected by the split's condition.
+- **A join whose every branch was de-selected is now SKIPPED rather than
+  executed.**
+- **`MULTI_MERGE` now fires once per upstream** instead of once in total. A stage
+  using it will execute N times where it previously executed once.
+- **A re-entered stage now re-reads its ancestors** instead of keeping the first
+  value it saw. Jump-based retry loops that silently never converged will now
+  converge — and will run to their real exit condition rather than failing at the
+  jump budget.
+- **Structured loops execute.** `LoopBuilder` workflows previously died on
+  `TaskNotFoundError`; they now run, so a graph built with one will do work it
+  did not do before.
+- `stageEnabled=False` deliberately still does **not** prune: a disabled stage in
+  a linear pipeline continues to let its successor run.
+
+Not fixed in this release, and still broken: multi-instance `cancel_remaining`
+has no runtime reader, so the remaining instances run to completion; and
+`create_dynamic(initial_count > 0)` clears `allow_dynamic`, so later
+`AddMultiInstance` messages are refused. Both are now flagged in the docs and the
+agent prompt rather than reading as working features.
 
 ### Fixed
 
