@@ -46,7 +46,11 @@ dependencies = [
 [project.optional-dependencies]
 postgres = [
     "psycopg[pool]>=3.0",
+    "psycopg-pool>=3.1",
     "migretti>=0.3",
+]
+cli = [
+    "pyyaml>=6.0",
 ]
 observability = [
     "structlog>=24.0",
@@ -58,7 +62,9 @@ process = [
 ]
 all = [
     "psycopg[pool]>=3.0",
+    "psycopg-pool>=3.1",
     "migretti>=0.3",
+    "pyyaml>=6.0",
     "structlog>=24.0",
     "opentelemetry-api>=1.20",
     "opentelemetry-sdk>=1.20",
@@ -66,7 +72,9 @@ all = [
 ]
 dev = [
     "psycopg[pool]>=3.0",
+    "psycopg-pool>=3.1",
     "migretti>=0.3",
+    "pyyaml>=6.0",
     "pytest>=8.0",
     "pytest-xdist>=3.0",
     "pytest-asyncio>=0.23",

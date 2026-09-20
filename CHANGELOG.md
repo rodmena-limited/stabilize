@@ -1,5 +1,73 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **The dependency manifest did not match the code, in both directions (#36).**
+  Reported into by runflow-3858c4, who asked whether 0.27.0 closed the
+  undeclared-direct-import defect they reported in July. The specific instance
+  (`resilient_circuit` imported in seven modules, arriving transitively through
+  bulkman) was closed in 0.20.0; the class was not, because one package was
+  declared and no check was added. Two live instances were on the published
+  0.27.0 wheel:
+
+  `PyYAML` is imported by `cli/config.py` and was declared in no group or extra,
+  including `[all]`. On a host without PyYAML, `stabilize mg-up` and `mg-status`
+  print a warning and exit 1 when an `mg.yaml` is present, which is the path the
+  CLI's own documentation tells the user to take. The import dates to
+  2025-12-23, so every release since has carried it. PyYAML is now declared in a
+  new `cli` extra, included in `[all]` and `[dev]`.
+
+  `pydantic` is declared and imported by nothing, and is deliberately KEPT. It
+  was removed in an earlier revision of this change and that was the wrong
+  reading: the declaration is intent that was never implemented, not a phantom.
+  The engine performs no contract validation at all — `create_message_from_dict`
+  is a bare `message_class(**data)` splat over a plain dataclass, so a queue
+  message with `attempts='three'` constructs silently and raises `TypeError` far
+  away in the retry path. Tracked as issue 41; the manifest test carries an
+  explicit `DECLARED_PENDING_USE` exemption naming it, plus a test that fails
+  once the exemption is taken up so it cannot outlive its reason.
+
+  `psycopg-pool` is now declared explicitly in the `postgres` extra. It arrived
+  via psycopg's own `[pool]` extra, so nothing was broken, but that is an
+  indirect declaration that depends on psycopg's extra layout.
+
+### Added
+
+- **`tests/test_dependency_manifest.py`, which compares imports against
+  declarations in both directions** and is the actual fix — the three defects
+  above are what it found. It fails on a third-party import with no declaration,
+  on a `[project].dependencies` entry no module imports, and on a guarded
+  optional import declared as a hard requirement. Module-to-distribution
+  resolution uses `importlib.metadata.packages_distributions()` rather than a
+  hand-maintained alias table, because four cases in this repo have different
+  names on each side (yaml/PyYAML, psycopg_pool/psycopg-pool, ulid/python-ulid,
+  resilient_circuit/resilient-circuit).
+
+  It carries a fourth test whose only job is to prove the scanner works, by
+  asserting it finds an import known to be there. A scan that silently matched
+  nothing would otherwise report a clean manifest with full confidence.
+
+  Demonstrated red before green. On the unfixed manifest:
+
+      FAILED test_every_third_party_import_is_declared
+        psycopg_pool (events.py, snapshots.py, subscriptions.py); yaml (cli/config.py)
+      FAILED test_no_runtime_dependency_is_unimported
+        pydantic
+      FAILED test_guarded_imports_are_optional_not_runtime
+        psycopg_pool not in 'postgres'; yaml not in 'cli'
+      PASSED test_the_check_can_see_a_known_positive
+
+  After: 4 passed.
+
+### Known limitation, unchanged
+
+- Multi-instance `cancel_remaining` still has no runtime reader (#35), and
+  `_hydrated_keys` still appears in `stage_executions.context` and in a task's
+  `INPUT` (#37). Neither is fixed here.
+
+
 ## [0.27.0] - 2026-09-20
 
 Ten orchestration defects, found by a three-pass adversarial audit. Every one was
