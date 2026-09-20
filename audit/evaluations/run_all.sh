@@ -6,6 +6,12 @@
 # PYTHON may override the interpreter. No probe here is destructive and none
 # contacts a production host; probe_ssrf_guard.py performs outbound DNS
 # resolution for public hostnames only.
+#
+# The probe list is DERIVED from the directory, not hand-maintained. A
+# hand-maintained list is a second description of the same fact, and it drifts
+# silently: four probes sat on disk outside the runner and were reported as
+# coverage. Anything deliberately not run must be named in EXCLUDED with a
+# reason, so an omission is a decision rather than an oversight.
 set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1
@@ -15,36 +21,31 @@ if [ ! -x "$PYTHON" ]; then
     PYTHON="python3"
 fi
 
-PROBES=(
-    audit/evaluations/probe_mg_conninfo.py
-    audit/evaluations/probe_ssrf_guard.py
-    audit/evaluations/probe_http_credential_persistence.py
-    audit/evaluations/probe_circuit_storage_honesty.py
-    audit/evaluations/probe_pool_options.py
-    audit/evaluations/probe_ssrf_rebinding.py
-    audit/evaluations/probe_schema_and_exists.py
-    audit/evaluations/probe_secret_redaction.py
-    audit/evaluations/probe_dsn_ssl_params.py
-    audit/evaluations/probe_stage_message_ownership.py
-    audit/evaluations/probe_stage_context_rehydration.py
-    audit/evaluations/probe_event_read_forward_compat.py
-    audit/evaluations/probe_event_commit_watermark.py
-    audit/evaluations/probe_event_coverage.py
-    audit/evaluations/probe_branch_pruning.py
-    audit/evaluations/probe_multi_merge.py
-    audit/evaluations/probe_structured_loops.py
-    audit/evaluations/probe_task_lease_fails_closed.py
-    audit/evaluations/probe_event_store_no_ddl_by_default.py
-    audit/evaluations/probe_multi_instance_cancel_remaining.py
-    audit/evaluations/probe_message_contract.py
-    audit/evaluations/probe_engine_key_census.py
-    audit/evaluations/probe_dynamic_multi_instance.py
-    audit/evaluations/probe_multitenant_rls.py
-    audit/evaluations/probe_schema_namespace_resolution.py
-    audit/evaluations/probe_split_namespace.py
+declare -A EXCLUDED=(
+    [probe_event_store_ddl_on_construction.py]="asserts the PRE-39 contract (constructor issues DDL by default), which 0.28.0 reversed; kept as the historical reproduction, superseded by probe_event_store_no_ddl_by_default.py"
 )
 
+mapfile -t ALL < <(cd audit/evaluations && ls probe_*.py | sort)
+
+PROBES=()
+for name in "${ALL[@]}"; do
+    if [ -n "${EXCLUDED[$name]:-}" ]; then
+        continue
+    fi
+    PROBES+=("audit/evaluations/$name")
+done
+
+echo "==================================================================="
+echo "${#ALL[@]} probe(s) on disk; ${#PROBES[@]} to run; ${#EXCLUDED[@]} excluded"
+for name in "${!EXCLUDED[@]}"; do
+    echo "  EXCLUDED $name"
+    echo "           ${EXCLUDED[$name]}"
+done
+echo "==================================================================="
+echo
+
 failures=0
+declare -a failed_names=()
 for probe in "${PROBES[@]}"; do
     echo "==================================================================="
     echo "RUNNING $probe"
@@ -54,6 +55,7 @@ for probe in "${PROBES[@]}"; do
     else
         echo "--- $probe: FAIL"
         failures=$((failures + 1))
+        failed_names+=("$probe")
     fi
     echo
 done
@@ -63,5 +65,8 @@ if [ "$failures" -eq 0 ]; then
     echo "ALL PROBES PASSED (${#PROBES[@]} probes)"
 else
     echo "$failures of ${#PROBES[@]} PROBE(S) FAILED"
+    for n in "${failed_names[@]}"; do
+        echo "  FAILED $n"
+    done
 fi
 exit "$failures"
