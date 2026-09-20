@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.28.0] - 2026-09-20
 
 Nine defects, every one reproduced against the PUBLISHED 0.27.0 artifact from
 PyPI before being fixed, and each carrying a probe in `audit/evaluations/` shown
