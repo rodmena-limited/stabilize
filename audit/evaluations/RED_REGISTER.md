@@ -40,7 +40,6 @@ transition across two published artifacts.
     probe_ssrf_rebinding
     probe_schema_and_exists
     probe_secret_redaction
-    probe_dsn_ssl_params
 
 Their fixes predate 0.26.0, so passing there is correct and expected. That is
 the point: for these nine, "green" and "asserts nothing" have produced identical
@@ -112,6 +111,41 @@ column before that case runs.
 
 Modes 2 and 3 were found in this suite. Mode 4 is what this file corrects.
 
+## RED OBSERVED — probe_dsn_ssl_params, on 0.25.2
+
+Recorded 2026-09-20, prompted by trace-thinkpad-83589d.
+
+This probe sat in NEVER OBSERVED RED and I inferred from that entry that it had
+no negative case. It has one. The entry describes the RUNS, not the CASES — it
+had only ever been pointed at 0.26.0 and 0.27.0, and the fix landed in 0.26.0,
+so both were supposed to pass. Green on two artifacts that both contain the fix
+is the same output a probe asserting nothing produces.
+
+Pointed at 0.25.2, which carries the defect:
+
+    STATIC   sslmode, sslrootcert, sslcert, sslkey, application_name -> ALL DROPPED
+             CONTROL: a plain URL gains no parameters it never had  -> none
+    LIVE     CONTROL A: no sslmode          -> reachable: True
+             sslmode=require (must FAIL)    -> CONNECTED  >>> the defect
+             CONTROL B: sslmode=disable     -> reachable: True
+    RESULT   6 CHECK(S) FAILED, exit 1
+
+Both live controls held, so the red is the defect and not an unreachable server.
+
+Two things the run settled that neither party knew:
+
+- The peer's fallback hypothesis -- that `sslmode` might survive while only the
+  file-path parameters were lost -- is **falsified**. The whole set goes,
+  `sslmode` included. Their original report stands exactly as filed.
+- `application_name` is dropped too, so the defect was never TLS-specific: 0.25.2
+  discarded **every** query parameter. The TLS ones were simply the ones that
+  hurt.
+
+The construction worth copying, in the peer's words: this negative case does not
+detect "TLS was dropped" directly, it detects that **a refusal it demanded did
+not happen**. It tests the consequence rather than the mechanism, which is why
+it is portable to servers that do not mandate TLS.
+
 ## The mode upstream of all four
 
     A CHECK THAT EXISTS BUT IS NOT EXECUTED REPORTS NOTHING WHILE LOOKING LIKE
@@ -132,6 +166,33 @@ Measured, two codebases in one night:
 In both cases the artefact that made it invisible was a HAND-MAINTAINED LIST
 standing beside a directory that already stated the truth. The remedy is the
 same in both: derive the list, and require a written reason to exclude.
+
+## An assertion the failure mode itself skips
+
+Contributed by trace-thinkpad-83589d, who hit it in their own repo while
+auditing it:
+
+    if response.status_code < 400:
+        ...the assertion...
+
+A 500 is not < 400, so the assertion was **skipped for every server error** --
+precisely the case it existed to catch. The route was answering 500 from an
+unhandled constraint violation and the probe reported PASS on every run. It was
+found in an API log, because an operator could not sign in; the suite was green
+throughout.
+
+    AN ASSERTION GUARDED BY A CONDITION THAT THE FAILURE MAKES FALSE
+    IS AN ASSERTION THAT NEVER RUNS WHEN IT MATTERS.
+
+This shape is greppable and is present in this repo:
+`tests/test_failure_scenarios.py:275-282` nests its assertion under
+`if moved == 0:` and then `if row:`. That one is not vacuous overall -- an
+unconditional `assert moved == 1` follows it -- but the inner assertion is dead
+unless the code is already broken, which is the same construction one step from
+harm.
+
+Distinct from "never goes red": the check *can* go red, and does on the happy
+path. It is the failure path that silently skips it.
 
 ## The general remedy the four share
 
