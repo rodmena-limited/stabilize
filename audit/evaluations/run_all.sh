@@ -38,6 +38,8 @@ PROBES=(
     audit/evaluations/probe_multi_instance_cancel_remaining.py
     audit/evaluations/probe_message_contract.py
     audit/evaluations/probe_engine_key_census.py
+    audit/evaluations/probe_dynamic_multi_instance.py
+    audit/evaluations/probe_multitenant_rls.py
 )
 
 failures=0

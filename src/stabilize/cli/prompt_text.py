@@ -2227,15 +2227,17 @@ instance_stages = MultiInstanceBuilder.create_from_collection(
     parent_stage=parent, collection_key="items", item_context_key="current_item",
 )
 
-# WCP-15: Dynamic (add instances during execution)
-# KNOWN LIMITATION: pass initial_count=0. With initial_count > 0 the builder
-# clears allow_dynamic, and every later AddMultiInstance is refused at WARNING.
-instance_stages = MultiInstanceBuilder.create_dynamic(parent_stage=parent, initial_count=0)
+# WCP-15: Dynamic (add instances during execution). initial_count may be 0 or
+# more; a seeded parent still accepts later AddMultiInstance messages.
+instance_stages = MultiInstanceBuilder.create_dynamic(parent_stage=parent, initial_count=2)
 
-# N-of-M with MI: proceed once 3 of 5 complete.
-# KNOWN LIMITATION: cancel_remaining is NOT implemented -- nothing reads it at
-# runtime. The join fires at the threshold, but the remaining instances run to
-# completion. Do not rely on it to stop work.
+# N-of-M with MI: proceed once 3 of 5 complete. The remaining instances still
+# run to completion -- the join threshold releases the DOWNSTREAM, it does not
+# stop upstream work.
+# cancel_remaining=True RAISES NotImplementedError rather than being accepted
+# and ignored: every instance is dispatched when the parent completes, so by the
+# time a threshold is reached the rest are already RUNNING and the engine has no
+# cancellation channel into a running task.
 instance_stages = MultiInstanceBuilder.create_fixed(
     parent_stage=parent, count=5, join_threshold=3,
 )

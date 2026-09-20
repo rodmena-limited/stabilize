@@ -255,12 +255,21 @@ class MultiInstanceBuilder:
         parent_stage.context["_mi_instance_count"] = initial_count
 
         if initial_count > 0:
-            return MultiInstanceBuilder.create_fixed(
+            stages = MultiInstanceBuilder.create_fixed(
                 parent_stage=parent_stage,
                 count=initial_count,
                 instance_type=instance_type,
                 instance_name_prefix=instance_name_prefix,
                 sync_on_complete=True,
             )
+            # create_fixed replaces mi_config wholesale and does not know about
+            # dynamic growth, so allow_dynamic reverted to False here and every
+            # later AddMultiInstance was refused at WARNING. Restore it.
+            parent_stage.mi_config = MultiInstanceConfig(
+                count=initial_count,
+                allow_dynamic=True,
+                sync_on_complete=True,
+            )
+            return stages
 
         return []
