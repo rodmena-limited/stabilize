@@ -88,6 +88,27 @@ column before that case runs.
 
 Modes 2 and 3 were found in this suite. Mode 4 is what this file corrects.
 
+## The mode upstream of all four
+
+    A CHECK THAT EXISTS BUT IS NOT EXECUTED REPORTS NOTHING WHILE LOOKING LIKE
+    COVERAGE.
+
+The four modes above all describe a check that RUNS and whose result misleads.
+This one is upstream of them: there is no result to mislead, and the only trace
+is a filename in a directory listing that a human counts as reassurance.
+
+Measured, two codebases in one night:
+
+    this suite     4 of 30 probes sat outside run_all.sh, including the #16
+                   probe and the only one that runs as a least-privilege role
+                   -- which is what caught the 0.28.1 regression once it ran
+    a peer         33 of 55 probes returned 401 on their first call, because a
+                   tenant-membership fixture was never created
+
+In both cases the artefact that made it invisible was a HAND-MAINTAINED LIST
+standing beside a directory that already stated the truth. The remedy is the
+same in both: derive the list, and require a written reason to exclude.
+
 ## The general remedy the four share
 
     A ZERO IS EVIDENCE ONLY WHEN SOMETHING IN THE SAME QUERY IS NON-ZERO.
