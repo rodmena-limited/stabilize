@@ -23,9 +23,23 @@ classifiers = [
 dependencies = [
     "python-ulid>=2.0",
     "pydantic>=2.0",
-    # NO UPPER BOUNDS on the house libraries. A cap here is the binding
-    # constraint estate-wide, because stabilize is pulled in transitively
-    # almost everywhere, and it blocks their fixes from reaching anyone.
+    # NO UPPER BOUNDS here on the house libraries, because stabilize is pulled
+    # in transitively almost everywhere and a cap of ours would block their
+    # fixes from reaching anyone.
+    #
+    # BUT THIS IS NOT WHERE THE ESTATE-WIDE CEILING LIVES, and an earlier
+    # version of this comment claimed it was. bulkman depends on
+    # resilient-circuit[postgres]<0.9, so the effective ceiling for every
+    # consumer of stabilize is bulkman's, not ours. It is deliberate and held:
+    # bulkman drives CircuitProtectorPolicy._status, a private attribute, so a
+    # resilient-circuit minor could break it at import time with no major bump.
+    # Argue with it there (bulkman SPECS/12), not here.
+    #
+    # Two further things arrive through that same line rather than through
+    # ours: the [postgres] extra pulls psycopg into EVERY bare stabilize
+    # install, so our own `postgres` extra does not gate it (bulkman #15), and
+    # psycopg-pool likewise. Our guarded `import psycopg` branches therefore
+    # almost never execute in practice.
     #
     # Floors are kept and are not caps: bulkman 2.0.1 added
     # BulkheadShutdownError, which resilience/executor.py's shutdown-race

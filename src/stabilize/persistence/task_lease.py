@@ -29,6 +29,16 @@ if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
 
 
+class TaskLeaseUnavailableError(RuntimeError):
+    """Raised when leasing was requested but cannot be provided.
+
+    Setting STABILIZE_TASK_LEASE asks for single-execution across processes.
+    Substituting no leasing for the leasing that was asked for would let a task
+    with external side effects run twice while the operator believed otherwise,
+    so the request fails rather than degrades.
+    """
+
+
 def _now_ms() -> int:
     return int(time.time() * 1000)
 

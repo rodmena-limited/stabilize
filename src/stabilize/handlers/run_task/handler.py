@@ -106,15 +106,33 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         # one worker across processes executes a given task at a time.
         self.task_lease = None
         if os.environ.get("STABILIZE_TASK_LEASE", "").lower() in ("1", "true", "yes"):
-            from stabilize.persistence.task_lease import TaskLeaseManager
+            from stabilize.persistence.task_lease import (
+                TaskLeaseManager,
+                TaskLeaseUnavailableError,
+            )
+
+            raw_ttl = os.environ.get("STABILIZE_TASK_LEASE_TTL_SECONDS", "3600")
+            try:
+                ttl = float(raw_ttl)
+            except ValueError as e:
+                raise TaskLeaseUnavailableError(
+                    f"STABILIZE_TASK_LEASE is set but STABILIZE_TASK_LEASE_TTL_SECONDS={raw_ttl!r} "
+                    "is not a number, so single-execution leasing cannot be configured"
+                ) from e
 
             try:
-                ttl = float(os.environ.get("STABILIZE_TASK_LEASE_TTL_SECONDS", "3600"))
                 self.task_lease = TaskLeaseManager(repository, ttl_seconds=ttl)
-                logger.info("Distributed task lease enabled (owner=%s)", self.task_lease.owner)
             except Exception as e:
-                logger.warning("Failed to initialize task lease manager, continuing without it: %s", e)
-                self.task_lease = None
+                raise TaskLeaseUnavailableError(
+                    "STABILIZE_TASK_LEASE is set but the lease manager could not be "
+                    f"initialised ({type(e).__name__}: {e}). Leasing is what keeps a task "
+                    "from executing on two workers at once; starting without it would "
+                    "silently allow the double execution this setting exists to prevent. "
+                    "Grant the runtime role rights to create the task_leases table, or "
+                    "unset STABILIZE_TASK_LEASE."
+                ) from e
+
+            logger.info("Distributed task lease enabled (owner=%s)", self.task_lease.owner)
 
         # Initialize resilience components with defaults if not provided
         if bulkhead_manager is None or circuit_factory is None:

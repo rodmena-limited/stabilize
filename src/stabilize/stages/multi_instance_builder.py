@@ -67,6 +67,17 @@ class MultiInstanceBuilder:
         Returns:
             List of created stages (instances + optional join stage)
         """
+        if cancel_remaining:
+            raise NotImplementedError(
+                "cancel_remaining is not implemented and cannot be honoured by this "
+                "engine: every instance of a fixed multi-instance stage is dispatched "
+                "when the parent completes, so by the time an N-of-M threshold is "
+                "reached the remaining instances are already RUNNING and there is no "
+                "cancellation channel into a running task. Measured at count=5 and "
+                "count=20: all remaining instances read RUNNING when the threshold "
+                "fires. Remove the argument, or track stabilize issue 35."
+            )
+
         if not instance_type:
             instance_type = parent_stage.type
 

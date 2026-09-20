@@ -112,3 +112,55 @@ class TestRunTaskHandlerLeaseWiring:
 
         result = repository.retrieve(workflow.id)
         assert result.status == WorkflowStatus.SUCCEEDED
+
+
+class TestLeaseFailsClosed:
+    """STABILIZE_TASK_LEASE must provide leasing or refuse; never silently disable it."""
+
+    def test_initialisation_failure_refuses(
+        self, repository: WorkflowStore, queue: Queue, backend: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from stabilize.handlers import RunTaskHandler
+        from stabilize.persistence import task_lease as task_lease_module
+        from stabilize.persistence.task_lease import TaskLeaseUnavailableError
+        from stabilize.tasks.registry import TaskRegistry
+
+        class Unavailable:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                raise RuntimeError("InsufficientPrivilege: permission denied for schema public")
+
+        monkeypatch.setenv("STABILIZE_TASK_LEASE", "1")
+        monkeypatch.setattr(task_lease_module, "TaskLeaseManager", Unavailable)
+
+        with pytest.raises(TaskLeaseUnavailableError) as excinfo:
+            RunTaskHandler(queue, repository, TaskRegistry())
+
+        assert "double execution" in str(excinfo.value)
+        assert "InsufficientPrivilege" in str(excinfo.value)
+
+    def test_unparseable_ttl_refuses(
+        self, repository: WorkflowStore, queue: Queue, backend: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The old catch was bare `except Exception`, so a bad TTL disabled leasing too."""
+        from stabilize.handlers import RunTaskHandler
+        from stabilize.persistence.task_lease import TaskLeaseUnavailableError
+        from stabilize.tasks.registry import TaskRegistry
+
+        monkeypatch.setenv("STABILIZE_TASK_LEASE", "1")
+        monkeypatch.setenv("STABILIZE_TASK_LEASE_TTL_SECONDS", "not-a-number")
+
+        with pytest.raises(TaskLeaseUnavailableError):
+            RunTaskHandler(queue, repository, TaskRegistry())
+
+    def test_control_leasing_still_works_when_available(
+        self, repository: WorkflowStore, queue: Queue, backend: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without this, a handler that never leases would pass the two tests above."""
+        from stabilize.handlers import RunTaskHandler
+        from stabilize.persistence.task_lease import TaskLeaseManager
+        from stabilize.tasks.registry import TaskRegistry
+
+        monkeypatch.setenv("STABILIZE_TASK_LEASE", "1")
+        handler = RunTaskHandler(queue, repository, TaskRegistry())
+
+        assert isinstance(handler.task_lease, TaskLeaseManager)

@@ -30,6 +30,25 @@ def validate_schema_name(schema: str) -> str:
     return schema
 
 
+def announce_file_source(path: Path, config: dict[str, Any] | None) -> None:
+    """Say which file the target came from, and what it resolved to.
+
+    migretti owns the ``mg.yaml`` name and reads it from the working directory
+    too, so a bare ``stabilize mg-up`` in a repo configured for migretti will
+    silently adopt that file and connect to whatever it names. Printing the
+    source and the resolved target is what lets an operator notice before the
+    connection rather than after.
+    """
+    if not config:
+        return
+    host = config.get("host", "localhost")
+    port = config.get("port", 5432)
+    dbname = config.get("dbname") or config.get("database") or "?"
+    user = config.get("user") or "?"
+    target = redact_db_url(f"{user}@{host}:{port}/{dbname}")
+    print(f"Using database configuration from {path}: {target}")
+
+
 def load_config() -> dict[str, Any]:
     """Load database config from mg.yaml or environment."""
     config: dict[str, Any] | None = None
@@ -47,6 +66,7 @@ def load_config() -> dict[str, Any]:
                 with open(mg_yaml) as f:
                     raw = yaml.safe_load(f)
                     config = raw.get("database", {}) if raw else {}
+                announce_file_source(mg_yaml, config)
             except ImportError:
                 print("Warning: PyYAML not installed, cannot read mg.yaml")
                 print("Set MG_DATABASE_URL environment variable instead")

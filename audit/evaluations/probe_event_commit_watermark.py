@@ -84,7 +84,7 @@ def main() -> int:
             setup.execute("DROP TABLE IF EXISTS event_subscriptions CASCADE")
             setup.execute("DROP TABLE IF EXISTS snapshots CASCADE")
 
-        store = PostgresEventStore(dsn)
+        store = PostgresEventStore(dsn, create_tables=True)
         print(f"commit cursor available: {store.supports_commit_cursor()}")
 
         def _event(name: str) -> Event:

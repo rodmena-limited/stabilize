@@ -32,6 +32,11 @@ PROBES=(
     audit/evaluations/probe_event_coverage.py
     audit/evaluations/probe_branch_pruning.py
     audit/evaluations/probe_multi_merge.py
+    audit/evaluations/probe_structured_loops.py
+    audit/evaluations/probe_task_lease_fails_closed.py
+    audit/evaluations/probe_event_store_no_ddl_by_default.py
+    audit/evaluations/probe_multi_instance_cancel_remaining.py
+    audit/evaluations/probe_message_contract.py
 )
 
 failures=0

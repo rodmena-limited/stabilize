@@ -22,6 +22,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from stabilize.models.stage.engine_keys import HIDDEN_FROM_TASK_INPUT
 from stabilize.tasks.interface import Task
 from stabilize.tasks.result import TaskResult
 
@@ -177,7 +178,7 @@ print("__PYTHONTASK_RESULT_END__")
             "env",
             "continue_on_failure",
             "inputs",
-        }
+        } | HIDDEN_FROM_TASK_INPUT
 
         # Start with ancestor outputs (upstream stage data)
         ancestor_outputs: dict[str, Any] = {}
@@ -188,6 +189,9 @@ print("__PYTHONTASK_RESULT_END__")
         except (AttributeError, ValueError):
             # Stage might not be attached to an execution yet
             pass
+
+        for engine_key in HIDDEN_FROM_TASK_INPUT:
+            ancestor_outputs.pop(engine_key, None)
 
         # Filter out internal keys from context
         base_inputs = {k: v for k, v in stage.context.items() if k not in internal_keys}

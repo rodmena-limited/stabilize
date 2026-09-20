@@ -88,3 +88,32 @@ SUBSCRIPTIONS_CURSOR_MIGRATION = (
 
 # xid8, pg_current_xact_id() and pg_snapshot_xmin() are PostgreSQL 13+.
 MIN_COMMIT_XID_VERSION = 130000
+
+
+REQUIRED_TABLES = ("events", "snapshots", "event_subscriptions")
+
+REQUIRED_COLUMNS = (
+    ("events", "commit_xid"),
+    ("event_subscriptions", "last_commit_cursor"),
+)
+
+SETUP_DDL = "\n".join(
+    (
+        EVENTS_SCHEMA.strip(),
+        "",
+        SNAPSHOTS_SCHEMA.strip(),
+        "",
+        SUBSCRIPTIONS_SCHEMA.strip(),
+        "",
+        *(f"{statement};" for statement in SUBSCRIPTIONS_CURSOR_MIGRATION),
+        "",
+        *(f"{statement};" for statement in EVENTS_COMMIT_XID_MIGRATION),
+    )
+)
+
+
+def setup_ddl(schema: str | None = None) -> str:
+    """The DDL an operator applies, schema-qualified when *schema* is given."""
+    if not schema:
+        return SETUP_DDL
+    return f"SET search_path TO {schema};\n\n{SETUP_DDL}"

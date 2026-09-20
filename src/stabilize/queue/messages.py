@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from functools import cache
+from typing import Any, cast
+
+from pydantic import TypeAdapter, ValidationError
 
 from stabilize.models.stage import SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
@@ -461,6 +464,34 @@ def get_message_type_name(message: Message) -> str:
     return message.__class__.__name__
 
 
+class MessageContractError(ValueError):
+    """A persisted message does not match its declared field types.
+
+    The queue row was written by another process, and on a rolling deploy by
+    another VERSION. Splatting it into a dataclass checks field NAMES and no
+    field TYPE, so a wrong value is admitted here and detonates later inside a
+    handler -- reaching the DLQ attributed to whatever code touched it rather
+    than to the deserialization that accepted it.
+    """
+
+
+def _validated(message_class: type[Message], data: dict[str, Any], type_name: str) -> Message:
+    adapter = _adapter_for(message_class)
+    try:
+        return cast(Message, adapter.validate_python(data))
+    except ValidationError as exc:
+        problems = "; ".join(
+            f"{'.'.join(str(p) for p in err['loc']) or '<message>'}: {err['msg']}"
+            for err in exc.errors()[:4]
+        )
+        raise MessageContractError(f"{type_name} failed its field contract: {problems}") from exc
+
+
+@cache
+def _adapter_for(message_class: type[Message]) -> Any:
+    return TypeAdapter(message_class)
+
+
 def create_message_from_dict(type_name: str, data: dict[str, Any]) -> Message:
     """
     Create a message from a dictionary representation.
@@ -474,9 +505,10 @@ def create_message_from_dict(type_name: str, data: dict[str, Any]) -> Message:
 
     Raises:
         ValueError: If type_name is unknown
+        MessageContractError: If a field does not match its declared type
     """
     if type_name not in MESSAGE_TYPES:
         raise ValueError(f"Unknown message type: {type_name}")
 
     message_class = MESSAGE_TYPES[type_name]
-    return message_class(**data)
+    return _validated(message_class, data, type_name)
