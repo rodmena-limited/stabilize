@@ -495,3 +495,88 @@ class PostgresWorkflowStore(PostgresMaintenanceMixin, WorkflowStore):
                 abort_store_transaction()
                 raise
             commit_store_transaction()
+
+    def supports_signal_storage(self) -> bool:
+        return True
+
+    def buffer_signal(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+        signal_name: str,
+        signal_data: dict[str, Any] | None = None,
+    ) -> int:
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO workflow_signals "
+                    "(execution_id, stage_ref_id, signal_name, signal_data) "
+                    "VALUES (%s, %s, %s, %s) RETURNING id",
+                    (execution_id, stage_ref_id, signal_name, json.dumps(signal_data or {}, default=str)),
+                )
+                row = cur.fetchone()
+            conn.commit()
+        return int(row["id"] if isinstance(row, dict) else row[0]) if row else 0
+
+    def consume_signal(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+        signal_name: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Claim the oldest unconsumed signal atomically.
+
+        FOR UPDATE SKIP LOCKED so two workers racing on the same suspended stage
+        cannot both claim one signal; the UPDATE and the read are one statement
+        so a crash between them cannot consume a signal without delivering it.
+        """
+        clause = "AND signal_name = %s" if signal_name else ""
+        params: tuple[Any, ...] = (
+            (execution_id, stage_ref_id, signal_name)
+            if signal_name
+            else (execution_id, stage_ref_id)
+        )
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE workflow_signals SET consumed = TRUE, consumed_at = NOW() "
+                    "WHERE id = (SELECT id FROM workflow_signals "
+                    "            WHERE execution_id = %s AND stage_ref_id = %s "
+                    f"          AND consumed = FALSE {clause} "
+                    "            ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1) "
+                    "RETURNING signal_name, signal_data",
+                    params,
+                )
+                row = cur.fetchone()
+            conn.commit()
+        if not row:
+            return None
+        if isinstance(row, dict):
+            return {"signal_name": row["signal_name"], "signal_data": row["signal_data"] or {}}
+        return {"signal_name": row[0], "signal_data": row[1] or {}}
+
+    def pending_signal_count(self, execution_id: str, stage_ref_id: str) -> int:
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT count(*) AS n FROM workflow_signals "
+                    "WHERE execution_id = %s AND stage_ref_id = %s AND consumed = FALSE",
+                    (execution_id, stage_ref_id),
+                )
+                row = cur.fetchone()
+        if not row:
+            return 0
+        return int(row["n"] if isinstance(row, dict) else row[0])
+
+
+    def discard_signals(self, execution_id: str, stage_ref_id: str) -> int:
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM workflow_signals WHERE execution_id = %s "
+                    "AND stage_ref_id = %s AND consumed = FALSE",
+                    (execution_id, stage_ref_id),
+                )
+                dropped = cur.rowcount or 0
+            conn.commit()
+        return dropped

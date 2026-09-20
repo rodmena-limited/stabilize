@@ -40,6 +40,8 @@ PROBES=(
     audit/evaluations/probe_engine_key_census.py
     audit/evaluations/probe_dynamic_multi_instance.py
     audit/evaluations/probe_multitenant_rls.py
+    audit/evaluations/probe_schema_namespace_resolution.py
+    audit/evaluations/probe_split_namespace.py
 )
 
 failures=0

@@ -132,9 +132,17 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
                     self._refuse_undeliverable(message, stage)
                     return
 
-                buffered = stage.context.get("_buffered_signals", [])
-                if len(buffered) >= self.handler_config.signal_buffer_max:
-                    self._refuse_overflow(message, stage, len(buffered))
+                store_backed = self.repository.supports_signal_storage()
+                context_buffered = stage.context.get("_buffered_signals", [])
+                if store_backed:
+                    depth = self.repository.pending_signal_count(
+                        stage.execution.id, stage.ref_id
+                    ) + len(context_buffered)
+                else:
+                    depth = len(context_buffered)
+
+                if depth >= self.handler_config.signal_buffer_max:
+                    self._refuse_overflow(message, stage, depth)
                     return
 
                 logger.info(
@@ -143,16 +151,30 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
                     stage.name,
                     stage.status,
                 )
-                buffered.append(
-                    {
-                        "signal_name": message.signal_name,
-                        "signal_data": message.signal_data,
-                    }
-                )
-                stage.context["_buffered_signals"] = buffered
 
-                with self.repository.transaction(self.queue) as txn:
-                    txn.store_stage(stage)
+                if store_backed:
+                    # workflow_signals, not stage context: the context copy grew
+                    # unbounded and is visible to every consumer reading that
+                    # column. Rows already carrying _buffered_signals keep
+                    # working -- the consume path reads both.
+                    self.repository.buffer_signal(
+                        stage.execution.id,
+                        stage.ref_id,
+                        message.signal_name,
+                        message.signal_data,
+                    )
+                    with self.repository.transaction(self.queue) as txn:
+                        txn.store_stage(stage)
+                else:
+                    context_buffered.append(
+                        {
+                            "signal_name": message.signal_name,
+                            "signal_data": message.signal_data,
+                        }
+                    )
+                    stage.context["_buffered_signals"] = context_buffered
+                    with self.repository.transaction(self.queue) as txn:
+                        txn.store_stage(stage)
                     if message.message_id:
                         txn.mark_message_processed(
                             message_id=message.message_id,

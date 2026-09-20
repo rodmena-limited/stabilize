@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from resilient_circuit import ExponentialDelay
 
@@ -205,11 +205,21 @@ def _handle_suspended(
     stage.status = WorkflowStatus.SUSPENDED
 
     # Check for any buffered signals (WCP-24: persistent triggers)
+    # Dual-read, context FIRST: a signal buffered before the storage move must
+    # drain rather than sit behind every signal written since. Rows carrying
+    # _buffered_signals keep working until they empty, and nothing rewrites them.
+    signal: dict[str, Any] | None = None
     buffered = stage.context.get("_buffered_signals", [])
     if buffered:
-        # Consume the first buffered signal
         signal = buffered.pop(0)
-        stage.context["_buffered_signals"] = buffered
+        if buffered:
+            stage.context["_buffered_signals"] = buffered
+        else:
+            stage.context.pop("_buffered_signals", None)
+    elif txn_helper.repository.supports_signal_storage():
+        signal = txn_helper.repository.consume_signal(stage.execution.id, stage.ref_id)
+
+    if signal:
         stage.context["_signal_name"] = signal.get("signal_name", "")
         stage.context["_signal_data"] = signal.get("signal_data", {})
         # Resume by re-running the same task (stage is already RUNNING)

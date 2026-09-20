@@ -16,7 +16,7 @@ import logging
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from stabilize.persistence.sqlite.operations import (
     cleanup_old_processed_messages as _cleanup_old_processed_messages,
@@ -215,3 +215,51 @@ class SqliteWorkflowStore(
     def get_processed_message_ids(self, limit: int | None = None) -> list[str] | None:
         """Return processed message IDs, for hydrating an in-memory dedup cache."""
         return _get_processed_message_ids(self._get_connection(), limit)
+
+    def supports_signal_storage(self) -> bool:
+        return True
+
+    def buffer_signal(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+        signal_name: str,
+        signal_data: dict[str, Any] | None = None,
+    ) -> int:
+        from stabilize.persistence.sqlite.signals import buffer_signal as _buffer
+
+        conn = self._get_connection()
+        signal_id = _buffer(conn, execution_id, stage_ref_id, signal_name, signal_data)
+        conn.commit()
+        return signal_id
+
+    def consume_signal(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+        signal_name: str | None = None,
+    ) -> dict[str, Any] | None:
+        from stabilize.persistence.sqlite.signals import consume_signal as _consume
+
+        conn = self._get_connection()
+        signal = _consume(conn, execution_id, stage_ref_id, signal_name)
+        conn.commit()
+        if signal is None:
+            return None
+        return {"signal_name": signal.signal_name, "signal_data": signal.signal_data}
+
+    def pending_signal_count(self, execution_id: str, stage_ref_id: str) -> int:
+        from stabilize.persistence.sqlite.signals import get_pending_signals
+
+        return len(get_pending_signals(self._get_connection(), execution_id, stage_ref_id))
+
+
+    def discard_signals(self, execution_id: str, stage_ref_id: str) -> int:
+        conn = self._get_connection()
+        cur = conn.execute(
+            "DELETE FROM workflow_signals WHERE execution_id = :e "
+            "AND stage_ref_id = :s AND consumed = 0",
+            {"e": execution_id, "s": stage_ref_id},
+        )
+        conn.commit()
+        return cur.rowcount or 0

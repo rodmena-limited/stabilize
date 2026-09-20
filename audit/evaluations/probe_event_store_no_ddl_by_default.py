@@ -24,6 +24,7 @@ import psycopg
 from testcontainers.postgres import PostgresContainer
 
 from stabilize.events.store.postgres import store as store_module
+from stabilize.events.store.postgres.schema import EVENTS_COMMIT_XID_MIGRATION
 from stabilize.events.store.postgres.store import PostgresEventStore
 
 
@@ -122,6 +123,31 @@ def main() -> int:
             names_column = "events.commit_xid" in str(exc)
             print(f"    RAISED EventStoreSchemaError; names the column: {names_column}")
             results.append(("stale schema refuses", names_column, str(exc)[:90]))
+
+        print()
+        print("=== F. A TABLE IN THE WRONG SCHEMA DOES NOT SATISFY THE CHECK ===")
+        print("    existence is not resolution: an information_schema lookup without")
+        print("    a schema filter passes when the table exists ANYWHERE this role")
+        print("    can see, while search_path resolves somewhere else entirely")
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            # Case E dropped commit_xid and did not put it back. Without this
+            # restore, F raises for a STALE-COLUMN reason on every version and
+            # proves nothing about schema resolution -- it would pass on the
+            # unfixed build too, which is how a check becomes vacuous.
+            for statement in EVENTS_COMMIT_XID_MIGRATION:
+                conn.execute(statement)
+            conn.execute("CREATE SCHEMA IF NOT EXISTS decoy")
+            conn.execute("ALTER TABLE events SET SCHEMA decoy")
+        try:
+            PostgresEventStore(dsn)
+            print("    CONSTRUCTED although events resolves to nothing on this connection")
+            results.append(("wrong-schema table is not accepted", False, "constructed anyway"))
+        except EventStoreSchemaError as exc:
+            print(f"    RAISED EventStoreSchemaError: {str(exc)[:70]}")
+            results.append(("wrong-schema table is not accepted", True, "EventStoreSchemaError"))
+        finally:
+            with psycopg.connect(dsn, autocommit=True) as conn:
+                conn.execute("ALTER TABLE decoy.events SET SCHEMA public")
 
     print()
     failures = 0

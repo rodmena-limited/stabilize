@@ -478,7 +478,22 @@ class StabilizeHandler(MessageHandler[M], ABC):
         )
         stage.status = new_status
         if new_status.is_complete:
+            store_pending = 0
+            if self.repository.supports_signal_storage() and stage.execution is not None:
+                store_pending = self.repository.pending_signal_count(
+                    stage.execution.id, stage.ref_id
+                )
+                if store_pending:
+                    self.repository.discard_signals(stage.execution.id, stage.ref_id)
             discarded = stage.context.pop("_buffered_signals", None)
+            if store_pending and not discarded:
+                logger.warning(
+                    "Discarding %d buffered signal(s) on stage %s (ref_id=%s) entering %s",
+                    store_pending,
+                    stage.id,
+                    stage.ref_id,
+                    new_status,
+                )
             if discarded:
                 logger.warning(
                     "Discarding %d buffered signal(s) on stage %s (ref_id=%s) entering %s",
