@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.28.2] - 2026-09-20
+
+### Fixed
+
+- **0.28.1 broke every deployment whose runtime role has per-table grants.**
+  #16 made `set_stage_status` call `pending_signal_count` on every stage
+  completion, which reads `workflow_signals`. A role granted privileges on the
+  previously-known table set has none on that table, because nothing referenced
+  it before 0.28.1, so the workflow died mid-flight with
+  `InsufficientPrivilege` -- at stage completion, not at startup.
+
+  `supports_signal_storage()` returned `True` on the strength of the backend
+  class. The caller needs an answer about the connection: can this session reach
+  that table. Different layers, same `True`. Support is now established by using
+  the table once and is withdrawn when it cannot be used, so an unreachable
+  table degrades to the pre-0.28.1 stage-context buffer instead of failing the
+  workflow.
+
+  The warning names where the data went, not merely that a fallback happened:
+  a deployment that protects `workflow_signals` with row-level security while
+  leaving `stage_executions` unprotected moves signal payloads outside that
+  boundary, and "falling back to stage-context buffering" does not say so.
+
+- **A signal could be dropped with no error.** `supports_signal_storage()` is
+  checked before the write, so an unreachable table correctly takes the context
+  path -- but if the check said yes and the write then failed, the caller had
+  already committed to the store branch and the signal was lost silently.
+  `buffer_signal` returns the row id, the caller checks it, and a zero falls
+  through to the context buffer. Replacing a crash with a quiet data-loss path
+  would have been worse than the crash.
+
+- **A redelivered signal buffered twice.** The store-backed branch never called
+  `mark_message_processed`; the context branch did. Now both do.
+
+- **`mg-up` found no migrations from a source checkout (#42).** `get_migrations`
+  resolved only through `importlib`, but the `.sql` files live at the repository
+  root and are force-included into the wheel at build time, so a checkout found
+  zero and reported "No migrations found in package" -- which reads as "this
+  version ships none". It now falls back to the repository root, and when
+  neither location has them, names both.
+
+  The suite could not have caught this: `tests/test_cli_schema.py` monkeypatches
+  `get_migrations` with a working replacement in three places.
+
+### Changed
+
+- The probe runner derives its list from the directory instead of carrying a
+  hand-maintained copy. Four probes sat outside it and were counted as coverage,
+  including the one for #16 and the only one that runs as a least-privilege role
+  -- which is what caught the regression above.
+
+
 ## [0.28.1] - 2026-09-20
 
 ### Fixed

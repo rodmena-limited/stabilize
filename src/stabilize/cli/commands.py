@@ -79,9 +79,6 @@ def mg_up(db_url: str | None = None) -> None:
                 # Get available migrations
                 migrations = get_migrations()
 
-                if not migrations:
-                    print("No migrations found in package")
-                    return
 
                 # Apply pending migrations
                 pending = 0

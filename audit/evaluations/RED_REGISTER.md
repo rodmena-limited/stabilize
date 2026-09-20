@@ -87,3 +87,37 @@ column before that case runs.
                                               me to say?"
 
 Modes 2 and 3 were found in this suite. Mode 4 is what this file corrects.
+
+## The general remedy the four share
+
+    A ZERO IS EVIDENCE ONLY WHEN SOMETHING IN THE SAME QUERY IS NON-ZERO.
+
+`workflow_signals` reading 0 rows is indistinguishable from "the table is
+unreachable and every write has been silently degrading" -- which is a real
+defect this repo shipped. Pairing it with `processed_messages` at 8,482 in the
+same run rules that out: the machinery is writing, and this table specifically
+has never been asked for anything.
+
+This is not a fifth failure mode. It is how to catch three of the four, so it is
+filed with them rather than among them.
+
+## When two checks agree
+
+Distinct from the four, because it is about the relationship between two
+instruments rather than a fault in either:
+
+    AGREEMENT BETWEEN TWO CHECKS IS EVIDENCE ONLY WHEN SOMETHING ESTABLISHES
+    THEY READ THE SAME ARTIFACT.
+
+Two parties confirmed that 0.27.0 carries no PostgreSQL signal store -- one
+against the wheel downloaded from PyPI, one against the copy installed in a
+running venv. The answers matched. Nothing in either check established that an
+installed tree and a published wheel are the same bytes, which is the assumption
+the "verify the served artifact" rule exists to forbid.
+
+Closed by a recursive diff of the two trees, with a known-positive in the same
+run: appending one comment line made it exit 1; restoring the line made it exit
+0. Without that, a diff comparing nothing -- wrong root, an exclude that
+swallowed the tree -- also exits 0.
+
+Agreement is treated as the end of an investigation. It is the start of one.

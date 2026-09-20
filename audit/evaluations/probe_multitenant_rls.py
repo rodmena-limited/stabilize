@@ -30,8 +30,6 @@ import logging
 import sys
 from urllib.parse import quote
 
-from pathlib import Path
-
 import psycopg
 from testcontainers.postgres import PostgresContainer
 
@@ -81,37 +79,13 @@ def _tenant_dsn(container: PostgresContainer, tenant: str) -> str:
 
 
 def _apply_migrations(admin_dsn: str) -> None:
-    """Apply the shipped migrations, from the package or from a source checkout.
+    """Apply the shipped migrations through the CLI's own resolver."""
+    from stabilize.cli.migrations import extract_up_migration, get_migrations
 
-    `stabilize mg-up` resolves migrations through importlib from the installed
-    package, where they are force-included at build time. In a source checkout
-    they live at the repository root instead, so this probe reads whichever is
-    present rather than only running against an installed wheel.
-    """
-    from importlib.resources import files
-
-    sql_files: list[tuple[str, str]] = []
-    try:
-        pkg = files("stabilize.migrations")
-        sql_files = [
-            (item.name, item.read_text())
-            for item in pkg.iterdir()
-            if item.name.endswith(".sql")
-        ]
-    except Exception:
-        sql_files = []
-
-    if not sql_files:
-        root = Path(__file__).resolve().parent.parent.parent / "migrations"
-        sql_files = [(f.name, f.read_text()) for f in sorted(root.glob("*.sql"))]
-
-    if not sql_files:
-        raise RuntimeError("no migrations found in the package or the checkout")
-
-    from stabilize.cli.migrations import extract_up_migration
+    sql_files = get_migrations()
 
     with psycopg.connect(admin_dsn, autocommit=True) as conn:
-        for name, content in sorted(sql_files):
+        for name, content in sql_files:
             conn.execute(extract_up_migration(content))
     print(f"    applied {len(sql_files)} migration(s)")
 

@@ -157,15 +157,35 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
                     # unbounded and is visible to every consumer reading that
                     # column. Rows already carrying _buffered_signals keep
                     # working -- the consume path reads both.
-                    self.repository.buffer_signal(
+                    stored = self.repository.buffer_signal(
                         stage.execution.id,
                         stage.ref_id,
                         message.signal_name,
                         message.signal_data,
                     )
-                    with self.repository.transaction(self.queue) as txn:
-                        txn.store_stage(stage)
-                else:
+                    if not stored:
+                        # The store accepted nothing. Falling through to the
+                        # context buffer keeps the signal; taking this branch
+                        # and returning would drop it with no error, which is
+                        # worse than the crash this guard replaced.
+                        logger.warning(
+                            "Signal store accepted no row for '%s' on stage %s; "
+                            "buffering in stage context instead",
+                            message.signal_name,
+                            stage.name,
+                        )
+                        store_backed = False
+                    else:
+                        with self.repository.transaction(self.queue) as txn:
+                            txn.store_stage(stage)
+                            if message.message_id:
+                                txn.mark_message_processed(
+                                    message_id=message.message_id,
+                                    handler_type="SignalStage",
+                                    execution_id=message.execution_id,
+                                )
+
+                if not store_backed:
                     context_buffered.append(
                         {
                             "signal_name": message.signal_name,

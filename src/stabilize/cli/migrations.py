@@ -5,19 +5,60 @@ from __future__ import annotations
 import hashlib
 import re
 from importlib.resources import files
+from pathlib import Path
+
+PACKAGE_LOCATION = "stabilize.migrations"
+CHECKOUT_LOCATION = "<repository root>/migrations"
+
+
+class MigrationsNotFoundError(RuntimeError):
+    """No migration files could be located in any known location."""
+
+
+def _package_migrations() -> list[tuple[str, str]]:
+    try:
+        pkg = files(PACKAGE_LOCATION)
+    except (ModuleNotFoundError, FileNotFoundError):
+        return []
+    try:
+        return [
+            (item.name, item.read_text())
+            for item in pkg.iterdir()
+            if item.name.endswith(".sql")
+        ]
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+
+
+def _checkout_root() -> Path:
+    return Path(__file__).resolve().parent.parent.parent.parent
+
+
+def _checkout_migrations() -> list[tuple[str, str]]:
+    root = _checkout_root() / "migrations"
+    if not root.is_dir():
+        return []
+    return [(p.name, p.read_text()) for p in root.glob("*.sql")]
 
 
 def get_migrations() -> list[tuple[str, str]]:
-    """Get all migration files from the package."""
-    migrations_pkg = files("stabilize.migrations")
-    migrations = []
+    """Return every migration as (filename, sql), in ULID order.
 
-    for item in migrations_pkg.iterdir():
-        if item.name.endswith(".sql"):
-            content = item.read_text()
-            migrations.append((item.name, content))
+    The .sql files live at the repository root and are force-included into the
+    wheel under stabilize/migrations at build time, so an installed package and
+    a source checkout keep them in different places.
+    """
+    migrations = _package_migrations() or _checkout_migrations()
 
-    # Sort by filename (ULID prefix ensures chronological order)
+    if not migrations:
+        raise MigrationsNotFoundError(
+            "No migration files found. Searched the installed package "
+            f"({PACKAGE_LOCATION}) and the source checkout "
+            f"({_checkout_root() / 'migrations'}). An installed wheel carries "
+            "them in the package; a checkout carries them at the repository "
+            "root."
+        )
+
     migrations.sort(key=lambda x: x[0])
     return migrations
 

@@ -6,6 +6,7 @@ import argparse
 import sys
 
 from stabilize.cli.commands import mg_status, mg_up, monitor, prompt, prune_signals
+from stabilize.cli.migrations import MigrationsNotFoundError
 
 
 def main() -> None:
@@ -92,9 +93,17 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "mg-up":
-        mg_up(args.db_url)
+        try:
+            mg_up(args.db_url)
+        except MigrationsNotFoundError as exc:
+            print(exc, file=sys.stderr)
+            sys.exit(1)
     elif args.command == "mg-status":
-        mg_status(args.db_url)
+        try:
+            mg_status(args.db_url)
+        except MigrationsNotFoundError as exc:
+            print(exc, file=sys.stderr)
+            sys.exit(1)
     elif args.command == "prompt":
         prompt()
     elif args.command == "monitor":
