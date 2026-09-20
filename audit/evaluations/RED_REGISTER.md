@@ -167,6 +167,43 @@ In both cases the artefact that made it invisible was a HAND-MAINTAINED LIST
 standing beside a directory that already stated the truth. The remedy is the
 same in both: derive the list, and require a written reason to exclude.
 
+## A census fails into good news
+
+The modes above all fail in a direction somebody is uneasy about: a green that
+should be red, an absence that should be a presence. This one is worse, and it
+is worse for a reason that has nothing to do with the check's logic.
+
+    A CENSUS HAS NO RED. IT HAS A LIST, AND A SHORTER LIST LOOKS LIKE BETTER
+    NEWS. THE FAILURE MODE PRODUCES A RESULT PEOPLE ARE PLEASED WITH.
+
+Nobody investigates good news. Asked "which of our machines run an old version",
+a broken search and a clean estate print the same thing, and only one of them
+prompts a second look.
+
+Measured, 2026-09-20, between this repo and trace-thinkpad-83589d — **three
+broken searches in one exchange, between two parties who had spent the night
+specifically hunting this class**:
+
+    theirs   find -maxdepth 4   -> empty; the venvs were at depth 5
+    ours     find -maxdepth 3   -> empty; the venvs were at depth 4
+    ours     find -type f       -> empty; a venv's `python` is a SYMLINK
+
+All three reported "no machine here is exposed". The true answer was ten venvs
+across two hosts, including `ci` and `ci-builder` — the conductor that runs every
+RunFlow build as a stabilize DAG — on a release four minors below the fix.
+
+**The rule, and the placement is the whole of it:** put the known-positive in the
+EXPECTED OUTPUT before running the search, not in your head afterwards. The peer
+recovered in one second because "trace must appear at 0.29.0" was written into
+the command. This repo took two rounds because its known-positive was accidental
+— it happened to be scanning a machine where `stabilize/.venv` was known to
+exist.
+
+A related, smaller rule earned in the same exchange: **a filesystem path is not a
+fact without a host.** `~/develop/provenance-audit` was reported without one,
+could not be verified from this machine, and was correctly not relayed onward
+until the host was supplied.
+
 ## An assertion the failure mode itself skips
 
 Contributed by trace-thinkpad-83589d, who hit it in their own repo while
