@@ -2121,6 +2121,19 @@ Conditions are evaluated using a safe expression evaluator. Supported:
   - Context lookups: key_name, nested.key, dict["key"]
 Does NOT support: function calls, imports, assignments, arbitrary code.
 
+BRANCH PRUNING. A branch the split does not choose does not run, and neither
+does anything downstream of it. A stage is pruned when EVERY incoming edge is
+dead -- an edge is dead if the split de-selected that stage, or if the upstream
+was itself pruned. Pruned stages are marked SKIPPED.
+
+The decision is made per stage, where all of its upstreams are visible: a stage
+with one de-selected parent and one live parent still runs, exactly once. A join
+whose every branch was de-selected is pruned rather than firing on a path no
+token reached.
+
+stageEnabled is deliberately NOT a prune: a stage disabled that way still lets
+its successor run. Use SplitType.OR with split_conditions to gate a whole branch.
+
 19.3 Deferred Choice (WCP-16)
 ------------------------------
 # Race between branches — first to start wins, others are cancelled
@@ -2215,11 +2228,16 @@ instance_stages = MultiInstanceBuilder.create_from_collection(
 )
 
 # WCP-15: Dynamic (add instances during execution)
-instance_stages = MultiInstanceBuilder.create_dynamic(parent_stage=parent, initial_count=2)
+# KNOWN LIMITATION: pass initial_count=0. With initial_count > 0 the builder
+# clears allow_dynamic, and every later AddMultiInstance is refused at WARNING.
+instance_stages = MultiInstanceBuilder.create_dynamic(parent_stage=parent, initial_count=0)
 
-# N-of-M with MI: proceed after 3 of 5 complete, cancel rest
+# N-of-M with MI: proceed once 3 of 5 complete.
+# KNOWN LIMITATION: cancel_remaining is NOT implemented -- nothing reads it at
+# runtime. The join fires at the threshold, but the remaining instances run to
+# completion. Do not rely on it to stop work.
 instance_stages = MultiInstanceBuilder.create_fixed(
-    parent_stage=parent, count=5, join_threshold=3, cancel_remaining=True,
+    parent_stage=parent, count=5, join_threshold=3,
 )
 
 19.9 Structured Loops (WCP-21)
@@ -2240,6 +2258,22 @@ stages = LoopBuilder.repeat_until(
     body_stages=[stage_a, stage_b],
     loop_ref_prefix="test_loop",
 )
+
+# Loop state travels as OUTPUTS. A body stage reads the current values from
+# stage.context and returns updated ones; mutating stage.context in place does
+# NOT persist (the stage is reloaded before the result is processed).
+class Attempt(Task):
+    def execute(self, stage):
+        n = stage.context.get("attempts", 0)
+        return TaskResult.success(outputs={"attempts": n + 1,
+                                           "tests_passed": run_tests()})
+
+# The condition's identifiers must be published by something, or the stage
+# fails naming the identifier rather than looping silently to the bound.
+# Reaching max_iterations exits the loop and CONTINUES past it, carrying
+# loop_exhausted=True downstream and marking the loop's last stage
+# FAILED_CONTINUE. Nested loops work: an inner loop gets a full budget on
+# every pass of the outer one.
 
 19.10 Sub-Workflows / Recursion (WCP-22)
 -----------------------------------------
@@ -2342,7 +2376,8 @@ registry.register("approval", ApprovalTask)
 # find the suspended gate and send the decision:
 gate = next(s for s in store.retrieve(workflow.id).stages if s.ref_id == "approve")
 if gate.status == WorkflowStatus.SUSPENDED:
-    approve(queue, workflow.id, gate.id, {"user": "alice"})   # or reject(queue, ...)
+    approve(queue, workflow.id, gate.id, {"note": "ok"}, user="alice")  # or reject(...)
+    # user= is recorded as the actor on the stage.resumed event.
     processor.process_all(timeout=30)                          # resumes and finishes
 # The suspension is persisted (waits minutes/days, survives a restart). A signal
 # sent BEFORE the stage suspends is buffered, so approvals are never lost.
@@ -2469,7 +2504,7 @@ processor.process_all(timeout=180)                     # runs until the approval
 
 gate = next(s for s in store.retrieve(workflow.id).stages if s.ref_id == "approve")
 if gate.status == WorkflowStatus.SUSPENDED:
-    approve(queue, workflow.id, gate.id, {"user": "alice"})
+    approve(queue, workflow.id, gate.id, {"note": "ok"}, user="alice")
     processor.process_all(timeout=30)
 
 result = store.retrieve(workflow.id)

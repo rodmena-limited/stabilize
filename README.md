@@ -53,6 +53,13 @@ no lost work: on restart, recovery re-queues precisely the work that was in
 flight. For an agent that has already spent real time and money on model calls,
 this is the difference between resuming and starting over.
 
+Recovery is something you turn on, not something that happens by itself. The
+state is durable either way, but the sweep that re-queues in-flight work runs
+only when you ask for it — `recover_on_startup(store, queue)` at boot, or
+`recover_on_start=True` / `recovery_interval_seconds=...` on the processor. It
+also considers only workflows started within `recovery_max_age_hours` (24 by
+default), which is worth raising if your workflows outlive that.
+
 **Control flow is expressive.** Beyond fan-out and fan-in, Stabilize implements
 a large subset of the van der Aalst workflow patterns: proceed when *k of n*
 branches finish, proceed on the *first* branch to finish, mutual exclusion,
@@ -231,9 +238,15 @@ gate = next(s for s in store.retrieve(workflow.id).stages if s.ref_id == "approv
 assert gate.status == WorkflowStatus.SUSPENDED
 
 # ... later, when a human decides ...
-approve(queue, workflow.id, gate.id, {"user": "alice"})
+approve(queue, workflow.id, gate.id, {"note": "looks right"}, user="alice")
 processor.process_all(timeout=30)   # resumes and finishes
 ```
+
+`user=` is recorded as the actor on the resulting `stage.resumed` event, so the
+run has a durable answer to "who approved this". The payload dict is the
+approver's data and reaches the task as `outputs["approval"]`; pass `store=` as
+well and a stage id belonging to a different workflow is rejected at the call
+site instead of asynchronously.
 
 To watch the agent work as it runs, subscribe to the workflow's event stream.
 Tasks emit progress with `emit_progress`, and lifecycle events are published

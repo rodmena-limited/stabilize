@@ -229,6 +229,19 @@ Key Collision Warning
 
 When multiple stages output to the same top-level key, only the last one (in topological order) survives. This commonly occurs with PythonTask since all RESULT values go under the ``result`` key.
 
+The order is stable: ties between siblings break on ``ref_id``, so the same
+stored state always merges the same way, on any process or host. Stability is
+not the same as correctness, though — when two ancestors with no path between
+them set the same key to different values, no tie-break is more right than
+another. The engine logs that case at WARNING, naming both ancestors and both
+values, and ``STABILIZE_MERGE_STRICT=1`` turns it into an error instead. Treat
+such a warning as a modelling bug rather than noise: which value you get is a
+convention, not a semantic.
+
+A stage that runs again — a loop body, a jump target, a restarted stage —
+re-reads its ancestors rather than keeping the value it saw the first time.
+Keys the caller set directly on the stage still take precedence.
+
 .. code-block:: python
 
     # PROBLEMATIC: Both stages output to "result" key

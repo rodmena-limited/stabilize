@@ -53,8 +53,6 @@ Event Type                 Description
 ``workflow.completed``     Workflow finished successfully
 ``workflow.failed``        Workflow failed
 ``workflow.canceled``      Workflow was canceled
-``workflow.paused``        Workflow was paused
-``workflow.resumed``       Workflow was resumed
 =========================  ==========================
 
 **Stage events:**
@@ -67,7 +65,15 @@ Event Type                 Description
 ``stage.failed``           Stage failed
 ``stage.skipped``          Stage was skipped
 ``stage.canceled``         Stage was canceled
+``stage.suspended``        Stage is waiting for a signal (WCP-23/24)
+``stage.resumed``          A signal released a suspended stage
 =========================  ==========================
+
+A ``stage.suspended`` event is what makes a human-approval wait legible: without
+it a multi-day wait is an unexplained silence between ``task.started`` and
+``task.completed``, and a replay shows the stage RUNNING. The matching
+``stage.resumed`` carries the signal name, and its ``metadata.actor`` is whoever
+sent the signal — see :doc:`agentic`.
 
 **Task events:**
 
@@ -80,14 +86,33 @@ Event Type                 Description
 ``task.retried``           Task is being retried
 =========================  ==========================
 
-**State change events:**
+**Routing events:**
 
 =========================  ==========================
 Event Type                 Description
 =========================  ==========================
-``status.changed``         Generic status change
-``context.updated``        Stage context was updated
-``outputs.updated``        Stage outputs were updated
+``jump.executed``          A jump moved control to another stage
+=========================  ==========================
+
+``jump.executed`` carries ``from_stage_id``, ``to_stage_id`` and a ``jump_type``
+of ``self_loop``, ``backward``, ``forward`` or ``restart``. It is what makes a
+loop or a retry visible: without it a workflow that looped forty times replays
+as though it ran once.
+
+**Not yet emitted**
+
+These types exist and replay understands them, but nothing in the engine
+currently records them. They are listed here so their absence from a stream is
+not mistaken for a gap in your workflow:
+
+=========================  ==========================
+Event Type                 Status
+=========================  ==========================
+``workflow.paused``        Not emitted — pause is a store call with no recorder
+``workflow.resumed``       Not emitted
+``status.changed``         Not emitted — needs buffering to stay transactional
+``context.updated``        Not emitted
+``outputs.updated``        Not emitted
 ``jump.executed``          Dynamic jump was executed
 =========================  ==========================
 
@@ -261,3 +286,43 @@ providing periodic checkpoints:
    # The replayer uses snapshots automatically when available
    replayer = EventReplayer(event_store, snapshot_store=snapshot_store)
    state = replayer.rebuild_workflow_state(workflow.id)  # Starts from latest snapshot
+
+.. note::
+
+   The engine does not create snapshots for you. The replayer will use a
+   snapshot if one exists, but nothing currently writes them, so replay reads
+   the full event stream unless your application calls
+   ``SnapshotStore.create_workflow_snapshot`` itself.
+
+
+Guarantees
+----------
+
+**Reading an event a newer build wrote.** An ``event_type`` this build does not
+recognise resolves to ``EventType.UNKNOWN`` with the original string preserved in
+``event.data["_raw_event_type"]``, and replay ignores it. An event whose
+``schema_version`` is newer than this build's is refused under strict migration
+and skipped during replay, rather than being applied with the wrong field
+layout.
+
+This matters for rolling deploys: before this, a single unrecognised row raised
+inside row-to-event conversion and failed the **entire** query — replay,
+``WorkflowStream`` and every durable subscription over that store, not just that
+one event.
+
+**Delivery order on PostgreSQL.** ``events.sequence`` is a ``BIGSERIAL``,
+assigned at INSERT and not at COMMIT, so a transaction that inserted an earlier
+sequence can commit after a later one. A cursor that advanced by sequence would
+step over it permanently. Durable subscriptions therefore track a commit
+watermark rather than a sequence, and deliver in commit order.
+
+The cost, stated plainly: delivery is held behind the oldest in-flight write
+transaction on the database, so one long workflow transaction delays subscription
+delivery. Requires PostgreSQL 13 or newer; below that the engine keeps the
+sequence cursor and logs a warning naming the loss mode. SQLite is unaffected —
+its write lock has always made commit order equal sequence order.
+
+**Transactionality.** Events are appended inside the same transaction that
+commits the state they describe, so a rollback cannot leave a phantom event
+behind. The exception is an event store on a *different* database from the
+workflow store, where no shared transaction exists.

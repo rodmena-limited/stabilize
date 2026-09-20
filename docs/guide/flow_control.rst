@@ -123,7 +123,39 @@ Supported expression syntax:
 - Literals: strings, numbers, ``True``, ``False``, ``None``
 - Context lookups: ``key_name``, ``nested.key``, ``dict["key"]``
 
-Branches with conditions that evaluate to ``False`` are automatically skipped.
+Branches with conditions that evaluate to ``False`` are automatically skipped,
+and so is everything behind them — see `Branch pruning`_.
+
+Branch pruning
+~~~~~~~~~~~~~~
+
+A branch a split did not choose does not run, and neither does anything
+downstream of it. The rule the engine applies is:
+
+    A stage is pruned when **every** one of its incoming edges is dead. An edge
+    is dead when the upstream split de-selected this stage, or when the upstream
+    was itself pruned.
+
+The decision is made at each stage's own readiness evaluation, which is the only
+place where all of that stage's upstreams are visible. That matters for a
+diamond: a stage with one de-selected parent and one live parent still carries a
+token from the live one, so it runs — exactly once.
+
+A pruned stage is marked ``SKIPPED``. A join whose every branch was de-selected
+is pruned too, rather than firing on a path no token reached.
+
+.. note::
+
+   **Behaviour change in 0.27.0.** Before this, a de-selected branch deeper than
+   one stage ran anyway, because ``SKIPPED`` counts as "upstream satisfied". A
+   gate stage was therefore not a gate: a disabled deploy branch still deployed.
+   If you were relying on that, the branch you want should be selected by the
+   split's condition rather than reached around it.
+
+``stageEnabled`` is deliberately **not** a prune. A stage disabled that way still
+lets its successor run, so a skipped optional step in a linear pipeline behaves
+as it always has. Use ``split_type=SplitType.OR`` with ``split_conditions`` when
+you want the whole branch gated.
 
 OR-Join / Structured Synchronizing Merge (WCP-7)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -462,6 +494,37 @@ Use ``LoopBuilder`` for structured while and repeat-until patterns:
         body_stages=[stage_a, stage_b],
         loop_ref_prefix="test_loop",
     )
+
+**Loop state.** The condition publishes the loop's variables as outputs, and the
+loop-back carries them forward on the jump. A body stage therefore reads the
+current values from ``stage.context`` and returns updated ones as
+``TaskResult.outputs``:
+
+.. code-block:: python
+
+    class Attempt(Task):
+        def execute(self, stage):
+            n = stage.context.get("attempts", 0)
+            return TaskResult.success(outputs={"attempts": n + 1,
+                                               "tests_passed": run_tests()})
+
+Return loop state as **outputs**. Mutating ``stage.context`` in place does not
+persist: the stage is reloaded from the store before a task's result is
+processed.
+
+**The condition's identifiers must exist.** A condition naming something nothing
+publishes fails the stage and names the identifier, rather than evaluating to
+``False`` and spinning silently to the bound. In the ``repeat_until`` example
+above, the body must publish ``tests_passed``.
+
+**Reaching max_iterations** exits the loop and lets the workflow continue past
+it, carrying ``loop_exhausted: True`` downstream and recording
+``FAILED_CONTINUE`` on the loop's terminating stage. A ``while`` loop that never
+satisfies its guard is a bug, so it is visible — but it does not halt the
+workflow, and a post-loop stage can branch on ``loop_exhausted`` to compensate.
+
+**Nesting works.** An inner loop gets a full, independent budget on every pass of
+the outer loop.
 
 Recursion / Sub-Workflows (WCP-22)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

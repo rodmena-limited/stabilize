@@ -80,8 +80,18 @@ arrives, then routes on it. It wraps the engine's durable
 
    # A human (or another system) approves — the payload lands in the stage's
    # outputs under "approval":
-   approve(queue, execution_id, gate.id, {"user": "alice"})
-   # or: reject(queue, execution_id, gate.id, {"reason": "needs work"})
+   approve(queue, execution_id, gate.id, {"note": "ok"}, user="alice")
+   # or: reject(queue, execution_id, gate.id, {"reason": "needs work"}, user="alice")
+
+``user=`` is recorded as the actor on the ``stage.resumed`` event, so a run has a
+durable record of who approved it; the payload dict is the approver's data and
+reaches the task as ``outputs["approval"]``. Passing ``store=`` as well checks
+that the stage belongs to the workflow you named, rejecting a mis-addressed
+approval at the call site.
+
+A suspended stage emits ``stage.suspended`` and its release emits
+``stage.resumed``, so a wait on a human is visible in the event stream rather
+than an unexplained gap.
 
 By default a rejection is terminal; set
 ``context["approval_reject_continues"] = True`` to continue the pipeline
