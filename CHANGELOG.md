@@ -2,71 +2,124 @@
 
 ## [Unreleased]
 
+Nine defects, every one reproduced against the PUBLISHED 0.27.0 artifact from
+PyPI before being fixed, and each carrying a probe in `audit/evaluations/` shown
+to fail on 0.27.0 and pass here. Six were found by consumers asking questions
+next to the thing rather than by an audit of this repo.
+
+### Upgrade notes — observable behaviour changes
+
+- **`PostgresEventStore(dsn)` no longer creates its own tables.** `create_tables`
+  now defaults to **False**. A store constructed against a schema that is absent
+  or out of date raises `EventStoreSchemaError` at construction, naming the
+  missing object and printing the exact, schema-qualified DDL to apply. Pass
+  `create_tables=True` to restore the old behaviour, or apply `setup_ddl()` as
+  the migration operator.
+
+  Why: a library that issues DDL from a constructor forces every consumer to
+  grant its runtime role a standing CREATE privilege, and that grant then
+  consents to whatever DDL a later release decides to run. On 0.27.0 the
+  constructor also ran `ALTER TABLE events ADD COLUMN commit_xid` and a
+  non-`CONCURRENTLY` `CREATE INDEX`, which takes ACCESS EXCLUSIVE on the events
+  table.
+
+- **`STABILIZE_TASK_LEASE` now fails closed.** When the flag is set and the lease
+  manager cannot be initialised, the engine raises `TaskLeaseUnavailableError`
+  instead of logging a warning and continuing. Previously a bare
+  `except Exception` disabled leasing silently — including on a typo in
+  `STABILIZE_TASK_LEASE_TTL_SECONDS` — so an operator who asked for
+  single-execution across processes did not have it and had no way to tell.
+
+- **A malformed queue message is now rejected at the boundary.**
+  `create_message_from_dict` validates fields against their declared types and
+  raises `MessageContractError` naming the field. Previously it was a bare
+  `message_class(**data)` splat: `attempts="three"` constructed silently and
+  raised `TypeError` far away in the retry path, reaching the DLQ attributed to
+  whatever code touched it. Caller-owned payload (`context`, `outputs`) is
+  deliberately unvalidated.
+
+- **`cancel_remaining=True` now raises `NotImplementedError`** rather than being
+  accepted and ignored. It is not implementable in this engine: every instance of
+  a fixed multi-instance stage is dispatched when the parent completes, so by the
+  time an N-of-M threshold is reached the remaining instances are already
+  RUNNING, and there is no cancellation channel into a running task. Measured at
+  count=5 and count=20; an admission-time check was also tried and is reached for
+  every instance before any completes.
+
+- **`mg-up` and `mg-status` now print the configuration source** and the
+  redacted resolved target before connecting. `mg.yaml` is a filename migretti
+  owns and reads from the working directory too, so a bare `stabilize mg-up` in
+  a repo configured for migretti silently adopted that file.
+
 ### Fixed
 
+- **`create_dynamic(initial_count > 0)` cleared `allow_dynamic` (#35).** It
+  delegated to `create_fixed`, which replaces `mi_config` wholesale and knows
+  nothing about dynamic growth, so the documented WCP-15 example produced a
+  parent that refused every later `AddMultiInstance` at WARNING.
+
+- **Engine-written context keys are enumerated and frozen (#37).** The defect was
+  never that `_hydrated_keys` leaked; it is that `context` had no published
+  boundary between caller data and engine bookkeeping, so every engine addition
+  was a silent behaviour change. `models/stage/engine_keys.py` publishes all 38;
+  `tests/test_engine_context_keys.py` fails when an unregistered key appears or a
+  registered one stops being written. 36 of the 38 are now stripped from a task's
+  `INPUT`; `_signal_name` and `_signal_data` stay visible because WCP-24 delivers
+  a signal to a suspended task through context.
+
+  An `_engine` envelope was designed for this and **withdrawn**: engine keys
+  legitimately vary by execution path, so nesting them stabilises no consumer's
+  key count, and under a no-migration commitment historical rows keep the old
+  shape indefinitely. The enumeration delivers what the envelope was chosen for
+  and covers every key rather than three.
+
 - **The dependency manifest did not match the code, in both directions (#36).**
-  Reported into by runflow-3858c4, who asked whether 0.27.0 closed the
-  undeclared-direct-import defect they reported in July. The specific instance
-  (`resilient_circuit` imported in seven modules, arriving transitively through
-  bulkman) was closed in 0.20.0; the class was not, because one package was
-  declared and no check was added. Two live instances were on the published
-  0.27.0 wheel:
+  `PyYAML` was imported by `cli/config.py` and declared nowhere, so `mg-up` and
+  `mg-status` exited 1 on an `mg.yaml` host; it is now declared in a new `cli`
+  extra. `psycopg-pool` arrived through psycopg's own `[pool]` extra and is now
+  declared explicitly. `pydantic` was declared and imported nowhere — it is
+  **kept**, because the declaration was intent that was never implemented, and
+  issue 41 implements it.
 
-  `PyYAML` is imported by `cli/config.py` and was declared in no group or extra,
-  including `[all]`. On a host without PyYAML, `stabilize mg-up` and `mg-status`
-  print a warning and exit 1 when an `mg.yaml` is present, which is the path the
-  CLI's own documentation tells the user to take. The import dates to
-  2025-12-23, so every release since has carried it. PyYAML is now declared in a
-  new `cli` extra, included in `[all]` and `[dev]`.
+- **`workflow_signals` is created on SQLite (#16, partial).**
+  `create_signals_table` existed and was never called, so the table was created
+  by migration on PostgreSQL and did not exist at all on SQLite. The storage move
+  itself is still open.
 
-  `pydantic` is declared and imported by nothing, and is deliberately KEPT. It
-  was removed in an earlier revision of this change and that was the wrong
-  reading: the declaration is intent that was never implemented, not a phantom.
-  The engine performs no contract validation at all — `create_message_from_dict`
-  is a bare `message_class(**data)` splat over a plain dataclass, so a queue
-  message with `attempts='three'` constructs silently and raises `TypeError` far
-  away in the retry path. Tracked as issue 41; the manifest test carries an
-  explicit `DECLARED_PENDING_USE` exemption naming it, plus a test that fails
-  once the exemption is taken up so it cannot outlive its reason.
-
-  `psycopg-pool` is now declared explicitly in the `postgres` extra. It arrived
-  via psycopg's own `[pool]` extra, so nothing was broken, but that is an
-  indirect declaration that depends on psycopg's extra layout.
+- The `pyproject.toml` dependency comment claimed a cap here is the estate-wide
+  binding constraint. It is not: bulkman pins `resilient-circuit[postgres]<0.9`,
+  deliberately, because it drives a private attribute. Corrected to name the
+  location and the reason.
 
 ### Added
 
-- **`tests/test_dependency_manifest.py`, which compares imports against
-  declarations in both directions** and is the actual fix — the three defects
-  above are what it found. It fails on a third-party import with no declaration,
-  on a `[project].dependencies` entry no module imports, and on a guarded
-  optional import declared as a hard requirement. Module-to-distribution
-  resolution uses `importlib.metadata.packages_distributions()` rather than a
-  hand-maintained alias table, because four cases in this repo have different
-  names on each side (yaml/PyYAML, psycopg_pool/psycopg-pool, ulid/python-ulid,
-  resilient_circuit/resilient-circuit).
+- **`tests/test_dependency_manifest.py`** compares imports against declarations
+  in both directions, with a test proving the scanner can find an import it is
+  pointed at, and a self-expiring exemption map. That map caught its own stale
+  entry within the same session.
 
-  It carries a fourth test whose only job is to prove the scanner works, by
-  asserting it finds an import known to be there. A scan that silently matched
-  nothing would otherwise report a clean manifest with full confidence.
+- **24 probes in `audit/evaluations/`**, each carrying controls that fail if the
+  probe goes vacuous. New here: task-lease fail-closed, event-store DDL, message
+  contract, structured loops, engine-key runtime census across four graph shapes,
+  dynamic multi-instance, and multi-tenant RLS.
 
-  Demonstrated red before green. On the unfixed manifest:
-
-      FAILED test_every_third_party_import_is_declared
-        psycopg_pool (events.py, snapshots.py, subscriptions.py); yaml (cli/config.py)
-      FAILED test_no_runtime_dependency_is_unimported
-        pydantic
-      FAILED test_guarded_imports_are_optional_not_runtime
-        psycopg_pool not in 'postgres'; yaml not in 'cli'
-      PASSED test_the_check_can_see_a_known_positive
-
-  After: 4 passed.
+- **Multi-tenant RLS is pinned by a test (#20).** Two tenants on separate
+  per-tenant DSNs against real PostgreSQL, with `tenant_id` defaulted from a GUC
+  under RESTRICTIVE policies: both workflows succeed, each tenant sees only its
+  own rows, and `FOR UPDATE SKIP LOCKED` is permitted. Note for deployers: a
+  purely RESTRICTIVE policy set denies everything, because restrictive policies
+  only subtract from permissive ones — a correct deployment needs a permissive
+  grant alongside the restrictive tenant constraint.
 
 ### Known limitation, unchanged
 
-- Multi-instance `cancel_remaining` still has no runtime reader (#35), and
-  `_hydrated_keys` still appears in `stage_executions.context` and in a task's
-  `INPUT` (#37). Neither is fixed here.
-
+- Stage context is persisted verbatim and is a bind parameter on every state
+  transition, so anything a caller places there is readable by anyone with
+  SELECT on `stage_executions`. This is a deliberate scope boundary (#17): the
+  orchestrator records what it is handed. Redaction at the persistence boundary
+  was implemented and reverted on measurement — handlers re-read stage state
+  during execution, so it starves the running task, which receives the literal
+  string `***REDACTED***` while the workflow reports SUCCEEDED.
 
 ## [0.27.0] - 2026-09-20
 
