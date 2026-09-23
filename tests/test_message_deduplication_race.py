@@ -161,7 +161,7 @@ class TestMessageDeduplicationRace:
                     mark_message_processed,
                 )
 
-                pool = get_connection_manager().get_postgres_pool(repository.connection_string)  # type: ignore
+                pool = repository._pool  # type: ignore[attr-defined]
 
                 barrier.wait()
 

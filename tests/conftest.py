@@ -47,12 +47,30 @@ except ImportError:
     PostgresQueue = None  # type: ignore[misc, assignment]
 
 
+_LEAKED_POOLS: list[str] = []
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    if _LEAKED_POOLS:
+        print(f"\n{len(_LEAKED_POOLS)} test(s) left a PostgreSQL pool held after teardown:")
+        for entry in _LEAKED_POOLS:
+            print(f"  {entry}")
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
 @pytest.fixture(autouse=True)
 def reset_connection_manager() -> Generator[None, None, None]:
-    """Reset singleton ConnectionManager between tests for isolation."""
+    """Reset singleton ConnectionManager between tests, failing the test if a PostgreSQL pool is still held."""
     yield
-    # Reset the singleton after each test
+    manager = SingletonMeta._instances.get(ConnectionManager)
+    held = sorted(manager._postgres_holders.values()) if manager is not None else []
     SingletonMeta.reset(ConnectionManager)
+    if held:
+        _LEAKED_POOLS.append(f"{os.environ.get('PYTEST_CURRENT_TEST', '?')}: holder counts {held}")
+        pytest.fail(
+            f"{len(held)} PostgreSQL pool(s) still held after teardown, holder counts {held}",
+            pytrace=False,
+        )
 
 
 @pytest.fixture(autouse=True)

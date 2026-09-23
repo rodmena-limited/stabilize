@@ -291,3 +291,29 @@ The lesson is narrower than the rule and worse:
 The control proves the instrument works. It says nothing about what the
 instrument was pointed at. Name the artifact and its version in the finding, or
 the control is decoration.
+
+## RED OBSERVED — probe_pool_release_per_tenant, on 0.29.0
+
+Recorded 2026-09-23, ticket #52, regression guard for #51.
+
+Observed at the server through `pg_stat_activity`, filtered by a per-tenant
+`application_name`. It does not read ConnectionManager's holder table, because
+that table is the code's model of itself, and that model was what was wrong.
+
+Four tenant DSNs, each constructs a PostgresQueue and a PostgresWorkflowStore,
+12 pushes and a size() per tenant, then every queue and store is closed:
+
+    v0.29.0 worktree   KNOWN-POSITIVE while open: 24   after close + 10s: 24   exit 1
+    current source     KNOWN-POSITIVE while open: 24   after close + 10s:  0   exit 0
+
+The known-positive is what makes the zero mean something: the observer query
+counted 24 tenant backends while the tenants were open, so a zero afterwards
+is a count of released connections, not an observer that cannot see them.
+
+The same ticket added a teardown check to `tests/conftest.py`: a test fails if
+any PostgreSQL pool is still held after its fixtures are torn down, checked
+before `SingletonMeta.reset` force-closes the rest. Until then that reset ran
+`close_all()` after every test, so no leaked pool could outlive a test and the
+suite could not observe #51 by construction. Current `tests/test_queue.py` run
+against the v0.29.0 source: 6 of 12 PostgreSQL cases error with the queue's
+pool still held (holder counts 5 to 11).

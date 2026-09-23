@@ -28,6 +28,7 @@ fi
 DOCKER_PROBES="probe_event_store_ddl_on_construction.py
 probe_event_store_no_ddl_by_default.py
 probe_multitenant_rls.py
+probe_pool_release_per_tenant.py
 probe_runtime_role_needs_no_create.py
 probe_schema_namespace_resolution.py
 probe_signal_storage_degrades.py
