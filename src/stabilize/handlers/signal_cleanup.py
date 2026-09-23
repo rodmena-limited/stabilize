@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
-    from stabilize.models.workflow import WorkflowStatus
+    from stabilize.models.status import WorkflowStatus
 
 logger = logging.getLogger(__name__)
 

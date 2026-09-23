@@ -16,6 +16,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from stabilize.persistence.connection import release_pool_once
 from stabilize.persistence.pool_options import with_schema
 from stabilize.queue.interface import Queue
 from stabilize.queue.messages import (
@@ -78,6 +79,9 @@ class PostgresQueue(Queue):
         self.schema = schema
         self._pool_options = with_schema(None, schema, connection_string)
         self._manager = get_connection_manager()
+        self._pool = self._manager.get_postgres_pool(
+            connection_string, options=self._pool_options
+        )
         self._pending: dict[int, dict[str, Any]] = {}
         # Size caching
         self._size_cache: int | None = None
@@ -85,14 +89,12 @@ class PostgresQueue(Queue):
         self._size_cache_ttl: float = 5.0  # seconds
 
     def _get_pool(self) -> Any:
-        """Get the shared connection pool from ConnectionManager."""
-        return self._manager.get_postgres_pool(
-            self.connection_string, options=self._pool_options
-        )
+        """Return the pool acquired at construction."""
+        return self._pool
 
     def close(self) -> None:
-        """Close the connection pool via connection manager."""
-        self._manager.close_postgres_pool(self.connection_string)
+        """Release this queue's hold on its pool."""
+        release_pool_once(self, self._manager, self._pool)
 
     def _serialize_message(self, message: Message) -> str:
         """Serialize a message to JSON."""

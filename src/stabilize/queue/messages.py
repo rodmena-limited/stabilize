@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from functools import cache
 from typing import Any, cast
 
 from pydantic import TypeAdapter, ValidationError
@@ -487,9 +486,14 @@ def _validated(message_class: type[Message], data: dict[str, Any], type_name: st
         raise MessageContractError(f"{type_name} failed its field contract: {problems}") from exc
 
 
-@cache
+_ADAPTERS: dict[type[Message], Any] = {}
+
+
 def _adapter_for(message_class: type[Message]) -> Any:
-    return TypeAdapter(message_class)
+    adapter = _ADAPTERS.get(message_class)
+    if adapter is None:
+        adapter = _ADAPTERS.setdefault(message_class, TypeAdapter(message_class))
+    return adapter
 
 
 def create_message_from_dict(type_name: str, data: dict[str, Any]) -> Message:

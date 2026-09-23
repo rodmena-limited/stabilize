@@ -25,7 +25,7 @@ from stabilize.events.store.postgres.schema import (
 )
 from stabilize.events.store.postgres.snapshots import PostgresSnapshotsMixin
 from stabilize.events.store.postgres.subscriptions import PostgresSubscriptionsMixin
-from stabilize.persistence.connection import get_connection_manager
+from stabilize.persistence.connection import get_connection_manager, release_pool_once
 
 logger = logging.getLogger(__name__)
 
@@ -292,5 +292,5 @@ class PostgresEventStore(
         return bool(getattr(self, "_commit_xid_available", False))
 
     def close(self) -> None:
-        """Close the connection pool."""
-        self._manager.close_postgres_pool(self._connection_string)
+        """Release this store's hold on its pool."""
+        release_pool_once(self, self._manager, self._pool)

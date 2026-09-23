@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.29.1] - 2026-09-23
+
+### Fixed — PostgreSQL connection pools leaked in 0.25.0 through 0.29.0 (#51)
+
+- **`PostgresQueue` took one pool hold per operation and released one on
+  `close()`, so its pool was never closed.** `_get_pool()` called
+  `get_postgres_pool()` at 14 sites, and every call registered a holder. After
+  N operations a queue needed N `close()` calls to release its pool. No caller
+  did that, and no caller could have known to.
+
+  With a constant DSN the leak is bounded at one extra pool per process: 5
+  connections, up to 15. With a DSN that varies per tenant, for example
+  `options=-c search_path=<tenant>`, every tenant gets its own pool, each of those
+  pools leaks, and connections grow with the number of tenants. One platform
+  hit its role's `connlimit` of 40 and was down for three days. The warning
+  psycopg_pool printed was read as noise. **Read it:** "the pool was deleted
+  while still open" means a pool was never closed.
+
+  Introduced by 3bfa497 (0.25.0), which added holder-counted pool lifetimes.
+  **Affected: 0.25.0 – 0.29.0. 0.24.x and earlier are not affected.**
+
+- **`close()` released holds by DSN, not by pool.** `close_postgres_pool(dsn)`
+  took one hold off **every** pool on that DSN. Closing a queue could therefore
+  close a store's pool that had different options. On 0.29.0 this happened even
+  when the queue had never performed an operation. A second `close()` took a
+  hold that belonged to another owner.
+
+  Now `PostgresQueue`, `PostgresWorkflowStore` and `PostgresEventStore` each
+  acquire their pool once, at construction. `close()` releases exactly that
+  pool's hold, exactly once per owner, through the new
+  `ConnectionManager.release_postgres_pool(pool)`. A repeated `close()` does
+  nothing. `close_postgres_pool(dsn)` is unchanged, for callers that already
+  depend on it.
+
+  Verified against a real PostgreSQL: on 0.29.0, holders went from 5 to 6 over
+  15 operations, and one `close()` left the pool open. On this release the
+  count stays at 1, and one `close()` closes the pool. `tests/test_queue_pool_holder.py`:
+  7 of 9 fail against 0.29.0 (the 2 that pass are controls), and all 9 pass
+  here.
+
+### Upgrade notes
+
+- **Go straight from ≤0.24.x to 0.29.1.** Any version from 0.25.0 to 0.29.0
+  has the leak.
+- **Pools have been keyed on DSN + pool options since 0.25.0.** This release
+  does not change that. A pool taken with an explicit
+  `get_postgres_pool(dsn, min_size=…, max_size=…)` is a different pool from the
+  default one shared by `PostgresQueue(dsn)` and `PostgresWorkflowStore(dsn)`.
+  On 0.24.x and earlier they were the same pool. Budget up to `max_size`
+  connections (default 15) per distinct key, per process. Release an explicit
+  hold with `get_connection_manager().release_postgres_pool(pool)`.
+- **Correction to an advisory sent for this defect.** It said that 0.21.1 to
+  0.25.2 discard URL query parameters. Only the CLI did: `mg-up` and `mg-status`
+  in 0.25.2 and earlier rebuilt the conninfo string and dropped `sslmode`,
+  `sslcert`, `sslkey` and the other query parameters (fixed in 0.26.0). The
+  runtime engine has always passed the DSN to libpq unchanged, in every version.
+
 ## [0.29.0] - 2026-09-20
 
 ### Upgrade notes — observable behaviour change

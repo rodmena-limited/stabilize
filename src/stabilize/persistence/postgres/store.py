@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from stabilize.models.workflow import Workflow
+from stabilize.persistence.connection import release_pool_once
 from stabilize.persistence.pool_options import (
     DEFAULT_HEALTH_TIMEOUT_SECONDS,
     PoolOptions,
@@ -99,8 +100,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         self._pool = self._manager.get_postgres_pool(connection_string, options=resolved_options)
 
     def close(self) -> None:
-        """Close the connection pool via connection manager."""
-        self._manager.close_postgres_pool(self.connection_string)
+        release_pool_once(self, self._manager, self._pool)
 
     def store(self, execution: Workflow) -> None:
         """Store a complete execution."""

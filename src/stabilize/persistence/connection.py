@@ -216,6 +216,25 @@ class ConnectionManager(metaclass=SingletonMeta):
             if not self._postgres_keys_by_dsn.get(connection_string):
                 self._postgres_keys_by_dsn.pop(connection_string, None)
 
+    def release_postgres_pool(self, pool: Any) -> None:
+        """Release one hold on *pool*, closing it when no hold remains."""
+        with self._postgres_lock:
+            key = next((k for k, v in self._postgres_pools.items() if v is pool), None)
+            if key is None:
+                return
+            holders = self._postgres_holders.get(key, 0)
+            if holders > 1:
+                self._postgres_holders[key] = holders - 1
+                return
+            self._postgres_holders.pop(key, None)
+            self._postgres_pools.pop(key, None)
+            keys = self._postgres_keys_by_dsn.get(key[0], [])
+            if key in keys:
+                keys.remove(key)
+            if not keys:
+                self._postgres_keys_by_dsn.pop(key[0], None)
+            pool.close()
+
     def close_sqlite_connection(self, connection_string: str) -> None:
         """Close SQLite connection for current thread."""
         db_path = self._parse_sqlite_path(connection_string)
@@ -248,3 +267,11 @@ class ConnectionManager(metaclass=SingletonMeta):
 def get_connection_manager() -> ConnectionManager:
     """Get the singleton ConnectionManager instance."""
     return ConnectionManager()
+
+
+def release_pool_once(owner: Any, manager: ConnectionManager, pool: Any) -> None:
+    """Release *owner*'s hold on *pool*; later calls by the same owner do nothing."""
+    if getattr(owner, "_stabilize_pool_released", False):
+        return
+    owner._stabilize_pool_released = True
+    manager.release_postgres_pool(pool)
