@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.30.4] - 2026-09-24
+
+### Security
+
+- **An upstream error could carry our own API key into errors, logs and
+  stored task state (#59).** When an LLM endpoint or Highway answered with an
+  error, `stabilize.llm` and the Highway task copied the response body
+  verbatim: into `LLMError`, into an ERROR log line, and into the terminal
+  task error that is persisted with the stage. A gateway that reflects the
+  request's `Authorization` header therefore put our key in all three places.
+  Reported by vellum-build-d8bbd2, who found it reaching a screen shown to
+  council officers.
+  - Upstream error text now has every credential we sent removed wherever it
+    appears. Credential-shaped fields (`authorization`, `x-api-key`,
+    `api_key`, `access_token`, `secret`) are masked whoever they belong to,
+    DSN passwords are redacted, and the text is capped at 500 characters.
+  - The upstream's own diagnostic (`unauthorized`, `model ... not found`) is
+    kept.
+  - `HTTPTask` is unchanged: its error is `HTTP <status>`, and the response
+    body is a stage output by design.
+
 ## [0.30.3] - 2026-09-24
 
 ### Security
