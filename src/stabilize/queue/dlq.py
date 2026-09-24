@@ -4,7 +4,6 @@ Dead Letter Queue (DLQ) functionality for PostgreSQL queue.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -22,6 +21,9 @@ def move_to_dlq(
 ) -> None:
     """Move a message to the Dead Letter Queue.
 
+    The row is copied server-side, so its payload reaches the DLQ exactly as
+    stored, whatever JSON it holds.
+
     Args:
         pool: Database connection pool
         table_name: Name of the queue table
@@ -35,45 +37,28 @@ def move_to_dlq(
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT id, message_id, message_type, payload, attempts, created_at
-                FROM {table_name}
-                WHERE id = %(id)s
-                FOR UPDATE SKIP LOCKED
-                """,
-                {"id": msg_id},
-            )
-            row = cur.fetchone()
-
-            if not row:
-                logger.warning("Message %s not found for DLQ move", msg_id)
-                return
-
-            cur.execute(
-                f"""
+                WITH moved AS (
+                    DELETE FROM {table_name}
+                    WHERE id = %(id)s
+                    RETURNING id, message_id, message_type, payload, attempts, created_at
+                )
                 INSERT INTO {table_name}_dlq (
                     original_id, message_id, message_type, payload,
                     attempts, error, last_error_at, created_at
-                ) VALUES (
-                    %(original_id)s, %(message_id)s, %(message_type)s, %(payload)s,
-                    %(attempts)s, %(error)s, NOW(), %(created_at)s
                 )
+                SELECT id, message_id, message_type, payload,
+                       attempts, %(error)s, NOW(), created_at
+                FROM moved
+                RETURNING message_type, attempts
                 """,
-                {
-                    "original_id": row["id"],
-                    "message_id": row["message_id"],
-                    "message_type": row["message_type"],
-                    "payload": (json.dumps(row["payload"]) if isinstance(row["payload"], dict) else row["payload"]),
-                    "attempts": row["attempts"],
-                    "error": error or "Max attempts exceeded",
-                    "created_at": row["created_at"],
-                },
+                {"id": msg_id, "error": error or "Max attempts exceeded"},
             )
-
-            cur.execute(
-                f"DELETE FROM {table_name} WHERE id = %(id)s",
-                {"id": msg_id},
-            )
+            row = cur.fetchone()
         conn.commit()
+
+    if not row:
+        logger.warning("Message %s not found for DLQ move", msg_id)
+        return
 
     pending.pop(msg_id, None)
     logger.warning(
@@ -141,35 +126,27 @@ def replay_dlq(pool: Any, table_name: str, dlq_id: int) -> bool:
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT * FROM {table_name}_dlq WHERE id = %(id)s FOR UPDATE SKIP LOCKED",
-                {"id": dlq_id},
-            )
-            row = cur.fetchone()
-
-            if not row:
-                logger.warning("DLQ entry %s not found for replay", dlq_id)
-                return False
-
-            cur.execute(
                 f"""
+                WITH taken AS (
+                    DELETE FROM {table_name}_dlq
+                    WHERE id = %(id)s
+                    RETURNING message_type, payload
+                )
                 INSERT INTO {table_name} (
                     message_id, message_type, payload, deliver_at, attempts
-                ) VALUES (
-                    %(message_id)s, %(message_type)s, %(payload)s::jsonb, NOW(), 0
                 )
+                SELECT %(message_id)s, message_type, payload, NOW(), 0
+                FROM taken
+                RETURNING message_type
                 """,
-                {
-                    "message_id": str(ULID()),
-                    "message_type": row["message_type"],
-                    "payload": (json.dumps(row["payload"]) if isinstance(row["payload"], dict) else row["payload"]),
-                },
+                {"id": dlq_id, "message_id": str(ULID())},
             )
-
-            cur.execute(
-                f"DELETE FROM {table_name}_dlq WHERE id = %(id)s",
-                {"id": dlq_id},
-            )
+            row = cur.fetchone()
         conn.commit()
+
+    if not row:
+        logger.warning("DLQ entry %s not found for replay", dlq_id)
+        return False
 
     logger.info("Replayed DLQ entry %s (type=%s)", dlq_id, row["message_type"])
     return True

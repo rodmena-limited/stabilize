@@ -57,6 +57,7 @@ from stabilize.persistence.store import (
     WorkflowNotFoundError,
     WorkflowStore,
 )
+from stabilize.persistence.task_state import capture, commit_captured, restore_versions, versions
 
 logger = logging.getLogger(__name__)
 
@@ -234,11 +235,19 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         if connection:
             with connection.cursor() as cur:
                 self._store_stage_impl(cur, stage, expected_phase)
-        else:
+            return
+        stage_version, task_versions = stage.version, versions(stage.tasks)
+        try:
             with self._pool.connection() as conn:
                 with conn.cursor() as cur:
                     self._store_stage_impl(cur, stage, expected_phase)
+                written = capture(stage.tasks)
                 conn.commit()
+        except Exception:
+            stage.version = stage_version
+            restore_versions(task_versions)
+            raise
+        commit_captured(written)
 
     def _store_stage_impl(
         self,
@@ -249,83 +258,53 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         """Implementation of store_stage using a cursor with optimistic locking."""
         from stabilize.errors import ConcurrencyError
 
+        phase_clause = " AND status = %(expected_phase)s" if expected_phase is not None else ""
         cur.execute(
-            "SELECT id FROM stage_executions WHERE id = %(id)s",
-            {"id": stage.id},
+            """
+            UPDATE stage_executions SET
+                status = %(status)s,
+                context = %(context)s::jsonb,
+                outputs = %(outputs)s::jsonb,
+                start_time = %(start_time)s,
+                end_time = %(end_time)s,
+                version = version + 1
+            WHERE id = %(id)s AND version = %(version)s"""
+            + phase_clause
+            + """
+            RETURNING version
+            """,
+            {
+                "id": stage.id,
+                "status": stage.status.name,
+                "context": json.dumps(stage.context, default=str),
+                "outputs": json.dumps(stage.outputs, default=str),
+                "start_time": stage.start_time,
+                "end_time": stage.end_time,
+                "version": stage.version,
+                "expected_phase": expected_phase,
+            },
         )
-        exists = cur.fetchone() is not None
-
-        if exists:
-            # Build update query with optimistic locking
-            # Optionally include phase check
-            if expected_phase is not None:
-                cur.execute(
-                    """
-                    UPDATE stage_executions SET
-                        status = %(status)s,
-                        context = %(context)s::jsonb,
-                        outputs = %(outputs)s::jsonb,
-                        start_time = %(start_time)s,
-                        end_time = %(end_time)s,
-                        version = version + 1
-                    WHERE id = %(id)s AND version = %(version)s AND status = %(expected_phase)s
-                    RETURNING version
-                    """,
-                    {
-                        "id": stage.id,
-                        "status": stage.status.name,
-                        "context": json.dumps(stage.context, default=str),
-                        "outputs": json.dumps(stage.outputs, default=str),
-                        "start_time": stage.start_time,
-                        "end_time": stage.end_time,
-                        "version": stage.version,
-                        "expected_phase": expected_phase,
-                    },
-                )
-            else:
-                cur.execute(
-                    """
-                    UPDATE stage_executions SET
-                        status = %(status)s,
-                        context = %(context)s::jsonb,
-                        outputs = %(outputs)s::jsonb,
-                        start_time = %(start_time)s,
-                        end_time = %(end_time)s,
-                        version = version + 1
-                    WHERE id = %(id)s AND version = %(version)s
-                    RETURNING version
-                    """,
-                    {
-                        "id": stage.id,
-                        "status": stage.status.name,
-                        "context": json.dumps(stage.context, default=str),
-                        "outputs": json.dumps(stage.outputs, default=str),
-                        "start_time": stage.start_time,
-                        "end_time": stage.end_time,
-                        "version": stage.version,
-                    },
-                )
-
-            result = cur.fetchone()
-            if result:
-                new_version = result[0] if isinstance(result, tuple) else result.get("version", stage.version + 1)
-                stage.version = new_version
-            else:
-                if expected_phase is not None:
-                    raise ConcurrencyError(
-                        f"Optimistic lock failed for stage {stage.id} "
-                        f"(version {stage.version}, expected_phase {expected_phase}). "
-                        f"Another process has modified this stage."
-                    )
-                raise ConcurrencyError(
-                    f"Optimistic lock failed for stage {stage.id} (version {stage.version}). "
-                    f"Another process has modified this stage."
-                )
-
+        result = cur.fetchone()
+        if result:
+            stage.version = result[0] if isinstance(result, tuple) else result.get("version", stage.version + 1)
             if stage.tasks:
-                upsert_tasks_bulk(cur, stage.tasks, stage.id)
-        else:
+                upsert_tasks_bulk(cur, stage.tasks, stage.id, only_changed=True)
+            return
+
+        cur.execute("SELECT id FROM stage_executions WHERE id = %(id)s", {"id": stage.id})
+        if cur.fetchone() is None:
             insert_stage(cur, stage, stage.execution.id)
+            return
+        if expected_phase is not None:
+            raise ConcurrencyError(
+                f"Optimistic lock failed for stage {stage.id} "
+                f"(version {stage.version}, expected_phase {expected_phase}). "
+                f"Another process has modified this stage."
+            )
+        raise ConcurrencyError(
+            f"Optimistic lock failed for stage {stage.id} (version {stage.version}). "
+            f"Another process has modified this stage."
+        )
 
     def add_stage(self, stage: Any) -> None:
         """Add a new stage."""
@@ -364,28 +343,22 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
                     execution = row_to_execution(exec_row)
                     stage.set_execution_strong(execution)
 
-                    all_stages = [stage]
                     requisites = list(stage.requisite_stage_ref_ids)
-                    if requisites:
-                        cur.execute(
-                            """
-                            SELECT * FROM stage_executions
-                            WHERE execution_id = %(execution_id)s
-                            AND ref_id = ANY(%(requisites)s)
-                            """,
-                            {"execution_id": execution.id, "requisites": requisites},
-                        )
-                        for us_row in cur.fetchall():
-                            us = row_to_stage(us_row)
-                            us.set_execution_strong(execution)
-                            all_stages.append(us)
-
-                    synthetic_stages = self.get_synthetic_stages(execution.id, stage.id)
-                    for ss in synthetic_stages:
-                        ss.set_execution_strong(execution)
-                        all_stages.append(ss)
-
-                    execution.stages = all_stages
+                    cur.execute(
+                        """
+                        SELECT * FROM stage_executions
+                        WHERE execution_id = %(execution_id)s
+                        AND (ref_id = ANY(%(requisites)s) OR parent_stage_id = %(stage_id)s)
+                        """,
+                        {"execution_id": execution.id, "requisites": requisites, "stage_id": stage.id},
+                    )
+                    related = cur.fetchall()
+                    upstream = [row_to_stage(r) for r in related if r["ref_id"] in stage.requisite_stage_ref_ids]
+                    synthetic = [row_to_stage(r) for r in related if r["parent_stage_id"] == stage.id]
+                    load_tasks_for_stages(cur, synthetic)
+                    for related_stage in upstream + synthetic:
+                        related_stage.set_execution_strong(execution)
+                    execution.stages = [stage, *upstream, *synthetic]
 
                 # ORDER BY id ensures consistent task sequencing (ULID encodes creation time)
                 cur.execute(

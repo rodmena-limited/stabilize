@@ -69,11 +69,24 @@ class TestParseDbUrlDoesNotPrintTheSecret:
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         with pytest.raises(SystemExit):
-            parse_db_url(f"postgresql://someuser:{SECRET}@:::badport/db")
+            parse_db_url(f"postgresql+psycopg://someuser:{SECRET}@host/db")
         captured = capsys.readouterr()
         assert SECRET not in captured.out
         assert SECRET not in captured.err
         assert "***" in captured.out
+
+    def test_a_string_libpq_accepts_but_cannot_connect_fails_without_echoing_the_password(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from stabilize.cli.commands import mg_status
+
+        with pytest.raises(SystemExit) as raised:
+            mg_status(f"postgresql://someuser:{SECRET}@:::badport/db?connect_timeout=2")
+        captured = capsys.readouterr()
+        assert raised.value.code == 1
+        assert "Database error" in captured.out
+        assert SECRET not in captured.out
+        assert SECRET not in captured.err
 
     def test_absent_password_is_none_not_empty_string(self) -> None:
         config = parse_db_url("postgresql://zzz_probe_user@host:5432/provenance")

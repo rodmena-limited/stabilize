@@ -6,6 +6,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from stabilize.errors import ConcurrencyError
+from stabilize.persistence.task_state import needs_write
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -105,7 +106,7 @@ def upsert_task(cur: Any, task: TaskExecution, stage_id: str) -> None:
     )
 
 
-def upsert_tasks_bulk(cur: Any, tasks: list[TaskExecution], stage_id: str) -> None:
+def upsert_tasks_bulk(cur: Any, tasks: list[TaskExecution], stage_id: str, only_changed: bool = False) -> None:
     """
     Batch upsert tasks with optimistic locking.
 
@@ -120,6 +121,8 @@ def upsert_tasks_bulk(cur: Any, tasks: list[TaskExecution], stage_id: str) -> No
 
     # Process each task individually to properly detect optimistic lock failures.
     for task in tasks:
+        if only_changed and not needs_write(task):
+            continue
         params = {
             "id": task.id,
             "stage_id": stage_id,

@@ -7,7 +7,8 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from stabilize.queue.messages import Message, create_message_from_dict
+from stabilize.queue.decode import MessageDecodeError, decode_message
+from stabilize.queue.messages import Message
 
 logger = logging.getLogger(__name__)
 
@@ -34,34 +35,8 @@ def deserialize_message(type_name: str, payload: Any) -> Message | None:
 
     Returns None if deserialization fails (corrupted message).
     """
-    from stabilize.models.stage import SyntheticStageOwner
-    from stabilize.models.status import WorkflowStatus
-
     try:
-        if isinstance(payload, dict):
-            data = payload
-        else:
-            data = json.loads(payload)
-    except (json.JSONDecodeError, TypeError) as e:
-        logger.error(
-            "Failed to decode message payload: %s. Payload: %s",
-            e,
-            payload[:200] if isinstance(payload, str) else payload,
-        )
+        return decode_message(type_name, payload)
+    except MessageDecodeError as exc:
+        logger.error("Failed to decode queue message: %s", exc)
         return None
-
-    # Convert enum values
-    if "status" in data and isinstance(data["status"], str):
-        data["status"] = WorkflowStatus[data["status"]]
-    if "original_status" in data and data["original_status"]:
-        data["original_status"] = WorkflowStatus[data["original_status"]]
-    if "phase" in data and isinstance(data["phase"], str):
-        data["phase"] = SyntheticStageOwner[data["phase"]]
-
-    # Remove metadata fields
-    data.pop("message_id", None)
-    data.pop("created_at", None)
-    data.pop("attempts", None)
-    data.pop("max_attempts", None)
-
-    return create_message_from_dict(type_name, data)

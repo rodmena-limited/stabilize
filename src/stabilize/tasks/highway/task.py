@@ -18,7 +18,6 @@ import urllib.request
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
-from stabilize.redaction import redact_upstream_text
 from stabilize.tasks.highway.config import HighwayConfig
 from stabilize.tasks.interface import RetryableTask
 from stabilize.tasks.result import TaskResult
@@ -226,12 +225,11 @@ class HighwayTask(RetryableTask):
             )
 
         except urllib.error.HTTPError as e:
-            raw_body = ""
+            error_body = ""
             try:
-                raw_body = e.read().decode("utf-8")
+                error_body = e.read().decode("utf-8")
             except Exception:
                 pass
-            error_body = redact_upstream_text(raw_body, [config.api_key])
 
             # 401/403: Auth error - terminal
             if e.code in (401, 403):
@@ -244,10 +242,8 @@ class HighwayTask(RetryableTask):
 
             # 404: Endpoint not found - terminal
             if e.code == 404:
-                logger.error("Highway endpoint not found: %s", redact_upstream_text(url, [config.api_key]))
-                return TaskResult.terminal(
-                    error=f"Highway endpoint not found: {redact_upstream_text(url, [config.api_key])}"
-                )
+                logger.error("Highway endpoint not found: %s", url)
+                return TaskResult.terminal(error=f"Highway endpoint not found: {url}")
 
             # 409: Conflict (duplicate idempotency key with different payload)
             if e.code == 409:
@@ -258,7 +254,7 @@ class HighwayTask(RetryableTask):
                 )
                 # Try to extract existing run_id from error response
                 try:
-                    error_data = json.loads(raw_body)
+                    error_data = json.loads(error_body)
                     existing_run_id = error_data.get("existing_run_id")
                     if existing_run_id:
                         return TaskResult.running(context={"highway_run_id": existing_run_id})
@@ -382,12 +378,11 @@ class HighwayTask(RetryableTask):
             return TaskResult.running(context=context_updates)
 
         except urllib.error.HTTPError as e:
-            raw_body = ""
+            error_body = ""
             try:
-                raw_body = e.read().decode("utf-8")
+                error_body = e.read().decode("utf-8")
             except Exception:
                 pass
-            error_body = redact_upstream_text(raw_body, [config.api_key])
 
             # 401/403: Auth error - terminal
             if e.code in (401, 403):

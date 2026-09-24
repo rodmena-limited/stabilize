@@ -28,3 +28,13 @@ A local server that returns 401 and echoes the request's `Authorization` header 
 - Against the 0.30.3 LLM client and Highway task, 3 fail: the LLM error, Highway submit and Highway poll.
 - With the fix, all 9 pass.
 - The existing Highway and LLM test files pass (32 tests).
+
+## Reverted in 0.31.0 (operator decision)
+
+stabilize is an orchestrator. It does not apply controls on the user's behalf to what an upstream publishes: whatever an upstream puts in its error response reaches the caller unchanged. `LLMClient` and `HighwayTask` are restored to their 0.30.3 behaviour (the body verbatim, `LLMError` chained to the `HTTPError`), and `redact_upstream_text` and its tests are removed.
+
+Checked after the revert: the echo server's body, including the reflected header, appears unchanged in `LLMError`, and the Highway and LLM tests pass (23).
+
+Consequence for callers: if an upstream reflects request credentials in an error body, that text is in the exception, the Highway log line and the stored task error, exactly as the upstream sent it. Handling that belongs to the caller, for example by not surfacing raw exception text to end users.
+
+Unaffected: the DSN-password protections (#53, #56, #57, #58). Those cover stabilize's own logging of the caller's own database password, not upstream content.

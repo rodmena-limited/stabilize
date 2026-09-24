@@ -66,6 +66,7 @@ class TaskExecution:
     # Back-reference to parent stage (set after construction)
     # Can be weakref (default) or strong ref (for standalone tasks)
     _stage: weakref.ReferenceType[StageExecution] | StageExecution | None = field(default=None, repr=False)
+    _persisted_state: tuple[Any, ...] | None = field(default=None, init=False, repr=False, compare=False)
 
     @property
     def stage(self) -> StageExecution | None:

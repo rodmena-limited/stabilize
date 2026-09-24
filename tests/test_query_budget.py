@@ -19,8 +19,8 @@ from stabilize.models.workflow import Workflow
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
-ONE_STAGE_BUDGET = 97
-PER_EXTRA_STAGE_BUDGET = 87
+ONE_STAGE_BUDGET = 87
+PER_EXTRA_STAGE_BUDGET = 67
 
 
 class _NoOp(Task):

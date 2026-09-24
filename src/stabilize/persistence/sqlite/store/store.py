@@ -153,6 +153,7 @@ class SqliteWorkflowStore(
         try:
             yield txn
             conn.commit()
+            txn.on_commit()
         except Exception:
             conn.rollback()
             # Restore in-memory versions to match rolled-back database state

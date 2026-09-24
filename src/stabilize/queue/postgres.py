@@ -18,12 +18,9 @@ from typing import Any
 
 from stabilize.persistence.connection import release_pool_once
 from stabilize.persistence.pool_options import with_schema
+from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.interface import Queue
-from stabilize.queue.messages import (
-    Message,
-    create_message_from_dict,
-    get_message_type_name,
-)
+from stabilize.queue.messages import Message, get_message_type_name
 
 _VALID_TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
@@ -112,44 +109,6 @@ class PostgresQueue(Queue):
                 data[key] = value
         return json.dumps(data)
 
-    def _deserialize_message(self, type_name: str, payload: Any) -> Message | None:
-        """Deserialize a message from JSON or dict.
-
-        Returns None if deserialization fails (corrupted message).
-        """
-        from stabilize.models.stage import SyntheticStageOwner
-        from stabilize.models.status import WorkflowStatus
-
-        try:
-            # psycopg3 returns JSONB as dict directly
-            if isinstance(payload, dict):
-                data = payload
-            else:
-                data = json.loads(payload)
-        except (json.JSONDecodeError, TypeError) as e:
-            logger.error(
-                "Failed to decode message payload: %s. Payload: %s",
-                e,
-                payload[:200] if isinstance(payload, str) else payload,
-            )
-            return None
-
-        # Convert enum values
-        if "status" in data and isinstance(data["status"], str):
-            data["status"] = WorkflowStatus[data["status"]]
-        if "original_status" in data and data["original_status"]:
-            data["original_status"] = WorkflowStatus[data["original_status"]]
-        if "phase" in data and isinstance(data["phase"], str):
-            data["phase"] = SyntheticStageOwner[data["phase"]]
-
-        # Remove metadata fields
-        data.pop("message_id", None)
-        data.pop("created_at", None)
-        data.pop("attempts", None)
-        data.pop("max_attempts", None)
-
-        return create_message_from_dict(type_name, data)
-
     def push(
         self,
         message: Message,
@@ -229,7 +188,7 @@ class PostgresQueue(Queue):
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED
                     )
-                    RETURNING id, message_type, payload, attempts
+                    RETURNING id, message_type, payload::text AS payload, attempts
                     """,
                     {
                         "locked_until": locked_until,
@@ -239,31 +198,25 @@ class PostgresQueue(Queue):
                 row = cur.fetchone()
             conn.commit()
 
-            if row:
-                msg_id = row["id"]
-                msg_type = row["message_type"]
-                payload = row["payload"]
-                attempts = row["attempts"]
-
-                message = self._deserialize_message(msg_type, payload)
-                if message is None:
-                    # Corrupted message - move to DLQ for audit instead of deleting
-                    logger.warning("Moving corrupted message %s (type: %s) to DLQ", msg_id, msg_type)
-                    self.move_to_dlq(
-                        msg_id,
-                        error=f"Deserialization failed for message type: {msg_type}",
-                    )
-                    return None
-
-                message.message_id = str(msg_id)
-                message.attempts = attempts
-                self._pending[msg_id] = {
-                    "message": message,
-                    "type": msg_type,
-                }
-                return message
-
+        if not row:
             return None
+
+        msg_id = row["id"]
+        msg_type = row["message_type"]
+        try:
+            message = decode_message(msg_type, row["payload"])
+        except MessageDecodeError as exc:
+            logger.error("Moving undecodable message %s to the DLQ: %s", msg_id, exc)
+            self.move_to_dlq(msg_id, error=f"Deserialization failed: {exc}")
+            return None
+
+        message.message_id = str(msg_id)
+        message.attempts = row["attempts"]
+        self._pending[msg_id] = {
+            "message": message,
+            "type": msg_type,
+        }
+        return message
 
     def ack(self, message: Message) -> None:
         """Acknowledge a message, removing it from the queue."""

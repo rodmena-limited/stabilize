@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from stabilize.persistence.store import StoreTransaction
+from stabilize.persistence.task_state import Captured, capture, commit_captured, versions
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -42,12 +43,15 @@ class PostgresTransaction(StoreTransaction):
         # Track stage/task objects and their original versions for rollback
         self._staged_objects: list[tuple[StageExecution | TaskExecution, int]] = []
         self._marked_ids: list[str] = []
+        self._written_tasks: Captured = []
 
     def on_commit(self) -> None:
         """Record the message ids this transaction marked processed, once it has committed."""
         from stabilize.persistence.committed_marks import record_committed
 
         record_committed(self._marked_ids)
+        commit_captured(self._written_tasks)
+        self._written_tasks = []
 
     def rollback_versions(self) -> None:
         """Restore original versions on rollback.
@@ -58,6 +62,7 @@ class PostgresTransaction(StoreTransaction):
         for obj, original_version in self._staged_objects:
             obj.version = original_version
         self._staged_objects.clear()
+        self._written_tasks = []
 
     def store_stage(self, stage: StageExecution, expected_phase: str | None = None) -> None:
         """Store or update a stage within the transaction.
@@ -66,15 +71,12 @@ class PostgresTransaction(StoreTransaction):
             stage: Stage to store
             expected_phase: If provided, passed to store.store_stage() for CAS.
         """
-        # Track original version before store (which may increment it)
         original_version = stage.version
+        task_versions = versions(stage.tasks)
         self._store.store_stage(stage, expected_phase=expected_phase, connection=self._conn)
-        # Track for potential rollback (store after because store_stage increments version)
         self._staged_objects.append((stage, original_version))
-        # Also track tasks that were updated
-        for task in stage.tasks:
-            if task.version != 0:  # Only track tasks that were updated
-                self._staged_objects.append((task, task.version - 1))
+        self._staged_objects.extend(task_versions)
+        self._written_tasks.extend(capture(stage.tasks))
 
     def update_workflow_status(self, workflow: Workflow) -> None:
         """Update workflow status within the transaction."""

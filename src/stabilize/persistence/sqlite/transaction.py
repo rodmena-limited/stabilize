@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from stabilize.errors import ConcurrencyError
 from stabilize.persistence.sqlite.helpers import insert_stage, upsert_task
 from stabilize.persistence.store import StoreTransaction
+from stabilize.persistence.task_state import Captured, capture, commit_captured
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -51,6 +52,12 @@ class AtomicTransaction(StoreTransaction):
         self._store = store
         # Track stage objects and their original versions for rollback
         self._staged_objects: list[tuple[StageExecution | TaskExecution, int]] = []
+        self._written_tasks: Captured = []
+
+    def on_commit(self) -> None:
+        """Record the task rows this transaction wrote, once it has committed."""
+        commit_captured(self._written_tasks)
+        self._written_tasks = []
 
     def rollback_versions(self) -> None:
         """Restore original versions on rollback.
@@ -61,6 +68,7 @@ class AtomicTransaction(StoreTransaction):
         for stage, original_version in self._staged_objects:
             stage.version = original_version
         self._staged_objects.clear()
+        self._written_tasks = []
 
     def store_stage(self, stage: StageExecution, expected_phase: str | None = None) -> None:
         """Store or update a stage within the transaction.
@@ -147,9 +155,10 @@ class AtomicTransaction(StoreTransaction):
             for task in stage.tasks:
                 # Track original version for rollback
                 self._staged_objects.append((task, task.version))
-                upsert_task(self._conn, task, stage.id)
+                upsert_task(self._conn, task, stage.id, only_changed=True)
         else:
             insert_stage(self._conn, stage, stage.execution.id)
+        self._written_tasks.extend(capture(stage.tasks))
 
     def update_workflow_status(self, workflow: Workflow) -> None:
         """Update workflow status within the transaction.

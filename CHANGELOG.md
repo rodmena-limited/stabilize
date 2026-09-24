@@ -1,6 +1,75 @@
 # Changelog
 
-## [Unreleased]
+## [0.31.0] - 2026-09-24
+
+### Fixed
+
+- **`mg-up` and `mg-status` accept libpq keyword/value strings and Unix-socket
+  URLs (#55).** `host=db port=5432 dbname=app user=u sslmode=verify-full ...`,
+  `postgresql:///app?host=/var/run/postgresql` and `postgresql:///app` were
+  refused as `Invalid database URL` although migretti and the engine connect
+  with them. Strings the URL pattern does not match are now parsed by libpq's
+  own parser; every URL that worked before parses as before. `schema=` works in
+  both forms. An unparseable string still exits 1 without printing its password.
+  Socket forms were verified at parse level; no socket server was exercised.
+- **`retrieve_stage` no longer borrows a second pool connection while holding
+  one (#54).** It loaded synthetic child stages through a separate checkout, so
+  on a pool of size one it could not complete (`PoolTimeout`), and under pool
+  pressure every stage load needed two connections. Upstream and synthetic
+  stages now come from one statement on the held connection.
+- **A queue message that cannot be decoded no longer crashes the poller
+  (#60).** A row with an unknown message type, an unknown enum value or a field
+  that fails the message contract made `poll_one` raise, on PostgreSQL and
+  SQLite, so `process_all` / `process_one` raised into the embedding
+  application while the row stayed on the queue. Such a row is
+  now moved to the DLQ at once with `error` = `Deserialization failed: <type>:
+  <cause>`, its payload kept as stored, and polling continues with the next
+  message. Nothing is retried or dropped on the operator's behalf: inspect with
+  `list_dlq()`, replay with `replay_dlq()`. During a rolling upgrade an older
+  worker quarantines a type only the newer version knows; replay it once every
+  worker is upgraded. `stabilize.queue.sqlite.deserialize_message` now returns
+  `None` for every decode failure, as documented, instead of raising for some.
+- **PostgreSQL DLQ moves and replays work for every payload (#60).**
+  `move_to_dlq` and `replay_dlq` fetched the payload into Python and sent it
+  back as a parameter, so a payload that was not a JSON object (an array was
+  sent as `smallint[]`) could not be dead-lettered or replayed. Both now move
+  the row server-side in one statement.
+- **A failed stage write no longer leaves stale in-memory versions (#61).** When
+  `store_stage` failed after its stage UPDATE (a task conflict), the stage and
+  task objects kept the bumped versions although the database rolled back. On
+  SQLite the non-transactional path also left that partial write in an open
+  transaction for the next commit on the connection. Both backends now roll
+  back and restore the versions. Inside `repository.transaction()`, rollback
+  restores each task's exact prior version.
+
+### Performance
+
+- **Fewer statements per stage on PostgreSQL (#54, #61):** one stage 97 -> 87,
+  each additional stage 87 -> 67. See `docs/guide/query_budget.rst`.
+  - `store_stage` runs its optimistic-lock UPDATE first and checks for the row
+    only when the UPDATE matched nothing; outcomes (update, insert,
+    `ConcurrencyError`) are unchanged.
+  - `store_stage` writes only the task rows whose state changed, on both
+    backends, instead of rewriting and re-versioning every task on every stage
+    write. Every task write goes through `store_stage`, whose stage-version
+    check runs first in the same transaction, so a stale writer is still
+    rejected whether or not it touched a task.
+  - `get_upstream_stages`, `get_downstream_stages` and `get_synthetic_stages`
+    no longer read the workflow row and every stage row of the workflow on
+    each call. That workflow was attached by weak reference only and was
+    garbage-collected before the call returned; the returned stages were and
+    remain detached, and still carry their tasks.
+
+### Changed
+
+- **Upstream error bodies are passed through unchanged again (reverts #59).**
+  stabilize is an orchestrator and does not apply controls on the user's
+  behalf to what another service publishes. When an LLM endpoint or Highway
+  answers with an error, `LLMError`, the Highway log line and the stored task
+  error carry the response body exactly as the upstream sent it, as they did in
+  0.30.3. If an upstream reflects request credentials in its error body, that
+  text reaches the caller, and deciding what to show end users is the caller's
+  call. The DSN-password protections for stabilize's own logs are unchanged.
 
 ### Security
 

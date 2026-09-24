@@ -50,47 +50,6 @@ def load_tasks_for_stages(
             stage_ref.tasks.append(task)
 
 
-def set_execution_reference(
-    conn: sqlite3.Connection,
-    stages: list[StageExecution],
-    execution_id: str,
-) -> None:
-    """Set the _execution reference for stages by loading execution summary.
-
-    Also loads all stages for the execution to populate execution.stages,
-    which is required for methods like synthetic_stages() and after_stages().
-    """
-    from stabilize.persistence.sqlite.converters import row_to_execution
-
-    if not stages:
-        return
-
-    result = conn.execute(
-        "SELECT * FROM pipeline_executions WHERE id = :id",
-        {"id": execution_id},
-    )
-    exec_row = result.fetchone()
-    if exec_row:
-        execution = row_to_execution(exec_row)
-
-        # Load all stages for this execution to populate execution.stages
-        # This is required for synthetic_stages() and after_stages() to work
-        all_stages_result = conn.execute(
-            "SELECT * FROM stage_executions WHERE execution_id = :id",
-            {"id": execution_id},
-        )
-        all_stages = [row_to_stage(row) for row in all_stages_result.fetchall()]
-        execution.stages = all_stages
-
-        # Set execution reference for all loaded stages
-        for s in all_stages:
-            s.execution = execution
-
-        # Also set for the originally requested stages (they may be the same objects)
-        for stage in stages:
-            stage.execution = execution
-
-
 def get_upstream_stages(
     conn: sqlite3.Connection,
     execution_id: str,
@@ -136,9 +95,6 @@ def get_upstream_stages(
     # Load tasks for all stages
     load_tasks_for_stages(conn, stages)
 
-    # Set execution reference
-    set_execution_reference(conn, stages, execution_id)
-
     return stages
 
 
@@ -163,9 +119,6 @@ def get_downstream_stages(
 
     # Load tasks for all stages
     load_tasks_for_stages(conn, stages)
-
-    # Set execution reference
-    set_execution_reference(conn, stages, execution_id)
 
     return stages
 
@@ -192,9 +145,6 @@ def get_synthetic_stages(
 
     # Load tasks for all stages
     load_tasks_for_stages(conn, stages)
-
-    # Set execution reference
-    set_execution_reference(conn, stages, execution_id)
 
     return stages
 

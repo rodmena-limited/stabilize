@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from stabilize.dag.merge import merge_ancestor_outputs, topological_order
 from stabilize.persistence.postgres.converters import (
-    row_to_execution,
     row_to_stage,
     row_to_task,
 )
@@ -44,36 +43,6 @@ def load_tasks_for_stages(cur: Any, stages: list[StageExecution]) -> None:
         if stage_ref:
             task.stage = stage_ref
             stage_ref.tasks.append(task)
-
-
-def set_execution_reference(cur: Any, stages: list[StageExecution], execution_id: str) -> None:
-    """Set the _execution reference for stages by loading execution summary."""
-    if not stages:
-        return
-
-    cur.execute(
-        "SELECT * FROM pipeline_executions WHERE id = %(id)s",
-        {"id": execution_id},
-    )
-    exec_row = cur.fetchone()
-    if exec_row:
-        execution = row_to_execution(cast(dict[str, Any], exec_row))
-
-        # Load all stages for this execution
-        cur.execute(
-            "SELECT * FROM stage_executions WHERE execution_id = %(id)s",
-            {"id": execution_id},
-        )
-        all_stages = [row_to_stage(cast(dict[str, Any], row)) for row in cur.fetchall()]
-        execution.stages = all_stages
-
-        # Set execution reference for all loaded stages
-        for s in all_stages:
-            s.execution = execution
-
-        # Also set for the originally requested stages
-        for stage in stages:
-            stage.execution = execution
 
 
 def get_upstream_stages(pool: Any, execution_id: str, stage_ref_id: str) -> list[StageExecution]:
@@ -112,9 +81,6 @@ def get_upstream_stages(pool: Any, execution_id: str, stage_ref_id: str) -> list
             # Load tasks for all stages
             load_tasks_for_stages(cur, stages)
 
-            # Set execution reference
-            set_execution_reference(cur, stages, execution_id)
-
             return stages
 
 
@@ -140,9 +106,6 @@ def get_downstream_stages(pool: Any, execution_id: str, stage_ref_id: str) -> li
             # Load tasks for all stages
             load_tasks_for_stages(cur, stages)
 
-            # Set execution reference
-            set_execution_reference(cur, stages, execution_id)
-
             return stages
 
 
@@ -166,9 +129,6 @@ def get_synthetic_stages(pool: Any, execution_id: str, parent_stage_id: str) -> 
 
             # Load tasks for all stages
             load_tasks_for_stages(cur, stages)
-
-            # Set execution reference
-            set_execution_reference(cur, stages, execution_id)
 
             return stages
 

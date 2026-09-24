@@ -14,6 +14,7 @@ from stabilize.models.workflow import (
     Workflow,
     WorkflowType,
 )
+from stabilize.persistence.task_state import mark_persisted
 
 
 def execution_to_dict(execution: Workflow) -> dict[str, Any]:
@@ -183,7 +184,7 @@ def row_to_task(row: dict[str, Any]) -> TaskExecution:
         # Already a dict (JSONB auto-parsed by psycopg)
         exception_details = raw_exception if raw_exception else {}
 
-    return TaskExecution(
+    task = TaskExecution(
         id=row["id"],
         name=row["name"],
         implementing_class=row["implementing_class"],
@@ -197,3 +198,5 @@ def row_to_task(row: dict[str, Any]) -> TaskExecution:
         task_exception_details=exception_details,
         version=row.get("version", 0) or 0,
     )
+    mark_persisted(task)
+    return task

@@ -7,7 +7,7 @@ import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import parse_qs, quote, unquote
+from urllib.parse import parse_qs, quote, unquote, urlencode
 
 from stabilize.redaction import redact_db_url as redact_db_url
 
@@ -93,14 +93,13 @@ def connection_params(config: dict[str, Any]) -> dict[str, Any]:
     through. The URL's own components win over a same-named query parameter.
     """
     params: dict[str, Any] = dict(config.get("connect_params") or {})
-    params.update(
-        {
-            "host": config["host"],
-            "port": config.get("port", 5432),
-            "user": config.get("user", "postgres"),
-            "dbname": config["dbname"],
-        }
-    )
+    components = {
+        "host": config.get("host"),
+        "port": config.get("port", 5432),
+        "user": config.get("user", "postgres"),
+        "dbname": config.get("dbname"),
+    }
+    params.update({key: value for key, value in components.items() if value is not None})
     password = config.get("password")
     if password:
         params["password"] = password
@@ -113,6 +112,8 @@ def build_db_url(config: dict[str, Any]) -> str:
     Userinfo is percent-encoded, and the password is omitted entirely when
     absent rather than emitted as an empty value.
     """
+    if config.get("conninfo"):
+        return str(config["conninfo"])
     user = quote(str(config.get("user", "postgres")), safe="")
     password = config.get("password")
     userinfo = f"{user}:{quote(str(password), safe='')}" if password else user
@@ -141,13 +142,11 @@ def parse_db_url(url: str) -> dict[str, Any]:
     # postgres://user:pass@host:port/dbname?schema=name
     pattern = (
         r"postgres(?:ql)?://(?:(?P<user>[^:]+)(?::(?P<password>[^@]+))?@)?"
-        r"(?P<host>[^:/]+)(?::(?P<port>\d+))?/(?P<dbname>[^?]+)(?:\?(?P<query>.*))?$"
+        r"(?P<host>[^:/@]+)(?::(?P<port>\d+))?/(?P<dbname>[^?]+)(?:\?(?P<query>.*))?$"
     )
     match = re.match(pattern, url)
     if not match:
-        print(f"Error: Invalid database URL: {redact_db_url(url)}")
-        print("Expected postgres://[user[:password]@]host[:port]/dbname[?schema=name]")
-        sys.exit(1)
+        return _parse_libpq_conninfo(url)
 
     user = match.group("user")
     password = match.group("password")
@@ -171,4 +170,56 @@ def parse_db_url(url: str) -> dict[str, Any]:
         # operator had asked for, discarded without a word.
         if parsed:
             config["connect_params"] = {key: values[-1] for key, values in parsed.items()}
+    return config
+
+
+_KV_SCHEMA_RE = re.compile(r"(?:^|\s)schema\s*=\s*(\S+)")
+
+
+def _split_schema(url: str) -> tuple[str, str | None]:
+    """Remove stabilize's own ``schema`` setting, which libpq does not know, from a conninfo string."""
+    if "://" in url:
+        base, question, query = url.partition("?")
+        if not question:
+            return url, None
+        parsed = parse_qs(query, keep_blank_values=True)
+        schema_values = parsed.pop("schema", None)
+        rest = urlencode([(key, value) for key, values in parsed.items() for value in values])
+        return (f"{base}?{rest}" if rest else base), (schema_values[-1] if schema_values else None)
+    found = _KV_SCHEMA_RE.search(url)
+    if not found:
+        return url, None
+    return (url[: found.start()] + url[found.end() :]).strip(), found.group(1)
+
+
+def _parse_libpq_conninfo(url: str) -> dict[str, Any]:
+    """Parse any connection string libpq accepts: keyword/value, or a URL without a host (socket)."""
+    from psycopg.conninfo import conninfo_to_dict
+
+    text, schema = _split_schema(url.strip())
+    try:
+        params: dict[str, Any] = dict(conninfo_to_dict(text))
+    except Exception:
+        params = {}
+    if not params:
+        print(f"Error: Invalid database URL: {redact_db_url(url)}")
+        print(
+            "Expected postgres://[user[:password]@]host[:port]/dbname[?schema=name], "
+            "a libpq keyword/value string (host=... dbname=...), or a socket URL "
+            "(postgresql:///dbname?host=/var/run/postgresql)"
+        )
+        sys.exit(1)
+    port = params.pop("port", None)
+    config: dict[str, Any] = {
+        "host": params.pop("host", None),
+        "port": int(port) if port and str(port).isdigit() else port,
+        "user": params.pop("user", None),
+        "password": params.pop("password", None),
+        "dbname": params.pop("dbname", None),
+        "conninfo": url,
+    }
+    if schema:
+        config["schema"] = schema
+    if params:
+        config["connect_params"] = params
     return config

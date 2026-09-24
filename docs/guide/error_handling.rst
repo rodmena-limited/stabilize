@@ -74,6 +74,29 @@ Check error type programmatically:
             # Move to DLQ, alert operator
             pass
 
+Queue Messages That Cannot Be Decoded
+-------------------------------------
+
+A queue row whose type is unknown to this version, whose enum values do not
+exist, or whose fields fail the message contract is never retried and never
+raised to the poller. ``poll_one`` moves it to the dead letter queue with the
+reason and returns ``None``, and polling continues with the next message. The
+payload is kept exactly as stored.
+
+The DLQ entry's ``error`` starts with ``Deserialization failed:`` followed by
+the message type and the cause. What happens next is the operator's decision:
+
+.. code-block:: python
+
+    for entry in queue.list_dlq():
+        print(entry["id"], entry["message_type"], entry["error"])
+
+    queue.replay_dlq(entry_id)   # back onto the queue, attempts reset
+
+During a rolling upgrade an older worker can meet a message type that only the
+newer version defines. That message is quarantined rather than lost; replay it
+once every worker runs the newer version.
+
 Error Codes
 -----------
 

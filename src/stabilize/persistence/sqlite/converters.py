@@ -15,6 +15,7 @@ from stabilize.models.workflow import (
     Workflow,
     WorkflowType,
 )
+from stabilize.persistence.task_state import mark_persisted
 
 if TYPE_CHECKING:
     pass
@@ -170,7 +171,7 @@ def row_to_task(row: sqlite3.Row) -> TaskExecution:
     except (IndexError, KeyError):
         version = 0
 
-    return TaskExecution(
+    task = TaskExecution(
         id=row["id"],
         name=row["name"],
         implementing_class=row["implementing_class"],
@@ -184,3 +185,5 @@ def row_to_task(row: sqlite3.Row) -> TaskExecution:
         task_exception_details=exception_details,
         version=version,
     )
+    mark_persisted(task)
+    return task

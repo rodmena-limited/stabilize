@@ -17,6 +17,7 @@ from stabilize.persistence.sqlite.converters import (
     row_to_task,
 )
 from stabilize.persistence.sqlite.helpers import insert_stage, upsert_task
+from stabilize.persistence.task_state import capture, commit_captured, restore_versions, versions
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -55,81 +56,88 @@ class SqliteStageOpsMixin:
                            phase-aware optimistic locking.
         """
         conn = self._get_connection()
+        stage_version, task_versions = stage.version, versions(stage.tasks)
+        try:
+            # Check if stage exists
+            result = conn.execute(
+                "SELECT id FROM stage_executions WHERE id = :id",
+                {"id": stage.id},
+            )
+            exists = result.fetchone() is not None
 
-        # Check if stage exists
-        result = conn.execute(
-            "SELECT id FROM stage_executions WHERE id = :id",
-            {"id": stage.id},
-        )
-        exists = result.fetchone() is not None
-
-        if exists:
-            # Build update query with optimistic locking
-            # Optionally include phase check
-            if expected_phase is not None:
-                cursor = conn.execute(
-                    """
-                    UPDATE stage_executions SET
-                        status = :status,
-                        context = :context,
-                        outputs = :outputs,
-                        start_time = :start_time,
-                        end_time = :end_time,
-                        version = version + 1
-                    WHERE id = :id AND version = :version AND status = :expected_phase
-                    """,
-                    {
-                        "id": stage.id,
-                        "status": stage.status.name,
-                        "context": json.dumps(stage.context, default=str),
-                        "outputs": json.dumps(stage.outputs, default=str),
-                        "start_time": stage.start_time,
-                        "end_time": stage.end_time,
-                        "version": stage.version,
-                        "expected_phase": expected_phase,
-                    },
-                )
-            else:
-                cursor = conn.execute(
-                    """
-                    UPDATE stage_executions SET
-                        status = :status,
-                        context = :context,
-                        outputs = :outputs,
-                        start_time = :start_time,
-                        end_time = :end_time,
-                        version = version + 1
-                    WHERE id = :id AND version = :version
-                    """,
-                    {
-                        "id": stage.id,
-                        "status": stage.status.name,
-                        "context": json.dumps(stage.context, default=str),
-                        "outputs": json.dumps(stage.outputs, default=str),
-                        "start_time": stage.start_time,
-                        "end_time": stage.end_time,
-                        "version": stage.version,
-                    },
-                )
-
-            if cursor.rowcount == 0:
+            if exists:
+                # Build update query with optimistic locking
+                # Optionally include phase check
                 if expected_phase is not None:
-                    raise ConcurrencyError(
-                        f"Optimistic lock failed for stage {stage.id} "
-                        f"(version {stage.version}, expected_phase {expected_phase})"
+                    cursor = conn.execute(
+                        """
+                        UPDATE stage_executions SET
+                            status = :status,
+                            context = :context,
+                            outputs = :outputs,
+                            start_time = :start_time,
+                            end_time = :end_time,
+                            version = version + 1
+                        WHERE id = :id AND version = :version AND status = :expected_phase
+                        """,
+                        {
+                            "id": stage.id,
+                            "status": stage.status.name,
+                            "context": json.dumps(stage.context, default=str),
+                            "outputs": json.dumps(stage.outputs, default=str),
+                            "start_time": stage.start_time,
+                            "end_time": stage.end_time,
+                            "version": stage.version,
+                            "expected_phase": expected_phase,
+                        },
                     )
-                raise ConcurrencyError(f"Optimistic lock failed for stage {stage.id} (version {stage.version})")
+                else:
+                    cursor = conn.execute(
+                        """
+                        UPDATE stage_executions SET
+                            status = :status,
+                            context = :context,
+                            outputs = :outputs,
+                            start_time = :start_time,
+                            end_time = :end_time,
+                            version = version + 1
+                        WHERE id = :id AND version = :version
+                        """,
+                        {
+                            "id": stage.id,
+                            "status": stage.status.name,
+                            "context": json.dumps(stage.context, default=str),
+                            "outputs": json.dumps(stage.outputs, default=str),
+                            "start_time": stage.start_time,
+                            "end_time": stage.end_time,
+                            "version": stage.version,
+                        },
+                    )
 
-            # Update local version
-            stage.version += 1
+                if cursor.rowcount == 0:
+                    if expected_phase is not None:
+                        raise ConcurrencyError(
+                            f"Optimistic lock failed for stage {stage.id} "
+                            f"(version {stage.version}, expected_phase {expected_phase})"
+                        )
+                    raise ConcurrencyError(f"Optimistic lock failed for stage {stage.id} (version {stage.version})")
 
-            # Update tasks
-            for task in stage.tasks:
-                upsert_task(conn, task, stage.id)
-        else:
-            insert_stage(conn, stage, stage.execution.id)
+                # Update local version
+                stage.version += 1
 
-        conn.commit()
+                # Update tasks
+                for task in stage.tasks:
+                    upsert_task(conn, task, stage.id, only_changed=True)
+            else:
+                insert_stage(conn, stage, stage.execution.id)
+            written = capture(stage.tasks)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            stage.version = stage_version
+            restore_versions(task_versions)
+            raise
+        commit_captured(written)
 
     def add_stage(self, stage: StageExecution) -> None:
         """Add a new stage."""

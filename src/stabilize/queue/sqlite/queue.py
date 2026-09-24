@@ -20,11 +20,12 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.interface import Queue
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.sqlite.dlq import SqliteDLQMixin
 from stabilize.queue.sqlite.schema import create_queue_tables
-from stabilize.queue.sqlite.serialization import deserialize_message, serialize_message
+from stabilize.queue.sqlite.serialization import serialize_message
 
 logger = logging.getLogger(__name__)
 
@@ -214,14 +215,11 @@ class SqliteQueue(SqliteDLQMixin, Queue):
             return None
 
         # Step 4: Successfully claimed - deserialize and return
-        message = deserialize_message(msg_type, payload)
-        if message is None:
-            # Corrupted message - move to DLQ for audit instead of deleting
-            logger.warning("Moving corrupted message %s (type: %s) to DLQ", msg_id, msg_type)
-            self.move_to_dlq(
-                msg_id,
-                error=f"Deserialization failed for message type: {msg_type}",
-            )
+        try:
+            message = decode_message(msg_type, payload)
+        except MessageDecodeError as exc:
+            logger.error("Moving undecodable message %s to the DLQ: %s", msg_id, exc)
+            self.move_to_dlq(msg_id, error=f"Deserialization failed: {exc}")
             return None
 
         message.message_id = str(msg_id)

@@ -16,8 +16,6 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
-from stabilize.redaction import redact_upstream_text
-
 
 @dataclass
 class ChatMessage:
@@ -180,8 +178,8 @@ class LLMClient:
                 parsed: dict[str, Any] = json.loads(response.read().decode("utf-8"))
                 return parsed
         except urllib.error.HTTPError as e:
-            detail = redact_upstream_text(e.read().decode("utf-8", errors="replace"), [self.api_key])
-            raise LLMError(f"LLM request failed ({e.code}): {detail}") from None
+            detail = e.read().decode("utf-8", errors="replace")
+            raise LLMError(f"LLM request failed ({e.code}): {detail}") from e
         except urllib.error.URLError as e:
             raise LLMError(f"LLM request failed: {e.reason}") from e
 

@@ -7,6 +7,7 @@ import sqlite3
 from typing import TYPE_CHECKING
 
 from stabilize.errors import ConcurrencyError
+from stabilize.persistence.task_state import needs_write
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -69,8 +70,10 @@ def insert_stage(conn: sqlite3.Connection, stage: StageExecution, execution_id: 
         upsert_task(conn, task, stage.id)
 
 
-def upsert_task(conn: sqlite3.Connection, task: TaskExecution, stage_id: str) -> None:
+def upsert_task(conn: sqlite3.Connection, task: TaskExecution, stage_id: str, only_changed: bool = False) -> None:
     """Insert or update a task with optimistic locking."""
+    if only_changed and not needs_write(task):
+        return
     # First try to update existing row with version check
     cursor = conn.execute(
         """

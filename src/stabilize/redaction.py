@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
 
 _KV_SECRET_RE = re.compile(r"(?i)\b(password|passfile|sslpassword)\s*=\s*('(?:[^'\\]|\\.)*'|\S*)")
 
@@ -142,27 +141,3 @@ def _redact_quoted_input(fragment: str, source: str) -> str:
     if _SAFE_HOST_RE.fullmatch(host):
         rendered += f"@{host}"
     return f'"{rendered}"'
-
-
-_CREDENTIAL_FIELD_RE = re.compile(
-    r"(?i)\b((?:proxy-)?authorization|x-api-key|api[-_]?key|access[-_]?token|secret)"
-    r"(\"?'?\s*[:=]\s*\"?'?)((?:bearer|basic|token)\s+)?[^\s\"',}]+"
-)
-
-_UPSTREAM_ECHO_LIMIT = 500
-
-
-def redact_upstream_text(text: str, known_secrets: Iterable[str | None] = ()) -> str:
-    """Return text received from another service safe to put into an exception.
-
-    Every secret this process sent (*known_secrets*) is removed wherever it
-    appears, credential-shaped fields are masked whoever they belong to, DSN
-    passwords are redacted, and the result is length-capped.
-    """
-    for secret in sorted({s for s in known_secrets if s and len(s) >= 4}, key=len, reverse=True):
-        text = text.replace(secret, "***")
-    text = _CREDENTIAL_FIELD_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}{m.group(3) or ''}***", text)
-    text = redact_text(text)
-    if len(text) > _UPSTREAM_ECHO_LIMIT:
-        text = f"{text[:_UPSTREAM_ECHO_LIMIT]}... (truncated)"
-    return text
