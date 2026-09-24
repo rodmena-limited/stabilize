@@ -52,7 +52,7 @@ class SingletonMeta(type):
                     instance.close_all()
 
 
-def _require_parseable_conninfo(connection_string: str) -> None:
+def require_parseable_conninfo(connection_string: str) -> None:
     """Raise a redacted ValueError when libpq cannot parse *connection_string*.
 
     psycopg_pool retries a failed connection in its worker threads and logs
@@ -140,7 +140,7 @@ class ConnectionManager(metaclass=SingletonMeta):
                 from psycopg.rows import dict_row
                 from psycopg_pool import ConnectionPool
 
-                _require_parseable_conninfo(connection_string)
+                require_parseable_conninfo(connection_string)
 
                 kwargs: dict[str, Any] = {"row_factory": dict_row}
                 kwargs.update(resolved.connect_kwargs)

@@ -105,4 +105,4 @@ def test_the_guard_is_the_libpq_parser() -> None:
         conninfo_to_dict(MALFORMED[0])
     assert SECRET in str(raised.value)
     with pytest.raises(ValueError):
-        conn_mod._require_parseable_conninfo(MALFORMED[0])
+        conn_mod.require_parseable_conninfo(MALFORMED[0])

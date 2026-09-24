@@ -24,24 +24,18 @@ def unavailable_postgres(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestDegradationIsLoud:
-    def test_known_positive_a_working_selection_is_reported(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_known_positive_a_working_selection_is_reported(self, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.INFO):
             storage = circuits._create_storage("sqlite:///x")
         assert type(storage).__name__ == "InMemoryStorage"
         assert caplog.text
 
-    def test_failure_logs_at_error(
-        self, unavailable_postgres: None, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_failure_logs_at_error(self, unavailable_postgres: None, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.DEBUG):
             circuits._create_storage("postgresql://u:p@h/db")
         assert any(r.levelno >= logging.ERROR for r in caplog.records)
 
-    def test_error_names_the_consequence(
-        self, unavailable_postgres: None, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_error_names_the_consequence(self, unavailable_postgres: None, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.DEBUG):
             circuits._create_storage("postgresql://u:p@h/db")
         assert "PROCESS-LOCAL" in caplog.text
@@ -56,9 +50,7 @@ class TestDegradationIsLoud:
 
 class TestStrictModeFailsClosed:
     @pytest.mark.parametrize("value", ["1", "true", "yes", "TRUE"])
-    def test_strict_raises(
-        self, unavailable_postgres: None, monkeypatch: pytest.MonkeyPatch, value: str
-    ) -> None:
+    def test_strict_raises(self, unavailable_postgres: None, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
         monkeypatch.setenv("STABILIZE_CIRCUIT_STORAGE_STRICT", value)
         with pytest.raises(CircuitStorageUnavailableError):
             circuits._create_storage("postgresql://u:p@h/db")
@@ -68,9 +60,7 @@ class TestStrictModeFailsClosed:
         storage = circuits._create_storage("postgresql://u:p@h/db")
         assert type(storage).__name__ == "InMemoryStorage"
 
-    def test_strict_does_not_break_the_working_path(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_strict_does_not_break_the_working_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("STABILIZE_CIRCUIT_STORAGE_STRICT", "1")
         storage = circuits._create_storage("sqlite:///x")
         assert type(storage).__name__ == "InMemoryStorage"
@@ -102,15 +92,24 @@ class TestDsnClassification:
             "POSTGRESQL://u:p@h/db",
             "  postgresql://u:p@h/db  ",
             "host=h dbname=d user=u",
-            "HOST=h DBNAME=d",
             "service=mysvc",
         ],
     )
-    def test_postgres_forms_reach_the_postgres_branch(
-        self, spy: list[object], url: str
-    ) -> None:
+    def test_postgres_forms_reach_the_postgres_branch(self, spy: list[object], url: str) -> None:
         circuits._create_storage(url)
         assert spy, f"{url!r} did not reach the PostgreSQL branch"
+
+    @pytest.mark.parametrize("url", ["HOST=h DBNAME=d", "postgresql+asyncpg://u:p@h/db"])
+    def test_postgres_forms_libpq_cannot_parse_are_reported_not_treated_as_no_database(
+        self, spy: list[object], url: str, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("STABILIZE_CIRCUIT_STORAGE_STRICT", raising=False)
+        caplog.set_level(logging.INFO)
+        circuits._create_storage(url)
+        assert not spy
+        messages = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+        assert any("storage unavailable" in m and "could not be parsed" in m for m in messages), messages
+        assert not any("no PostgreSQL DSN configured" in r.getMessage() for r in caplog.records)
 
     @pytest.mark.parametrize("url", ["sqlite:///x", "sqlite:///:memory:", None, "", "   "])
     def test_non_postgres_forms_do_not(self, spy: list[object], url: str | None) -> None:
@@ -122,9 +121,7 @@ class TestDsnClassification:
         circuits._create_storage("postgresql://u:p@h/db?sslmode=verify-full")
         assert spy[0] == "postgresql://u:p@h/db?sslmode=verify-full"
 
-    def test_in_memory_log_no_longer_claims_sqlite_for_every_case(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_in_memory_log_no_longer_claims_sqlite_for_every_case(self, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.INFO):
             circuits._create_storage(None)
         assert "SQLite or no database" not in caplog.text

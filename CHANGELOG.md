@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.30.1] - 2026-09-24
+
+### Security
+
+- **Circuit-breaker storage logged a malformed DSN's password in
+  stabilize's own ERROR line (#56).** `RunTaskHandler` always builds circuit
+  breaker storage from the database URL. When libpq could not parse that URL,
+  the psycopg error was formatted into
+  `PostgreSQL circuit breaker storage unavailable (ProgrammingError: ... u:<password>@...)`.
+  - With `STABILIZE_CIRCUIT_STORAGE_STRICT=1`, the raised error and its chain
+    carried the password instead.
+  - resilient-circuit logged it as well: 0.7.0 as "Failed to ensure table
+    exists", 0.8.2 and 0.8.3 as "Failed to verify circuit breaker schema".
+  - A `+psycopg` suffix was stripped first, so that one form was spared;
+    `+asyncpg`, and any other string libpq cannot parse, was not.
+  - Now the URL is parsed before it reaches resilient-circuit, the failure is
+    reported with `u:***@`, and there is no exception chain. resilient-circuit
+    never receives the string, so this also protects anyone still on
+    resilient-circuit below 0.8.4.
+- **Correction:** the 0.29.1 announcement said a sweep found no stabilize code
+  that logs a DSN. The sweep matched `logger(..., exc)` and missed an exception
+  formatted into an f-string argument, which is exactly how this path did it.
+
+### Changed
+
+- An upper-case URL scheme (`POSTGRESQL://`) for circuit-breaker storage is
+  lower-cased before use. libpq rejects the upper-case form, so it previously
+  reached resilient-circuit only to fail.
+
 ## [0.30.0] - 2026-09-24
 
 ### Security

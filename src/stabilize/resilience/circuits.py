@@ -19,6 +19,8 @@ from resilient_circuit import CircuitProtectorPolicy
 from resilient_circuit.storage import CircuitBreakerStorage, InMemoryStorage
 
 from stabilize.errors import is_transient
+from stabilize.persistence.connection import require_parseable_conninfo
+from stabilize.redaction import redact_text
 from stabilize.resilience.config import ResilienceConfig
 
 if TYPE_CHECKING:
@@ -83,7 +85,7 @@ def _strict_storage_required() -> bool:
     return os.environ.get("STABILIZE_CIRCUIT_STORAGE_STRICT", "").lower() in {"1", "true", "yes"}
 
 
-def _degrade_or_raise(reason: str, error: BaseException) -> CircuitBreakerStorage:
+def _degrade_or_raise(reason: str, error: BaseException | None) -> CircuitBreakerStorage:
     """Handle a PostgreSQL breaker-store failure.
 
     A ``postgresql://`` URL is an explicit request for circuit state SHARED
@@ -129,12 +131,16 @@ def _create_storage(database_url: str | None) -> CircuitBreakerStorage:
             # sslcert, sslkey, sslrootcert), silently forcing the breaker onto
             # in-memory storage on TLS-mandatory databases.
             conn_string = (database_url or "").strip().replace("+psycopg", "")
+            scheme, separator, rest = conn_string.partition("://")
+            if separator:
+                conn_string = f"{scheme.lower()}://{rest}"
 
+            require_parseable_conninfo(conn_string)
             storage = PostgresStorage(connection_string=conn_string)
         except ImportError as exc:
             return _degrade_or_raise("psycopg/resilient-circuit not available", exc)
         except Exception as exc:
-            return _degrade_or_raise(f"{type(exc).__name__}: {exc}", exc)
+            return _degrade_or_raise(f"{type(exc).__name__}: {redact_text(str(exc))}", None)
         # Logged only once construction has actually succeeded: an INFO line
         # emitted before the attempt reads as confirmation of a backend that
         # may never have been created.
