@@ -106,3 +106,32 @@ def test_the_guard_is_the_libpq_parser() -> None:
     assert SECRET in str(raised.value)
     with pytest.raises(ValueError):
         conn_mod.require_parseable_conninfo(MALFORMED[0])
+
+
+@pytest.mark.parametrize(
+    ("dsn", "fragments"),
+    [
+        ("host=127.0.0.1 port=1 dbname=d user=u password=Zq7Sentinel Pw9xK", ["Zq7Sentinel", "Pw9xK"]),
+        ("host=h password=Zq7Sentinel Pw9xK dbname=d", ["Zq7Sentinel", "Pw9xK"]),
+        ("host=h password=ab cd dbname=d", ["cd"]),
+    ],
+)
+def test_an_unquoted_password_with_a_space_is_not_echoed(manager: Any, dsn: str, fragments: list[str]) -> None:
+    import psycopg
+    from psycopg.conninfo import conninfo_to_dict
+
+    with pytest.raises(psycopg.ProgrammingError) as raw:
+        conninfo_to_dict(dsn)
+    assert any(f'"{f}"' in str(raw.value) for f in fragments)
+
+    with pytest.raises(ValueError, match="could not be parsed") as raised:
+        manager.get_postgres_pool(dsn)
+    message = str(raised.value)
+    assert not any(f'"{f}"' in message for f in fragments)
+    assert not any(f in message for f in fragments if len(f) >= 4)
+
+
+def test_a_libpq_diagnostic_without_a_secret_is_kept(manager: Any) -> None:
+    with pytest.raises(ValueError) as raised:
+        manager.get_postgres_pool("HOST=h DBNAME=d")
+    assert 'invalid connection option "HOST"' in str(raised.value)

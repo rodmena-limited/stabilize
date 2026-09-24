@@ -83,3 +83,41 @@ def redact_text(text: str) -> str:
     redacted = _URL_TOKEN_RE.sub(lambda m: _redact_bare_userinfo(redact_userinfo(m.group(0))), text)
     redacted = _KV_SECRET_RE.sub(r"\1=***", redacted)
     return redacted.encode("unicode_escape").decode("ascii")
+
+
+_KV_SECRET_VALUE_RE = re.compile(
+    r"(?i)\b(?:password|passfile|sslpassword)\s*=\s*('(?:[^'\\]|\\.)*'|.*?)(?=\s+[A-Za-z_]+\s*=|$)"
+)
+
+_MIN_BARE_FRAGMENT = 4
+
+
+def _secret_fragments(source: str) -> list[str]:
+    fragments: list[str] = []
+    for token in _URL_TOKEN_RE.findall(source) or [source]:
+        _scheme, separator, rest = token.partition("://")
+        if separator:
+            userinfo, at_sign, _host = rest.rpartition("@")
+            _user, colon, password = userinfo.partition(":")
+            if at_sign and colon and password:
+                fragments.append(password)
+    for match in _KV_SECRET_VALUE_RE.finditer(source):
+        value = match.group(1).strip().strip("'")
+        if value:
+            fragments.append(value)
+            fragments.extend(value.split())
+    return sorted({f for f in fragments if f}, key=len, reverse=True)
+
+
+def redact_against(text: str, source: str) -> str:
+    """Return *text* with every password fragment found in *source* removed, then :func:`redact_text` applied.
+
+    For an error raised while parsing *source*: libpq quotes back whatever
+    part of the input it could not tokenise, which for an unquoted password
+    containing a space is the part after the space.
+    """
+    for fragment in _secret_fragments(source):
+        text = text.replace(f'"{fragment}"', '"***"')
+        if len(fragment) >= _MIN_BARE_FRAGMENT:
+            text = text.replace(fragment, "***")
+    return redact_text(text)

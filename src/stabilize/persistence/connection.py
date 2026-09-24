@@ -62,13 +62,13 @@ def require_parseable_conninfo(connection_string: str) -> None:
     import psycopg
     from psycopg.conninfo import conninfo_to_dict
 
-    from stabilize.redaction import redact_text
+    from stabilize.redaction import redact_against
 
     try:
         conninfo_to_dict(connection_string)
     except psycopg.ProgrammingError as exc:
         raise ValueError(
-            f"PostgreSQL connection string could not be parsed: {redact_text(str(exc))}"
+            f"PostgreSQL connection string could not be parsed: {redact_against(str(exc), connection_string)}"
         ) from None
 
 

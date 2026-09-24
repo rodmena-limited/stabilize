@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.30.2] - 2026-09-24
+
+### Security
+
+- **A fragment of a password could survive redaction (#57).** In a
+  keyword-form connection string with an unquoted space in the password
+  (`password=abc def`), libpq quotes back the part after the space:
+  `missing "=" after "def"`. 0.30.1's redaction rewrote URL userinfo and
+  `password=<token>`, and the echoed fragment is neither, so it passed
+  through.
+  - Now the password is taken from the input string (URL userinfo, the
+    `password=` value, and each whitespace-separated piece of it) and scrubbed
+    from the error before anything else sees it. A diagnostic with no password
+    in it, such as `invalid connection option "HOST"`, is kept.
+  - The trigger is a connection string libpq cannot parse. resilient-circuit's
+    environment-variable factory builds `password=...` unquoted, which
+    produces exactly this string when a password contains a space.
+
 ## [0.30.1] - 2026-09-24
 
 ### Security
