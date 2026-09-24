@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import re
 
-_KV_SECRET_RE = re.compile(
-    r"(?i)\b(password|passfile|sslpassword)\s*=\s*('(?:[^'\\]|\\.)*'|\S*)"
-)
+_KV_SECRET_RE = re.compile(r"(?i)\b(password|passfile|sslpassword)\s*=\s*('(?:[^'\\]|\\.)*'|\S*)")
 
 _ECHO_LIMIT = 200
 
@@ -69,3 +67,19 @@ def redact_db_url(url: str) -> str:
     if len(redacted) > _ECHO_LIMIT:
         redacted = f"{redacted[:_ECHO_LIMIT]}... (truncated)"
     return redacted
+
+
+_URL_TOKEN_RE = re.compile(r"[^\s\"']*://[^\s\"']+")
+
+
+def redact_text(text: str) -> str:
+    """Return *text* with the password of every DSN it quotes, and every libpq keyword secret, replaced by ``***``.
+
+    For messages that may quote a DSN back, such as a psycopg error raised
+    while parsing a connection string. Only the URLs inside the text are
+    rewritten; the rest of the message is kept. Control characters are
+    escaped; the length is not capped.
+    """
+    redacted = _URL_TOKEN_RE.sub(lambda m: _redact_bare_userinfo(redact_userinfo(m.group(0))), text)
+    redacted = _KV_SECRET_RE.sub(r"\1=***", redacted)
+    return redacted.encode("unicode_escape").decode("ascii")

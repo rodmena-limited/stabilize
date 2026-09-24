@@ -52,6 +52,26 @@ class SingletonMeta(type):
                     instance.close_all()
 
 
+def _require_parseable_conninfo(connection_string: str) -> None:
+    """Raise a redacted ValueError when libpq cannot parse *connection_string*.
+
+    psycopg_pool retries a failed connection in its worker threads and logs
+    each failure, and a libpq parse error quotes the whole input back,
+    password included.
+    """
+    import psycopg
+    from psycopg.conninfo import conninfo_to_dict
+
+    from stabilize.redaction import redact_text
+
+    try:
+        conninfo_to_dict(connection_string)
+    except psycopg.ProgrammingError as exc:
+        raise ValueError(
+            f"PostgreSQL connection string could not be parsed: {redact_text(str(exc))}"
+        ) from None
+
+
 class ConnectionManager(metaclass=SingletonMeta):
     """
     Singleton connection manager for all database connections.
@@ -119,6 +139,8 @@ class ConnectionManager(metaclass=SingletonMeta):
             if pool is None:
                 from psycopg.rows import dict_row
                 from psycopg_pool import ConnectionPool
+
+                _require_parseable_conninfo(connection_string)
 
                 kwargs: dict[str, Any] = {"row_factory": dict_row}
                 kwargs.update(resolved.connect_kwargs)

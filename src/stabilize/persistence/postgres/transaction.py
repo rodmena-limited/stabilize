@@ -41,6 +41,13 @@ class PostgresTransaction(StoreTransaction):
         self._queue = queue
         # Track stage/task objects and their original versions for rollback
         self._staged_objects: list[tuple[StageExecution | TaskExecution, int]] = []
+        self._marked_ids: list[str] = []
+
+    def on_commit(self) -> None:
+        """Record the message ids this transaction marked processed, once it has committed."""
+        from stabilize.persistence.committed_marks import record_committed
+
+        record_committed(self._marked_ids)
 
     def rollback_versions(self) -> None:
         """Restore original versions on rollback.
@@ -127,6 +134,7 @@ class PostgresTransaction(StoreTransaction):
                     "execution_id": execution_id,
                 },
             )
+        self._marked_ids.append(message_id)
 
     def acquire_claim(
         self,

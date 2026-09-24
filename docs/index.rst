@@ -35,6 +35,7 @@ Key Features
    guide/resilience
    guide/error_handling
    guide/event_sourcing
+   guide/query_budget
    guide/agentic
 
 .. toctree::

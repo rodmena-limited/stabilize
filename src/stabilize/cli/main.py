@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from stabilize.cli.commands import mg_status, mg_up, monitor, prompt, prune_signals
+from stabilize.cli.commands import mg_check_grants, mg_status, mg_up, monitor, prompt, prune_signals
 from stabilize.cli.migrations import MigrationsNotFoundError
 
 
@@ -29,6 +29,16 @@ def main() -> None:
     status_parser.add_argument(
         "--db-url",
         help="Database URL (postgres://user:pass@host:port/dbname)",
+    )
+
+    grants_parser = subparsers.add_parser(
+        "mg-check-grants",
+        help="Report which engine tables a database role cannot use (exit 1 if any)",
+    )
+    grants_parser.add_argument("--role", required=True, help="Runtime database role to check")
+    grants_parser.add_argument(
+        "--db-url",
+        help="Database URL of a user that can read the catalogue (postgres://user:pass@host:port/dbname)",
     )
 
     # prompt command
@@ -104,6 +114,12 @@ def main() -> None:
         except MigrationsNotFoundError as exc:
             print(exc, file=sys.stderr)
             sys.exit(1)
+    elif args.command == "mg-check-grants":
+        try:
+            mg_check_grants(args.role, args.db_url)
+        except MigrationsNotFoundError as exc:
+            print(exc, file=sys.stderr)
+            sys.exit(2)
     elif args.command == "prompt":
         prompt()
     elif args.command == "monitor":

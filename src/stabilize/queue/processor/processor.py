@@ -505,13 +505,12 @@ class QueueProcessor(QueueProcessorMixin):
                 self._last_dlq_check = time.monotonic()
 
             while time.monotonic() - start < timeout:
-                if self.queue.size() == 0:
-                    break
                 if self.process_one():
                     count += 1
-                else:
-                    # No ready messages, wait a bit
-                    time.sleep(0.01)
+                    continue
+                if self.queue.size() == 0:
+                    break
+                time.sleep(0.01)
 
             return count
         finally:

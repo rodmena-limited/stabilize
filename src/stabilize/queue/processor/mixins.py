@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
+from stabilize.persistence.committed_marks import clear_committed, consume_committed
 from stabilize.queue.dedup import get_deduplicator
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.processor.handler_base import MessageHandler
@@ -198,6 +199,7 @@ class QueueProcessorMixin:
 
         logger.debug("Handling %s (execution=%s)", get_message_type_name(message), execution_id or "N/A")
 
+        clear_committed()
         handler.handle(message)
 
         # Mark message as processed for deduplication
@@ -206,8 +208,7 @@ class QueueProcessorMixin:
             dedup = get_deduplicator()
             dedup.mark_seen(message_id)
 
-            # Also mark in database for persistence
-            if self._store is not None:
+            if self._store is not None and not consume_committed(message_id):
                 self._store.mark_message_processed(
                     message_id=message_id,
                     handler_type=get_message_type_name(message),

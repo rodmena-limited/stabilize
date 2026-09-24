@@ -490,6 +490,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
             try:
                 yield txn
                 conn.commit()
+                txn.on_commit()
             except Exception:
                 conn.rollback()
                 txn.rollback_versions()

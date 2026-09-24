@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.30.0] - 2026-09-24
+
+### Security
+
+- **A PostgreSQL DSN that libpq cannot parse is refused before any pool
+  exists, so its password no longer reaches your logs (#53).** Before, the
+  malformed string went to psycopg_pool, which retried and logged libpq's
+  parse error at WARNING on every attempt. libpq quotes the unparsed input
+  back, password included. Measured with a `postgresql+psycopg://` DSN: 14 of
+  28 log records carried the password, and the caller got a clean PoolTimeout
+  after the acquire timeout, so an audit of your own except-blocks found
+  nothing. Now `get_postgres_pool` raises at once:
+  `ValueError: PostgreSQL connection string could not be parsed: ... u:***@...`
+  with no exception chain. No pool is created and nothing is logged.
+- **`resilient-circuit>=0.8.4`**, raised from 0.8.2. 0.8.2 and 0.8.3 log a
+  malformed conninfo with its password.
+
+### Added
+
+- **`stabilize mg-check-grants --role ROLE [--db-url URL]` (#44).** Reports
+  which engine tables the role cannot SELECT, INSERT, UPDATE or DELETE, a
+  missing USAGE on the schema, and a missing USAGE on each table's serial
+  sequence (INSERT needs it).
+  - The table set is read from the migrations shipped in the package, so it
+    follows new tables without anyone updating a list.
+  - Exit codes: 0 when complete, 1 when anything is missing, 2 when the role
+    does not exist or the check cannot confirm a table owner's own access.
+  - Run it at deploy time as a user that can read the catalogue.
+  - Not covered: the event-store tables and `task_leases`. The engine creates
+    those at runtime, not through the migrations.
+- **`stabilize[c]` (#45).** Installs `psycopg[c]`, the compiled driver linked
+  against the system libpq. It needs `pg_config` and a compiler at install
+  time, so it is not part of `all`. No extra declares `psycopg[binary]`.
+
+### Changed
+
+- **`mg-up` and `mg-status` state which driver will open the connection (#47).**
+  They print the psycopg version, its implementation, the libpq version, and
+  whether that libpq is the system one or bundled inside psycopg-binary. If
+  that cannot be determined, they refuse to connect.
+- **An import error is no longer reported as "psycopg not installed" (#47).**
+  The install hint now appears only when psycopg itself is absent. Any other
+  ImportError, such as a `psycopg_c` whose version does not match the
+  installed psycopg, propagates with its own message. Before, it was reported
+  as "psycopg not installed", on a host where psycopg was installed.
+- **Database errors printed by the CLI are redacted.**
+- **Fewer database round trips per stage (#46).** A one-stage workflow on
+  PostgreSQL now issues 97 SQL statements instead of 110, and each additional
+  stage 87 instead of 97.
+  - Each message was marked processed twice: once inside the handler's
+    transaction and once by the processor afterwards. The processor now skips
+    its mark only when a committed transaction on the same thread already
+    marked that exact message. A handler that does not mark still gets the
+    processor's mark.
+  - `process_all` counted the queue before every message. It now counts only
+    when no message was ready, and still stops only when the queue is empty.
+  - `tests/test_query_budget.py` fails if either number rises.
+    `docs/guide/query_budget.rst` has the per-statement breakdown and what is
+    left (#54).
+
 ## [0.29.1] - 2026-09-23
 
 ### Fixed — PostgreSQL connection pools leaked in 0.25.0 through 0.29.0 (#51)

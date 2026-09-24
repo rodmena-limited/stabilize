@@ -1,6 +1,6 @@
 [project]
 name = "stabilize"
-version = "0.29.1"
+version = "0.30.0"
 description = "Stabilize Workflow Orchestration - Agentic Parallel Workflows"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -36,17 +36,18 @@ dependencies = [
     # Argue with it there (bulkman SPECS/12), not here.
     #
     # Two further things arrive through that same line rather than through
-    # ours: the [postgres] extra pulls psycopg into EVERY bare stabilize
-    # install, so our own `postgres` extra does not gate it (bulkman #15), and
-    # psycopg-pool likewise. Our guarded `import psycopg` branches therefore
-    # almost never execute in practice.
+    # ours: its [postgres] extra pulls psycopg and python-dotenv into EVERY bare
+    # stabilize install, so our own `postgres` extra does not gate psycopg
+    # (bulkman #15). psycopg-pool is ours, from our own psycopg[pool]. Our
+    # guarded `import psycopg` branches therefore almost never execute in
+    # practice.
     #
     # Floors are kept and are not caps: bulkman 2.0.1 added
     # BulkheadShutdownError, which resilience/executor.py's shutdown-race
     # classification requires, and every bulkman before 2.0.4 itself caps
     # resilient-circuit below 0.8, so a lower floor would let a resolver pick
-    # one that forbids the version we want. resilient-circuit's floor matches
-    # bulkman 2.0.4's own.
+    # one that forbids the version we want. resilient-circuit's floor is 0.8.4
+    # because 0.8.2 and 0.8.3 log a malformed conninfo with its password.
     #
     # The tradeoff, stated rather than hidden: a future breaking major will
     # install silently. The engine is built to survive that rather than to
@@ -54,12 +55,17 @@ dependencies = [
     # naming the consequence, and STABILIZE_CIRCUIT_STORAGE_STRICT=1 turns it
     # into a startup failure instead of process-local state.
     "bulkman>=2.0.4",
-    "resilient-circuit>=0.8.2",
+    "resilient-circuit>=0.8.4",
 ]
 
 [project.optional-dependencies]
 postgres = [
     "psycopg[pool]>=3.0",
+    "psycopg-pool>=3.1",
+    "migretti>=0.3",
+]
+c = [
+    "psycopg[c,pool]>=3.0",
     "psycopg-pool>=3.1",
     "migretti>=0.3",
 ]
