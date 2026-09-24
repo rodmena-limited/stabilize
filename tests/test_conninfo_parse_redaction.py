@@ -135,3 +135,40 @@ def test_a_libpq_diagnostic_without_a_secret_is_kept(manager: Any) -> None:
     with pytest.raises(ValueError) as raised:
         manager.get_postgres_pool("HOST=h DBNAME=d")
     assert 'invalid connection option "HOST"' in str(raised.value)
+
+
+def _generated_malformed() -> list[str]:
+    secret = "Zq7SentinelPw9xK"
+    split = "Zq7Sentinel Pw9xK"
+    shapes: list[str] = []
+    for scheme in ("postgresql", "postgres", "POSTGRESQL", "postgresql+asyncpg", "postgres!!!", "pg", ""):
+        for sep in ("://", ":", ":/", "//", ":///", ""):
+            for pw in (secret, split):
+                for tail in ("@h/d", "@h:5432/d", "@h/d?x=1", "@/d", "@h/d extra"):
+                    shapes.append(f"{scheme}{sep}u:{pw}{tail}")
+    for pw in (secret, split, f"'{secret}", f"{secret}'"):
+        shapes.append(f"host=h password={pw} dbname=d")
+        shapes.append(f"password={pw}")
+        shapes.append(f"host=h dbname=d password={pw} x")
+    return shapes
+
+
+@pytest.mark.parametrize("dsn", _generated_malformed())
+def test_no_generated_malformed_dsn_echoes_the_password(manager: Any, dsn: str) -> None:
+    import psycopg
+    from psycopg.conninfo import conninfo_to_dict
+
+    pieces = ["Zq7SentinelPw9xK", "Zq7Sentinel", "Pw9xK"]
+    try:
+        conninfo_to_dict(dsn)
+    except psycopg.ProgrammingError as raw:
+        raw_text = str(raw)
+    else:
+        pytest.skip("libpq parses this shape; nothing is echoed")
+    if not any(p in raw_text for p in pieces):
+        pytest.skip("libpq's own error carries no part of the password for this shape")
+
+    with pytest.raises(ValueError) as raised:
+        manager.get_postgres_pool(dsn)
+    message = str(raised.value)
+    assert not any(p in message for p in pieces), message

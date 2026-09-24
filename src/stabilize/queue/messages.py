@@ -483,7 +483,7 @@ def _validated(message_class: type[Message], data: dict[str, Any], type_name: st
             f"{'.'.join(str(p) for p in err['loc']) or '<message>'}: {err['msg']}"
             for err in exc.errors()[:4]
         )
-        raise MessageContractError(f"{type_name} failed its field contract: {problems}") from exc
+        raise MessageContractError(f"{type_name} failed its field contract: {problems}") from None
 
 
 _ADAPTERS: dict[type[Message], Any] = {}

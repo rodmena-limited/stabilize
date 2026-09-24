@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.30.3] - 2026-09-24
+
+### Security
+
+- **Most mistyped connection strings still echoed the password in 0.30.2
+  (#58).** A connection string with a mistyped separator
+  (`postgresql:u:<pw>@h/d`, `postgresql//u:<pw>@h/d`, or a bare
+  `u:<pw>@h/d`) was quoted back by libpq in full. It contains no `://`, so
+  neither the URL redactor nor 0.30.2's fragment scrub recognised it.
+  - Of 446 generated malformed shapes whose raw libpq error contains the
+    password, 325 still leaked on 0.30.2.
+  - Any fragment of the input that libpq quotes back is now rendered from an
+    allow-list: a bare word, the URL scheme, and a host with no spaces or query
+    string are shown; everything else becomes `***`.
+  - All 446 generated cases pass, and diagnostics such as
+    `invalid connection option "HOST"` and the `+psycopg` scheme hint remain
+    readable.
+  - 0.30.0 to 0.30.2 each fixed the shapes I had thought of and missed others.
+    The allow-list stops depending on that: it decides what may be shown, not
+    what must be hidden.
+
+- **A queue message that failed its field contract carried the rejected
+  value in its traceback.** A free-form field (`signal_data`, `jump_context`,
+  `instance_context`) sent with the wrong type raised `MessageContractError`
+  chained to pydantic's `ValidationError`, which includes `input_value=<raw
+  value>`. The processor logs failed messages with their traceback. The error
+  already names the field and the reason, so the chain is now dropped.
+  Reported as a class by trace-thinkpad-83589d (pydantic echoes refused input).
+
 ## [0.30.2] - 2026-09-24
 
 ### Security

@@ -120,4 +120,24 @@ def redact_against(text: str, source: str) -> str:
         text = text.replace(f'"{fragment}"', '"***"')
         if len(fragment) >= _MIN_BARE_FRAGMENT:
             text = text.replace(fragment, "***")
+    text = _QUOTED_RE.sub(lambda m: _redact_quoted_input(m.group(1), source), text)
     return redact_text(text)
+
+
+_QUOTED_RE = re.compile(r'"([^"]*)"')
+_SAFE_WORD_RE = re.compile(r"[A-Za-z0-9_.+=\-]*")
+_SAFE_SCHEME_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.!\-]*")
+_SAFE_HOST_RE = re.compile(r"[A-Za-z0-9_.\-:/\[\]]+")
+
+
+def _redact_quoted_input(fragment: str, source: str) -> str:
+    """Render a fragment of *source* that libpq quoted back, showing only parts that cannot hold a credential."""
+    if not fragment or fragment not in source or _SAFE_WORD_RE.fullmatch(fragment):
+        return f'"{fragment}"'
+    scheme = fragment.partition("://")[0] if "://" in fragment else ""
+    host = fragment.rpartition("@")[2] if "@" in fragment else ""
+    rendered = f"{scheme}://" if _SAFE_SCHEME_RE.fullmatch(scheme) else ""
+    rendered += "***"
+    if _SAFE_HOST_RE.fullmatch(host):
+        rendered += f"@{host}"
+    return f'"{rendered}"'
