@@ -46,8 +46,9 @@ dependencies = [
     # BulkheadShutdownError, which resilience/executor.py's shutdown-race
     # classification requires, and every bulkman before 2.0.4 itself caps
     # resilient-circuit below 0.8, so a lower floor would let a resolver pick
-    # one that forbids the version we want. resilient-circuit's floor is 0.8.4
-    # because 0.8.2 and 0.8.3 log a malformed conninfo with its password.
+    # one that forbids the version we want. resilient-circuit's floor is 0.8.5:
+    # every earlier version logs some shape of malformed conninfo with its
+    # password (0.8.4 closed the URL shapes, 0.8.5 the rest).
     #
     # The tradeoff, stated rather than hidden: a future breaking major will
     # install silently. The engine is built to survive that rather than to
@@ -55,7 +56,7 @@ dependencies = [
     # naming the consequence, and STABILIZE_CIRCUIT_STORAGE_STRICT=1 turns it
     # into a startup failure instead of process-local state.
     "bulkman>=2.0.4",
-    "resilient-circuit>=0.8.4",
+    "resilient-circuit>=0.8.5",
 ]
 
 [project.optional-dependencies]

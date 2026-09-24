@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Security
+
+- **`resilient-circuit>=0.8.5`**, raised from 0.8.4. Every earlier
+  resilient-circuit logs some shape of malformed conninfo with its password;
+  0.8.4 closed the URL shapes, 0.8.5 the rest. stabilize's own path was
+  already safe from 0.30.1: it refuses an unparseable DSN before
+  resilient-circuit sees it (measured: 0 of 5 such shapes reached it). The
+  floor protects other code in the same process that constructs
+  resilient-circuit storage itself.
+
 ## [0.30.4] - 2026-09-24
 
 ### Security
