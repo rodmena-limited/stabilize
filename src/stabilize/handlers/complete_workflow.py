@@ -117,6 +117,13 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
             if status != WorkflowStatus.SUCCEEDED:
                 running_stages = [s for s in execution.top_level_stages() if s.status == WorkflowStatus.RUNNING]
 
+            never_started: list[StageExecution] = []
+            if status == WorkflowStatus.CANCELED and execution.is_canceled:
+                never_started = [s for s in execution.top_level_stages() if s.status == WorkflowStatus.NOT_STARTED]
+                for stage in never_started:
+                    self.set_stage_status(stage, WorkflowStatus.CANCELED)
+                    stage.end_time = execution.end_time
+
             # Save pipeline_config_id before cleanup
             pipeline_config_id = execution.pipeline_config_id
             keep_waiting_pipelines = execution.keep_waiting_pipelines
@@ -124,6 +131,8 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
             # Atomic: update execution status + cancel stages + start waiting workflows
             with self.repository.transaction(self.queue) as txn:
                 txn.update_workflow_status(execution)
+                for stage in never_started:
+                    txn.store_stage(stage)
 
                 # Message deduplication
                 if message.message_id:
