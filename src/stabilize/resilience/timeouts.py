@@ -42,7 +42,7 @@ class TimeoutManager:
             from stabilize.tasks.interface import RetryableTask
 
             if isinstance(task, RetryableTask):
-                return task.get_dynamic_timeout(stage)
+                return task.get_execution_timeout(stage)
             # Fallback if hasattr but not instance (duck typing)
             result: timedelta = getattr(task, "get_dynamic_timeout")(stage)
             return result

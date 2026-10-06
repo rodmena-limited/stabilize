@@ -1786,7 +1786,10 @@ Valid transitions:
 Tasks are executed with timeout enforcement using thread interruption:
 
 # Default timeout: 5 minutes for regular tasks
-# RetryableTask can override via get_dynamic_timeout()
+# RetryableTask has two limits:
+#   get_timeout() / get_dynamic_timeout(stage): TOTAL time across all executions,
+#     measured from the task's first start
+#   get_execution_timeout(stage): ONE execute() call; defaults to the total limit
 
 class MyRetryableTask(RetryableTask):
     def get_timeout(self) -> timedelta:
@@ -1795,6 +1798,9 @@ class MyRetryableTask(RetryableTask):
     def get_dynamic_timeout(self, stage: StageExecution) -> timedelta:
         # Can use stage context to determine timeout
         return timedelta(milliseconds=stage.context.get("stageTimeoutMs", 300000))
+
+    def get_execution_timeout(self, stage: StageExecution) -> timedelta:
+        return timedelta(seconds=30)
 
 # When timeout occurs, task.on_timeout(stage) is called if defined
 def on_timeout(self, stage: StageExecution) -> TaskResult | None:

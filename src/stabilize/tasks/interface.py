@@ -161,12 +161,31 @@ class RetryableTask(Task):
     @abstractmethod
     def get_timeout(self) -> timedelta:
         """
-        Get the maximum time this task can run before timing out.
+        Get the total time this task may spend across all its executions.
+
+        Measured from the task's first start. When it is exceeded the engine
+        calls on_timeout(stage); a returned TaskResult is processed as the
+        task's result, and None completes the task as TERMINAL.
 
         Returns:
-            Maximum execution time
+            Total lifecycle limit
         """
         pass
+
+    def get_execution_timeout(self, stage: StageExecution) -> timedelta:
+        """
+        Get the limit for a single execute() call.
+
+        Defaults to get_dynamic_timeout(stage), the lifecycle limit. Override
+        to bound each call separately, e.g. a 30 s poll inside a 2 h wait.
+
+        Args:
+            stage: The stage execution context
+
+        Returns:
+            Per-call limit
+        """
+        return self.get_dynamic_timeout(stage)
 
     def get_backoff_period(
         self,

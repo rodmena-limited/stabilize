@@ -87,6 +87,34 @@ Retryable Tasks
 
 Implement ``RetryableTask`` for polling or unreliable operations. The engine handles backoff and timeouts.
 
+A retryable task has two limits:
+
+*   ``get_timeout()`` (or ``get_dynamic_timeout(stage)``) is the **total** time the task may
+    spend across all its executions, measured from its first start. When it is exceeded the
+    engine calls ``on_timeout(stage)``: a returned ``TaskResult`` is processed as the task's
+    result, and ``None`` completes the task as ``TERMINAL``.
+*   ``get_execution_timeout(stage)`` bounds a **single** ``execute()`` call. It defaults to the
+    total limit; override it to bound each poll separately. A call that exceeds it also goes
+    through ``on_timeout(stage)``.
+
+A ``TransientError`` raised by ``execute()`` is retried with backoff up to ``max_attempts``
+(10) **consecutive** times; a ``RUNNING`` result resets the count.
+
+.. code-block:: python
+
+    class WaitForDeploy(RetryableTask):
+        def get_timeout(self) -> timedelta:
+            return timedelta(hours=2)
+
+        def get_execution_timeout(self, stage: StageExecution) -> timedelta:
+            return timedelta(seconds=30)
+
+        def get_backoff_period(self, stage: StageExecution, duration: timedelta) -> timedelta:
+            return timedelta(seconds=10)
+
+        def execute(self, stage: StageExecution) -> TaskResult:
+            return TaskResult.success() if deployed(stage) else TaskResult.running()
+
 Task Cleanup
 ~~~~~~~~~~~~
 
