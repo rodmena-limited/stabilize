@@ -161,6 +161,17 @@ class Queue(ABC):
         # Default implementation: heartbeating not supported
         return False
 
+    def purge_workflow(self, execution_id: str) -> int:
+        """Delete every queued and dead-lettered message for one workflow.
+
+        Args:
+            execution_id: The workflow whose messages to delete
+
+        Returns:
+            Number of rows deleted. The default implementation deletes nothing.
+        """
+        return 0
+
 
 @dataclass(order=True)
 class QueuedMessage:

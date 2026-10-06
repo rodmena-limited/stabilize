@@ -357,6 +357,21 @@ class PostgresQueue(Queue):
                 )
                 return cur.fetchone() is not None
 
+    def purge_workflow(self, execution_id: str) -> int:
+        """Delete every queued and dead-lettered message for one workflow."""
+        deleted = 0
+        with self._get_pool().connection() as conn:
+            with conn.cursor() as cur:
+                for table in (self.table_name, f"{self.table_name}_dlq"):
+                    cur.execute(
+                        f"DELETE FROM {table} WHERE payload ->> 'execution_id' = %s",
+                        (execution_id,),
+                    )
+                    deleted += cur.rowcount
+            conn.commit()
+        self._size_cache = None
+        return deleted
+
     # ========== Dead Letter Queue Methods ==========
 
     def move_to_dlq(

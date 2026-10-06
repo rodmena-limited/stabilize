@@ -1,6 +1,8 @@
 """Backends for the 0.32.0 probes.
 
-SQLite always runs. PostgreSQL runs when STABILIZE_PROBE_DSN names a database
+SQLite always runs, set up as QueueProcessor's docstring shows; set
+STABILIZE_PROBE_SQLITE_QUEUE_TABLES=1 to also call SqliteQueue._create_table(),
+which releases before 0.32.0 needed for a dead-letter table. PostgreSQL runs when STABILIZE_PROBE_DSN names a database
 (migrated here with mg_up), or else in a throwaway testcontainers instance;
 with neither available the PostgreSQL leg reports SKIP, never PASS.
 """
@@ -22,6 +24,8 @@ def sqlite_backend() -> Iterator[tuple[Any, Any]]:
         url = f"sqlite:///{d}/probe.db"
         store = SqliteWorkflowStore(url, create_tables=True)
         queue = SqliteQueue(url, table_name="queue_messages")
+        if os.environ.get("STABILIZE_PROBE_SQLITE_QUEUE_TABLES") == "1":
+            queue._create_table()
         try:
             yield store, queue
         finally:

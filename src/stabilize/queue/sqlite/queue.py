@@ -326,6 +326,20 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         self._pending.clear()
         logger.debug("Cleared queue")
 
+    def purge_workflow(self, execution_id: str) -> int:
+        """Delete every queued and dead-lettered message for one workflow."""
+        conn = self._get_connection()
+        deleted = 0
+        for table in (self.table_name, f"{self.table_name}_dlq"):
+            cur = conn.execute(
+                f"DELETE FROM {table} WHERE CASE WHEN json_valid(payload) "
+                "THEN json_extract(payload, '$.execution_id') END = ?",
+                (execution_id,),
+            )
+            deleted += cur.rowcount
+        conn.commit()
+        return deleted
+
     def has_pending_message_for_task(self, task_id: str) -> bool:
         """Check if there's already a pending message for a specific task.
 

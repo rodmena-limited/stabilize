@@ -19,6 +19,7 @@ from stabilize.persistence.sqlite.converters import (
 )
 from stabilize.persistence.sqlite.helpers import insert_stage
 from stabilize.persistence.store import WorkflowNotFoundError
+from stabilize.persistence.store.owned_rows import WORKFLOW_OWNED_ROWS
 
 if TYPE_CHECKING:
     from stabilize.models.workflow import Workflow
@@ -155,13 +156,23 @@ class SqliteWorkflowCrudMixin:
         conn.commit()
 
     def delete(self, execution_id: str) -> None:
-        """Delete an execution."""
+        """Delete an execution and every store row it owns.
+
+        Queue and dead-letter rows belong to the queue: see Queue.purge_workflow.
+        """
         conn = self._get_connection()
-        conn.execute(
-            "DELETE FROM pipeline_executions WHERE id = :id",
-            {"id": execution_id},
-        )
-        conn.commit()
+        present = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+        }
+        try:
+            for table, column in WORKFLOW_OWNED_ROWS:
+                if table in present:
+                    conn.execute(f"DELETE FROM {table} WHERE {column} = :id", {"id": execution_id})
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
     def exists(self, execution_id: str) -> bool:
         """Check if a workflow exists.
