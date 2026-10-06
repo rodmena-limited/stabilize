@@ -312,7 +312,11 @@ class LifecycleManager:
         for processor in processors:
             try:
                 elapsed = time.monotonic() - start_time
-                processor.stop(wait=True, timeout=max(0.0, self.shutdown_timeout - elapsed))
+                budget = max(0.0, self.shutdown_timeout - elapsed)
+                try:
+                    processor.stop(wait=True, timeout=budget)
+                except TypeError:
+                    processor.stop(wait=False)
                 logger.debug("Stopped QueueProcessor")
             except Exception as e:
                 logger.warning("Error stopping processor: %s", e)

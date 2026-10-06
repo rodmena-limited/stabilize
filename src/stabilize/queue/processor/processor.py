@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from datetime import timedelta
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -448,8 +449,15 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
                 with self._lock:
                     self._active_count -= 1
 
-        if self._executor is not None:
+        try:
+            if self._executor is None:
+                raise RuntimeError("processor is not running")
             self._executor.submit(process_and_ack)
+        except RuntimeError:
+            with self._lock:
+                self._active_count -= 1
+            self.queue.reschedule(message, timedelta(0))
+            raise
 
     @property
     def is_running(self) -> bool:
