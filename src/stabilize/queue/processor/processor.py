@@ -243,7 +243,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
             self._recovery_thread.join(timeout=5.0)
 
         if self._executor:
-            self._executor.shutdown(wait=False, cancel_futures=not wait)
+            self._executor.shutdown(wait=False)
             if wait:
                 limit = self.config.shutdown_timeout_seconds if timeout is None else timeout
                 deadline = None if limit is None else time.monotonic() + limit
