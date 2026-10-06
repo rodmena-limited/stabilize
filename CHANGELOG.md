@@ -1,5 +1,95 @@
 # Changelog
 
+## [0.32.0] - 2026-10-06
+
+Audit release (two falsification passes; every finding reproduced live on
+0.31.0 and red there for its stated reason). **Run `stabilize mg-up` with the
+owner role before starting 0.32.0 workers on PostgreSQL**: one migration
+rewrites the queue tables (see "Migration" below).
+
+### Fixed
+
+- **Transient task retries stop at `max_attempts` (#62).** The retry counter
+  lived in `Message.attempts`, which every queue delivery overwrote with the
+  row's delivery count, so a task raising `TransientError` on every call
+  retried forever with its workflow `RUNNING` (measured: 4164 executions in
+  60 s on SQLite, 1412 on PostgreSQL). The count now travels in the payload
+  field `retry_count`; a task that keeps failing is `TERMINAL` after 10
+  consecutive transient failures, and a `RUNNING` result resets the count.
+- **A database error while saving a successful task's result no longer fails
+  or re-runs the task (#63).** It was handled as if the task had raised it:
+  non-transient errors marked the task `TERMINAL`, transient ones executed it
+  again. The result is now held and saved by the redelivery without executing
+  the task again in that worker process.
+- **A re-queued task no longer forks a second execution chain (#75).** When a
+  task returned `RUNNING` or raised `TransientError`, the source message was
+  not marked processed in the transaction that pushed the follow-up; a failure
+  of the separate mark afterwards redelivered it and the task ran on two
+  chains. Both paths now mark the source atomically.
+- **Crash recovery examines every pending workflow in its window (#64).** It
+  looked at the newest 100 only. The application-filtered path also ignored
+  the recovery window; `retrieve_by_application` and
+  `retrieve_by_pipeline_config_id` now honour `start_time_after` /
+  `start_time_before`.
+- **`Orchestrator.start` raises when it cannot store the workflow (#65)**
+  instead of swallowing the error and queueing a `StartWorkflow` for a
+  workflow that does not exist.
+- **`QueueProcessor.stop(wait=True)` is bounded (#66).** New `timeout`
+  argument (default `QueueProcessorConfig.shutdown_timeout_seconds` = 60 s);
+  it returns the number of handlers still running. `LifecycleManager` passes
+  its remaining budget, so its `shutdown_timeout` now holds on a blocked
+  handler.
+- **Deleting a workflow removes its rows (#67).** `store.delete` also removes
+  the workflow's `processed_messages`, `stage_claims` and `workflow_signals`
+  rows. New `Queue.purge_workflow(execution_id)` deletes its queued and
+  dead-lettered messages.
+- **SQLite: the default dead-letter table exists (#71).** A database set up
+  with `SqliteWorkflowStore(create_tables=True)` had no `queue_messages_dlq`
+  unless the private `SqliteQueue._create_table()` was called; a poison
+  message then made `process_all` raise. SQLite schema migration 3 creates it.
+- **SQLite queue timing is exact UTC (#73).** On SQLite 3.40 and older (the
+  system SQLite of Debian bookworm, used by the official
+  `python:3.11/3.12-slim-bookworm` images) with a non-UTC host timezone, the
+  queue's clock was shifted by the UTC offset: west of UTC a locked message
+  was polled again at once (double execution) and delays were ignored; east of
+  UTC new messages were not delivered for hours. Delays could also fire up to
+  1 s early, and the processed-message retention sweep (opt-in) deleted marks
+  written on the cutoff's calendar date regardless of age.
+- **PostgreSQL queue timing is absolute (#74).** Queue timestamps were
+  `TIMESTAMP WITHOUT TIME ZONE` compared with each session's wall clock, so
+  sessions with different `TimeZone` settings (PGTZ, DSN options, per-role
+  defaults) disagreed by the offset (measured New York vs UTC: a 4 h stall, a
+  2 h delay delivered at once, a locked message polled again). The same applies
+  to one non-UTC server across a DST change. Locks and reschedules now use the
+  database clock.
+- **PostgreSQL queue ids are 64-bit (#72).** `queue_messages.id` was `int4`;
+  after 2,147,483,647 pushes over a database's life every push failed and the
+  engine stopped.
+
+### Added
+
+- `RetryableTask.get_execution_timeout(stage)` bounds a single `execute()`
+  call; it defaults to the lifecycle limit, so existing tasks are unchanged
+  (#68). Docs now state the `on_timeout` semantics of both limits.
+- `PostgresQueue(options=PoolOptions(...))`; the same instance on the store and
+  the queue gives one pool (#69). The idle cost of the poll interval is
+  documented (one processor: 19.6 transactions/s at the default 50 ms).
+
+### Migration
+
+- PostgreSQL `01M483DVR3DS980FHS8N754CWH_queue_bigint_ids_and_timestamptz`:
+  `queue_messages` and `queue_messages_dlq` ids to `bigint`, their timestamps
+  to `timestamptz` (existing values read in the migrating session's
+  `TimeZone`). It rewrites both tables under an `ACCESS EXCLUSIVE` lock; they
+  are normally small. Run it with workers stopped or between bursts.
+- SQLite schema migration 3 (`queue_messages_dlq`), applied automatically by
+  `create_tables=True`.
+
+### Rolling upgrades
+
+- A 0.31.0 worker reading a 0.32.0 retry message ignores `retry_count` and
+  behaves as 0.31.0 did (unbounded transient retries); upgrade all workers.
+
 ## [0.31.0] - 2026-09-24
 
 ### Fixed
