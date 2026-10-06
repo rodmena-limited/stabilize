@@ -23,7 +23,6 @@ Configuration:
         store,
         queue,
         max_recovery_age_hours=24,  # Only recover recent workflows
-        batch_size=100,  # Process in batches
     )
 """
 
@@ -31,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -89,7 +89,8 @@ class WorkflowRecovery:
             queue: Queue for re-queuing messages
             max_recovery_age_hours: Only recover workflows started within
                 this time window (default 24 hours)
-            batch_size: Number of workflows to process per batch
+            batch_size: Accepted for compatibility; recovery examines every
+                pending workflow in the window regardless of this value.
         """
         self.store = store
         self.queue = queue
@@ -128,7 +129,6 @@ class WorkflowRecovery:
         try:
             # Get workflows needing recovery
             workflows = self._get_workflows_for_recovery(application, cutoff_time)
-            logger.info("Found %d workflows to check for recovery", len(workflows))
 
             for workflow in workflows:
                 try:
@@ -182,43 +182,33 @@ class WorkflowRecovery:
         self,
         application: str | None,
         cutoff_time: int,
-    ) -> list[Workflow]:
-        """Get workflows that may need recovery.
+    ) -> Iterator[Workflow]:
+        """Yield every RUNNING or NOT_STARTED workflow started after cutoff_time (or not yet started).
 
         Args:
             application: Optional application filter
             cutoff_time: Only consider workflows started after this time
 
         Returns:
-            List of Workflow objects to check
+            Iterator of Workflow objects to check
         """
         from stabilize.persistence.store import WorkflowCriteria
 
-        # Query for running/not-started workflows (both may need recovery)
         criteria = WorkflowCriteria(
             statuses={WorkflowStatus.RUNNING, WorkflowStatus.NOT_STARTED},
-            page_size=self.batch_size,
+            page_size=None,
             start_time_after=cutoff_time,
         )
 
-        workflows = []
-
         if application:
-            for wf in self.store.retrieve_by_application(application, criteria):
-                workflows.append(wf)
-        else:
-            # Need to get all applications - this is a limitation
-            # In production, you'd iterate through known applications
-            # For now, we'll use a direct query if available
-            if hasattr(self.store, "get_all_pending_workflows"):
-                workflows = list(getattr(self.store, "get_all_pending_workflows")(criteria))
-            else:
-                logger.warning(
-                    "Store doesn't support get_all_pending_workflows, "
-                    "recovery may be incomplete without application filter"
-                )
-
-        return workflows
+            return self.store.retrieve_by_application(application, criteria)
+        if hasattr(self.store, "get_all_pending_workflows"):
+            return iter(getattr(self.store, "get_all_pending_workflows")(criteria))
+        logger.warning(
+            "Store doesn't support get_all_pending_workflows, "
+            "recovery may be incomplete without application filter"
+        )
+        return iter(())
 
     def _recover_workflow(self, workflow: Workflow) -> RecoveryResult:
         """Recover a single workflow.

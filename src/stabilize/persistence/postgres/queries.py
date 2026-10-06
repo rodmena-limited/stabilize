@@ -12,6 +12,7 @@ from stabilize.persistence.postgres.converters import (
     row_to_task,
 )
 from stabilize.persistence.store import WorkflowCriteria
+from stabilize.persistence.store.criteria import time_window_sql
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -210,10 +211,11 @@ def retrieve_by_pipeline_config_id(
             query += " AND status = ANY(%(statuses)s)"
             params["statuses"] = status_names
 
+    query += time_window_sql(criteria, params, "%")
     query += " ORDER BY start_time DESC"
 
     if criteria and criteria.page_size:
-        query += f" LIMIT {criteria.page_size}"
+        query += f" LIMIT {int(criteria.page_size)}"
 
     with pool.connection() as conn:
         with conn.cursor() as cur:
@@ -240,11 +242,7 @@ def get_all_pending_workflows(
         query += " AND status = ANY(%(statuses)s)"
         params["statuses"] = status_names
 
-    if criteria and criteria.start_time_after:
-        # Include not-yet-started workflows (NULL start_time).
-        query += " AND (start_time >= %(start_time_after)s OR start_time IS NULL)"
-        params["start_time_after"] = criteria.start_time_after
-
+    query += time_window_sql(criteria, params, "%")
     query += " ORDER BY start_time DESC NULLS LAST"
 
     if criteria and criteria.page_size:
@@ -276,10 +274,11 @@ def retrieve_by_application(
             query += " AND status = ANY(%(statuses)s)"
             params["statuses"] = status_names
 
+    query += time_window_sql(criteria, params, "%")
     query += " ORDER BY start_time DESC"
 
     if criteria and criteria.page_size:
-        query += f" LIMIT {criteria.page_size}"
+        query += f" LIMIT {int(criteria.page_size)}"
 
     with pool.connection() as conn:
         with conn.cursor() as cur:

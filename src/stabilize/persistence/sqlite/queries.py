@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from stabilize.dag.merge import merge_ancestor_outputs, topological_order
 from stabilize.persistence.sqlite.converters import row_to_stage, row_to_task
 from stabilize.persistence.store import WorkflowCriteria
+from stabilize.persistence.store.criteria import time_window_sql
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -228,10 +229,11 @@ def retrieve_by_pipeline_config_id(
         for i, name in enumerate(status_names):
             params[f"status_{i}"] = name
 
+    query += time_window_sql(criteria, params, ":")
     query += " ORDER BY start_time DESC"
 
     if criteria and criteria.page_size:
-        query += f" LIMIT {criteria.page_size}"
+        query += f" LIMIT {int(criteria.page_size)}"
 
     result = conn.execute(query, params)
     for row in result.fetchall():
@@ -258,10 +260,11 @@ def retrieve_by_application(
         for i, name in enumerate(status_names):
             params[f"status_{i}"] = name
 
+    query += time_window_sql(criteria, params, ":")
     query += " ORDER BY start_time DESC"
 
     if criteria and criteria.page_size:
-        query += f" LIMIT {criteria.page_size}"
+        query += f" LIMIT {int(criteria.page_size)}"
 
     result = conn.execute(query, params)
     for row in result.fetchall():

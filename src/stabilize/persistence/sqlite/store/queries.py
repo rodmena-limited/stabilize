@@ -30,6 +30,7 @@ from stabilize.persistence.sqlite.queries import (
     retrieve_by_pipeline_config_id as _retrieve_by_pipeline_config_id,
 )
 from stabilize.persistence.store import WorkflowCriteria
+from stabilize.persistence.store.criteria import time_window_sql
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -149,16 +150,11 @@ class SqliteQueriesMixin:
             for i, name in enumerate(status_names):
                 params[f"status_{i}"] = name
 
-        if criteria and criteria.start_time_after:
-            # Handle both started and not-yet-started workflows
-            # Workflows that haven't started yet have NULL start_time
-            query += " AND (start_time >= :start_time_after OR start_time IS NULL)"
-            params["start_time_after"] = criteria.start_time_after
-
+        query += time_window_sql(criteria, params, ":")
         query += " ORDER BY start_time DESC NULLS LAST"
 
         if criteria and criteria.page_size:
-            query += f" LIMIT {criteria.page_size}"
+            query += f" LIMIT {int(criteria.page_size)}"
 
         result = conn.execute(query, params)
         for row in result.fetchall():
