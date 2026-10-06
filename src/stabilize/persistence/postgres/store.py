@@ -51,13 +51,13 @@ from stabilize.persistence.postgres.queries import (
     retrieve_by_pipeline_config_id as _retrieve_by_pipeline_config_id,
 )
 from stabilize.persistence.postgres.signals import PostgresSignalMixin
-from stabilize.persistence.store.owned_rows import WORKFLOW_OWNED_ROWS
 from stabilize.persistence.store import (
     StoreTransaction,
     WorkflowCriteria,
     WorkflowNotFoundError,
     WorkflowStore,
 )
+from stabilize.persistence.store.owned_rows import WORKFLOW_OWNED_ROWS
 from stabilize.persistence.task_state import capture, commit_captured, restore_versions, versions
 
 logger = logging.getLogger(__name__)
