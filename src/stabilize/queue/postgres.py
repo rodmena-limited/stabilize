@@ -13,7 +13,7 @@ import re
 import time
 import uuid
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from stabilize.persistence.connection import release_pool_once
@@ -125,8 +125,6 @@ class PostgresQueue(Queue):
         message_id = str(uuid.uuid4())
         payload = self._serialize_message(message)
 
-        # Use PostgreSQL's NOW() for deliver_at to avoid clock drift between Python and PostgreSQL.
-        # When comparing timestamps, we need to ensure consistency with the poll query which uses NOW().
         if delay:
             deliver_at_expr = "NOW() + %(delay)s * INTERVAL '1 second'"
             extra_params = {"delay": delay.total_seconds()}
@@ -172,15 +170,12 @@ class PostgresQueue(Queue):
     def poll_one(self) -> Message | None:
         """Poll for a single message without callback."""
         pool = self._get_pool()
-        locked_until = datetime.now(UTC) + self.lock_duration
-
         with pool.connection() as conn:
             with conn.cursor() as cur:
-                # Use SKIP LOCKED to allow concurrent workers
                 cur.execute(
                     f"""
                     UPDATE {self.table_name}
-                    SET locked_until = %(locked_until)s,
+                    SET locked_until = NOW() + %(lock_seconds)s * INTERVAL '1 second',
                         attempts = attempts + 1
                     WHERE id = (
                         SELECT id FROM {self.table_name}
@@ -194,7 +189,7 @@ class PostgresQueue(Queue):
                     RETURNING id, message_type, payload::text AS payload, attempts
                     """,
                     {
-                        "locked_until": locked_until,
+                        "lock_seconds": self.lock_duration.total_seconds(),
                         "max_attempts": self.max_attempts,
                     },
                 )
@@ -255,13 +250,14 @@ class PostgresQueue(Queue):
         except ValueError:
             return False
 
-        locked_until = datetime.now(UTC) + (duration or self.lock_duration)
+        seconds = (duration or self.lock_duration).total_seconds()
         pool = self._get_pool()
         with pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"UPDATE {self.table_name} SET locked_until = %(locked_until)s WHERE id = %(id)s",
-                    {"locked_until": locked_until, "id": msg_id},
+                    f"UPDATE {self.table_name} SET locked_until = NOW() + %(seconds)s * INTERVAL '1 second' "
+                    "WHERE id = %(id)s",
+                    {"seconds": seconds, "id": msg_id},
                 )
                 extended = bool(cur.rowcount == 1)
             conn.commit()
@@ -287,7 +283,6 @@ class PostgresQueue(Queue):
             return
 
         msg_id = int(message.message_id)
-        deliver_at = datetime.now(UTC) + delay
         pool = self._get_pool()
 
         with pool.connection() as conn:
@@ -295,11 +290,11 @@ class PostgresQueue(Queue):
                 cur.execute(
                     f"""
                     UPDATE {self.table_name}
-                    SET deliver_at = %(deliver_at)s,
+                    SET deliver_at = NOW() + %(delay)s * INTERVAL '1 second',
                         locked_until = NULL
                     WHERE id = %(id)s
                     """,
-                    {"id": msg_id, "deliver_at": deliver_at},
+                    {"id": msg_id, "delay": delay.total_seconds()},
                 )
             conn.commit()
 
