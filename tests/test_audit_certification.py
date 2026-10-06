@@ -14,10 +14,13 @@ import time
 from datetime import timedelta
 from typing import Any
 
+import pytest
+
 from stabilize.persistence.connection import ConnectionManager, SingletonMeta
 from stabilize.persistence.sqlite import SqliteWorkflowStore
 from stabilize.queue.messages import StartWorkflow
 from stabilize.queue.processor import QueueProcessor
+from stabilize.queue.processor.config import QueueProcessorConfig
 from stabilize.queue.sqlite import SqliteQueue
 
 
@@ -51,24 +54,31 @@ class TestCertifiedInvariants:
             reset_deduplicator()
             SingletonMeta.reset(ConnectionManager)
 
-    def test_lock_heartbeat_prevents_double_delivery(self, tmp_path: Any) -> None:
+    @pytest.mark.parametrize("heartbeat", [True, False], ids=["heartbeat", "control-no-heartbeat"])
+    def test_lock_heartbeat_prevents_double_delivery(self, tmp_path: Any, heartbeat: bool) -> None:
         SingletonMeta.reset(ConnectionManager)
         try:
-            queue = SqliteQueue(f"sqlite:///{tmp_path}/cert_hb.db", lock_duration=timedelta(seconds=0.3))
+            queue = SqliteQueue(f"sqlite:///{tmp_path}/cert_hb.db", lock_duration=timedelta(seconds=1.0))
             queue._create_table()
-            processor = QueueProcessor(queue)
+            processor = QueueProcessor(
+                queue,
+                config=QueueProcessorConfig(poll_frequency_ms=20, enable_lock_heartbeat=heartbeat),
+            )
             invocations: list[float] = []
 
             def slow(m: Any) -> None:
                 invocations.append(time.monotonic())
-                time.sleep(1.0)
+                time.sleep(2.5)
 
             processor.register_handler_func(StartWorkflow, slow)
             queue.push(StartWorkflow(execution_type="PIPELINE", execution_id="e1"))
             processor.start()
-            time.sleep(1.6)
+            time.sleep(3.0)
             processor.stop()
-            assert len(invocations) == 1
+            if heartbeat:
+                assert len(invocations) == 1
+            else:
+                assert len(invocations) >= 2
         finally:
             SingletonMeta.reset(ConnectionManager)
 
