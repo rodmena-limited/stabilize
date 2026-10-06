@@ -161,10 +161,7 @@ class SqliteWorkflowCrudMixin:
         Queue and dead-letter rows belong to the queue: see Queue.purge_workflow.
         """
         conn = self._get_connection()
-        present = {
-            row[0]
-            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
-        }
+        present = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
         try:
             for table, column in WORKFLOW_OWNED_ROWS:
                 if table in present:

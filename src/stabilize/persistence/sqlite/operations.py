@@ -149,11 +149,12 @@ def mark_message_processed(
         INSERT OR IGNORE INTO processed_messages (
             message_id, processed_at, handler_type, execution_id
         ) VALUES (
-            :message_id, datetime('now', 'utc'), :handler_type, :execution_id
+            :message_id, :processed_at, :handler_type, :execution_id
         )
         """,
         {
             "message_id": message_id,
+            "processed_at": datetime.now(UTC).isoformat(),
             "handler_type": handler_type,
             "execution_id": execution_id,
         },
@@ -168,7 +169,7 @@ def cleanup_old_processed_messages(
     """Clean up old processed message records."""
     cutoff = datetime.now(UTC) - timedelta(hours=max_age_hours)
     cursor = conn.execute(
-        "DELETE FROM processed_messages WHERE processed_at < :cutoff",
+        "DELETE FROM processed_messages WHERE julianday(processed_at) < julianday(:cutoff)",
         {"cutoff": cutoff.isoformat()},
     )
     conn.commit()

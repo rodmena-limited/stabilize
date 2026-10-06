@@ -172,13 +172,13 @@ class SqliteQueue(SqliteDLQMixin, Queue):
             f"""
             SELECT id, message_type, payload, attempts, version
             FROM {self.table_name}
-            WHERE datetime(deliver_at) <= datetime('now', 'utc')
-            AND (locked_until IS NULL OR datetime(locked_until) < datetime('now', 'utc'))
+            WHERE julianday(deliver_at) <= julianday(:now)
+            AND (locked_until IS NULL OR julianday(locked_until) < julianday(:now))
             AND attempts < :max_attempts
             ORDER BY deliver_at
             LIMIT 1
             """,
-            {"max_attempts": self.max_attempts},
+            {"max_attempts": self.max_attempts, "now": datetime.now(UTC).isoformat()},
         )
         row = result.fetchone()
 

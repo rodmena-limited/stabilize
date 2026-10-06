@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import uuid
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -160,13 +161,14 @@ class SqliteDLQMixin:
             INSERT INTO {self.table_name} (
                 message_id, message_type, payload, deliver_at, attempts
             ) VALUES (
-                :message_id, :message_type, :payload, datetime('now', 'utc'), 0
+                :message_id, :message_type, :payload, :now, 0
             )
             """,
             {
                 "message_id": str(uuid.uuid4()),
                 "message_type": row["message_type"],
                 "payload": row["payload"],
+                "now": datetime.now(UTC).isoformat(),
             },
         )
         conn.commit()

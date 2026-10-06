@@ -256,11 +256,12 @@ class AtomicTransaction(StoreTransaction):
             INSERT OR IGNORE INTO processed_messages (
                 message_id, processed_at, handler_type, execution_id
             ) VALUES (
-                :message_id, datetime('now', 'utc'), :handler_type, :execution_id
+                :message_id, :processed_at, :handler_type, :execution_id
             )
             """,
             {
                 "message_id": message_id,
+                "processed_at": datetime.now(UTC).isoformat(),
                 "handler_type": handler_type,
                 "execution_id": execution_id,
             },
