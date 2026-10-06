@@ -15,3 +15,9 @@ Ticket: #66 (0.32.0). Unattended audit session 2026-10-06 (#70).
 ## Evidence
 
 `probe_processor_stop_bounded.py`: 0.31.0 LifecycleManager(shutdown_timeout=1) did not return within 30 s on a blocked handler; fixed 1.0 s; a handler finishing in 0.5 s is still waited for. `tests/test_processor_stop_bounded.py`.
+
+## Second falsification pass
+
+- A message polled while stop() shut the executor down incremented `_active_count`, then `submit()` raised; the count never came down -> undone and the message rescheduled.
+- LifecycleManager calling `stop(timeout=...)` on a subclass with the old signature -> falls back to `stop(wait=False)`.
+- Behaviour change documented: a plain `stop()` now returns after 60 s.

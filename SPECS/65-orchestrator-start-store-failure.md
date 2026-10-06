@@ -14,3 +14,7 @@ Ticket: #65 (0.32.0). Unattended audit session 2026-10-06 (#70).
 ## Evidence
 
 `probe_orchestrator_start_store_failure.py`: 0.31.0 raised nothing and queued StartWorkflow for a missing workflow on both backends; fixed raises, queues nothing. `tests/test_orchestrator_start_store_failure.py`.
+
+## Second falsification pass
+
+- SQLite `store()` had no rollback: a failed stage insert left the workflow row uncommitted on the thread-local connection, `exists()` saw it, and the next commit stored a partial workflow and started it -> `store()` rolls back and re-raises. Test: duplicate stage id on both backends.

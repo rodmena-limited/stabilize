@@ -17,3 +17,7 @@ Ticket: #74 (0.32.0). Unattended audit session 2026-10-06 (#70).
 ## Evidence
 
 `probe_pg_queue_session_timezone.py` (New York vs UTC sessions): 0.31.0 4 h stall, 2 h delay delivered at once, a locked message re-polled; fixed all pass.
+
+## Second falsification pass
+
+- The migration reads existing TIMESTAMP values in the migrating session's TimeZone; correct only if workers wrote them in that zone. Documented in the changelog (drain the queue or migrate with the workers' zone).

@@ -15,3 +15,8 @@ Ticket: #67 (0.32.0). Unattended audit session 2026-10-06 (#70).
 ## Evidence
 
 `probe_delete_removes_owned_rows.py`: 0.31.0 left processed/signal/claim/DLQ rows; fixed removes them and leaves another workflow's rows. `tests/test_delete_owned_rows.py`.
+
+## Second falsification pass
+
+- `SqliteQueue.purge_workflow` raised with its first DELETE uncommitted when the DLQ table was absent -> absent tables skipped.
+- SQLite `processed_messages` had no `execution_id` index -> added in SQLite migration 3.

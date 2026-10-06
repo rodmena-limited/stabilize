@@ -15,3 +15,8 @@ Ticket: #64 (0.32.0). Unattended audit session 2026-10-06 (#70).
 ## Evidence
 
 `probe_recovery_examines_all.py`: 0.31.0 recovered 99-100 of 150 on both backends, and the sqlite application path examined a 48 h-old workflow; fixed 150/150, window honoured. `tests/test_recovery_examines_all.py`.
+
+## Second falsification pass
+
+- NOT_STARTED workflows were recovered by pushing StartStage directly (skipping StartWorkflowHandler's checks); #64 made every one reachable -> recovery pushes StartWorkflow, only when no message for the workflow is queued (`Queue.has_pending_message_for_execution`).
+- PostgreSQL id queries yielded while holding a pooled connection and snapshot for the whole sweep -> ids fetched, connection returned, then workflows loaded.
