@@ -72,7 +72,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     ),
     Migration(
         3,
-        "add_default_queue_dlq",
+        "add_default_queue_dlq_and_processed_execution_index",
         (
             """
             CREATE TABLE IF NOT EXISTS queue_messages_dlq (
@@ -89,6 +89,7 @@ MIGRATIONS: tuple[Migration, ...] = (
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_queue_messages_dlq_type ON queue_messages_dlq(message_type)",
+            "CREATE INDEX IF NOT EXISTS idx_processed_messages_execution ON processed_messages(execution_id)",
         ),
     ),
 )

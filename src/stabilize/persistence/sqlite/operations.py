@@ -169,7 +169,8 @@ def cleanup_old_processed_messages(
     """Clean up old processed message records."""
     cutoff = datetime.now(UTC) - timedelta(hours=max_age_hours)
     cursor = conn.execute(
-        "DELETE FROM processed_messages WHERE julianday(processed_at) < julianday(:cutoff)",
+        "DELETE FROM processed_messages "
+        "WHERE processed_at < :cutoff AND julianday(processed_at) < julianday(:cutoff)",
         {"cutoff": cutoff.isoformat()},
     )
     conn.commit()
