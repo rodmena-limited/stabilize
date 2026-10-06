@@ -32,6 +32,7 @@ from stabilize.handlers.run_task.error import (
     handle_exception,
 )
 from stabilize.handlers.run_task.execution import execute_with_timeout, resolve_task
+from stabilize.handlers.run_task.lease import build_task_lease
 from stabilize.handlers.run_task.result import get_backoff_period, process_result
 from stabilize.handlers.run_task.verification import verify_task_outputs
 from stabilize.metrics import Timer
@@ -73,6 +74,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
     # Maps task_id -> start_time (monotonic) for staleness detection
     _executing_tasks: dict[str, float] = {}
     _executing_lock = threading.Lock()
+    _unsaved_results: dict[str, TaskResult] = {}
 
     def __init__(
         self,
@@ -102,37 +104,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         self.isolation_mode = os.environ.get("STABILIZE_ISOLATION_MODE", "thread").lower()
         self.process_executor = ProcessIsolatedTaskExecutor() if self.isolation_mode == "process" else None
 
-        # Opt-in distributed task lease (disabled by default). When enabled, only
-        # one worker across processes executes a given task at a time.
-        self.task_lease = None
-        if os.environ.get("STABILIZE_TASK_LEASE", "").lower() in ("1", "true", "yes"):
-            from stabilize.persistence.task_lease import (
-                TaskLeaseManager,
-                TaskLeaseUnavailableError,
-            )
-
-            raw_ttl = os.environ.get("STABILIZE_TASK_LEASE_TTL_SECONDS", "3600")
-            try:
-                ttl = float(raw_ttl)
-            except ValueError as e:
-                raise TaskLeaseUnavailableError(
-                    f"STABILIZE_TASK_LEASE is set but STABILIZE_TASK_LEASE_TTL_SECONDS={raw_ttl!r} "
-                    "is not a number, so single-execution leasing cannot be configured"
-                ) from e
-
-            try:
-                self.task_lease = TaskLeaseManager(repository, ttl_seconds=ttl)
-            except Exception as e:
-                raise TaskLeaseUnavailableError(
-                    "STABILIZE_TASK_LEASE is set but the lease manager could not be "
-                    f"initialised ({type(e).__name__}: {e}). Leasing is what keeps a task "
-                    "from executing on two workers at once; starting without it would "
-                    "silently allow the double execution this setting exists to prevent. "
-                    "Grant the runtime role rights to create the task_leases table, or "
-                    "unset STABILIZE_TASK_LEASE."
-                ) from e
-
-            logger.info("Distributed task lease enabled (owner=%s)", self.task_lease.owner)
+        self.task_lease = build_task_lease(repository)
 
         # Initialize resilience components with defaults if not provided
         if bulkhead_manager is None or circuit_factory is None:
@@ -167,7 +139,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                         task_model.name,
                         task_model.status,
                     )
-                # Mark message as processed to prevent redelivery
+                self._take_unsaved_result(task_model.id)
                 if message.message_id:
                     with self.repository.transaction(self.queue) as txn:
                         txn.mark_message_processed(message.message_id)
@@ -307,7 +279,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                             self.retry_on_concurrency_error,
                         )
                     else:
-                        self._process_result_safely(message.stage_id, message.task_id, timeout_result, message)
+                        self._save_result(task_model.id, timeout_result, message)
                     return
 
             # CONCURRENT EXECUTION CHECK: Prevent duplicate execution of same task
@@ -354,27 +326,30 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                         )
                         return
 
-                # Execute the task with timeout enforcement
-                timeout = self.timeout_manager.get_task_timeout(stage, task)
-                with Timer(
-                    "task_execution_seconds",
-                    task_type=message.task_type,
-                    task_name=task_model.name,
-                ):
-                    result = execute_with_timeout(
-                        task,
-                        stage,
-                        timeout,
-                        message,
-                        self.bulkhead_manager,
-                        self.circuit_factory,
-                        self.process_executor,
+                result = self._take_unsaved_result(task_model.id)
+                if result is None:
+                    timeout = self.timeout_manager.get_task_timeout(stage, task)
+                    with Timer(
+                        "task_execution_seconds",
+                        task_type=message.task_type,
+                        task_name=task_model.name,
+                    ):
+                        result = execute_with_timeout(
+                            task,
+                            stage,
+                            timeout,
+                            message,
+                            self.bulkhead_manager,
+                            self.circuit_factory,
+                            self.process_executor,
+                        )
+
+                    verify_task_outputs(stage, result, self.task_registry)
+                else:
+                    logger.warning(
+                        "Saving the held result of task %s instead of executing it again",
+                        task_model.name,
                     )
-
-                # Verify outputs before processing/persisting
-                verify_task_outputs(stage, result, self.task_registry)
-
-                self._process_result_safely(message.stage_id, message.task_id, result, message)
             except TaskTimeoutError as e:
                 logger.info("Task %s timed out: %s", task_model.name, e)
                 timeout_result = task.on_timeout(stage) if hasattr(task, "on_timeout") else None
@@ -389,7 +364,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                         self.retry_on_concurrency_error,
                     )
                 else:
-                    self._process_result_safely(message.stage_id, message.task_id, timeout_result, message)
+                    self._save_result(task_model.id, timeout_result, message)
             except TransientVerificationError as e:
                 logger.info(
                     "Verification pending for task %s, will retry: %s",
@@ -443,8 +418,10 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                     self._get_backoff_period,
                     self.retry_on_concurrency_error,
                 )
+            else:
+                if result is not None:
+                    self._save_result(task_model.id, result, message)
             finally:
-                # Release the execution lock so other messages can be processed
                 with RunTaskHandler._executing_lock:
                     RunTaskHandler._executing_tasks.pop(task_model.id, None)
                 unregister_token(task_model.id)
@@ -452,6 +429,23 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                     self.task_lease.release(task_model.id)
 
         self.with_task(message, on_task)
+
+    def _take_unsaved_result(self, task_id: str) -> TaskResult | None:
+        with RunTaskHandler._executing_lock:
+            return RunTaskHandler._unsaved_results.pop(task_id, None)
+
+    def _save_result(self, task_id: str, result: TaskResult, message: RunTask) -> None:
+        try:
+            self._process_result_safely(message.stage_id, task_id, result, message)
+        except Exception:
+            with RunTaskHandler._executing_lock:
+                RunTaskHandler._unsaved_results[task_id] = result
+            logger.error(
+                "Task %s completed but its result could not be saved; holding it for the redelivery",
+                task_id,
+                exc_info=True,
+            )
+            raise
 
     def _process_result_safely(
         self,

@@ -79,9 +79,11 @@ def reset_handler_state() -> Generator[None, None, None]:
     from stabilize.resilience.cancellation import reset_cancellation_state
 
     RunTaskHandler._executing_tasks.clear()
+    RunTaskHandler._unsaved_results.clear()
     reset_cancellation_state()
     yield
     RunTaskHandler._executing_tasks.clear()
+    RunTaskHandler._unsaved_results.clear()
     reset_cancellation_state()
 
 
