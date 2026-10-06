@@ -19,26 +19,42 @@ rewrites the queue tables (see "Migration" below).
 - **A database error while saving a successful task's result no longer fails
   or re-runs the task (#63).** It was handled as if the task had raised it:
   non-transient errors marked the task `TERMINAL`, transient ones executed it
-  again. The result is now held and saved by the redelivery without executing
-  the task again in that worker process.
+  again. When the store is unavailable (connection loss, pool timeout,
+  statement timeout and the rest of the OperationalError family), the result
+  is now held and saved by the redelivery without executing the task again in
+  that worker process; a held result applies only to the execution that
+  produced it. When the store refuses the result itself (e.g. a NUL character
+  in JSONB outputs), the task completes `TERMINAL` with `Task result could not
+  be stored: <type>: <error>`.
 - **A re-queued task no longer forks a second execution chain (#75).** When a
   task returned `RUNNING` or raised `TransientError`, the source message was
   not marked processed in the transaction that pushed the follow-up; a failure
   of the separate mark afterwards redelivered it and the task ran on two
   chains. Both paths now mark the source atomically.
+- **A message handled twice no longer commits twice.** When a message's lock
+  lapsed while its worker stalled, a second worker could process it too and
+  both committed. A handler transaction that marks its source message now
+  rolls back if another delivery marked it first.
 - **Crash recovery examines every pending workflow in its window (#64).** It
-  looked at the newest 100 only. The application-filtered path also ignored
+  looked at the newest 100 only. A workflow that never started is now
+  recovered by re-queuing `StartWorkflow` (so its status and concurrency
+  checks run), once, instead of starting its stages directly. The application-filtered path also ignored
   the recovery window; `retrieve_by_application` and
   `retrieve_by_pipeline_config_id` now honour `start_time_after` /
   `start_time_before`.
 - **`Orchestrator.start` raises when it cannot store the workflow (#65)**
   instead of swallowing the error and queueing a `StartWorkflow` for a
-  workflow that does not exist.
+  workflow that does not exist. On SQLite, a `store()` that failed part-way
+  (e.g. on a stage insert) is now rolled back; before, the next commit on that
+  connection stored the workflow with only some of its stages.
 - **`QueueProcessor.stop(wait=True)` is bounded (#66).** New `timeout`
   argument (default `QueueProcessorConfig.shutdown_timeout_seconds` = 60 s);
-  it returns the number of handlers still running. `LifecycleManager` passes
-  its remaining budget, so its `shutdown_timeout` now holds on a blocked
-  handler.
+  it returns the number of handlers still running. **Behaviour change:** a
+  plain `stop()` used to wait without limit; it now returns after 60 s. Pass
+  `timeout=None` (or set `shutdown_timeout_seconds=None`) for the old
+  behaviour, and do not close the store while the returned count is non-zero.
+  `LifecycleManager` passes its remaining budget, so its `shutdown_timeout`
+  now holds on a blocked handler.
 - **Deleting a workflow removes its rows (#67).** `store.delete` also removes
   the workflow's `processed_messages`, `stage_claims` and `workflow_signals`
   rows. New `Queue.purge_workflow(execution_id)` deletes its queued and
@@ -79,10 +95,15 @@ rewrites the queue tables (see "Migration" below).
 
 - PostgreSQL `01M483DVR3DS980FHS8N754CWH_queue_bigint_ids_and_timestamptz`:
   `queue_messages` and `queue_messages_dlq` ids to `bigint`, their timestamps
-  to `timestamptz` (existing values read in the migrating session's
-  `TimeZone`). It rewrites both tables under an `ACCESS EXCLUSIVE` lock; they
-  are normally small. Run it with workers stopped or between bursts.
-- SQLite schema migration 3 (`queue_messages_dlq`), applied automatically by
+  to `timestamptz`. Existing values are read in the **migrating session's**
+  `TimeZone`, which is right when the workers wrote them in that same zone
+  (the server default, unless `PGTZ`, a DSN `options=-c timezone=...` or a
+  per-role setting says otherwise). If your workers set their own zone, drain
+  the queue first or run the migration with that zone. It rewrites both
+  tables under an `ACCESS EXCLUSIVE` lock; they are normally small. Run it
+  with workers stopped or between bursts.
+- SQLite schema migration 3 (`queue_messages_dlq`, and an index on
+  `processed_messages.execution_id`), applied automatically by
   `create_tables=True`.
 
 ### Rolling upgrades
