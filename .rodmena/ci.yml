@@ -58,6 +58,6 @@ jobs:
       - name: Installed package is the published one
         run: .pub/bin/python -c "import stabilize, sys; print(stabilize.__version__, stabilize.__file__); sys.exit(0 if stabilize.__version__ == '0.32.0' and 'site-packages' in stabilize.__file__ else 1)"
       - name: Suite against the installed package
-        run: STABILIZE_TEST_DSN="$DATABASE_URL" .pub/bin/python -m pytest tests golden_standard_tests -q -n 3 -p no:cacheprovider --timeout 600 -rfE
+        run: PATH="$PWD/.pub/bin:$PATH" STABILIZE_TEST_DSN="$DATABASE_URL" .pub/bin/python -m pytest tests golden_standard_tests -q -n 3 -p no:cacheprovider --timeout 600 -rfE
       - name: Probes against the installed package
         run: .pub/bin/stabilize mg-up --db-url "$DATABASE_URL?schema=orchestration" && STABILIZE_PROBE_SCHEMA=orchestration PROBE_SET=sqlite AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" PYTHON=.pub/bin/python bash audit/evaluations/run_all.sh
