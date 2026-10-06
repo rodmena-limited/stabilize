@@ -70,6 +70,27 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        3,
+        "add_default_queue_dlq",
+        (
+            """
+            CREATE TABLE IF NOT EXISTS queue_messages_dlq (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                original_id INTEGER,
+                message_id TEXT NOT NULL,
+                message_type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                attempts INTEGER,
+                error TEXT,
+                last_error_at TEXT,
+                created_at TEXT DEFAULT (datetime('now', 'utc')),
+                moved_at TEXT DEFAULT (datetime('now', 'utc'))
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_queue_messages_dlq_type ON queue_messages_dlq(message_type)",
+        ),
+    ),
 )
 
 
