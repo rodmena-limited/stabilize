@@ -17,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from stabilize.persistence.connection import release_pool_once
-from stabilize.persistence.pool_options import with_schema
+from stabilize.persistence.pool_options import PoolOptions, with_schema
 from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.interface import Queue
 from stabilize.queue.messages import Message, get_message_type_name
@@ -45,6 +45,7 @@ class PostgresQueue(Queue):
         lock_duration: timedelta = timedelta(seconds=60),
         max_attempts: int = 10,
         schema: str | None = None,
+        options: PoolOptions | None = None,
     ) -> None:
         """
         Initialize the PostgreSQL queue.
@@ -64,6 +65,8 @@ class PostgresQueue(Queue):
                 should size this above their worst-case single message, e.g.
                 lock_duration=timedelta(minutes=30).
             max_attempts: Maximum retry attempts before dropping message
+            options: Pool and connection options. Pass the same PoolOptions
+                instance given to PostgresWorkflowStore to share one pool.
         """
         from stabilize.persistence.connection import get_connection_manager
 
@@ -74,7 +77,7 @@ class PostgresQueue(Queue):
         self.lock_duration = lock_duration
         self.max_attempts = max_attempts
         self.schema = schema
-        self._pool_options = with_schema(None, schema, connection_string)
+        self._pool_options = with_schema(options, schema, connection_string)
         self._manager = get_connection_manager()
         self._pool = self._manager.get_postgres_pool(
             connection_string, options=self._pool_options

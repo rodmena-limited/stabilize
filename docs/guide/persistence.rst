@@ -116,3 +116,33 @@ connection's default schema and the DSN needs no options:
 
    A Stabilize-only database has no such collision, and can set the option on
    the single shared DSN.
+
+Pool options and idle cost
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``PostgresWorkflowStore`` and ``PostgresQueue`` both accept ``options=PoolOptions(...)``.
+Pools are keyed by connection string and options, so pass the **same** ``PoolOptions``
+instance to both to share one pool:
+
+.. code-block:: python
+
+    from stabilize.persistence.pool_options import PoolOptions
+
+    options = PoolOptions(min_size=1, max_size=4)
+    store = PostgresWorkflowStore(dsn, options=options)
+    queue = PostgresQueue(dsn, options=options)
+
+Without options each gets the default pool (``min_size=5``, ``max_size=15``).
+
+An idle ``QueueProcessor`` polls once per ``poll_frequency_ms`` and every poll is one
+transaction. Measured on PostgreSQL 16 for one idle processor:
+
+=====================  ===================  ==================
+``poll_frequency_ms``  transactions/second  transactions/day
+=====================  ===================  ==================
+50 (default)           19.6                 about 1.7 million
+1000                   1.2                  about 0.1 million
+=====================  ===================  ==================
+
+Raise ``poll_frequency_ms`` where pickup latency allows; the same cost applies per
+processor instance.
