@@ -9,8 +9,11 @@ The fault is injected at the persistence boundary: the store's transaction()
 raises once, on the first transaction opened after the task returned success.
 Nothing inside the handler is patched.
 
-  A  non-transient store error (QueryCanceled / disk I/O)  -> SUCCEEDED, 1 execution
+  A  store unavailable (QueryCanceled / disk I/O)           -> SUCCEEDED, 1 execution
   B  transient store error (PoolTimeout / OperationalError) -> SUCCEEDED, 1 execution
+  E  the store refuses the result itself (DataError family) -> TERMINAL with the reason,
+     1 execution: a redelivery would be refused the same way, so holding it would leave
+     the task RUNNING forever
   C  CONTROL: no injected fault                             -> SUCCEEDED, 1 execution
   D  CONTROL: the injection fired in A and B (counted), so the green is not a no-op
 
@@ -77,12 +80,14 @@ def _errors(backend: str):
         from psycopg_pool import PoolTimeout
 
         return [
-            ("non-transient", psycopg.errors.QueryCanceled("canceling statement due to statement timeout")),
+            ("unavailable", psycopg.errors.QueryCanceled("canceling statement due to statement timeout")),
             ("transient", PoolTimeout("couldn't get a connection after 30.00 sec")),
+            ("refused", psycopg.errors.UntranslatableCharacter("unsupported Unicode escape sequence")),
         ]
     return [
-        ("non-transient", sqlite3.DatabaseError("disk I/O error")),
+        ("unavailable", sqlite3.OperationalError("disk I/O error")),
         ("transient", sqlite3.OperationalError("unable to open database file")),
+        ("refused", sqlite3.DataError("string or blob too big")),
     ]
 
 
@@ -130,7 +135,8 @@ def main() -> int:
             with factory() as (store, queue):
                 status, calls = _run(store, queue)
             fired_ok = (STATE["fired"] == 1) if err is not None else (STATE["fired"] == 0)
-            ok = status == WorkflowStatus.SUCCEEDED and calls == 1 and fired_ok
+            want = WorkflowStatus.TERMINAL if label == "refused" else WorkflowStatus.SUCCEEDED
+            ok = status == want and calls == 1 and fired_ok
             print(
                 f"[{'PASS' if ok else 'FAIL'}] {name} {label}: status={status.name} "
                 f"executions={calls} injected={STATE['fired']} "

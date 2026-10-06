@@ -35,6 +35,7 @@ from stabilize.handlers.run_task.error import (
 from stabilize.handlers.run_task.execution import execute_with_timeout, resolve_task
 from stabilize.handlers.run_task.lease import build_task_lease
 from stabilize.handlers.run_task.result import get_backoff_period, process_result
+from stabilize.handlers.run_task.saving import save_or_hold
 from stabilize.handlers.run_task.verification import verify_task_outputs
 from stabilize.metrics import Timer
 from stabilize.models.status import WorkflowStatus
@@ -143,6 +144,12 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 if message.message_id:
                     with self.repository.transaction(self.queue) as txn:
                         txn.mark_message_processed(message.message_id)
+                return
+
+            held = held_results.take(task_model)
+            if held is not None:
+                logger.warning("Saving the held result of task %s instead of executing it again", task_model.name)
+                self._save_result(task_model, held, message)
                 return
 
             # Resolve task implementation
@@ -326,30 +333,23 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                         )
                         return
 
-                result = held_results.take(task_model)
-                if result is None:
-                    timeout = self.timeout_manager.get_task_timeout(stage, task)
-                    with Timer(
-                        "task_execution_seconds",
-                        task_type=message.task_type,
-                        task_name=task_model.name,
-                    ):
-                        result = execute_with_timeout(
-                            task,
-                            stage,
-                            timeout,
-                            message,
-                            self.bulkhead_manager,
-                            self.circuit_factory,
-                            self.process_executor,
-                        )
-
-                    verify_task_outputs(stage, result, self.task_registry)
-                else:
-                    logger.warning(
-                        "Saving the held result of task %s instead of executing it again",
-                        task_model.name,
+                timeout = self.timeout_manager.get_task_timeout(stage, task)
+                with Timer(
+                    "task_execution_seconds",
+                    task_type=message.task_type,
+                    task_name=task_model.name,
+                ):
+                    result = execute_with_timeout(
+                        task,
+                        stage,
+                        timeout,
+                        message,
+                        self.bulkhead_manager,
+                        self.circuit_factory,
+                        self.process_executor,
                     )
+
+                verify_task_outputs(stage, result, self.task_registry)
             except TaskTimeoutError as e:
                 logger.info("Task %s timed out: %s", task_model.name, e)
                 timeout_result = task.on_timeout(stage) if hasattr(task, "on_timeout") else None
@@ -419,8 +419,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                     self.retry_on_concurrency_error,
                 )
             else:
-                if result is not None:
-                    self._save_result(task_model, result, message)
+                self._save_result(task_model, result, message)
             finally:
                 with RunTaskHandler._executing_lock:
                     RunTaskHandler._executing_tasks.pop(task_model.id, None)
@@ -431,16 +430,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
         self.with_task(message, on_task)
 
     def _save_result(self, task_model: TaskExecution, result: TaskResult, message: RunTask) -> None:
-        try:
-            self._process_result_safely(message.stage_id, task_model.id, result, message)
-        except Exception:
-            held_results.hold(task_model, result)
-            logger.error(
-                "Task %s completed but its result could not be saved; holding it for the redelivery",
-                task_model.id,
-                exc_info=True,
-            )
-            raise
+        save_or_hold(self, task_model, result, message)
 
     def _process_result_safely(
         self,

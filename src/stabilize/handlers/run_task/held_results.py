@@ -31,3 +31,19 @@ def take(task_model: TaskExecution) -> TaskResult | None:
 def clear() -> None:
     with _lock:
         _held.clear()
+
+
+_UNAVAILABLE_TYPE_NAMES = frozenset(
+    {"OperationalError", "InterfaceError", "PoolTimeout", "PoolClosed", "ConcurrencyError", "TooManyConnections"}
+)
+
+
+def is_store_unavailable(error: BaseException) -> bool:
+    """True when a failed save may succeed on retry: the store, not the data, was the problem."""
+    from stabilize.errors import is_transient
+
+    if isinstance(error, (ConnectionError, TimeoutError)):
+        return True
+    if isinstance(error, Exception) and is_transient(error):
+        return True
+    return any(cls.__name__ in _UNAVAILABLE_TYPE_NAMES for cls in type(error).__mro__)

@@ -7,7 +7,7 @@ PYTHON="${PYTHON:?set PYTHON to the interpreter that has the OLD stabilize insta
 
 EXPECT=(
     "probe_transient_retry_bounded.py|[FAIL] sqlite always_transient"
-    "probe_result_persist_failure.py|[FAIL] sqlite non-transient"
+    "probe_result_persist_failure.py|[FAIL] sqlite unavailable"
     "probe_recovery_examines_all.py|[FAIL] sqlite all-applications"
     "probe_orchestrator_start_store_failure.py|[FAIL] sqlite A store failure"
     "probe_processor_stop_bounded.py|[FAIL] C LifecycleManager"

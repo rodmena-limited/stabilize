@@ -48,14 +48,17 @@ def _inject(store: WorkflowStore) -> None:
     store.transaction = transaction  # type: ignore[method-assign]
 
 
-@pytest.mark.parametrize(
-    "error",
-    [None, RuntimeError("server closed the connection unexpectedly"), TimeoutError("pool exhausted")],
-    ids=["control", "non-transient", "transient"],
-)
-def test_failed_save_of_successful_result_neither_fails_nor_reruns(
+class OperationalError(Exception):
+    pass
+
+
+class DataError(Exception):
+    pass
+
+
+def _run_with_fault(
     repository: WorkflowStore, queue: Queue, error: Exception | None, monkeypatch: pytest.MonkeyPatch
-) -> None:
+) -> Workflow:
     monkeypatch.setenv("STABILIZE_CIRCUIT_BREAKER_ENABLED", "false")
     STATE.update(armed=False, fired=0, calls=0, error=error)
     registry = TaskRegistry()
@@ -86,9 +89,31 @@ def test_failed_save_of_successful_result_neither_fails_nor_reruns(
             pass
         if repository.retrieve(wf.id).status.is_complete:
             break
-    assert repository.retrieve(wf.id).status == WorkflowStatus.SUCCEEDED
+    return repository.retrieve(wf.id)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [None, OperationalError("canceling statement due to statement timeout"), TimeoutError("pool exhausted")],
+    ids=["control", "store-unavailable", "transient"],
+)
+def test_failed_save_of_successful_result_neither_fails_nor_reruns(
+    repository: WorkflowStore, queue: Queue, error: Exception | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result = _run_with_fault(repository, queue, error, monkeypatch)
+    assert result.status == WorkflowStatus.SUCCEEDED
     assert STATE["calls"] == 1
     assert STATE["fired"] == (0 if error is None else 1)
+
+
+def test_result_the_store_refuses_ends_terminal_with_the_reason(
+    repository: WorkflowStore, queue: Queue, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result = _run_with_fault(repository, queue, DataError("unsupported Unicode escape sequence"), monkeypatch)
+    assert result.status == WorkflowStatus.TERMINAL
+    assert STATE["calls"] == 1
+    error = result.stages[0].context["exception"]["details"]["error"]
+    assert "could not be stored" in error and "DataError" in error
 
 
 def test_held_result_is_not_applied_to_a_later_execution_of_the_same_task() -> None:
