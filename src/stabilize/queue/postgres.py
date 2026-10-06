@@ -355,6 +355,16 @@ class PostgresQueue(Queue):
                 )
                 return cur.fetchone() is not None
 
+    def has_pending_message_for_execution(self, execution_id: str) -> bool:
+        """Whether any queued message targets this workflow."""
+        with self._get_pool().connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT 1 FROM {self.table_name} WHERE payload ->> 'execution_id' = %s LIMIT 1",
+                    (execution_id,),
+                )
+                return cur.fetchone() is not None
+
     def purge_workflow(self, execution_id: str) -> int:
         """Delete every queued and dead-lettered message for one workflow."""
         deleted = 0

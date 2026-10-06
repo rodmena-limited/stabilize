@@ -141,6 +141,10 @@ class Queue(ABC):
         """
         return False
 
+    def has_pending_message_for_execution(self, execution_id: str) -> bool:
+        """Whether any queued message targets this workflow. Default: False."""
+        return False
+
     def extend_lock(self, message: Message, duration: timedelta | None = None) -> bool:
         """Extend the visibility lock of an in-flight message (heartbeat).
 

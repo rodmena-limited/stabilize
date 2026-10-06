@@ -326,11 +326,25 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         self._pending.clear()
         logger.debug("Cleared queue")
 
+    def has_pending_message_for_execution(self, execution_id: str) -> bool:
+        """Whether any queued message targets this workflow."""
+        row = (
+            self._get_connection()
+            .execute(
+                f"SELECT 1 FROM {self.table_name} WHERE CASE WHEN json_valid(payload) "
+                "THEN json_extract(payload, '$.execution_id') END = ? LIMIT 1",
+                (execution_id,),
+            )
+            .fetchone()
+        )
+        return row is not None
+
     def purge_workflow(self, execution_id: str) -> int:
         """Delete every queued and dead-lettered message for one workflow."""
         conn = self._get_connection()
+        present = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
         deleted = 0
-        for table in (self.table_name, f"{self.table_name}_dlq"):
+        for table in (t for t in (self.table_name, f"{self.table_name}_dlq") if t in present):
             cur = conn.execute(
                 f"DELETE FROM {table} WHERE CASE WHEN json_valid(payload) "
                 "THEN json_extract(payload, '$.execution_id') END = ?",
