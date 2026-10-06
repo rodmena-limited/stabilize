@@ -54,7 +54,7 @@ jobs:
     timeout_minutes: 50
     steps:
       - name: Install stabilize 0.32.0 from PyPI, not the checkout
-        run: uv venv .pub && uv pip install -p .pub/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.32.0' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml && rm -rf src
+        run: uv venv .pub && uv pip install -p .pub/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.32.0' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml
       - name: Installed package is the published one
         run: .pub/bin/python -c "import stabilize, sys; print(stabilize.__version__, stabilize.__file__); sys.exit(0 if stabilize.__version__ == '0.32.0' and 'site-packages' in stabilize.__file__ else 1)"
       - name: Suite against the installed package
