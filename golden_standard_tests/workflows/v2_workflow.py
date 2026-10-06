@@ -34,11 +34,11 @@ from stabilize.tasks.interface import RetryableTask
 # =============================================================================
 
 
-def get_temp_files() -> tuple[str, str]:
-    """Get temp file paths for output and retry flag."""
+def get_temp_files(execution_id: str) -> tuple[str, str]:
+    """Get temp file paths for output and retry flag, unique per execution."""
     temp_dir = tempfile.gettempdir()
-    output_file = os.path.join(temp_dir, "golden_v2_output.txt")
-    retry_flag = os.path.join(temp_dir, "golden_v2_retry.flag")
+    output_file = os.path.join(temp_dir, f"golden_v2_output_{execution_id}.txt")
+    retry_flag = os.path.join(temp_dir, f"golden_v2_retry_{execution_id}.flag")
     return output_file, retry_flag
 
 
@@ -51,7 +51,7 @@ class SetupTask(Task):
     """Phase 1: Setup - creates output file with first token."""
 
     def execute(self, stage: StageExecution) -> TaskResult:
-        output_file, retry_flag = get_temp_files()
+        output_file, retry_flag = get_temp_files(stage.execution.id)
 
         # Clean up and write first token (no :: prefix for first token)
         result = subprocess.run(

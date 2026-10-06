@@ -34,11 +34,11 @@ from stabilize.tasks.interface import RetryableTask
 # =============================================================================
 
 
-def get_temp_files() -> tuple[str, str]:
-    """Get temp file paths for output and retry flag."""
+def get_temp_files(execution_id: str) -> tuple[str, str]:
+    """Get temp file paths for output and retry flag, unique per execution."""
     temp_dir = tempfile.gettempdir()
-    output_file = os.path.join(temp_dir, "golden_dr_output.txt")
-    retry_flag = os.path.join(temp_dir, "golden_dr_retry.flag")
+    output_file = os.path.join(temp_dir, f"golden_dr_output_{execution_id}.txt")
+    retry_flag = os.path.join(temp_dir, f"golden_dr_retry_{execution_id}.flag")
     return output_file, retry_flag
 
 
@@ -51,7 +51,7 @@ class DRSetupTask(Task):
     """Phase 1: Setup - creates output file with header and first token."""
 
     def execute(self, stage: StageExecution) -> TaskResult:
-        output_file, retry_flag = get_temp_files()
+        output_file, retry_flag = get_temp_files(stage.execution.id)
 
         # Clean up and write header + first token
         # Use printf with format string to avoid --- being interpreted as option
