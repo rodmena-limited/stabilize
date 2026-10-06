@@ -9,10 +9,8 @@ jobs:
     steps:
       - name: Install
         run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
-      - name: Ruff
-        run: .venv/bin/ruff check src/ tests/ golden_standard_tests/
-      - name: Mypy
-        run: .venv/bin/mypy src/
+      - name: Ruff and mypy
+        run: r=0; .venv/bin/ruff check src/ tests/ golden_standard_tests/ || r=1; .venv/bin/mypy src/ || r=1; exit $r
 
   tests:
     name: "Tests (sqlite + postgres)"

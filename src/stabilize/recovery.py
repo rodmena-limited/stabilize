@@ -35,8 +35,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from stabilize.errors import RecoveryError
-from stabilize.recovery_rules import can_start, has_started
 from stabilize.models.status import WorkflowStatus
+from stabilize.recovery_rules import can_start, has_started
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution

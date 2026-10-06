@@ -15,9 +15,9 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import timedelta
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from stabilize.queue import Queue
