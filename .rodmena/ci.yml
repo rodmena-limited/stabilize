@@ -33,8 +33,10 @@ jobs:
     steps:
       - name: Install
         run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
+      - name: Engine tables in a non-default schema for probe_schema_and_exists
+        run: .venv/bin/stabilize mg-up --db-url "$DATABASE_URL?schema=orchestration"
       - name: Probe harness
-        run: PROBE_SET=sqlite AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" PYTHON=.venv/bin/python bash audit/evaluations/run_all.sh
+        run: STABILIZE_PROBE_SCHEMA=orchestration PROBE_SET=sqlite AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" PYTHON=.venv/bin/python bash audit/evaluations/run_all.sh
 
   falsify:
     name: "New probes go red on 0.31.0"

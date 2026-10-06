@@ -28,7 +28,7 @@ from pathlib import Path
 logging.basicConfig(level=logging.CRITICAL)
 sys.path.insert(0, str(Path(__file__).parent))
 
-from _backends import _container_dsn  # noqa: E402
+from _backends import _container_dsn, dedicated_dsn  # noqa: E402
 
 
 def main() -> int:
@@ -40,7 +40,7 @@ def main() -> int:
 
     container = None
     if os.environ.get("AUDIT_ALLOW_DESTRUCTIVE") == "1" and os.environ.get("STABILIZE_PROBE_DSN"):
-        dsn = os.environ["STABILIZE_PROBE_DSN"]
+        dsn = dedicated_dsn(os.environ["STABILIZE_PROBE_DSN"], "capacity")
         print(f"BLAST RADIUS: moving queue_messages_id_seq on {dsn.split('@')[-1]}")
     else:
         dsn, container = _container_dsn()

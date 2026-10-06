@@ -91,13 +91,17 @@ def main() -> int:
     try:
         print("=" * 72)
         print("CONTROL: the tables really are in a non-default schema")
-        found = subprocess.run(
-            ["docker", "exec", CONTAINER, "psql", "-U", "vu", "-d", "vdb", "-tAc",
-             "select schemaname from pg_tables where tablename='pipeline_executions'"],
-            capture_output=True, text=True, check=False,
-        ).stdout.strip() if owns else schema
+        import psycopg
+
+        with psycopg.connect(dsn) as conn:
+            found = ",".join(
+                r[0]
+                for r in conn.execute(
+                    "select schemaname from pg_tables where tablename='pipeline_executions' order by 1"
+                ).fetchall()
+            )
         print(f"  pipeline_executions lives in: {found!r}")
-        if owns and found != schema:
+        if found != schema:
             print("  >>> CONTROL FAILED: migrations did not land in the schema; probe invalid")
             return 1
         print("  >>> control green")

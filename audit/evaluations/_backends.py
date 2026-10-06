@@ -47,11 +47,27 @@ def _container_dsn() -> tuple[str | None, Any]:
     return url, c
 
 
+def dedicated_dsn(base: str, suffix: str = "probes") -> str:
+    """A database of its own next to base's, so these probes never touch base's schemas."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    import psycopg
+
+    parts = urlsplit(base)
+    name = f"{parts.path.lstrip('/') or 'postgres'}_{suffix}"
+    with psycopg.connect(base, autocommit=True) as conn:
+        if conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,)).fetchone() is None:
+            conn.execute(f'CREATE DATABASE "{name}"')
+    return urlunsplit((parts.scheme, parts.netloc, f"/{name}", parts.query, parts.fragment))
+
+
 @contextmanager
 def postgres_dsn() -> Iterator[str | None]:
     dsn = os.environ.get("STABILIZE_PROBE_DSN")
     container = None
-    if not dsn:
+    if dsn:
+        dsn = dedicated_dsn(dsn)
+    else:
         dsn, container = _container_dsn()
     if dsn is None:
         yield None
