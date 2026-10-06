@@ -94,6 +94,7 @@ def _handle_running(
 
     txn_helper.execute_atomic(
         stage=stage,
+        source_message=message,
         messages_to_push=[(replace(message, message_id=None, retry_count=0), delay.total_seconds())],
         handler_name="RunTask",
     )

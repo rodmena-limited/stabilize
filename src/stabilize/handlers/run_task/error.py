@@ -254,6 +254,7 @@ def _handle_transient_retry(
                 logger.warning("Stage %s not found during context update", message.stage_id)
                 # Still push retry message even if stage not found
                 txn_helper.execute_atomic(
+                    source_message=message,
                     messages_to_push=[(retry_message, delay.total_seconds())],
                     handler_name="RunTask",
                     during_txn=_record_retry,
@@ -263,6 +264,7 @@ def _handle_transient_retry(
             # Atomic: store stage with context update + push retry message
             txn_helper.execute_atomic(
                 stage=fresh_stage,
+                source_message=message,
                 messages_to_push=[(retry_message, delay.total_seconds())],
                 handler_name="RunTask",
                 during_txn=_record_retry,
@@ -275,6 +277,7 @@ def _handle_transient_retry(
     else:
         # Atomic: push retry message (no stage update needed)
         txn_helper.execute_atomic(
+            source_message=message,
             messages_to_push=[(retry_message, delay.total_seconds())],
             handler_name="RunTask",
             during_txn=_record_retry,
