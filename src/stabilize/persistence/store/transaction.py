@@ -56,12 +56,16 @@ class StoreTransaction(ABC):
         message_id: str,
         handler_type: str | None = None,
         execution_id: str | None = None,
-    ) -> None:
+    ) -> bool:
         """
         Mark a message as successfully processed within the transaction.
 
         This ensures that message processing is only marked complete if
         the transaction commits successfully.
+
+        Returns:
+            False if the message was already marked processed by another
+            transaction, i.e. this delivery is a duplicate.
         """
         pass
 

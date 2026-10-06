@@ -118,7 +118,7 @@ class PostgresTransaction(StoreTransaction):
         message_id: str,
         handler_type: str | None = None,
         execution_id: str | None = None,
-    ) -> None:
+    ) -> bool:
         """Mark a message as successfully processed within the transaction."""
         with self._conn.cursor() as cur:
             cur.execute(
@@ -136,7 +136,10 @@ class PostgresTransaction(StoreTransaction):
                     "execution_id": execution_id,
                 },
             )
-        self._marked_ids.append(message_id)
+            inserted = bool(cur.rowcount == 1)
+        if inserted:
+            self._marked_ids.append(message_id)
+        return inserted
 
     def acquire_claim(
         self,

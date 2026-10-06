@@ -113,6 +113,10 @@ ERROR_HANDLING_RETRY_POLICY = RetryWithBackoffPolicy(
 )
 
 
+class DuplicateDeliveryError(Exception):
+    """The source message was marked processed by another transaction first."""
+
+
 class TransactionHelper:
     """Helper for executing atomic transactions with common patterns.
 
@@ -176,11 +180,12 @@ class TransactionHelper:
 
                 if source_message and source_message.message_id:
                     execution_id = getattr(source_message, "execution_id", None)
-                    txn.mark_message_processed(
+                    if not txn.mark_message_processed(
                         message_id=source_message.message_id,
                         handler_type=handler_name,
                         execution_id=execution_id,
-                    )
+                    ):
+                        raise DuplicateDeliveryError(source_message.message_id)
 
                 if during_txn is not None:
                     during_txn()
@@ -190,6 +195,8 @@ class TransactionHelper:
 
         try:
             _execute()
+        except DuplicateDeliveryError as e:
+            logger.info("%s: message %s was already processed by another delivery; rolled back", handler_name, e)
         except RetryLimitReached as e:
             logger.error(
                 "Transaction failed after max retries due to lock contention: %s",
@@ -246,17 +253,20 @@ class TransactionHelper:
 
                 if source_message and source_message.message_id:
                     execution_id = getattr(source_message, "execution_id", None)
-                    txn.mark_message_processed(
+                    if not txn.mark_message_processed(
                         message_id=source_message.message_id,
                         handler_type=handler_name,
                         execution_id=execution_id,
-                    )
+                    ):
+                        raise DuplicateDeliveryError(source_message.message_id)
 
                 for msg, delay in messages_to_push:
                     txn.push_message(msg, delay or 0)
 
         try:
             _execute()
+        except DuplicateDeliveryError as e:
+            logger.info("%s: message %s was already processed by another delivery; rolled back", handler_name, e)
         except RetryLimitReached as e:
             logger.critical(
                 "CRITICAL: Transaction failed after max retries in error handling path: %s",

@@ -249,9 +249,9 @@ class AtomicTransaction(StoreTransaction):
         message_id: str,
         handler_type: str | None = None,
         execution_id: str | None = None,
-    ) -> None:
+    ) -> bool:
         """Mark a message as successfully processed within the transaction."""
-        self._conn.execute(
+        cursor = self._conn.execute(
             """
             INSERT OR IGNORE INTO processed_messages (
                 message_id, processed_at, handler_type, execution_id
@@ -266,6 +266,7 @@ class AtomicTransaction(StoreTransaction):
                 "execution_id": execution_id,
             },
         )
+        return bool(cursor.rowcount == 1)
 
     def acquire_claim(
         self,

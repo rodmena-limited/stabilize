@@ -93,9 +93,10 @@ class NoOpTransaction(StoreTransaction):
         message_id: str,
         handler_type: str | None = None,
         execution_id: str | None = None,
-    ) -> None:
+    ) -> bool:
         """Buffer processed message mark to be stored when transaction completes."""
         self._pending_processed.append((message_id, handler_type, execution_id))
+        return True
 
     def _flush_messages(self) -> None:
         """Flush all pending operations.
