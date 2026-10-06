@@ -39,8 +39,14 @@ class SqliteWorkflowCrudMixin:
         Use exists() to check first if needed.
         """
         conn = self._get_connection()
+        try:
+            self._insert_execution(conn, execution)
+        except Exception:
+            conn.rollback()
+            raise
+        conn.commit()
 
-        # Insert execution
+    def _insert_execution(self, conn: sqlite3.Connection, execution: Workflow) -> None:
         conn.execute(
             """
             INSERT INTO pipeline_executions (
@@ -60,11 +66,8 @@ class SqliteWorkflowCrudMixin:
             execution_to_dict(execution),
         )
 
-        # Insert stages
         for stage in execution.stages:
             insert_stage(conn, stage, execution.id)
-
-        conn.commit()
 
     def retrieve(self, execution_id: str) -> Workflow:
         """Retrieve an execution by ID."""

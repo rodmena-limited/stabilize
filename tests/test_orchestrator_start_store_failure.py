@@ -54,3 +54,21 @@ def test_start_tolerates_a_concurrent_store_of_the_same_workflow(
     monkeypatch.setattr(repository, "store", racing)
     Orchestrator(queue, store=repository).start(wf)
     assert queue.size() == 1
+
+
+def test_start_raises_when_a_stage_insert_fails_and_leaves_no_partial_workflow(
+    repository: WorkflowStore, queue: Queue
+) -> None:
+    wf = _wf()
+    duplicate = StageExecution(
+        ref_id="s2",
+        type="test",
+        name="s2",
+        tasks=[TaskExecution.create("t2", "success", stage_start=True, stage_end=True)],
+    )
+    duplicate.id = wf.stages[0].id
+    wf.stages.append(duplicate)
+    with pytest.raises(Exception):
+        Orchestrator(queue, store=repository).start(wf)
+    assert not repository.exists(wf.id)
+    assert queue.size() == 0
