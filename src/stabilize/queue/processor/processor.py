@@ -22,8 +22,9 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from stabilize.queue import Queue
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.processor.config import QueueProcessorConfig
+from stabilize.queue.processor.drain import SynchronousDrainMixin
 from stabilize.queue.processor.handler_base import MessageHandler
-from stabilize.queue.processor.lease_guard import check_sync_lease, start_lock_heartbeat
+from stabilize.queue.processor.lease_guard import start_lock_heartbeat
 from stabilize.queue.processor.mixins import QueueProcessorMixin
 from stabilize.resilience.config import HandlerConfig
 
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 M = TypeVar("M", bound=Message)
 
 
-class QueueProcessor(QueueProcessorMixin):
+class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
     """
     Processes messages from a queue using registered handlers.
 
@@ -219,12 +220,18 @@ class QueueProcessor(QueueProcessorMixin):
 
         logger.info("Queue processor started")
 
-    def stop(self, wait: bool = True) -> None:
+    def stop(self, wait: bool = True, timeout: float | None = None) -> int:
         """
         Stop the queue processor.
 
         Args:
-            wait: Whether to wait for pending messages to complete
+            wait: Whether to wait for running handlers to complete
+            timeout: Seconds to wait when wait=True. None uses
+                config.shutdown_timeout_seconds.
+
+        Returns:
+            Number of handlers still running when stop() returned. Their
+            messages are redelivered after the queue lock expires.
         """
         self._stopping = True
         self._running = False
@@ -236,18 +243,22 @@ class QueueProcessor(QueueProcessorMixin):
             self._recovery_thread.join(timeout=5.0)
 
         if self._executor:
-            self._executor.shutdown(wait=wait)
+            self._executor.shutdown(wait=False, cancel_futures=not wait)
+            if wait:
+                limit = self.config.shutdown_timeout_seconds if timeout is None else timeout
+                deadline = None if limit is None else time.monotonic() + limit
+                while self.active_count > 0 and (deadline is None or time.monotonic() < deadline):
+                    time.sleep(0.05)
 
-        if not wait:
-            with self._in_flight_lock:
-                count = len(self._in_flight)
-            if count > 0:
-                logger.warning(
-                    "Forced shutdown with %d messages in-flight; will be redelivered after queue lock timeout",
-                    count,
-                )
-
+        remaining = self.active_count
+        if remaining > 0:
+            logger.warning(
+                "Queue processor stopped with %d handler(s) still running; "
+                "their messages will be redelivered after the queue lock timeout",
+                remaining,
+            )
         logger.info("Queue processor stopped")
+        return remaining
 
     def request_stop(self) -> None:
         """
@@ -439,82 +450,6 @@ class QueueProcessor(QueueProcessorMixin):
 
         if self._executor is not None:
             self._executor.submit(process_and_ack)
-
-    def _warn_once_if_lease_unrenewed(self) -> None:
-        """Warn at the first synchronous poll when nothing renews the lease."""
-        if self._sync_lease_warned:
-            return
-        self._sync_lease_warned = True
-        warning = check_sync_lease(self.queue)
-        if warning is not None:
-            logger.warning("%s", warning)
-
-    def process_one(self) -> bool:
-        """
-        Process a single message synchronously.
-
-        Useful for testing and debugging.
-
-        Returns:
-            True if a message was processed, False otherwise
-        """
-        self._warn_once_if_lease_unrenewed()
-        message = self.queue.poll_one()
-        if message:
-            try:
-                self._handle_message(message)
-                self.queue.ack(message)
-                return True
-            except Exception as e:
-                logger.error("Error handling message: %s", e, exc_info=True)
-                # Store error context for debugging and auditing
-                message.set_error_context(e)
-                self.queue.reschedule(message, self.config.retry_delay)
-                raise
-        return False
-
-    def process_all(self, timeout: float = 60.0) -> int:
-        """
-        Process all messages synchronously until queue is empty.
-
-        Thread-safe: uses a processing lock to prevent concurrent calls.
-        Also performs periodic DLQ cleanup for expired messages.
-
-        Args:
-            timeout: Maximum time to wait for processing
-
-        Returns:
-            Number of messages processed
-        """
-        # Use processing lock to prevent concurrent calls
-        # Non-blocking acquire - if another thread is processing, return immediately
-        acquired = self._processing_lock.acquire(blocking=False)
-        if not acquired:
-            logger.debug("Another thread is processing, skipping")
-            return 0
-
-        try:
-            count = 0
-            # Use monotonic time for elapsed time calculations to avoid
-            # issues with clock drift, NTP adjustments, or leap seconds
-            start = time.monotonic()
-
-            # Periodic DLQ check (every 30 seconds)
-            if time.monotonic() - self._last_dlq_check > 30.0:
-                self._check_dlq()
-                self._last_dlq_check = time.monotonic()
-
-            while time.monotonic() - start < timeout:
-                if self.process_one():
-                    count += 1
-                    continue
-                if self.queue.size() == 0:
-                    break
-                time.sleep(0.01)
-
-            return count
-        finally:
-            self._processing_lock.release()
 
     @property
     def is_running(self) -> bool:

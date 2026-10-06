@@ -309,10 +309,10 @@ class LifecycleManager:
             except Exception as e:
                 logger.warning("Error waiting for processor: %s", e)
 
-        # Step 3: Force stop processors if still running
         for processor in processors:
             try:
-                processor.stop(wait=True)
+                elapsed = time.monotonic() - start_time
+                processor.stop(wait=True, timeout=max(0.0, self.shutdown_timeout - elapsed))
                 logger.debug("Stopped QueueProcessor")
             except Exception as e:
                 logger.warning("Error stopping processor: %s", e)

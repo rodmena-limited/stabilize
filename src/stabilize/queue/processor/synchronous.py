@@ -56,9 +56,9 @@ class SynchronousQueueProcessor(QueueProcessor):
         """No-op for synchronous processor."""
         pass
 
-    def stop(self, wait: bool = True) -> None:
+    def stop(self, wait: bool = True, timeout: float | None = None) -> int:
         """No-op for synchronous processor."""
-        pass
+        return 0
 
     def push_and_process(self, message: Message) -> None:
         """

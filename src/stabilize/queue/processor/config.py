@@ -68,6 +68,10 @@ class QueueProcessorConfig:
     retention_sweep_interval_seconds: float = 0.0
     processed_messages_max_age_hours: float = 24.0
 
+    # Upper bound, in seconds, on how long stop(wait=True) waits for running
+    # handlers. None waits without a bound.
+    shutdown_timeout_seconds: float | None = 60.0
+
     # --- Automatic crash recovery (opt-in; all default to disabled) ---
     # Run a one-shot recovery sweep when start() is called. This re-queues
     # workflows that were interrupted by a crash/restart. Requires a store.
