@@ -1,0 +1,48 @@
+version: 1
+
+jobs:
+  lint:
+    name: "Lint and types"
+    image: containers.rodmena.co.uk/rodmena/ci-python:3.14
+    memory_mb: 1536
+    timeout_minutes: 20
+    steps:
+      - name: Install
+        run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
+      - name: Ruff
+        run: .venv/bin/ruff check src/ tests/ golden_standard_tests/
+      - name: Mypy
+        run: .venv/bin/mypy src/
+
+  tests:
+    name: "Tests (sqlite + postgres)"
+    image: containers.rodmena.co.uk/rodmena/ci-python:3.14
+    services: [postgres]
+    timeout_minutes: 45
+    steps:
+      - name: Install
+        run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
+      - name: Unit and golden tests
+        run: STABILIZE_TEST_DSN="$DATABASE_URL" .venv/bin/python -m pytest tests golden_standard_tests -q -n 3 -p no:cacheprovider --timeout 600 -rfE
+
+  probes:
+    name: "Audit probes"
+    image: containers.rodmena.co.uk/rodmena/ci-python:3.14
+    services: [postgres]
+    timeout_minutes: 40
+    steps:
+      - name: Install
+        run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
+      - name: Probe harness
+        run: PROBE_SET=sqlite AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" PYTHON=.venv/bin/python bash audit/evaluations/run_all.sh
+
+  falsify:
+    name: "New probes go red on 0.31.0"
+    image: containers.rodmena.co.uk/rodmena/ci-python:3.14
+    services: [postgres]
+    timeout_minutes: 30
+    steps:
+      - name: Install published 0.31.0
+        run: uv venv /tmp/old && uv pip install -p /tmp/old/bin/python 'stabilize[postgres,cli]==0.31.0'
+      - name: Each new probe must fail against 0.31.0
+        run: AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" STABILIZE_PROBE_SQLITE_QUEUE_TABLES=1 PYTHON=/tmp/old/bin/python bash audit/evaluations/falsify_previous.sh

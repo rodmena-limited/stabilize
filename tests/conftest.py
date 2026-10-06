@@ -27,6 +27,31 @@ from stabilize.persistence.connection import ConnectionManager, SingletonMeta
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue import Queue
 
+_TEST_DSN = os.environ.get("STABILIZE_TEST_DSN")
+
+
+class _ExternalPostgres:
+    def __init__(self, url: str) -> None:
+        self._url = url
+
+    def get_connection_url(self) -> str:
+        return self._url
+
+
+def _worker_database(base_dsn: str) -> str:
+    from urllib.parse import urlsplit, urlunsplit
+
+    import psycopg
+
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    parts = urlsplit(base_dsn)
+    name = f"{parts.path.lstrip('/') or 'postgres'}_{worker}"
+    with psycopg.connect(base_dsn, autocommit=True) as conn:
+        conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        conn.execute(f'CREATE DATABASE "{name}"')
+    return urlunsplit((parts.scheme, parts.netloc, f"/{name}", parts.query, parts.fragment))
+
+
 # Optional PostgreSQL dependencies - only required for postgres tests
 try:
     from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
@@ -135,7 +160,14 @@ class CounterTask(Task):
 
 @pytest.fixture(scope="session")
 def postgres_container() -> Generator[Any, None, None]:
-    """Start PostgreSQL container once per test session."""
+    """Start PostgreSQL container once per test session.
+
+    With STABILIZE_TEST_DSN set (CI, where there is no Docker), each xdist
+    worker gets its own database on that server instead of a container.
+    """
+    if _TEST_DSN:
+        yield _ExternalPostgres(_worker_database(_TEST_DSN))
+        return
     if not HAS_TESTCONTAINERS:
         pytest.skip("testcontainers not installed")
     with PostgresContainer("postgres:15") as postgres:
@@ -145,7 +177,7 @@ def postgres_container() -> Generator[Any, None, None]:
 @pytest.fixture(scope="session")
 def postgres_url(postgres_container: Any) -> str:
     """Get PostgreSQL connection URL and run migrations."""
-    if not HAS_TESTCONTAINERS:
+    if not (HAS_TESTCONTAINERS or _TEST_DSN):
         pytest.skip("testcontainers not installed")
 
     # testcontainers returns psycopg2 style URL, convert to psycopg3
@@ -184,7 +216,7 @@ def postgres_url(postgres_container: Any) -> str:
 def _get_available_backends() -> list[str]:
     """Return list of available backends based on installed dependencies."""
     backends = ["sqlite"]
-    if HAS_TESTCONTAINERS and HAS_POSTGRES:
+    if HAS_POSTGRES and (HAS_TESTCONTAINERS or _TEST_DSN):
         backends.append("postgres")
     return backends
 

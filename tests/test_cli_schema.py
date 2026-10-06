@@ -7,6 +7,8 @@ dedicated schema.
 
 from __future__ import annotations
 
+import os
+
 from pathlib import Path
 from typing import Any
 
@@ -105,7 +107,7 @@ def fresh_database(postgres_container: Any) -> Any:
     if not HAS_POSTGRES:
         pytest.skip("psycopg not installed")
     base_url = postgres_container.get_connection_url().replace("+psycopg2", "")
-    dbname = "mg_schema_test"
+    dbname = f"mg_schema_test_{os.environ.get('PYTEST_XDIST_WORKER', 'main')}"
     with psycopg.connect(base_url, autocommit=True) as conn:
         conn.execute(f"DROP DATABASE IF EXISTS {dbname}")
         conn.execute(f"CREATE DATABASE {dbname}")
