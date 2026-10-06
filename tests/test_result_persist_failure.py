@@ -89,3 +89,18 @@ def test_failed_save_of_successful_result_neither_fails_nor_reruns(
     assert repository.retrieve(wf.id).status == WorkflowStatus.SUCCEEDED
     assert STATE["calls"] == 1
     assert STATE["fired"] == (0 if error is None else 1)
+
+
+def test_held_result_is_not_applied_to_a_later_execution_of_the_same_task() -> None:
+    from stabilize.handlers.run_task import held_results
+
+    task = TaskExecution.create("t", "succeeds", stage_start=True, stage_end=True)
+    task.start_time = 1000
+    held_results.hold(task, TaskResult.success())
+    task.start_time = 2000
+    assert held_results.take(task) is None
+
+    task.start_time = 3000
+    held_results.hold(task, TaskResult.success())
+    assert held_results.take(task) is not None
+    assert held_results.take(task) is None

@@ -26,6 +26,7 @@ from stabilize.errors import (
     is_transient,
 )
 from stabilize.handlers.base import StabilizeHandler
+from stabilize.handlers.run_task import held_results
 from stabilize.handlers.run_task.error import (
     complete_with_error,
     handle_cancellation,
@@ -74,7 +75,6 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
     # Maps task_id -> start_time (monotonic) for staleness detection
     _executing_tasks: dict[str, float] = {}
     _executing_lock = threading.Lock()
-    _unsaved_results: dict[str, TaskResult] = {}
 
     def __init__(
         self,
@@ -139,7 +139,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                         task_model.name,
                         task_model.status,
                     )
-                self._take_unsaved_result(task_model.id)
+                held_results.take(task_model)
                 if message.message_id:
                     with self.repository.transaction(self.queue) as txn:
                         txn.mark_message_processed(message.message_id)
@@ -279,7 +279,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                             self.retry_on_concurrency_error,
                         )
                     else:
-                        self._save_result(task_model.id, timeout_result, message)
+                        self._save_result(task_model, timeout_result, message)
                     return
 
             # CONCURRENT EXECUTION CHECK: Prevent duplicate execution of same task
@@ -326,7 +326,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                         )
                         return
 
-                result = self._take_unsaved_result(task_model.id)
+                result = held_results.take(task_model)
                 if result is None:
                     timeout = self.timeout_manager.get_task_timeout(stage, task)
                     with Timer(
@@ -364,7 +364,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                         self.retry_on_concurrency_error,
                     )
                 else:
-                    self._save_result(task_model.id, timeout_result, message)
+                    self._save_result(task_model, timeout_result, message)
             except TransientVerificationError as e:
                 logger.info(
                     "Verification pending for task %s, will retry: %s",
@@ -420,7 +420,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 )
             else:
                 if result is not None:
-                    self._save_result(task_model.id, result, message)
+                    self._save_result(task_model, result, message)
             finally:
                 with RunTaskHandler._executing_lock:
                     RunTaskHandler._executing_tasks.pop(task_model.id, None)
@@ -430,19 +430,14 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
 
         self.with_task(message, on_task)
 
-    def _take_unsaved_result(self, task_id: str) -> TaskResult | None:
-        with RunTaskHandler._executing_lock:
-            return RunTaskHandler._unsaved_results.pop(task_id, None)
-
-    def _save_result(self, task_id: str, result: TaskResult, message: RunTask) -> None:
+    def _save_result(self, task_model: TaskExecution, result: TaskResult, message: RunTask) -> None:
         try:
-            self._process_result_safely(message.stage_id, task_id, result, message)
+            self._process_result_safely(message.stage_id, task_model.id, result, message)
         except Exception:
-            with RunTaskHandler._executing_lock:
-                RunTaskHandler._unsaved_results[task_id] = result
+            held_results.hold(task_model, result)
             logger.error(
                 "Task %s completed but its result could not be saved; holding it for the redelivery",
-                task_id,
+                task_model.id,
                 exc_info=True,
             )
             raise

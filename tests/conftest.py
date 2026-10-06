@@ -23,6 +23,7 @@ from stabilize import (
     TaskResult,
 )
 from stabilize.events import reset_event_bus, reset_event_migrator, reset_event_recorder
+from stabilize.handlers.run_task import held_results
 from stabilize.persistence.connection import ConnectionManager, SingletonMeta
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue import Queue
@@ -104,11 +105,11 @@ def reset_handler_state() -> Generator[None, None, None]:
     from stabilize.resilience.cancellation import reset_cancellation_state
 
     RunTaskHandler._executing_tasks.clear()
-    RunTaskHandler._unsaved_results.clear()
+    held_results.clear()
     reset_cancellation_state()
     yield
     RunTaskHandler._executing_tasks.clear()
-    RunTaskHandler._unsaved_results.clear()
+    held_results.clear()
     reset_cancellation_state()
 
 
