@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -166,8 +167,7 @@ def handle_exception(
             exception,
         )
 
-        # Get attempt count from message (0-indexed) and increment
-        current_attempts = message.attempts or 0
+        current_attempts = message.retry_count or 0
         max_attempts = message.max_attempts or 10
 
         if current_attempts + 1 < max_attempts:
@@ -219,8 +219,7 @@ def _handle_transient_retry(
     next_attempt = current_attempts + 1
     delay = get_backoff_fn(stage, task_model, message, next_attempt + 1)
 
-    # Create new message with incremented attempt count
-    retry_message = message.copy_with_attempts(next_attempt)
+    retry_message = replace(message, message_id=None, retry_count=next_attempt)
 
     def _record_retry() -> None:
         from stabilize.events.recorder import get_event_recorder

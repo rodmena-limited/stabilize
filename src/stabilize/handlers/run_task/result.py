@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -91,10 +92,9 @@ def _handle_running(
     """Handle RUNNING status - task needs to be re-executed."""
     delay = get_backoff_fn(stage, task_model, message, 1)
 
-    # Atomic: store stage + push message together
     txn_helper.execute_atomic(
         stage=stage,
-        messages_to_push=[(message, delay.total_seconds())],
+        messages_to_push=[(replace(message, message_id=None, retry_count=0), delay.total_seconds())],
         handler_name="RunTask",
     )
 
@@ -237,6 +237,7 @@ def _handle_suspended(
                         execution_id=message.execution_id,
                         stage_id=message.stage_id,
                         task_id=task_model.id,
+                        task_type=message.task_type,
                     ),
                     None,
                 )
