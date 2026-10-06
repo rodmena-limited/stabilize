@@ -82,6 +82,11 @@ rewrites the queue tables (see "Migration" below).
   after 2,147,483,647 pushes over a database's life every push failed and the
   engine stopped.
 
+- **A canceled workflow is no longer reported complete while a stage that
+  never started is still `NOT_STARTED`.** `CompleteWorkflow` could finish
+  before the per-stage `CancelStage` messages; it now marks never-started
+  top-level stages `CANCELED` in the same transaction as the workflow.
+
 ### Added
 
 - `RetryableTask.get_execution_timeout(stage)` bounds a single `execute()`
