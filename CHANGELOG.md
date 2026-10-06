@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.32.1] - 2026-10-06
+
+Documentation only; no code or schema change from 0.32.0 and no migration.
+
+### Documented
+
+- **`QueueProcessor.process_one()` / `process_all()` raise handler errors to
+  the caller (#76).** When a handler raises, the message is rescheduled by
+  `config.retry_delay` (15 s by default) and the exception is re-raised;
+  `process_all()` stops there and a later call delivers the message again.
+  `processor.start()` does the same in the background and logs instead of
+  raising. A task result held because the store was unavailable (#63) is saved
+  by that redelivery without executing the task again. This behaviour is
+  unchanged since before 0.31.0; it was undocumented, which made a single
+  `process_all()` call that hit a store error look like a regression of #63.
+  See the docstrings, the README and "Errors During Synchronous Draining" in
+  `docs/guide/error_handling.rst`.
+
 ## [0.32.0] - 2026-10-06
 
 Audit release (two falsification passes; every finding reproduced live on

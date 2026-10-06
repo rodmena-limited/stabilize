@@ -292,3 +292,32 @@ Key Files
 *   ``src/stabilize/errors.py`` - Exception hierarchy and utilities
 *   ``src/stabilize/error_codes.py`` - ErrorCode enum and classification
 *   ``src/stabilize/handlers/run_task/error.py`` - Error handling in task execution
+
+Errors During Synchronous Draining
+----------------------------------
+
+``QueueProcessor.process_one()`` and ``process_all()`` handle messages on the
+calling thread. When a handler raises, the message is rescheduled by
+``config.retry_delay`` (15 s by default) and the exception is **re-raised to the
+caller**; ``process_all()`` stops at that point. The message is delivered again by
+a later call once the delay has passed. ``processor.start()`` runs the same
+handling in the background and logs the error instead of raising it.
+
+A task that completed while the store was unavailable (for example a statement
+timeout or a pool timeout while saving its result) is not executed again: its
+result is held and saved by the redelivery.
+
+To drain through transient errors in a script or a test:
+
+.. code-block:: python
+
+    processor.config.retry_delay = timedelta(milliseconds=50)
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        try:
+            processor.process_all(timeout=1.0)
+        except Exception:
+            logger.warning("handler error; the message was rescheduled", exc_info=True)
+        if store.retrieve(workflow.id).status.is_complete:
+            break
+

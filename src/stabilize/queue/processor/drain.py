@@ -42,8 +42,17 @@ class SynchronousDrainMixin:
 
         Useful for testing and debugging.
 
+        If the handler raises, the message is rescheduled by
+        ``config.retry_delay`` and the exception is re-raised to the caller.
+        The message is delivered again by a later call once that delay has
+        passed. A task result held because the store was unavailable is saved
+        by that redelivery without executing the task again.
+
         Returns:
             True if a message was processed, False otherwise
+
+        Raises:
+            Exception: whatever the handler raised, after rescheduling.
         """
         self._warn_once_if_lease_unrenewed()
         message = self.queue.poll_one()
@@ -67,11 +76,19 @@ class SynchronousDrainMixin:
         Thread-safe: uses a processing lock to prevent concurrent calls.
         Also performs periodic DLQ cleanup for expired messages.
 
+        A handler exception stops the drain: it propagates from
+        ``process_one`` after the message is rescheduled by
+        ``config.retry_delay``. To drain through such errors, catch the
+        exception and call ``process_all`` again after that delay.
+
         Args:
             timeout: Maximum time to wait for processing
 
         Returns:
             Number of messages processed
+
+        Raises:
+            Exception: the first handler exception, after its message was rescheduled.
         """
         # Use processing lock to prevent concurrent calls
         # Non-blocking acquire - if another thread is processing, return immediately

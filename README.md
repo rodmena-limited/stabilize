@@ -166,6 +166,11 @@ print(result.stages[0].outputs["completion"])
 for scripts and tests. In a service you would call `processor.start()` and let
 it run in the background.
 
+If a handler raises during `process_all` (for example the database is briefly
+unavailable), the message is rescheduled by `config.retry_delay` (15 s by
+default) and the exception is raised to your code. A later `process_all` call
+delivers it again; `processor.start()` does this for you.
+
 ### Mid-level: a tool-using agent with human approval
 
 Real agents use tools and often need a human to sign off before an action takes
