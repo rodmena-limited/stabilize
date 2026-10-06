@@ -220,8 +220,9 @@ def retrieve_by_pipeline_config_id(
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(query, params)
-            for row in cur.fetchall():
-                yield retrieve_fn(cast(dict[str, Any], row)["id"])
+            ids = [cast(dict[str, Any], row)["id"] for row in cur.fetchall()]
+    for execution_id in ids:
+        yield retrieve_fn(execution_id)
 
 
 def get_all_pending_workflows(
@@ -251,8 +252,9 @@ def get_all_pending_workflows(
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(query, params)
-            for row in cur.fetchall():
-                yield retrieve_fn(cast(dict[str, Any], row)["id"])
+            ids = [cast(dict[str, Any], row)["id"] for row in cur.fetchall()]
+    for execution_id in ids:
+        yield retrieve_fn(execution_id)
 
 
 def retrieve_by_application(
@@ -283,5 +285,6 @@ def retrieve_by_application(
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(query, params)
-            for row in cur.fetchall():
-                yield retrieve_fn(cast(dict[str, Any], row)["id"])
+            ids = [cast(dict[str, Any], row)["id"] for row in cur.fetchall()]
+    for execution_id in ids:
+        yield retrieve_fn(execution_id)
