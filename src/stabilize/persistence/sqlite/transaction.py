@@ -363,6 +363,10 @@ class AtomicTransaction(StoreTransaction):
         ).fetchall()
         return [r[0] for r in rows]
 
+    def workflow_status(self, workflow_id: str) -> str | None:
+        row = self._conn.execute("SELECT status FROM pipeline_executions WHERE id = ?", (workflow_id,)).fetchone()
+        return None if row is None else str(row[0])
+
 
 
 def _queue_table_for(store: Any, queue: Any) -> str:
@@ -384,6 +388,7 @@ def _queue_table_for(store: Any, queue: Any) -> str:
                 "a push cannot be atomic with the store write"
             )
     return str(getattr(queue, "table_name", None) or "queue_messages")
+
 
 # Forward reference for type hint
 from stabilize.persistence.sqlite.store import SqliteWorkflowStore  # noqa: E402, F401

@@ -115,3 +115,7 @@ class StoreTransaction(ABC):
         """BUFFERED workflow ids of the config, oldest (lowest id) first."""
         raise NotImplementedError(f"{type(self).__name__} does not support admission control")
 
+    def workflow_status(self, workflow_id: str) -> str | None:
+        """The workflow's status name as this transaction sees it."""
+        raise NotImplementedError(f"{type(self).__name__} does not support admission control")
+

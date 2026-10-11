@@ -55,6 +55,7 @@ def _plan_running_stage(workflow: Workflow, stage: StageExecution, queue: Queue)
                         task_id=task.id,
                         status=status,
                         original_status=original,
+                        task_start_time=task.start_time,
                     )
                 )
             else:

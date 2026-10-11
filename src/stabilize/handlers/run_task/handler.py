@@ -175,8 +175,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 )
                 return
 
-            # Check execution state
-            if execution.is_canceled:
+            if execution.is_canceled or execution.status.is_complete:
                 handle_cancellation(
                     stage,
                     task_model,
@@ -185,27 +184,6 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                     self.repository,
                     self.txn_helper,
                     self.retry_on_concurrency_error,
-                )
-                return
-
-            if execution.status.is_complete:
-                # Atomic: mark message processed + push CompleteTask
-                self.txn_helper.execute_atomic(
-                    stage=stage,
-                    source_message=message,
-                    messages_to_push=[
-                        (
-                            CompleteTask(
-                                execution_type=message.execution_type,
-                                execution_id=message.execution_id,
-                                stage_id=message.stage_id,
-                                task_id=message.task_id,
-                                status=WorkflowStatus.CANCELED,
-                            ),
-                            None,
-                        )
-                    ],
-                    handler_name="RunTask",
                 )
                 return
 

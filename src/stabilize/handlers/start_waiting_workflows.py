@@ -12,6 +12,7 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
+from stabilize.audit import audit
 from stabilize.handlers.admission import promote_waiting
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.queue.messages import StartWaitingWorkflows
@@ -65,15 +66,7 @@ class StartWaitingWorkflowsHandler(StabilizeHandler[StartWaitingWorkflows]):
         """Inner handle logic to be retried."""
         if not message.pipeline_config_id:
             return
-        with self.repository.transaction(self.queue) as txn:
-            txn.lock_admission(message.pipeline_config_id)
-            started, canceled = promote_waiting(self, txn, message.pipeline_config_id, message.purge_queue)
-            if message.message_id:
-                txn.mark_message_processed(
-                    message_id=message.message_id,
-                    handler_type="StartWaitingWorkflows",
-                    execution_id=None,
-                )
+        started, canceled = promote_waiting(self, message.pipeline_config_id, message.purge_queue, message)
         for execution in canceled:
             self.repository.cancel(
                 execution.id,
@@ -86,11 +79,20 @@ class StartWaitingWorkflowsHandler(StabilizeHandler[StartWaitingWorkflows]):
             len(started),
             len(canceled),
         )
-        if self.event_recorder:
-            for execution, initial in started:
+        for execution, initial in started:
+            if self.event_recorder:
                 self.set_event_context(execution.id)
+                self.event_recorder.record_workflow_created(execution, source_handler="StartWaitingWorkflowsHandler")
                 self.event_recorder.record_workflow_started(
                     execution,
                     initial_stage_ids=[s.id for s in initial],
                     source_handler="StartWaitingWorkflowsHandler",
                 )
+            audit(
+                event_type="WORKFLOW_LIFECYCLE",
+                action="START",
+                user=execution.trigger.user or "system",
+                resource_type="workflow",
+                resource_id=execution.id,
+                details={"application": execution.application, "name": execution.name, "initial_stages": len(initial)},
+            )

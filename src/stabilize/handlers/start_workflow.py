@@ -13,11 +13,12 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.audit import audit
-from stabilize.handlers.admission import limits_concurrency, start_running
+from stabilize.handlers.admission import limits_concurrency, start_running, try_lock_admission
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
     CancelWorkflow,
+    StartWaitingWorkflows,
     StartWorkflow,
 )
 from stabilize.queue.ownership import queue_table_name
@@ -113,29 +114,37 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
 
     def _admit(self, execution: Workflow, message: StartWorkflow) -> None:
         config_id = execution.pipeline_config_id or ""
-        started: list[StageExecution] | None = None
         with self.repository.transaction(self.queue) as txn:
-            txn.lock_admission(config_id)
-            current = self.repository.retrieve(execution.id)
-            if current.status != WorkflowStatus.NOT_STARTED:
-                self._mark(txn, message)
-                return
-            running = txn.count_running(config_id)
-            waiting_older = [w for w in txn.buffered_ids(config_id) if w < execution.id]
-            if running >= execution.max_concurrent_executions or waiting_older:
-                logger.info(
-                    "Execution %s buffered (running=%d limit=%d older waiting=%d)",
-                    execution.id,
-                    running,
-                    execution.max_concurrent_executions,
-                    len(waiting_older),
-                )
-                self.set_workflow_status(execution, WorkflowStatus.BUFFERED)
-                txn.update_workflow_status(execution)
-                self._mark(txn, message)
-                return
-            started = self._start_in(txn, execution, message)
+            if try_lock_admission(txn, config_id):
+                started = self._admit_locked(txn, execution, message, config_id)
+            else:
+                started = self._start_in(txn, execution, message)
         self._after_start(execution, started)
+
+    def _admit_locked(
+        self, txn: StoreTransaction, execution: Workflow, message: StartWorkflow, config_id: str
+    ) -> list[StageExecution] | None:
+        if txn.workflow_status(execution.id) != WorkflowStatus.NOT_STARTED.name:
+            self._mark(txn, message)
+            return None
+        limit = execution.max_concurrent_executions
+        running = txn.count_running(config_id)
+        waiting_older = [w for w in txn.buffered_ids(config_id) if w < execution.id]
+        if waiting_older and running < limit:
+            txn.push_message(StartWaitingWorkflows(pipeline_config_id=config_id, purge_queue=False))
+        if running >= limit or waiting_older:
+            logger.info(
+                "Execution %s buffered (running=%d limit=%d older waiting=%d)",
+                execution.id,
+                running,
+                limit,
+                len(waiting_older),
+            )
+            self.set_workflow_status(execution, WorkflowStatus.BUFFERED)
+            txn.update_workflow_status(execution)
+            self._mark(txn, message)
+            return None
+        return self._start_in(txn, execution, message)
 
     def _mark(self, txn: StoreTransaction, message: StartWorkflow) -> None:
         if message.message_id:

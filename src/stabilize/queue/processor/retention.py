@@ -21,11 +21,14 @@ def sweep_once(processor: Any) -> int:
     store = processor._store
     cfg = processor.config
     try:
-        removed = store.cleanup_old_processed_messages(
-            max_age_hours=cfg.processed_messages_max_age_hours,
-            batch_size=cfg.retention_batch_size,
-            max_rows=cfg.retention_max_rows_per_sweep,
-        )
+        try:
+            removed = store.cleanup_old_processed_messages(
+                max_age_hours=cfg.processed_messages_max_age_hours,
+                batch_size=cfg.retention_batch_size,
+                max_rows=cfg.retention_max_rows_per_sweep,
+            )
+        except TypeError:
+            removed = store.cleanup_old_processed_messages(max_age_hours=cfg.processed_messages_max_age_hours)
         claims = store.cleanup_completed_stage_claims()
     except Exception as e:
         processor._retention_failures += 1

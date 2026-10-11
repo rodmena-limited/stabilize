@@ -26,8 +26,8 @@ from stabilize.queue.processor.config import QueueProcessorConfig
 from stabilize.queue.processor.drain import SynchronousDrainMixin
 from stabilize.queue.processor.handler_base import MessageHandler
 from stabilize.queue.processor.lease_guard import start_lock_heartbeat
-from stabilize.queue.processor.retention import start_retention_thread
 from stabilize.queue.processor.mixins import QueueProcessorMixin
+from stabilize.queue.processor.retention import start_retention_thread
 from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:

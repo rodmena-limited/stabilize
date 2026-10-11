@@ -12,6 +12,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from stabilize.handlers.base import StabilizeHandler
+from stabilize.handlers.run_task.execution import resolve_task
 from stabilize.models.stage.completion_records import recorded_completion
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import CancelStage, CompleteStage, CompleteWorkflow
@@ -92,6 +93,8 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
 
             moved: list[TaskExecution] = []
             for task in stage.tasks:
+                if task.status == WorkflowStatus.SKIPPED and task.end_time is None:
+                    task.end_time = self.current_time_millis()
                 if task.status in {WorkflowStatus.NOT_STARTED, WorkflowStatus.RUNNING}:
                     if task.status == WorkflowStatus.RUNNING and not _canceled_by_run_task(stage, task):
                         moved.append(task)
@@ -144,7 +147,7 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
         moved_ids = {t.id for t in moved}
         for task in stage.tasks:
             try:
-                impl = self.task_registry.get_by_class(task.implementing_class)
+                impl = resolve_task(task.implementing_class, task, self.task_registry)
             except Exception as e:
                 logger.warning("Cannot resolve task %s for cancel hooks: %s", task.name, e)
                 continue

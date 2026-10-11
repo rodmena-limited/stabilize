@@ -181,7 +181,8 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
         task_model.task_exception_details["exception"] = details
         self.set_task_status(task_model, WorkflowStatus.RUNNING)
         task_model.start_time = self.current_time_millis()
-        record_completion(stage, task_model.id, WorkflowStatus.TERMINAL, WorkflowStatus.TERMINAL)
+        status = stage.failure_status(default=WorkflowStatus.TERMINAL)
+        record_completion(stage, task_model.id, status, WorkflowStatus.TERMINAL)
         with self.repository.transaction(self.queue) as txn:
             txn.store_stage(stage)
             if message.message_id:
@@ -196,7 +197,7 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
                     execution_id=message.execution_id,
                     stage_id=message.stage_id,
                     task_id=message.task_id,
-                    status=WorkflowStatus.TERMINAL,
+                    status=status,
                     original_status=WorkflowStatus.TERMINAL,
                 )
             )

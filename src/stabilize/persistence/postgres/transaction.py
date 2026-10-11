@@ -254,6 +254,14 @@ class PostgresTransaction(StoreTransaction):
             rows = cur.fetchall()
         return [r["id"] if isinstance(r, dict) else r[0] for r in rows]
 
+    def workflow_status(self, workflow_id: str) -> str | None:
+        with self._conn.cursor() as cur:
+            cur.execute("SELECT status FROM pipeline_executions WHERE id = %(id)s", {"id": workflow_id})
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return str(row["status"] if isinstance(row, dict) else row[0])
+
 
 # Forward reference for type hint
 from stabilize.persistence.postgres.store import (  # noqa: E402, F401

@@ -192,6 +192,10 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
         if WorkflowStatus.TERMINAL in statuses:
             return WorkflowStatus.TERMINAL
 
+        active = [s for s in stages if s.status in _ACTIVE_STAGE_STATUSES]
+        if active and not execution.is_canceled:
+            return None
+
         # Any CANCELED -> CANCELED
         if WorkflowStatus.CANCELED in statuses:
             return WorkflowStatus.CANCELED
@@ -204,7 +208,6 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
                     return WorkflowStatus.TERMINAL
                 return WorkflowStatus.SUCCEEDED
 
-        active = [s for s in stages if s.status in _ACTIVE_STAGE_STATUSES]
         if active:
             logger.debug(
                 "CompleteWorkflow for %s: %d stage(s) still active; their completion re-evaluates the workflow",

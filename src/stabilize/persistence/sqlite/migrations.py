@@ -171,31 +171,32 @@ def apply_migrations(
         The schema version after migration.
     """
     _validate_migrations(migrations, baseline_version)
-    ensure_version_table(conn)
-    current = get_schema_version(conn)
-
-    # Stamp the baseline for an existing or just-created un-versioned database so
-    # the baseline DDL is never re-run on upgrade.
-    if current < baseline_version:
-        conn.execute(
-            "INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (?, ?)",
-            (baseline_version, "baseline"),
-        )
-        current = baseline_version
-
-    # Apply forward migrations strictly in version order.
-    for migration in sorted(migrations, key=lambda m: m.version):
-        if migration.version <= current:
-            continue
-        for statement in migration.statements:
-            stmt = statement.strip()
-            if stmt:
-                conn.execute(stmt)
-        conn.execute(
-            "INSERT INTO schema_migrations(version, name) VALUES (?, ?)",
-            (migration.version, migration.name),
-        )
-        current = migration.version
-
-    conn.commit()
+    if conn.in_transaction:
+        conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        ensure_version_table(conn)
+        current = get_schema_version(conn)
+        if current < baseline_version:
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (?, ?)",
+                (baseline_version, "baseline"),
+            )
+            current = baseline_version
+        for migration in sorted(migrations, key=lambda m: m.version):
+            if migration.version <= current:
+                continue
+            for statement in migration.statements:
+                stmt = statement.strip()
+                if stmt:
+                    conn.execute(stmt)
+            conn.execute(
+                "INSERT INTO schema_migrations(version, name) VALUES (?, ?)",
+                (migration.version, migration.name),
+            )
+            current = migration.version
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
     return current

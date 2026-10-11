@@ -98,7 +98,8 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
 
         def on_task(stage: StageExecution, task: TaskExecution) -> None:
             # Idempotency check - only complete tasks that are RUNNING
-            if task.status != WorkflowStatus.RUNNING and not accepts_start_task_skip(task, message):
+            stale = message.task_start_time is not None and message.task_start_time != task.start_time
+            if stale or (task.status != WorkflowStatus.RUNNING and not accepts_start_task_skip(task, message)):
                 logger.debug(
                     "Ignoring CompleteTask for %s (%s) - already %s",
                     task.name,

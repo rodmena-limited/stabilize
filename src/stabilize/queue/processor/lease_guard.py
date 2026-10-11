@@ -96,6 +96,9 @@ def start_lock_heartbeat(
             try:
                 if not extend(message):
                     return
+            except ValueError as exc:
+                logger.error("Lock heartbeat for %s stopped: %s", get_message_type_name(message), exc)
+                return
             except Exception as exc:
                 logger.warning(
                     "Lock heartbeat failed for %s, retrying in %.2fs: %s",
