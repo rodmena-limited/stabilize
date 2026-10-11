@@ -46,3 +46,7 @@ Status: CONFIRMED on published 0.32.1 (pipeline 2930). C1 (postgres): with q_b o
 - B81-3 (SQLite): store.transaction(queue) inserts on the store's connection; if the SqliteQueue is a different database file, refuse (ValueError at transaction start) — atomicity cannot be provided across files.
 - B81-4: the default-table test normalises the name (strip schema qualifier and quotes) before comparing with queue_messages.
 - Parser sites confirmed: queue/postgres.py:225,249,285; queue/sqlite/queue.py:242,263,295; queue/dlq.py:34; queue/sqlite/dlq.py:50; self._pending keyed by the parsed int.
+
+## Implementation (commit 8f40cad) — callers
+
+Callers: delivery_key <- queue/postgres.py:214, queue/sqlite/queue.py:228 (poll). row_id <- postgres.py:228/253/287, sqlite/queue.py:245/267/297, queue/dlq.py:36, queue/sqlite/dlq.py:52 — every former int(message_id) site (grep for int(message finds none left). Consumers of message.message_id as a dedup key compare strings only: queue/processor/mixins._handle_message, txn.mark_message_processed in handlers, persistence/committed_marks. update_workflow_status now also writes queue_table = COALESCE(:queue_table, queue_table): callers handlers/start_workflow.py:134/155/191, handlers/admission.py:33/60/68 (set queue_table), handlers/workflow_control.py:211/296 and handlers/complete_workflow.py:137 (workflow loaded from the store carries its queue_table, so the value is unchanged; NULL leaves it as is). store.transaction(queue) on SQLite now uses queue.table_name and refuses a queue on another database file.

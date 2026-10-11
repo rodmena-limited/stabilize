@@ -51,3 +51,7 @@ Correction from ci-conductor (thread 01M4ME7M81P310BRX51Y24HYN5, delivery 01M4P9
 ## Round 2 (pipeline 2936)
 
 Round 2: max_age_hours=168 (int) on PostgreSQL removed 2,000,000 backdated rows in 1.43 s in one statement; max_age_hours=1.0 (float, the processor's type) raised UndefinedFunction. The defect is the float parameter alone; the int path works.
+
+## Implementation (commit 8f40cad) — callers
+
+Callers of cleanup_old_processed_messages: queue/processor/retention.sweep_once (retention thread; batch_size and max_rows from config), cli/maintenance_commands.prune_processed, the PostgreSQL maintenance mixin and SQLite store (implementations), WorkflowStore default (MaintenanceDefaults, returns 0). External callers that pass only max_age_hours get the same result as 0.32.1 (every stale row deleted), in bounded transactions. The poll loop no longer calls it.

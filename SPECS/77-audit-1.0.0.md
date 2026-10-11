@@ -183,3 +183,7 @@ Findings against c1725aa..5195655, all adopted (fixes in 60475c0, regression tes
 - F11 POSSIBLE minor compatibility: old one-argument cleanup signature, stores without admission support, alias-registered tasks in cancel hooks, heartbeat on unparsable ids. Fixed.
 Attacks that found nothing: halt rule paths and redelivery; completion-record producers (RUNNING / transient / held paths push no CompleteTask); attempts fencing (every caller holds the polled message); default-table keys unchanged; nothing runs on the SQLite connection before lock_admission; no CompleteWorkflow/CancelStage loop; no import cycle; gate record persisted before RunTask; base-exception catch order; retention thread lifecycle; PostgreSQL migration additive; bulkman capacity/timeout/shutdown errors are typed and never unwrapped; all 19 handlers registered once.
 Pipeline 2939 (5195655): lint failed (mypy **cfg typing in handlers/defaults.py, 3 ruff issues) — fixed in 60475c0.
+
+## Release number
+
+RELEASE NUMBER CORRECTION (operator, 2026-10-11): this release ships as 0.33.0, not 1.0.0. 0.33.0 is built to the 1.0 bar; the operator promotes it to 1.0.0 later. Version strings, CHANGELOG and docs/guide/stability.rst updated; ci-conductor told.

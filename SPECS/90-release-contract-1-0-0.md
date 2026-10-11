@@ -30,3 +30,7 @@ Status: release requirement for 1.0.0 (operator decision 2026-10-11). C24 public
 ## Callers
 
 - Documentation and CI only.
+
+## Release number
+
+RELEASE NUMBER CORRECTION (operator, 2026-10-11): this release ships as 0.33.0, not 1.0.0. 0.33.0 is built to the 1.0 bar; the operator promotes it to 1.0.0 later. Version strings, CHANGELOG and docs/guide/stability.rst updated; ci-conductor told.

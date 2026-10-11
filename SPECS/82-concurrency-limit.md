@@ -50,3 +50,7 @@ Status: CONFIRMED on published 0.32.1 (pipeline 2930). C4 block: 8 workflows, li
 ## Round 2 (pipeline 2936)
 
 N7 CONFIRMED (probe_purge_cancels_buffered.py, both backends): limit 1, keep_waiting_pipelines=False, three workflows: the third ended NOT_STARTED (promoted, then canceled by flag only, never terminal); control keep=True: all SUCCEEDED. Covered by the B82-2 amendment (purge and StartWorkflow's canceled path set CANCELED).
+
+## Implementation (commit 8f40cad) — callers
+
+Callers: _should_queue removed (its only caller was StartWorkflowHandler.on_execution). lock_admission <- handlers/start_workflow.py:118 (_admit), handlers/start_waiting_workflows.py:69. count_running / buffered_ids <- handlers/admission.promote_waiting and StartWorkflowHandler._admit, always after lock_admission in the same transaction. Both handlers call no helper that commits on the shared SQLite connection inside the section (repository.cancel for purged workflows runs after the transaction). PostgreSQL lock key: pg_advisory_xact_lock(0x5354424C, hashtext(config_id)); SET LOCAL lock_timeout 30s.
