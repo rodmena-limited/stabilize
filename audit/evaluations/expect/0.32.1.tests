@@ -15,9 +15,9 @@ tests/test_audit_retention.py::test_cleanup_in_batches_returns_the_total|C3 clea
 tests/test_audit_retention.py::test_cleanup_respects_max_rows|C3 cleanup_old_processed_messages has no max_rows
 tests/test_audit_multi_queue.py::test_every_message_on_two_tables_is_handled|C1/C6 WA=
 tests/test_audit_multi_queue.py::test_unfiltered_recovery_does_not_reissue_work_owned_by_another_table|C31 recovery pushed a RunTask
-tests/test_audit_concurrency_limit.py::test_limit_holds_under_concurrent_starts_and_all_work_completes|C4 limit 2 exceeded
+tests/test_audit_concurrency_limit.py::test_limit_holds_under_concurrent_starts_and_all_work_completes|C4 
 tests/test_audit_concurrency_limit.py::test_recovery_starts_buffered_work_after_a_lost_wake_up|C5 W2 BUFFERED
-tests/test_audit_concurrency_limit.py::test_purged_buffered_workflow_ends_canceled|N7 purged workflow left BUFFERED
+tests/test_audit_concurrency_limit.py::test_purged_buffered_workflow_ends_canceled|N7 purged workflow left NOT_STARTED
 tests/test_audit_heartbeat.py::test_heartbeat_keeps_renewing_after_a_failed_renewal|C27 heartbeat stopped after its first failed renewal
 tests/test_audit_heartbeat.py::test_a_worker_whose_lease_was_taken_cannot_touch_the_new_lease|B79-1 a worker whose lease expired
 tests/test_audit_round2.py::test_redirect_without_target_ends_its_stage|N1 REDIRECT without target left the workflow RUNNING

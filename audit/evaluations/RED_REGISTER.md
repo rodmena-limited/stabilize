@@ -317,3 +317,23 @@ before `SingletonMeta.reset` force-closes the rest. Until then that reset ran
 suite could not observe #51 by construction. Current `tests/test_queue.py` run
 against the v0.29.0 source: 6 of 12 PostgreSQL cases error with the queue's
 pool still held (holder counts 5 to 11).
+
+## 1.0.0 audit (#77) — red observed on published 0.32.1, CI falsify job
+
+Observed red for the stated reason with the control green, against
+`stabilize==0.32.1` from PyPI (pipelines 2930, 2933, 2935, 2936, 2939):
+probe_task_after_failure, probe_two_queue_tables, probe_recovery_cross_table,
+probe_parallel_leaf_not_terminal, probe_start_task_skip,
+probe_sqlite_txn_queue_table, probe_concurrency_limit (C), probe_raw_exception_error_code,
+probe_raising_task_hooks, probe_cancel_runs_task_hooks, probe_recovered_runtask_type,
+probe_skip_decided_once, probe_lost_message_recovery, probe_retention_does_not_stall (E),
+probe_handler_config_reaches_handlers, probe_synthetic_stage_paths, probe_base_exception_task,
+probe_cleanup_once_on_conflict, probe_purge_cancels_buffered, probe_redirect_without_target.
+
+probe_heartbeat_survives_blip went red in 2930 (postgres) and 2933 (sqlite) and
+green in 2939: it depends on subprocess start-up timing, so it is not a falsify
+gate. C27's gate is tests/test_audit_heartbeat.py, which is deterministic and
+red on 0.32.1 (1 renewal call after the failure).
+
+Never red (claims held on 0.32.1, probes kept as regression guards):
+probe_continue_on_failure_all_paths (C29), probe_two_processes_execute_once (C17).

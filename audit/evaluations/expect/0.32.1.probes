@@ -1,5 +1,4 @@
 probe_task_after_failure.py|[FAIL] sqlite A terminal|[PASS] sqlite F CONTROL success
-probe_heartbeat_survives_blip.py|[FAIL] any-backend A one renewal raises|[PASS] all-backends B CONTROL no fault
 probe_two_queue_tables.py|[FAIL] postgres A own id sequence per table|[PASS] postgres B CONTROL shared sequence
 probe_recovery_cross_table.py|[FAIL] postgres A unfiltered sweep|[PASS] postgres B CONTROL filtered sweep
 probe_parallel_leaf_not_terminal.py|[FAIL] sqlite A budget 0.6 s|[PASS] sqlite B CONTROL budget 20 s

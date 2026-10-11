@@ -469,9 +469,7 @@ class TestExecuteWithResilience:
         assert result == 50
 
     def test_exception_propagates(self) -> None:
-        """Non-resilience exceptions propagate through (wrapped by bulkhead)."""
-        from bulkman.exceptions import BulkheadError
-
+        """A task's own exception propagates as itself, not as bulkman's BulkheadError wrapper."""
         config = ResilienceConfig()
         bulkhead_manager = TaskBulkheadManager(config)
         storage = InMemoryStorage()
@@ -485,8 +483,7 @@ class TestExecuteWithResilience:
         def raising_func() -> None:
             raise ValueError("Custom error")
 
-        # Bulkhead wraps exceptions in BulkheadError
-        with pytest.raises(BulkheadError) as exc_info:
+        with pytest.raises(ValueError) as exc_info:
             execute_with_resilience(
                 bulkhead_manager=bulkhead_manager,
                 circuit=circuit,
@@ -496,8 +493,7 @@ class TestExecuteWithResilience:
                 timeout=10.0,
             )
 
-        # The original error message should be in the BulkheadError
-        assert "Custom error" in str(exc_info.value)
+        assert str(exc_info.value) == "Custom error"
 
 
 # =============================================================================

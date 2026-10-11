@@ -47,7 +47,10 @@ def _env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("STABILIZE_CIRCUIT_BREAKER_ENABLED", "false")
 
 
-def test_limit_holds_under_concurrent_starts_and_all_work_completes(repository: WorkflowStore, queue: Queue) -> None:
+def test_limit_holds_under_concurrent_starts_and_all_work_completes(
+    file_repository: WorkflowStore, file_queue: Queue
+) -> None:
+    repository, queue = file_repository, file_queue
     peaks, done = [], []
     for _ in range(3):
         cfg = f"cfg-{uuid.uuid4().hex[:8]}"
