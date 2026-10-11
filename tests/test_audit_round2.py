@@ -8,7 +8,6 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
-from audit_support import drive, make_processor, stage, start
 
 from stabilize import Orchestrator, StageExecution, TaskExecution, TaskResult, Workflow
 from stabilize.errors.transient import ConcurrencyError
@@ -18,6 +17,7 @@ from stabilize.persistence.store import WorkflowStore
 from stabilize.queue import Queue
 from stabilize.resilience.config import reset_handler_config
 from stabilize.tasks.interface import RetryableTask, Task
+from tests.audit_support import drive, make_processor, stage, start
 
 MARKS: dict[str, list[float]] = {}
 CALLS = {"cleanup": 0, "exec": 0, "armed": False}

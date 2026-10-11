@@ -26,3 +26,5 @@ tests/test_audit_round2.py::test_failed_continue_before_stage_lets_the_workflow_
 tests/test_audit_round2.py::test_parallel_before_stage_is_not_failed_by_the_wait_budget|B86-2 parent TERMINAL while before-stage b2 was RUNNING
 tests/test_audit_round2.py::test_system_exit_from_a_task_is_one_recorded_failure|N6 SystemExit escaped the processor
 tests/test_audit_round2.py::test_on_cleanup_runs_once_across_a_version_conflict|N4 on_cleanup ran 2 times across one conflict
+tests/test_audit_purge.py::test_purge_removes_completed_workflows_and_keeps_live_ones|C15 no purge_completed_workflows
+tests/test_audit_purge.py::test_prune_processed_cli_removes_old_records|C3 prune-processed CLI failed

@@ -5,7 +5,6 @@ import uuid
 from datetime import timedelta
 
 import pytest
-from audit_support import drive, drop_first, make_processor, stage, start
 
 from stabilize import QueueProcessor, StageExecution, TaskRegistry, TaskResult
 from stabilize.models.status import WorkflowStatus
@@ -15,6 +14,7 @@ from stabilize.resilience.bulkheads import TaskBulkheadManager
 from stabilize.resilience.circuits import WorkflowCircuitFactory
 from stabilize.resilience.config import BulkheadConfig, ResilienceConfig
 from stabilize.tasks.interface import RetryableTask, Task
+from tests.audit_support import drive, drop_first, make_processor, stage, start
 
 COUNT = {"n": 0}
 THREADS: list[str] = []

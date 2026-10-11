@@ -5,7 +5,6 @@ from collections.abc import Iterator
 from datetime import timedelta
 
 import pytest
-from audit_support import drive, make_processor, stage, start
 
 from stabilize import StageExecution, TaskResult
 from stabilize.models.status import WorkflowStatus
@@ -13,6 +12,7 @@ from stabilize.persistence.store import WorkflowStore
 from stabilize.queue import Queue
 from stabilize.resilience.config import reset_handler_config
 from stabilize.tasks.interface import RetryableTask, Task
+from tests.audit_support import drive, make_processor, stage, start
 
 FIRST: dict[str, float] = {}
 
