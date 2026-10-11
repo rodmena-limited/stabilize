@@ -63,6 +63,8 @@ starting 0.33.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
   `BULKHEAD_FULL` / "Execution failed: …".
 - **`QueueProcessor(handler_config=...)` reaches every handler (#85);** 17 of
   19 handlers used the environment instead.
+- **An id longer than the 26-character columns is refused with a `ValueError`
+  before any write**, instead of a database truncation error.
 
 ### Fixed — retention
 
