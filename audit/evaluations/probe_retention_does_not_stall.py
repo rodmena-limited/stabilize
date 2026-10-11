@@ -68,7 +68,20 @@ def _seed_sqlite(path: str, n: int) -> None:
     conn.close()
 
 
+class _Warnings(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(level=logging.INFO)
+        self.lines: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.lines.append(record.getMessage()[:200])
+
+
 def _case(store: Any, queue: Any, n: int) -> tuple[float, bool, bool]:
+    warnings = _Warnings()
+    proc_logger = logging.getLogger("stabilize.queue.processor.processor")
+    proc_logger.addHandler(warnings)
+    proc_logger.setLevel(logging.INFO)
     registry = TaskRegistry()
     registry.register("ok", Ok)
     store.mark_message_processed(message_id="fresh-1", handler_type="RunTask", execution_id=None)
@@ -96,6 +109,11 @@ def _case(store: Any, queue: Any, n: int) -> tuple[float, bool, bool]:
         drained = not any(store.is_message_processed(s) for s in samples)
     finally:
         proc.stop(wait=True, timeout=30)
+    proc_logger.removeHandler(warnings)
+    print(f"[INFO] processor warnings during the run: {[w for w in warnings.lines if 'etention' in w][:5]}")
+    t1 = time.monotonic()
+    removed = store.cleanup_old_processed_messages(max_age_hours=1.0)
+    print(f"[INFO] direct cleanup_old_processed_messages after the run: removed {removed} in {time.monotonic() - t1:.2f} s")
     fresh = store.is_message_processed("fresh-1")
     return latency, drained, fresh
 

@@ -34,6 +34,7 @@ from _backends import backends  # noqa: E402
 from _engine import drive, processor, snapshot, stage, start, workflow  # noqa: E402
 
 from stabilize import StageExecution, TaskRegistry, TaskResult  # noqa: E402
+from stabilize.resilience.config import reset_handler_config  # noqa: E402
 from stabilize.tasks.interface import RetryableTask, Task  # noqa: E402
 
 STARTED: dict[str, float] = {}
@@ -69,6 +70,7 @@ def main() -> int:
             STARTED.clear()
             os.environ["STABILIZE_MAX_STAGE_WAIT_RETRIES"] = str(retries)
             os.environ["STABILIZE_HANDLER_RETRY_DELAY_S"] = "0.2"
+            reset_handler_config()
             registry = TaskRegistry()
             registry.register("fast", Fast)
             registry.register("slow", Slow)

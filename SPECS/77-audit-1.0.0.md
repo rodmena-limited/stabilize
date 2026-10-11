@@ -120,3 +120,14 @@ PROBE DEFECTS (red for another reason; not findings):
 
 REFUTED:
 - C35 (apparent duplicate 'on' in postgres skip case C) was cross-case leakage in the shared probe database: recovery correctly healed case B's [off,on] workflow. Counter now keyed per workflow.
+
+## Falsification round 1b — CI pipeline 2933 (sha 14a3068, falsify job 8500)
+
+- C10 CONFIRMED: ValueError / KeyError recorded as BULKHEAD_FULL, text "Execution failed: ..." (#88).
+- C37 CONFIRMED: 17 of 19 default handlers ignore QueueProcessor(handler_config=...) (#85).
+- C27 CONFIRMED on both backends across rounds (postgres in 2930, sqlite in 2933): timing-sensitive; probe margins widened, verdict aggregated across backends.
+- C9 reproduced (TERMINAL, slow leaf CANCELED) but its control was also red: get_handler_config() caches the environment per process. Probe now calls reset_handler_config(); re-run in round 1c (#86).
+- FIFO (C5) still passed, under the same caching defect; re-run in round 1c.
+- C3: no poll stall on PostgreSQL at 2 M rows; SQLite 1.95 s (bound 2.0 s); PostgreSQL backlog not drained in 120 s — diagnostics added (sweep log, direct timed cleanup) (#87).
+- C17 NOT REPRODUCED: two processor processes, 20 workflows x 6 tasks, both backends: every task executed exactly once, every poll 3 times. Claim holds on 0.32.1; probe kept as a regression guard.
+- C19 upgrade job: the old phase exited 1 by its own rule (two workflows finished before the others reached 2 polls); poll budget raised to 6.

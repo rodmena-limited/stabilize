@@ -45,7 +45,7 @@ from stabilize import (  # noqa: E402
 from stabilize.models.status import WorkflowStatus  # noqa: E402
 from stabilize.persistence.store import WorkflowCriteria  # noqa: E402
 from stabilize.queue.messages import StartWaitingWorkflows  # noqa: E402
-from stabilize.resilience.config import HandlerConfig  # noqa: E402
+from stabilize.resilience.config import HandlerConfig, reset_handler_config  # noqa: E402
 from stabilize.tasks.interface import RetryableTask  # noqa: E402
 
 ORDER: list[str] = []
@@ -179,6 +179,7 @@ def fifo(store: Any, queue: Any) -> list[str]:
     cfg = f"cfg-fifo-{time.time_ns()}"
     ORDER.clear()
     os.environ["STABILIZE_DEFAULT_PAGE_SIZE"] = "2"
+    reset_handler_config()
     proc = QueueProcessor(
         queue,
         store=store,
@@ -195,6 +196,7 @@ def fifo(store: Any, queue: Any) -> list[str]:
         _step(proc, store, [w.id for w in wfs], False, 20)
     finally:
         os.environ.pop("STABILIZE_DEFAULT_PAGE_SIZE", None)
+        reset_handler_config()
     return list(ORDER)
 
 

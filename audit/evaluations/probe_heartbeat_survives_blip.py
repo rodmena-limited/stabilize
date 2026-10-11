@@ -8,8 +8,8 @@ connection blip) and checks that a second worker PROCESS polling the same
 table does not execute the still-running task.
 
 Worker A (this process, start()): lock_duration 1 s, heartbeat every 0.25 s,
-runs a task that takes 4 s. Worker B (a subprocess, process_one loop) starts
-once A is inside the task and polls for 5 s. Executions are counted in a file
+runs a task that takes 6 s. Worker B (a subprocess, process_one loop) starts
+once A is inside the task and polls for 7 s. Executions are counted in a file
 each execution appends its pid to.
 
   A  one extend_lock call raises: executions 1
@@ -33,7 +33,7 @@ from typing import Any
 logging.basicConfig(level=logging.CRITICAL)
 sys.path.insert(0, str(Path(__file__).parent))
 
-TASK_SECONDS = 4.0
+TASK_SECONDS = 6.0
 LOCK = timedelta(seconds=1)
 
 
@@ -164,6 +164,10 @@ def main() -> int:
             print(f"[{'PASS' if ok else 'FAIL'}] {kind} {label}: executions={executions} (want 1)")
             if not ok:
                 failures.append(f"{kind}/{label}")
+    a_failed = any("/A" in f for f in failures)
+    b_failed = any("/B" in f for f in failures)
+    print(f"[{'FAIL' if a_failed else 'PASS'}] any-backend A one renewal raises")
+    print(f"[{'FAIL' if b_failed else 'PASS'}] all-backends B CONTROL no fault")
     if failures:
         print(f"VERDICT: FAIL — {', '.join(failures)}")
         return 1
