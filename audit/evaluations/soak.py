@@ -135,7 +135,7 @@ def main() -> int:
                         dsn, "SELECT COUNT(*) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()"
                     ),
                     "rss_mb": round(me.memory_info().rss / 2**20, 1),
-                    "retention_failures": proc._retention_failures,
+                    "retention_failures": getattr(proc, "_retention_failures", None),
                 }
                 samples.append(sample)
                 print(json.dumps(sample), flush=True)
