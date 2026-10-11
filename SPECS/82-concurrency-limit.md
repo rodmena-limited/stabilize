@@ -46,3 +46,7 @@ Status: CONFIRMED on published 0.32.1 (pipeline 2930). C4 block: 8 workflows, li
 - B82-4 (PostgreSQL key): pg_advisory_xact_lock(<stabilize class id>, hashtext(pipeline_config_id)) computed in SQL; SET LOCAL lock_timeout for the admitting transaction.
 - StartWorkflow re-reads the workflow's status after taking the lock (two StartWorkflow for one workflow, recovery + promotion).
 - The limit is each workflow's own max_concurrent_executions in both paths; recovery adds BUFFERED to its status filter.
+
+## Round 2 (pipeline 2936)
+
+N7 CONFIRMED (probe_purge_cancels_buffered.py, both backends): limit 1, keep_waiting_pipelines=False, three workflows: the third ended NOT_STARTED (promoted, then canceled by flag only, never terminal); control keep=True: all SUCCEEDED. Covered by the B82-2 amendment (purge and StartWorkflow's canceled path set CANCELED).

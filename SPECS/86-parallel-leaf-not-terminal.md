@@ -36,3 +36,7 @@ Status: CONFIRMED on published 0.32.1 (round 1b, pipeline 2933: TERMINAL with th
 - B86-1 (stranding): CancelStage never pushes CompleteWorkflow; with CompleteWorkflow from CancelWorkflow handled first, #86 returns without re-queue and nothing completes the workflow. Same for CancelRegion, deferred-choice cancel, complete_workflow's own cancels. Design: CancelStage pushes CompleteWorkflow (top-level stage) or CompleteStage(parent) (synthetic) in its transaction.
 - B86-2 (false TERMINAL, sweep miss): continue_parent_stage.py before phase (~139-190) and after phase (~319-357) have the same bounded wait on legitimate sibling work; the same "stop polling while a sibling is active" rule applies there.
 - Paths verified by the refuter to push CompleteWorkflow afterwards: leaf success/failure, halt redelivery, blocking failure, error path, SkipStage, ContinueParentStage TERMINAL, PAUSED/Resume, SUSPENDED/Signal, multi-instance. RestartStage of a non-leaf stage: healed only by #84.
+
+## Round 2 (pipeline 2936)
+
+N8 CONFIRMED (probe_synthetic_stage_paths.py B): a before-stage ending FAILED_CONTINUE left its parent RUNNING with its task NOT_STARTED, forever. B86-2 CONFIRMED (C): two parallel before-stages, slow sibling 3 s, budget 0.6 s -> parent TERMINAL while b2 RUNNING. EARS: When a before-stage ends FAILED_CONTINUE, the parent shall proceed to its own tasks (continue semantics), and ContinueParentStage shall not mark a parent TERMINAL while any of its synthetic stages is active.

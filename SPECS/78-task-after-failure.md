@@ -45,3 +45,7 @@ Status: CONFIRMED on published 0.32.1 (CI pipeline 2930, falsify job 8484): side
 
 - B78-1 (duplicate execution): _handle_canceled with continuePipelineOnFailure sends CompleteTask(FAILED_CONTINUE, original=CANCELED); _handle_unhandled sends original = the odd status. The halt rule is therefore stated positively: CONTINUE iff status in {SUCCEEDED, SKIPPED} or (status == FAILED_CONTINUE and original_status in {None, FAILED_CONTINUE}); everything else halts.
 - B78-2: halted later tasks are set SKIPPED with end_time = now (start_time None), so they are distinguishable from the #80 acceptance state (SKIPPED, end_time None).
+
+## Round 2 (pipeline 2936)
+
+N1 CONFIRMED (probe_redirect_without_target.py, both backends): a last task returning REDIRECT without target_stage_ref_id left the stage RUNNING with the task REDIRECT and nothing queued. EARS: If a task returns REDIRECT without a target, then RunTask shall complete the task TERMINAL with error 'REDIRECT result without target_stage_ref_id'. Covered by the same halt rule.

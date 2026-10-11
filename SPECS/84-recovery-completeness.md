@@ -45,3 +45,7 @@ Status: CONFIRMED on published 0.32.1 (pipeline 2930). C7: after a lost RunTask,
 - B84-4 (stranding): CompleteWorkflow heal when no top-level stage is active and none is startable (covers a TERMINAL stage with NOT_STARTED downstream), not only "all complete".
 - C7 sweep: ResumeStage (workflow_control.py:307-313) and SignalStage (signal_stage.py:111-116) also push RunTask without task_type; both set it.
 - has_pending_message_for_stage matches any message with payload stage_id = the stage; PostgreSQL gets an expression index migration on payload->>'stage_id' (supersedes "no schema change" in this ticket).
+
+## Round 2 (pipeline 2936)
+
+N2 CONFIRMED (probe_synthetic_stage_paths.py A, both backends): a recovery sweep while a STAGE_BEFORE synthetic stage was polling pushed StartTask for the parent's first task; the parent's task ran before the before-stage ended, and the parent stayed RUNNING. EARS: recovery shall push StartTask for a RUNNING stage's first NOT_STARTED task only when every before-stage of that stage is complete; otherwise it shall leave the stage to the before-stages' ContinueParentStage.

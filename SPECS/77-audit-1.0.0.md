@@ -161,3 +161,8 @@ New claims from Phase 4 (SUSPECTED until reproduced; round 2 probes):
 - C3: SQLite poll stall 2.06 s during a 500 k-row sweep (bound 2.0 s) — marginal red.
 - C5-FIFO NOT REPRODUCED with page size 2 applied (order f0..f4 on both backends); the design orders explicitly anyway (cheap).
 - C19 upgrade: in-flight work started under published 0.32.1 finished under the checkout; polls resumed from persisted counts (before+after = 6 for all 6 workflows).
+
+## Falsification round 2 — CI pipeline 2936 (sha f89ca2b, falsify job 8522): FALSIFICATION CHECK PASSED, 21/21 probes red on published 0.32.1 for their stated reason, controls green
+
+New CONFIRMED (from the Phase 4 refuter's suspected list): N1 (#78), N2 (#84), N4 and N6 (#83), N7 (#82), N8 and B86-2 (#86). C38 detail: int max_age_hours works on PostgreSQL (2 M rows in 1.43 s), float fails.
+Still SUSPECTED, not reproduced: N3 (zombie re-plan race), N5 (JumpToStage context lost update).
