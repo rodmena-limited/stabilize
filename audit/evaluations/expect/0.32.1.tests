@@ -20,3 +20,9 @@ tests/test_audit_concurrency_limit.py::test_recovery_starts_buffered_work_after_
 tests/test_audit_concurrency_limit.py::test_purged_buffered_workflow_ends_canceled|N7 purged workflow left BUFFERED
 tests/test_audit_heartbeat.py::test_heartbeat_keeps_renewing_after_a_failed_renewal|C27 heartbeat stopped after its first failed renewal
 tests/test_audit_heartbeat.py::test_a_worker_whose_lease_was_taken_cannot_touch_the_new_lease|B79-1 a worker whose lease expired
+tests/test_audit_round2.py::test_redirect_without_target_ends_its_stage|N1 REDIRECT without target left the workflow RUNNING
+tests/test_audit_round2.py::test_recovery_does_not_start_a_parent_before_its_before_stage_ends|N2 the parent's task ran before its before-stage ended
+tests/test_audit_round2.py::test_failed_continue_before_stage_lets_the_workflow_finish|N8 parent wedged after a FAILED_CONTINUE before-stage
+tests/test_audit_round2.py::test_parallel_before_stage_is_not_failed_by_the_wait_budget|B86-2 parent TERMINAL while before-stage b2 was RUNNING
+tests/test_audit_round2.py::test_system_exit_from_a_task_is_one_recorded_failure|N6 SystemExit escaped the processor
+tests/test_audit_round2.py::test_on_cleanup_runs_once_across_a_version_conflict|N4 on_cleanup ran 2 times across one conflict
