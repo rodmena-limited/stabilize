@@ -12,5 +12,10 @@ probe_cancel_runs_task_hooks.py|[FAIL] sqlite A cancel during polling|[PASS] sql
 probe_recovered_runtask_type.py|[FAIL] sqlite A recovered poll bulkhead|[PASS] sqlite B CONTROL normal poll bulkhead
 probe_skip_decided_once.py|[FAIL] sqlite A enabled polling task|[PASS] sqlite C CONTROL disabled exact name
 probe_lost_message_recovery.py|[FAIL] sqlite lost CompleteStage|[PASS] sqlite CONTROL nothing lost
-probe_retention_does_not_stall.py|[FAIL] postgres B backlog drained|[PASS] postgres C CONTROL recent record kept
+probe_retention_does_not_stall.py|[FAIL] postgres E direct cleanup max_age_hours=1.0|[PASS] postgres C CONTROL recent record kept
 probe_handler_config_reaches_handlers.py|[FAIL] sqlite A every handler uses the passed config|[PASS] sqlite B CONTROL RunTaskHandler uses the passed config
+probe_synthetic_stage_paths.py|[FAIL] sqlite A recovery during before-stage|[PASS] sqlite D CONTROL one fast before-stage
+probe_base_exception_task.py|[FAIL] sqlite A SystemExit|[PASS] sqlite B CONTROL RuntimeError
+probe_cleanup_once_on_conflict.py|[FAIL] sqlite A one conflict at completion|[PASS] sqlite B CONTROL no conflict
+probe_purge_cancels_buffered.py|[FAIL] sqlite A keep_waiting_pipelines=False|[PASS] sqlite B CONTROL keep_waiting_pipelines=True
+probe_redirect_without_target.py|[FAIL] sqlite A REDIRECT without target|[PASS] sqlite B CONTROL success

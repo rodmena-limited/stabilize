@@ -131,3 +131,33 @@ REFUTED:
 - C3: no poll stall on PostgreSQL at 2 M rows; SQLite 1.95 s (bound 2.0 s); PostgreSQL backlog not drained in 120 s — diagnostics added (sweep log, direct timed cleanup) (#87).
 - C17 NOT REPRODUCED: two processor processes, 20 workflows x 6 tasks, both backends: every task executed exactly once, every poll 3 times. Claim holds on 0.32.1; probe kept as a regression guard.
 - C19 upgrade job: the old phase exited 1 by its own rule (two workflows finished before the others reached 2 polls); poll budget raised to 6.
+
+## Phase 4 — design refutation (fresh-context refuter, read-only, 2026-10-11)
+
+Breaks found in 9 of 11 designs (#78 #79 #80 #81 #82 #83 #84 #85 #86); #87 and #88 hold with conditions. Every amendment is recorded on its ticket and SPECS file under "Phase 4 design refutation". The most consequential:
+- #79: retrying renewal without an owner check extends / clears / acks another worker's lease -> fence on attempts.
+- #81: pre-upgrade bare-id records collide with future default-table ids -> advance queue_messages_id_seq; ownership written in StartWorkflow's own transaction.
+- #82: purge leaves canceled workflows BUFFERED (recovery would loop); SQLite commits inside the admission section; advisory key must be stable across processes.
+- #83: on_cancel can run twice; hooks must run after commit, outside the version-conflict retry.
+- #84: task-less zombie stage would become false SUCCEEDED; marker must be keyed and cleared on every path; every completion producer must write it.
+- #86: CancelStage never pushes CompleteWorkflow (strands a canceled workflow once the retry is removed); ContinueParentStage has the same false-TERMINAL wait.
+
+New claims from Phase 4 (SUSPECTED until reproduced; round 2 probes):
+- N1 REDIRECT without target wedges its stage — probe_redirect_without_target.py
+- N2 recovery starts a parent's tasks while its before-stage runs — probe_synthetic_stage_paths.py A
+- N3 zombie re-plan race duplicates before-stage work — SUSPECTED, no deterministic external interleaving yet
+- N4 on_cleanup / finalizers repeat on every version conflict — probe_cleanup_once_on_conflict.py
+- N5 JumpToStage overwrites concurrently written context — SUSPECTED, not probed
+- N6 SystemExit/KeyboardInterrupt from a task: redelivered, re-executed, stranded — probe_base_exception_task.py
+- N7 purge leaves BUFFERED + is_canceled; StartWorkflow canceled path no-op — probe_purge_cancels_buffered.py
+- N8 FAILED_CONTINUE before-stage wedges its parent — probe_synthetic_stage_paths.py B
+- B86-2 ContinueParentStage bounded wait fails a parent while a sibling before-stage runs — probe_synthetic_stage_paths.py C
+
+## Falsification round 1c — CI pipeline 2935 (sha 387c944)
+
+- C9 CONFIRMED with control green: budget 0.6 s -> TERMINAL, slow leaf CANCELED (both backends); budget 20 s control SUCCEEDED.
+- C27 CONFIRMED (aggregated verdict).
+- C38 NEW, CONFIRMED: PostgreSQL retention query raises UndefinedFunction make_interval(hours => double precision); the sweep has never removed a row on PostgreSQL (#87).
+- C3: SQLite poll stall 2.06 s during a 500 k-row sweep (bound 2.0 s) — marginal red.
+- C5-FIFO NOT REPRODUCED with page size 2 applied (order f0..f4 on both backends); the design orders explicitly anyway (cheap).
+- C19 upgrade: in-flight work started under published 0.32.1 finished under the checkout; polls resumed from persisted counts (before+after = 6 for all 6 workflows).

@@ -30,3 +30,8 @@ Status: CONFIRMED on published 0.32.1 (pipeline 2930): one extend_lock exception
 ## Die-here / two-at-once
 
 - Handler finishes while a renewal is in flight: stop event set; the in-flight extend may extend an acked (deleted) row: rowcount 0 -> False -> thread exits.
+
+## Phase 4 design refutation (fresh-context refuter, 2026-10-11) — amendments
+
+- B79-1 (duplicate execution): extend_lock, ack and reschedule are not owner-checked; a retrying heartbeat that outlives its lease extends another worker's lock, and its handler's later reschedule clears that lock (third execution) or its ack deletes the row under the other worker. Design: fence with the poll's attempts counter — extend_lock, ack and reschedule add AND attempts = :attempts on both backends; rowcount 0 means the lease was lost (heartbeat stops; ack/reschedule log and do nothing).
+- B79-2: extend_lock returns False on an unparsable message_id, which the heartbeat reads as "gone". Parsing goes through the #81 parser and raises on failure; False is reserved for rowcount 0.

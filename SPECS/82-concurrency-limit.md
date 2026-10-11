@@ -37,3 +37,12 @@ Status: CONFIRMED on published 0.32.1 (pipeline 2930). C4 block: 8 workflows, li
 - Two StartWorkflow for one config at once: the advisory lock serializes them; the second sees the first's RUNNING.
 - Die holding the advisory lock: the transaction aborts and the lock is released with it.
 - StartWaitingWorkflows racing a StartWorkflow: both admit under the lock.
+
+## Phase 4 design refutation (fresh-context refuter, 2026-10-11) — amendments
+
+- B82-1 (oldest-first violated): StartWaitingWorkflows, inside the admission lock, moves BUFFERED -> RUNNING directly and pushes StartStage for the initial stages (the StartWorkflow start path, factored out); StartWorkflow buffers a new workflow whenever an older BUFFERED workflow of the same config exists; the waiting query orders by id ascending.
+- B82-2 / N7 (stranding + endless recovery loop): the purge path calls repository.cancel, which leaves status BUFFERED; StartWorkflow's canceled path does nothing. Design: purge and StartWorkflow's canceled path set status CANCELED (with end_time) in a transaction.
+- B82-3 (SQLite serialization broken): the admission section uses transaction-object methods only (no helper that commits on the shared connection); assert not conn.in_transaction before BEGIN IMMEDIATE.
+- B82-4 (PostgreSQL key): pg_advisory_xact_lock(<stabilize class id>, hashtext(pipeline_config_id)) computed in SQL; SET LOCAL lock_timeout for the admitting transaction.
+- StartWorkflow re-reads the workflow's status after taking the lock (two StartWorkflow for one workflow, recovery + promotion).
+- The limit is each workflow's own max_concurrent_executions in both paths; recovery adds BUFFERED to its status filter.

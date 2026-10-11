@@ -40,3 +40,8 @@ Status: CONFIRMED on published 0.32.1 (CI pipeline 2930, falsify job 8484): side
 ## Class sweep
 
 - Other "continue after failure" points: CompleteStage starts downstream only for SUCCEEDED / FAILED_CONTINUE / SKIPPED (correct); after-stages vs on-failure stages are planned by status (correct); ContinueParentStage and JumpToStage do not start sibling tasks. No second instance found.
+
+## Phase 4 design refutation (fresh-context refuter, 2026-10-11) — amendments
+
+- B78-1 (duplicate execution): _handle_canceled with continuePipelineOnFailure sends CompleteTask(FAILED_CONTINUE, original=CANCELED); _handle_unhandled sends original = the odd status. The halt rule is therefore stated positively: CONTINUE iff status in {SUCCEEDED, SKIPPED} or (status == FAILED_CONTINUE and original_status in {None, FAILED_CONTINUE}); everything else halts.
+- B78-2: halted later tasks are set SKIPPED with end_time = now (start_time None), so they are distinguishable from the #80 acceptance state (SKIPPED, end_time None).

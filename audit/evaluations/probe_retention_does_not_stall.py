@@ -14,6 +14,8 @@ retention paths; every assertion goes through the store's own API.
   A  a workflow started 50 ms after the first sweep is due completes within 2.0 s
   B  repeated sweeps remove the backlog: sampled stale ids are no longer processed
   C  CONTROL a message marked processed just now is still processed
+  D  store.cleanup_old_processed_messages(max_age_hours=168) (int) succeeds
+  E  store.cleanup_old_processed_messages(max_age_hours=1.0) (float, the config default type) succeeds
 
     python audit/evaluations/probe_retention_does_not_stall.py   (AUDIT_ALLOW_DESTRUCTIVE=1 for PostgreSQL)
 """
@@ -68,6 +70,9 @@ def _seed_sqlite(path: str, n: int) -> None:
     conn.close()
 
 
+DIRECT: dict[str, str] = {}
+
+
 class _Warnings(logging.Handler):
     def __init__(self) -> None:
         super().__init__(level=logging.INFO)
@@ -111,9 +116,13 @@ def _case(store: Any, queue: Any, n: int) -> tuple[float, bool, bool]:
         proc.stop(wait=True, timeout=30)
     proc_logger.removeHandler(warnings)
     print(f"[INFO] processor warnings during the run: {[w for w in warnings.lines if 'etention' in w][:5]}")
-    t1 = time.monotonic()
-    removed = store.cleanup_old_processed_messages(max_age_hours=1.0)
-    print(f"[INFO] direct cleanup_old_processed_messages after the run: removed {removed} in {time.monotonic() - t1:.2f} s")
+    for hours in (168, 1.0):
+        t1 = time.monotonic()
+        try:
+            removed = store.cleanup_old_processed_messages(max_age_hours=hours)
+            DIRECT[repr(hours)] = f"removed {removed} in {time.monotonic() - t1:.2f} s"
+        except Exception as e:
+            DIRECT[repr(hours)] = f"raised {type(e).__name__}: {str(e).splitlines()[0][:120]}"
     fresh = store.is_message_processed("fresh-1")
     return latency, drained, fresh
 
@@ -162,11 +171,14 @@ def main() -> int:
 
             runs.append(("postgres", pg_run))
         for name, fn in runs:
+            DIRECT.clear()
             latency, drained, fresh = fn()
             for ok, label, detail in (
                 (latency <= 2.0, "A workflow during sweep", f"completed in {latency:.2f} s (want <= 2.0 s)"),
                 (drained, "B backlog drained", f"sampled stale ids gone={drained}"),
                 (fresh, "C CONTROL recent record kept", f"fresh-1 processed={fresh}"),
+                (DIRECT.get("168", "").startswith("removed"), "D direct cleanup max_age_hours=168", DIRECT.get("168", "")),
+                (DIRECT.get("1.0", "").startswith("removed"), "E direct cleanup max_age_hours=1.0", DIRECT.get("1.0", "")),
             ):
                 print(f"[{'PASS' if ok else 'FAIL'}] {name} {label}: {detail}")
                 if not ok:

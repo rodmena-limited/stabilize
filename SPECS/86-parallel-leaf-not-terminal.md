@@ -30,3 +30,9 @@ Status: CONFIRMED on published 0.32.1 (round 1b, pipeline 2933: TERMINAL with th
 
 - The last active stage's CompleteWorkflow lost: #84 recovery pushes CompleteWorkflow for a RUNNING workflow whose stages are all complete.
 - A stage wedged forever (a bug elsewhere) now leaves the workflow RUNNING instead of a false TERMINAL after 1 h: visible in status, healed by #84 where it is a lost message.
+
+## Phase 4 design refutation (fresh-context refuter, 2026-10-11) — amendments
+
+- B86-1 (stranding): CancelStage never pushes CompleteWorkflow; with CompleteWorkflow from CancelWorkflow handled first, #86 returns without re-queue and nothing completes the workflow. Same for CancelRegion, deferred-choice cancel, complete_workflow's own cancels. Design: CancelStage pushes CompleteWorkflow (top-level stage) or CompleteStage(parent) (synthetic) in its transaction.
+- B86-2 (false TERMINAL, sweep miss): continue_parent_stage.py before phase (~139-190) and after phase (~319-357) have the same bounded wait on legitimate sibling work; the same "stop polling while a sibling is active" rule applies there.
+- Paths verified by the refuter to push CompleteWorkflow afterwards: leaf success/failure, halt redelivery, blocking failure, error path, SkipStage, ContinueParentStage TERMINAL, PAUSED/Resume, SUSPENDED/Signal, multi-instance. RestartStage of a non-leaf stage: healed only by #84.

@@ -31,3 +31,7 @@ Status: CONFIRMED on published 0.32.1 (round 1b, pipeline 2933): a Task raising 
 ## Die-here / two-at-once
 
 - None: pure exception translation.
+
+## Phase 4 design refutation (fresh-context refuter, 2026-10-11) — amendments
+
+- Unwrap only when type(err) is bulkman BulkheadError exactly AND isinstance(err.__cause__, Exception): a BaseException cause (SystemExit, KeyboardInterrupt) is not re-raised (N6). BulkheadFullError (capacity) and BulkheadTimeoutError have no cause and are not unwrapped.

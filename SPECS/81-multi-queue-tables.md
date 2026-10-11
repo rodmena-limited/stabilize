@@ -38,3 +38,11 @@ Status: CONFIRMED on published 0.32.1 (pipeline 2930). C1 (postgres): with q_b o
 
 - Upgrade with default-table messages in flight: keys unchanged, dedup intact. Non-default tables: records written before the upgrade under bare ids stop matching; a non-default-table message redelivered across the upgrade window can run once more (changelog caveat; only deployments with separate sequences, which were already dropping messages).
 - Workflow created before the column exists: queue_table NULL -> treated as queue_messages; a non-default-table deployment must set it (changelog: one UPDATE per application, or recovery_application) — to be stated in the release notes.
+
+## Phase 4 design refutation (fresh-context refuter, 2026-10-11) — amendments
+
+- B81-1 (stranding after upgrade): bare-id records written by a non-default table before the upgrade collide with future default-table ids for the whole retention window. Design: a migration advances queue_messages_id_seq past the largest numeric processed_messages.message_id (PostgreSQL); SQLite: UPDATE sqlite_sequence for queue_messages to the same bound.
+- B81-2 (stranding): workflows are often stored before or outside Orchestrator.start (SubWorkflowTask, users pushing StartWorkflow, tests). Design: StartWorkflowHandler writes queue_table = self.queue.table_name in its admitting transaction (covers promotion and recovery); a non-default-table processor logs once per sweep when it sees NULL-owned RUNNING workflows.
+- B81-3 (SQLite): store.transaction(queue) inserts on the store's connection; if the SqliteQueue is a different database file, refuse (ValueError at transaction start) — atomicity cannot be provided across files.
+- B81-4: the default-table test normalises the name (strip schema qualifier and quotes) before comparing with queue_messages.
+- Parser sites confirmed: queue/postgres.py:225,249,285; queue/sqlite/queue.py:242,263,295; queue/dlq.py:34; queue/sqlite/dlq.py:50; self._pending keyed by the parsed int.

@@ -37,3 +37,9 @@ Status: CONFIRMED on published 0.32.1 (pipeline 2930). C11: a raising on_timeout
 
 - Hook runs, process dies before the CancelStage transaction commits: redelivery calls the hook again (at-least-once for hooks across a crash; documented).
 - A RunTask executing in another process while CancelStage runs: on_cancel runs concurrently with execute; the cooperative token is set in-process only. Documented.
+
+## Phase 4 design refutation (fresh-context refuter, 2026-10-11) — amendments
+
+- B83-1 (on_cancel twice): handle_cancellation leaves the task RUNNING until CompleteTask(CANCELED) is handled; CancelStage in that window calls on_cancel again. Design: handle_cancellation sets the task CANCELED with end_time in its own transaction (and pushes CompleteTask as before); CancelStage calls on_cancel only for tasks it moves from RUNNING.
+- B83-2 (hooks repeat on version conflict): CancelStage computes the moved-task set inside its transaction and calls on_cancel/on_cleanup after commit, outside retry_on_concurrency_error: at-most-once per transition (documented).
+- B83-3 (gate-raised task executes after a lost CompleteTask): StartTask's is_enabled-raised path writes the #84 pending-completion marker and task_exception_details in the same transaction, so recovery pushes CompleteTask(TERMINAL), never RunTask.

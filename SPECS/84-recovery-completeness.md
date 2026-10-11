@@ -36,3 +36,12 @@ Status: CONFIRMED on published 0.32.1 (pipeline 2930). C7: after a lost RunTask,
 
 - Recovery sweep racing a live CompleteTask: the pending-message checks include in-flight (locked) rows, so a message being handled is pending.
 - Pending completion recorded, CompleteTask handled, die before ack: redelivery is a dedup skip; the key was cleared in CompleteTask's transaction.
+
+## Phase 4 design refutation (fresh-context refuter, 2026-10-11) — amendments
+
+- B84-1 (false SUCCEEDED): the CompleteStage heal requires the stage to have tasks or synthetic stages; a task-less, synthetic-less RUNNING stage keeps the StartStage (zombie re-plan) path.
+- B84-2 (stale marker): marker keyed by (task_id, task.start_time) and used only on an exact match; cleared on CompleteTask's ignore-duplicate path, in reset_stage_for_retry, and not restored by JumpToStage's context snapshot; registered in engine_keys / HIDDEN_FROM_TASK_INPUT.
+- B84-3 (duplicate execution): every completion producer writes the marker on the stage object it stores: _handle_success_like/_terminal/_canceled/_unhandled, _mark_terminal and complete_with_error (on fresh_stage), handle_cancellation, the RunTask manual-skip and execution-complete paths (which gain a store_stage).
+- B84-4 (stranding): CompleteWorkflow heal when no top-level stage is active and none is startable (covers a TERMINAL stage with NOT_STARTED downstream), not only "all complete".
+- C7 sweep: ResumeStage (workflow_control.py:307-313) and SignalStage (signal_stage.py:111-116) also push RunTask without task_type; both set it.
+- has_pending_message_for_stage matches any message with payload stage_id = the stage; PostgreSQL gets an expression index migration on payload->>'stage_id' (supersedes "no schema change" in this ticket).

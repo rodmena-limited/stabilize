@@ -34,3 +34,8 @@ Status: CONFIRMED on published 0.32.1 (pipeline 2930). C8: stages [on, off] and 
 ## Die-here / two-at-once
 
 - Die after StartTask's skip transaction and before CompleteTask: task SKIPPED/no end_time; the queued CompleteTask completes it; if that message is lost, the stage is RUNNING with all tasks complete -> #84 recovery pushes CompleteStage (for [on, off]); for [off, on] recovery already pushes StartTask for the NOT_STARTED task.
+
+## Phase 4 design refutation (fresh-context refuter, 2026-10-11) — amendments
+
+- B80-1 (disabled task executes across the upgrade): a task started RUNNING on 0.32.x without a StartTask gate check (dotted implementing_class) relied on SkippableTask.execute's re-check. Design: StartTask records that the gate was evaluated (reserved stage-context key keyed by task id, hidden from task input); RunTask evaluates is_enabled once for a SkippableTask without that record before its first execution.
+- Race with recovery's heal: has_pending_message_for_stage (#84) matches any queued message whose payload stage_id equals the stage, so a delayed CompleteTask(SKIPPED) suppresses the CompleteStage heal.

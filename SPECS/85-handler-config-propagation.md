@@ -24,3 +24,8 @@ Status: CONFIRMED by reading on 0.32.1 (queue/processor/mixins.py:102-125); prob
 ## Callers
 
 - _register_default_handlers: QueueProcessor.__init__. The other registration helper in handlers/__init__.py to be listed in the implementation comment.
+
+## Phase 4 design refutation (fresh-context refuter, 2026-10-11) — amendments
+
+- A HandlerConfig() built in code ignores the environment; deployments passing handler_config= and tuning STABILIZE_* in the environment lose those settings in 17 handlers when this lands. Changelog entry; plus a warning when the passed object differs from HandlerConfig.from_env() on a field whose env var is set.
+- register_all_handlers (handlers/__init__.py:80-96) also omits CancelWorkflow, RestartStage, ResumeStage, PauseTask: fixed in the same change.

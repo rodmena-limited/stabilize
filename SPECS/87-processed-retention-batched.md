@@ -34,3 +34,12 @@ Status: round 1b (pipeline 2933): no poll stall reproduced on PostgreSQL with 2 
 ## Die-here / two-at-once
 
 - Die between batches: committed batches stay deleted; the next sweep continues. Two processors sweeping: batches touch disjoint rows or zero rows (deleting an already-deleted ctid is a no-op).
+
+## Phase 4 design refutation (fresh-context refuter, 2026-10-11) — amendments
+
+- Batch selection and deletion in ONE statement with the age predicate repeated on the outer DELETE, by primary key: DELETE FROM processed_messages WHERE message_id IN (SELECT message_id FROM processed_messages WHERE processed_at < $1 ORDER BY processed_at LIMIT n FOR UPDATE SKIP LOCKED) AND processed_at < $1 (SQLite: rowid IN (SELECT ... LIMIT n) AND processed_at < cutoff, single statement). Never ctid across statements (VACUUM reuse could delete a fresh dedup record).
+- stop() joins the retention thread before closing the store; the retention thread uses at most one pooled connection and skips a sweep when it cannot get one within 5 s; SQLite batches default to 2,000.
+
+## C38 (round 1c)
+
+C38 CONFIRMED on published 0.32.1 (round 1c, pipeline 2935, falsify job 8515): PostgreSQL cleanup_old_processed_messages raises psycopg.errors.UndefinedFunction 'function make_interval(hours => double precision) does not exist' (persistence/postgres/operations.py:162). The processor's retention sweep passes processed_messages_max_age_hours (a float, default 24.0), and the poll loop catches the exception and logs 'Retention sweep failed' at WARNING, so on PostgreSQL the sweep has never removed a row. This is the likely cause of ci.rodmena.co.uk's 3.28 M stale rows (#143), not only the size of a single DELETE. Class: a maintenance path tested on one backend only (tests/test_sqlite_queue_clock.py is the only caller in tests). Sweep: no other make_interval in src/; the queue's %s * INTERVAL '1 second' form accepts floats. EARS added: the PostgreSQL retention query shall accept int and float max_age_hours (cast in SQL: processed_at < NOW() - (%(hours)s * INTERVAL '1 hour')); a failing sweep shall be logged at ERROR with the exception and counted, not WARNING; every store maintenance method shall be exercised on both backends by a test.
