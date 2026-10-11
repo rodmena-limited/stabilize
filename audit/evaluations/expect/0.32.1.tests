@@ -28,3 +28,4 @@ tests/test_audit_round2.py::test_system_exit_from_a_task_is_one_recorded_failure
 tests/test_audit_round2.py::test_on_cleanup_runs_once_across_a_version_conflict|N4 on_cleanup ran 2 times across one conflict
 tests/test_audit_purge.py::test_purge_removes_completed_workflows_and_keeps_live_ones|C15 no purge_completed_workflows
 tests/test_audit_purge.py::test_prune_processed_cli_removes_old_records|C3 prune-processed CLI failed
+tests/test_audit_id_length.py::test_over_long_workflow_id_is_refused_before_any_write|C26 over-long id|tests/test_audit_id_length.py::test_control_ulid_ids_are_accepted
