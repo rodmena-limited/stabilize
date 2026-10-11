@@ -1,7 +1,7 @@
 """A task's own exception is reported with the error code of that exception.
 
-When a task raises, the engine records task_exception_details with an
-error_code from classify_error. Task execution runs inside a bulkman bulkhead;
+When a task raises, the engine records the failure in the stage's context
+("exception" -> "details") with an error_code from classify_error. Task execution runs inside a bulkman bulkhead;
 the error code must describe the task's exception, not the bulkhead that
 carried it. The expected code is classify_error applied to the same exception
 type raised outside the engine.
@@ -50,8 +50,7 @@ class RaisesKey(RetryableTask):
 
 
 def _details(wf: Any) -> dict[str, Any]:
-    task = wf.stages[0].tasks[0]
-    return ((task.task_exception_details or {}).get("exception") or {}).get("details") or {}
+    return (wf.stages[0].context.get("exception") or {}).get("details") or {}
 
 
 def main() -> int:

@@ -8,8 +8,9 @@ max_stage_wait_retries x handler_retry_delay_seconds (240 x 15 s = 1 h by
 default) is therefore failed while healthy.
 
 Two parallel stages: "fast" finishes at once; "slow" polls (RUNNING) for 3 s.
-max_stage_wait_retries=3 and handler_retry_delay_seconds=0.2, so the budget is
-0.6 s.
+STABILIZE_MAX_STAGE_WAIT_RETRIES=3 and STABILIZE_HANDLER_RETRY_DELAY_S=0.2, so the
+budget is 0.6 s. (The environment, not QueueProcessor(handler_config=...), is what
+CompleteWorkflowHandler reads; see probe_handler_config_reaches_handlers.py.)
 
   A  budget 0.6 s: workflow SUCCEEDED, slow SUCCEEDED
   B  CONTROL budget 100 x 0.2 s: workflow SUCCEEDED, slow SUCCEEDED
@@ -66,6 +67,8 @@ def main() -> int:
             continue
         for label, retries in (("A budget 0.6 s", 3), ("B CONTROL budget 20 s", 100)):
             STARTED.clear()
+            os.environ["STABILIZE_MAX_STAGE_WAIT_RETRIES"] = str(retries)
+            os.environ["STABILIZE_HANDLER_RETRY_DELAY_S"] = "0.2"
             registry = TaskRegistry()
             registry.register("fast", Fast)
             registry.register("slow", Slow)

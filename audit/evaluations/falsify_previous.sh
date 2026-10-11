@@ -35,6 +35,7 @@ for entry in "${EXPECT[@]}"; do
         bad=$((bad + 1))
     elif ! printf '%s\n' "$out" | grep -qF -- "$marker"; then
         echo ">>> RED FOR ANOTHER REASON: expected a line starting '$marker'"
+        printf '%s\n' "$out" | tail -25
         bad=$((bad + 1))
     elif [ -n "$control" ] && ! printf '%s\n' "$out" | grep -qF -- "$control"; then
         echo ">>> CONTROL NOT GREEN: expected a line starting '$control' on the old release"

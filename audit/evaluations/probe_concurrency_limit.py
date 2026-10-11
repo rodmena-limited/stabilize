@@ -178,6 +178,7 @@ def lost_wakeup(store: Any, queue: Any, drop: bool) -> tuple[str, int]:
 def fifo(store: Any, queue: Any) -> list[str]:
     cfg = f"cfg-fifo-{time.time_ns()}"
     ORDER.clear()
+    os.environ["STABILIZE_DEFAULT_PAGE_SIZE"] = "2"
     proc = QueueProcessor(
         queue,
         store=store,
@@ -190,7 +191,10 @@ def fifo(store: Any, queue: Any) -> list[str]:
         store.store(wf)
         orch.start(wf)
         time.sleep(0.005)
-    _step(proc, store, [w.id for w in wfs], False, 20)
+    try:
+        _step(proc, store, [w.id for w in wfs], False, 20)
+    finally:
+        os.environ.pop("STABILIZE_DEFAULT_PAGE_SIZE", None)
     return list(ORDER)
 
 

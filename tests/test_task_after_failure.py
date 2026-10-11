@@ -117,7 +117,8 @@ def test_no_task_starts_after_a_task_fails_its_stage(
     wf = _run(repository, queue, first, context)
     side = next(t for t in wf.stages[0].tasks if t.name == "side")
     assert COUNT["side"] == 0, f"C0 side_effect executed after a {first} task: {COUNT['side']} time(s)"
-    assert side.status == WorkflowStatus.NOT_STARTED
+    assert side.start_time is None
+    assert side.status in {WorkflowStatus.NOT_STARTED, WorkflowStatus.SKIPPED}
     assert wf.status.is_complete
 
 

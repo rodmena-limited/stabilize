@@ -78,7 +78,6 @@ def _case(store: Any, queue: Any, n: int) -> tuple[float, bool, bool]:
     proc.config.processed_messages_max_age_hours = 1.0
     proc.config.poll_frequency_ms = 10
     wf = workflow([stage("s", ["ok"])])
-    store.store(wf)
     proc.start()
     try:
         time.sleep(0.55)

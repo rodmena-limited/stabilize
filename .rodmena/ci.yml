@@ -87,3 +87,18 @@ jobs:
           echo "probe falsification exit=$p test falsification exit=$t"
           [ "$p" -eq 0 ] && [ "$t" -eq 0 ]
 
+  upgrade:
+    name: "Work in flight under published 0.32.1 finishes under this checkout"
+    image: containers.rodmena.co.uk/rodmena/ci-python:3.14
+    services: [postgres]
+    timeout_minutes: 25
+    steps:
+      - name: Install published 0.32.1 and this checkout side by side
+        run: uv venv .old && uv pip install -p .old/bin/python 'stabilize[postgres,cli]==0.32.1' && uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
+      - name: Old release starts the work, this checkout finishes it
+        run: |
+          set -eu
+          export STABILIZE_PROBE_DSN="$DATABASE_URL" UPGRADE_STATE_FILE="$PWD/upgrade-state.json"
+          PATH="$PWD/.old/bin:$PATH" .old/bin/python audit/evaluations/upgrade_inflight.py --phase old
+          PATH="$PWD/.venv/bin:$PATH" .venv/bin/python audit/evaluations/upgrade_inflight.py --phase new
+

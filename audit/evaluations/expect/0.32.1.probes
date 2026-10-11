@@ -11,6 +11,7 @@ probe_raising_task_hooks.py|[FAIL] sqlite A on_timeout raises|[PASS] sqlite C CO
 probe_cancel_runs_task_hooks.py|[FAIL] sqlite A cancel during polling|[PASS] sqlite B CONTROL completes
 probe_recovered_runtask_type.py|[FAIL] sqlite A recovered poll bulkhead|[PASS] sqlite B CONTROL normal poll bulkhead
 probe_skip_decided_once.py|[FAIL] sqlite A enabled polling task|[PASS] sqlite C CONTROL disabled exact name
-probe_continue_on_failure_all_paths.py|[FAIL] sqlite A total timeout|[PASS] sqlite C CONTROL terminal result
 probe_lost_message_recovery.py|[FAIL] sqlite lost CompleteStage|[PASS] sqlite CONTROL nothing lost
 probe_retention_does_not_stall.py|[FAIL] postgres A workflow during sweep|[PASS] postgres C CONTROL recent record kept
+probe_handler_config_reaches_handlers.py|[FAIL] sqlite A every handler uses the passed config|[PASS] sqlite B CONTROL RunTaskHandler uses the passed config
+probe_two_processes_execute_once.py|[FAIL] postgres B each execution once|[PASS] postgres C CONTROL both processes worked

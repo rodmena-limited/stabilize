@@ -88,3 +88,35 @@ Ranked by customer harm. "src" is the code read; "exp" is the disproving experim
 
 - C28 SQLite queue row-id reuse after deleting the max row: both queue schemas use INTEGER PRIMARY KEY AUTOINCREMENT; no code resets a sequence (no RESTART IDENTITY / sqlite_sequence / setval).
 - Recovery duplicating an in-flight RunTask on ONE table: has_pending_message_for_task does not filter locked rows, so an in-flight message counts as pending.
+
+## Falsification round 1 — CI pipeline 2930 (sha f52e1c4, falsify job 8484, published 0.32.1 from site-packages)
+
+CONFIRMED (red for the stated reason, control green, both backends unless noted):
+- C0  next task runs after TERMINAL / raise / STOPPED / CANCELED / continue-on-failure TERMINAL: side effect 1x in all 10 cases; control 1x as expected. Regression test red with the C0 marker, control test green.
+- C27 (postgres) one extend_lock exception -> second process executes the running task: executions=2; control 1. SQLite did not reproduce (1).
+- C1  (postgres) own id sequence per table -> WB NOT_STARTED, never run; shared-sequence control SUCCEEDED. SQLite masked by C6.
+- C31 (postgres) unfiltered sweep pushed a RunTask for WB's in-flight task into queue_messages; filtered control did not. SQLite masked by C6.
+- C8  StartTask skip wedges stage RUNNING ([on,off] and [off,on]); unchanged after 2 recovery sweeps; control SUCCEEDED.
+- C6  SQLite txn push to queue_messages: workflow on q_b NOT_STARTED, 1 stray message on queue_messages.
+- C4  limit 2 exceeded: peak RUNNING sqlite [5,6,2], postgres [4,4,4]; release direction failed in one postgres round (4/8 SUCCEEDED in 60 s).
+- C5  lost StartWaitingWorkflows -> W2 BUFFERED after a recovery sweep; control SUCCEEDED.
+- C11 on_timeout raising and is_enabled raising: hook called 10x, task stranded RUNNING / NOT_STARTED; control 1x TERMINAL.
+- C12 cancel during polling: on_cancel 0, on_cleanup 0; control on_cleanup 1.
+- C7  recovered poll ran in Bulkhead-stabilize_default_0; normal poll in Bulkhead-stabilize_job_0.
+- C13 is_enabled evaluated 4x for 3 polls; dotted implementing_class skipped only at RunTask (start_time set).
+- C33 lost CompleteTask -> task executed 2x after recovery (both backends).
+- C32 lost CompleteStage -> workflow RUNNING, stage RUNNING with all tasks done.
+- C34 lost CompleteWorkflow -> workflow RUNNING with every stage SUCCEEDED.
+- C37 (by reading, probe added) QueueProcessor(handler_config=X) passes X to SignalStage and RunTask handlers only (queue/processor/mixins.py:102-125); every other handler uses HandlerConfig.from_env().
+
+NOT REPRODUCED:
+- C29 continuePipelineOnFailure on timeout / unregistered task: s FAILED_CONTINUE and downstream SUCCEEDED on both backends (CompleteStage applies failure_status). Probe kept as a green regression guard; claim closed.
+- C5-FIFO at page size 2 passed, but the page size was not applied (C37). Re-run with STABILIZE_DEFAULT_PAGE_SIZE=2.
+- C9 passed, but max_stage_wait_retries was not applied (C37). Re-run with STABILIZE_MAX_STAGE_WAIT_RETRIES=3.
+
+PROBE DEFECTS (red for another reason; not findings):
+- C10 read task_exception_details, which is not persisted; details live in stage.context["exception"]. Probe corrected.
+- C3 stored the workflow twice (duplicate key) before measuring. Probe corrected.
+
+REFUTED:
+- C35 (apparent duplicate 'on' in postgres skip case C) was cross-case leakage in the shared probe database: recovery correctly healed case B's [off,on] workflow. Counter now keyed per workflow.

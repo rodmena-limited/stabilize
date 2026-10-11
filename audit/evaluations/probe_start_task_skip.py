@@ -28,7 +28,7 @@ from _engine import drive, processor, snapshot, stage, start, workflow  # noqa: 
 from stabilize import StageExecution, TaskRegistry, TaskResult  # noqa: E402
 from stabilize.tasks.interface import SkippableTask  # noqa: E402
 
-COUNT = {"on": 0}
+COUNT: dict[str, int] = {}
 
 
 class Off(SkippableTask):
@@ -46,7 +46,7 @@ class OffAtRun(SkippableTask):
 
 class On(SkippableTask):
     def do_execute(self, stage: StageExecution) -> TaskResult:
-        COUNT["on"] += 1
+        COUNT[stage.execution.id] = COUNT.get(stage.execution.id, 0) + 1
         return TaskResult.success()
 
 
@@ -66,7 +66,6 @@ def main() -> int:
             print(f"[SKIP] {name}: no PostgreSQL available")
             continue
         for label, names, sweeps, want_on in CASES:
-            COUNT["on"] = 0
             registry = TaskRegistry()
             registry.register("off", Off)
             registry.register("offrun", OffAtRun)
@@ -79,8 +78,9 @@ def main() -> int:
                 for _ in range(sweeps):
                     proc.run_recovery()
                     wf = drive(proc, store, wid, timeout=5, idle=0.5)["workflow"]
-            ok = wf.status.name == "SUCCEEDED" and COUNT["on"] == want_on
-            print(f"[{'PASS' if ok else 'FAIL'}] {name} {label}: {snapshot(wf)} on x{COUNT['on']} (want SUCCEEDED, on x{want_on})")
+            on = COUNT.get(wid, 0)
+            ok = wf.status.name == "SUCCEEDED" and on == want_on
+            print(f"[{'PASS' if ok else 'FAIL'}] {name} {label}: {snapshot(wf)} on x{on} (want SUCCEEDED, on x{want_on})")
             if not ok:
                 failures.append(f"{name}/{label}")
     if failures:
