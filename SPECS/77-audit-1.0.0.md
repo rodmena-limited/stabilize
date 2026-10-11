@@ -46,3 +46,45 @@ Ticket: #77. Input: ci-conductor-dd94c8 report #143 (thread 01M4ME7M81P310BRX51Y
 ## Claim inventory, findings, not-reproduced claims
 
 Maintained in the ticket comments and below as the audit proceeds.
+## Claim inventory (Phase 1) — every entry SUSPECTED until its probe goes red on published 0.32.1
+
+Ranked by customer harm. "src" is the code read; "exp" is the disproving experiment.
+
+### Tier 1 — a side effect runs that must not, or runs twice
+
+- C0  After a task completes TERMINAL / STOPPED / CANCELED (or FAILED_CONTINUE converted from TERMINAL by continuePipelineOnFailure), no later task of the same stage starts. src: complete_task.py next_task(task) is unconditional; original_status is carried but never read; Orca's shouldCompleteStage only continues on SUCCEEDED or a task-returned FAILED_CONTINUE. exp: stage [fails, side_effect] → side_effect executions must be 0; control [ok, side_effect] = 1. Not in the peer report (peer P1 saw the FAILED_CONTINUE case).
+- C27 While a handler runs longer than the queue lock, the lock is renewed for the whole run. src: lease_guard.beat returns on the first extend_lock exception; the task lease is off by default. exp: two processors; one extend_lock raises once mid-task; the second processor must not execute the task while the first is still in it.
+- C1  Messages from two queue tables in one store are each handled (peer #10, P19 own-seq). src: message_id = str(row id), store-wide processed_messages. exp: queue_a and queue_b with own sequences; both id 1 → one silently skipped.
+- C31 Recovery never pushes a second RunTask for a task whose message sits in another queue table (peer item C + #12). src: has_pending_message_for_task checks only the sweeping processor's table; recovery_application=None selects every application. exp: workflow of app B in flight on table B; unfiltered sweep on processor A → a RunTask lands in table A.
+- C17 Two processors on one table execute each task once per attempt (default config, lease off). exp: N workflows × 2 processors; count do_execute per task.
+- C16 Kill at each handler commit point → recovery resumes with no duplicate task execution and no stranding. exp: fault injection between commit and ack for each handler type.
+- C4  limitConcurrent admits at most N RUNNING (peer #8). src: _should_queue counts RUNNING without a lock. exp: 8 concurrent StartWorkflow, limit 2, PG, two processors.
+- C2  Retention never removes a dedup record whose message can still be delivered. src: rows outlive their processed mark only for lock_duration / reschedule delay. Expected NOT reproducible; documented as an argued negative unless a path is found.
+
+### Tier 2 — work stranded, or a false outcome reported
+
+- C9  A workflow is TERMINAL only if a stage failed (peer #6, P5). src: complete_workflow re-queues max_stage_wait_retries then TERMINAL, then CancelStage on the still-running leaf. exp: two leaves, MAX_STAGE_WAIT_RETRIES small, slow leaf.
+- C8  A task skipped at StartTask completes its stage (peer #9, F19). src: start_task SKIPPED + CompleteTask(SKIPPED); complete_task ignores non-RUNNING. exp: [on, off] stage → RUNNING forever, also after 2 recovery sweeps.
+- C5  BUFFERED work starts when a slot frees, oldest first (peer #8). src: recovery ignores BUFFERED; first-page-DESC then in-memory sort. exp: lose StartWaitingWorkflows; > page_size buffered.
+- C6  A transactional push lands on the processor's own queue table (peer #1). src: sqlite/transaction.py hardcodes queue_messages. exp: SqliteQueue(table_name='q_b'), push via store.transaction(queue).
+- C11 A raising user hook does not strand or repeat (peer #4, P17; class: on_timeout, on_cancel, is_enabled, on_cleanup). src: on_timeout outside try (handler.py ~277, ~354), on_cancel outside try (error.py:51), is_enabled outside try (start_task.py:98). exp: each hook raises → task completes TERMINAL once; hook called once.
+- C12 Canceling a running task runs on_cancel and on_cleanup (peer #3, D). src: CancelStage marks tasks CANCELED; RunTask status guard returns before is_canceled. exp: cancel mid-RetryableTask, 6 trials.
+- C29 continuePipelineOnFailure applies to every task failure. src: complete_with_error always TERMINAL (timeouts, task-not-found, verification failure, stageTimeoutMs); _mark_terminal uses failure_status. exp: task timeout in a stage with continuePipelineOnFailure → stage must be FAILED_CONTINUE and downstream must run.
+- C10 A raw task exception is reported with its own error code (peer #11, P22). src: bulkman BulkheadError wrapper + name heuristics → BULKHEAD_FULL. exp: ValueError → error_code.
+- C7  A recovered RunTask resolves the same task and bulkhead as the original (peer #2, P10, E). src: recovery task_type=stage.type, copied on every re-queue. exp: lose the RunTask; recover; record bulkhead name and task_type on later polls.
+- C13 The skip decision is taken once, at StartTask, for every registered name form (peer #5, P20). src: StartTask uses registry.get(implementing_class); RunTask uses resolve_task; SkippableTask.execute re-checks. exp: FQCN-registered SkippableTask; is_enabled flip.
+- C30 A RUNNING workflow older than recovery_max_age_hours with a lost message is recoverable. src: cutoff on start_time, not last activity (peer P8 measured). exp: 30 h old workflow, lost message. Possible outcome: documented limit, not a defect — decide in Phase 3.
+- C32 A RUNNING stage whose tasks are all complete but whose CompleteStage was lost is recovered. src: recovery pushes StartStage, which ignores a RUNNING stage with tasks. exp: drop CompleteStage; sweep.
+
+### Tier 3 — operability, contract, 1.0 promise
+
+- C3  Retention on a 1 M-row backlog runs in bounded transactions and does not stop message processing (#143). src: single DELETE on the poll thread. exp: 1 M backdated rows; poll latency during the sweep.
+- C14 Unfiltered recovery with several applications is visible (peer #12). Superseded in severity by C31.
+- C15 Completed workflows can be purged through the product interface (peer #7b).
+- C26 A workflow id longer than the column is refused with a clear error before any write (peer F11: StringDataRightTruncation).
+- C18–C24 as in the plan (cancel/pause/signals/jump strandings, upgrade from 0.32.1 schema, security surfaces re-run, Python 3.11, sustained run, declared-but-false doc claims, public API freeze).
+
+### Refuted by reading (no probe; recorded so they are not re-opened)
+
+- C28 SQLite queue row-id reuse after deleting the max row: both queue schemas use INTEGER PRIMARY KEY AUTOINCREMENT; no code resets a sequence (no RESTART IDENTITY / sqlite_sequence / setval).
+- Recovery duplicating an in-flight RunTask on ONE table: has_pending_message_for_task does not filter locked rows, so an in-flight message counts as pending.

@@ -45,7 +45,7 @@ jobs:
       - name: Install on a managed CPython 3.11
         run: uv venv -p 3.11 .venv311 && .venv311/bin/python -c "import sys; print(sys.version); sys.exit(0 if sys.version_info[:2] == (3, 11) else 1)" && uv pip install -p .venv311/bin/python -e '.[dev,observability,cli]'
       - name: Unit and golden tests
-        run: STABILIZE_TEST_DSN="$DATABASE_URL" .venv311/bin/python -m pytest tests golden_standard_tests -q -n 3 -p no:cacheprovider --timeout 600 -rfE
+        run: PATH="$PWD/.venv311/bin:$PATH" STABILIZE_TEST_DSN="$DATABASE_URL" .venv311/bin/python -m pytest tests golden_standard_tests -q -n 3 -p no:cacheprovider --timeout 600 -rfE
 
   baseline:
     name: "Published 0.32.1 from PyPI: existing suite and probes"
@@ -69,3 +69,21 @@ jobs:
           export PATH="$PWD/.old/bin:$PATH"
           .old/bin/stabilize mg-up --db-url "$DATABASE_URL?schema=orchestration"
           PROBE_EXCLUDE_FILE=audit/evaluations/expect/0.32.1.probes STABILIZE_PROBE_SCHEMA=orchestration PROBE_SET=sqlite AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" PYTHON=.old/bin/python bash audit/evaluations/run_all.sh
+
+  falsify:
+    name: "New probes and tests go red on published 0.32.1 for their stated reason"
+    image: containers.rodmena.co.uk/rodmena/ci-python:3.14
+    services: [postgres]
+    timeout_minutes: 50
+    steps:
+      - name: Install stabilize 0.32.1 from PyPI, not the checkout
+        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.32.1' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml
+      - name: Probes listed in expect/0.32.1.probes fail on 0.32.1 with their marker, controls green
+        run: |
+          set -u
+          export PATH="$PWD/.old/bin:$PATH"
+          OLD_VERSION=0.32.1 AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" STABILIZE_PROBE_SQLITE_QUEUE_TABLES=1 PYTHON=.old/bin/python bash audit/evaluations/falsify_previous.sh; p=$?
+          OLD_VERSION=0.32.1 STABILIZE_TEST_DSN="$DATABASE_URL" PYTHON=.old/bin/python bash audit/evaluations/falsify_tests.sh; t=$?
+          echo "probe falsification exit=$p test falsification exit=$t"
+          [ "$p" -eq 0 ] && [ "$t" -eq 0 ]
+

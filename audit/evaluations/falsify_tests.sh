@@ -16,9 +16,23 @@ fi
 bad=0
 for entry in "${EXPECT[@]}"; do
     nodeid="${entry%%|*}"
-    marker="${entry#*|}"
+    rest="${entry#*|}"
+    marker="${rest%%|*}"
+    control=""
+    [ "$rest" != "$marker" ] && control="${rest#*|}"
     out="$("$PYTHON" -m pytest "$nodeid" -q -p no:cacheprovider --timeout 600 -rfE 2>&1)"
     rc=$?
+    if [ -n "$control" ]; then
+        cout="$("$PYTHON" -m pytest "$control" -q -p no:cacheprovider --timeout 600 -rfE 2>&1)"
+        crc=$?
+        if [ "$crc" -ne 0 ]; then
+            echo "=================================================================== $nodeid"
+            echo ">>> CONTROL NOT GREEN on $OLD_VERSION: $control (pytest exit $crc)"
+            printf '%s\n' "$cout" | tail -20
+            bad=$((bad + 1))
+            continue
+        fi
+    fi
     echo "=================================================================== $nodeid (pytest exit $rc)"
     printf '%s\n' "$out" | grep -E '^(FAILED|ERROR|PASSED)|passed|failed|error' | tail -5 || true
     if [ "$rc" -eq 0 ]; then
@@ -33,7 +47,7 @@ for entry in "${EXPECT[@]}"; do
         printf '%s\n' "$out" | tail -30
         bad=$((bad + 1))
     else
-        echo ">>> red for the stated reason: $marker"
+        echo ">>> red for the stated reason: $marker${control:+ (control green: $control)}"
     fi
 done
 

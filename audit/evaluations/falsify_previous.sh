@@ -17,7 +17,10 @@ fi
 bad=0
 for entry in "${EXPECT[@]}"; do
     probe="${entry%%|*}"
-    marker="${entry#*|}"
+    rest="${entry#*|}"
+    marker="${rest%%|*}"
+    control=""
+    [ "$rest" != "$marker" ] && control="${rest#*|}"
     if [ "$probe" = "probe_queue_id_capacity.py" ] && [ "${AUDIT_ALLOW_DESTRUCTIVE:-}" != "1" ]; then
         echo "--- $probe: NOT RUN (needs AUDIT_ALLOW_DESTRUCTIVE=1); counted as a failure of this check"
         bad=$((bad + 1))
@@ -33,8 +36,11 @@ for entry in "${EXPECT[@]}"; do
     elif ! printf '%s\n' "$out" | grep -qF -- "$marker"; then
         echo ">>> RED FOR ANOTHER REASON: expected a line starting '$marker'"
         bad=$((bad + 1))
+    elif [ -n "$control" ] && ! printf '%s\n' "$out" | grep -qF -- "$control"; then
+        echo ">>> CONTROL NOT GREEN: expected a line starting '$control' on the old release"
+        bad=$((bad + 1))
     else
-        echo ">>> red for the stated reason: $marker"
+        echo ">>> red for the stated reason: $marker${control:+ (control green: $control)}"
     fi
 done
 

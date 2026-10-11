@@ -1,0 +1,16 @@
+probe_task_after_failure.py|[FAIL] sqlite A terminal|[PASS] sqlite F CONTROL success
+probe_heartbeat_survives_blip.py|[FAIL] postgres A one renewal raises|[PASS] postgres B CONTROL no fault
+probe_two_queue_tables.py|[FAIL] postgres A own id sequence per table|[PASS] postgres B CONTROL shared sequence
+probe_recovery_cross_table.py|[FAIL] postgres A unfiltered sweep|[PASS] postgres B CONTROL filtered sweep
+probe_parallel_leaf_not_terminal.py|[FAIL] sqlite A budget 0.6 s|[PASS] sqlite B CONTROL budget 20 s
+probe_start_task_skip.py|[FAIL] sqlite A [on, off]|[PASS] sqlite D CONTROL [on, offrun]
+probe_sqlite_txn_queue_table.py|[FAIL] sqlite A table q_b|[PASS] sqlite B CONTROL table queue_messages
+probe_concurrency_limit.py|[FAIL] sqlite C lost wake-up|[PASS] sqlite D CONTROL wake-up delivered
+probe_raw_exception_error_code.py|[FAIL] sqlite A Task ValueError|[PASS] sqlite C CONTROL A Task ValueError error text recorded
+probe_raising_task_hooks.py|[FAIL] sqlite A on_timeout raises|[PASS] sqlite C CONTROL on_timeout returns None
+probe_cancel_runs_task_hooks.py|[FAIL] sqlite A cancel during polling|[PASS] sqlite B CONTROL completes
+probe_recovered_runtask_type.py|[FAIL] sqlite A recovered poll bulkhead|[PASS] sqlite B CONTROL normal poll bulkhead
+probe_skip_decided_once.py|[FAIL] sqlite A enabled polling task|[PASS] sqlite C CONTROL disabled exact name
+probe_continue_on_failure_all_paths.py|[FAIL] sqlite A total timeout|[PASS] sqlite C CONTROL terminal result
+probe_lost_message_recovery.py|[FAIL] sqlite lost CompleteStage|[PASS] sqlite CONTROL nothing lost
+probe_retention_does_not_stall.py|[FAIL] postgres A workflow during sweep|[PASS] postgres C CONTROL recent record kept
