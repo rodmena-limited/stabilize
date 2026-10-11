@@ -77,56 +77,26 @@ class QueueProcessorMixin:
             circuit_factory: Optional circuit breaker factory
             handler_config: Optional handler configuration
         """
-        from stabilize.handlers import (
-            AddMultiInstanceHandler,
-            CancelRegionHandler,
-            CancelStageHandler,
-            CancelWorkflowHandler,
-            CompleteStageHandler,
-            CompleteTaskHandler,
-            CompleteWorkflowHandler,
-            ContinueParentStageHandler,
-            JumpToStageHandler,
-            PauseTaskHandler,
-            RestartStageHandler,
-            ResumeStageHandler,
-            RunTaskHandler,
-            SignalStageHandler,
-            SkipStageHandler,
-            StartStageHandler,
-            StartTaskHandler,
-            StartWaitingWorkflowsHandler,
-            StartWorkflowHandler,
-        )
+        from stabilize.handlers.defaults import default_handlers
 
-        all_handlers = [
-            StartWorkflowHandler(queue, store),
-            StartWaitingWorkflowsHandler(queue, store),
-            StartStageHandler(queue, store),
-            SkipStageHandler(queue, store),
-            CancelStageHandler(queue, store),
-            ContinueParentStageHandler(queue, store),
-            JumpToStageHandler(queue, store),
-            SignalStageHandler(queue, store, handler_config=handler_config),
-            CancelRegionHandler(queue, store),
-            AddMultiInstanceHandler(queue, store),
-            StartTaskHandler(queue, store, task_registry),
-            RunTaskHandler(
-                queue,
-                store,
-                task_registry,
-                bulkhead_manager=bulkhead_manager,
-                circuit_factory=circuit_factory,
-                handler_config=handler_config,
-            ),
-            CompleteTaskHandler(queue, store),
-            CompleteStageHandler(queue, store, task_registry=task_registry),
-            CompleteWorkflowHandler(queue, store),
-            CancelWorkflowHandler(queue, store),
-            RestartStageHandler(queue, store),
-            ResumeStageHandler(queue, store),
-            PauseTaskHandler(queue, store),
-        ]
+        if handler_config is not None:
+            from stabilize.resilience.config import env_settings_overridden
+
+            overridden = env_settings_overridden(handler_config)
+            if overridden:
+                logger.warning(
+                    "QueueProcessor(handler_config=...) overrides environment settings for: %s",
+                    ", ".join(overridden),
+                )
+
+        all_handlers = default_handlers(
+            queue,
+            store,
+            task_registry,
+            bulkhead_manager=bulkhead_manager,
+            circuit_factory=circuit_factory,
+            handler_config=handler_config,
+        )
 
         from stabilize.queue.messages import (
             InvalidStageId,

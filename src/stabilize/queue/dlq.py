@@ -9,6 +9,8 @@ from typing import Any
 
 from ulid import ULID
 
+from stabilize.queue.message_ids import row_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,7 +33,7 @@ def move_to_dlq(
         message_id: The message ID (integer or string)
         error: Error message/details explaining why it was moved
     """
-    msg_id = int(message_id)
+    msg_id = row_id(message_id)
 
     with pool.connection() as conn:
         with conn.cursor() as cur:

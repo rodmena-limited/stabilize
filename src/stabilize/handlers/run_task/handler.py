@@ -33,6 +33,13 @@ from stabilize.handlers.run_task.error import (
     handle_exception,
 )
 from stabilize.handlers.run_task.execution import execute_with_timeout, resolve_task
+from stabilize.handlers.run_task.guards import (
+    CONVERTED_BASE_EXCEPTIONS,
+    as_task_error,
+    complete_timed_out,
+    ungated_skip,
+    with_gate_record,
+)
 from stabilize.handlers.run_task.lease import build_task_lease
 from stabilize.handlers.run_task.result import get_backoff_period, process_result
 from stabilize.handlers.run_task.saving import save_or_hold
@@ -184,6 +191,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             if execution.status.is_complete:
                 # Atomic: mark message processed + push CompleteTask
                 self.txn_helper.execute_atomic(
+                    stage=stage,
                     source_message=message,
                     messages_to_push=[
                         (
@@ -224,6 +232,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             if stage.context.get("manualSkip"):
                 # Atomic: mark message processed + push CompleteTask
                 self.txn_helper.execute_atomic(
+                    stage=stage,
                     source_message=message,
                     messages_to_push=[
                         (
@@ -274,19 +283,14 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                         elapsed_ms,
                         int(allowed_ms),
                     )
-                    timeout_result = task.on_timeout(stage) if hasattr(task, "on_timeout") else None
-                    if timeout_result is None:
-                        complete_with_error(
-                            stage,
-                            task_model,
-                            message,
-                            f"Task exceeded total timeout ({elapsed_ms}ms > {int(allowed_ms)}ms)",
-                            self.repository,
-                            self.txn_helper,
-                            self.retry_on_concurrency_error,
-                        )
-                    else:
-                        self._save_result(task_model, timeout_result, message)
+                    complete_timed_out(
+                        self,
+                        stage,
+                        task_model,
+                        task,
+                        message,
+                        f"Task exceeded total timeout ({elapsed_ms}ms > {int(allowed_ms)}ms)",
+                    )
                     return
 
             # CONCURRENT EXECUTION CHECK: Prevent duplicate execution of same task
@@ -333,38 +337,29 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                         )
                         return
 
-                timeout = self.timeout_manager.get_task_timeout(stage, task)
-                with Timer(
-                    "task_execution_seconds",
-                    task_type=message.task_type,
-                    task_name=task_model.name,
-                ):
-                    result = execute_with_timeout(
-                        task,
-                        stage,
-                        timeout,
-                        message,
-                        self.bulkhead_manager,
-                        self.circuit_factory,
-                        self.process_executor,
-                    )
+                result = ungated_skip(task, stage, task_model)
+                if result is None:
+                    timeout = self.timeout_manager.get_task_timeout(stage, task)
+                    with Timer(
+                        "task_execution_seconds",
+                        task_type=message.task_type,
+                        task_name=task_model.name,
+                    ):
+                        result = execute_with_timeout(
+                            task,
+                            stage,
+                            timeout,
+                            message,
+                            self.bulkhead_manager,
+                            self.circuit_factory,
+                            self.process_executor,
+                        )
+                    result = with_gate_record(result, task, stage, task_model)
 
                 verify_task_outputs(stage, result, self.task_registry)
             except TaskTimeoutError as e:
                 logger.info("Task %s timed out: %s", task_model.name, e)
-                timeout_result = task.on_timeout(stage) if hasattr(task, "on_timeout") else None
-                if timeout_result is None:
-                    complete_with_error(
-                        stage,
-                        task_model,
-                        message,
-                        str(e),
-                        self.repository,
-                        self.txn_helper,
-                        self.retry_on_concurrency_error,
-                    )
-                else:
-                    self._save_result(task_model, timeout_result, message)
+                complete_timed_out(self, stage, task_model, task, message, str(e))
             except TransientVerificationError as e:
                 logger.info(
                     "Verification pending for task %s, will retry: %s",
@@ -413,6 +408,19 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                     task,
                     message,
                     e,
+                    self.repository,
+                    self.txn_helper,
+                    self._get_backoff_period,
+                    self.retry_on_concurrency_error,
+                )
+            except CONVERTED_BASE_EXCEPTIONS as e:
+                logger.error("Task %s raised %s", task_model.name, type(e).__name__)
+                handle_exception(
+                    stage,
+                    task_model,
+                    task,
+                    message,
+                    as_task_error(e),
                     self.repository,
                     self.txn_helper,
                     self._get_backoff_period,

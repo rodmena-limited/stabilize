@@ -92,6 +92,29 @@ MIGRATIONS: tuple[Migration, ...] = (
             "CREATE INDEX IF NOT EXISTS idx_processed_messages_execution ON processed_messages(execution_id)",
         ),
     ),
+    Migration(
+        4,
+        "add_workflow_queue_table_and_advance_queue_ids",
+        (
+            "ALTER TABLE pipeline_executions ADD COLUMN queue_table TEXT",
+            """
+            INSERT INTO sqlite_sequence(name, seq)
+            SELECT 'queue_messages', 0
+            WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'queue_messages')
+            """,
+            """
+            UPDATE sqlite_sequence SET seq = MAX(
+                seq,
+                COALESCE(
+                    (SELECT MAX(CAST(message_id AS INTEGER)) FROM processed_messages
+                     WHERE message_id GLOB '[0-9]*' AND message_id NOT GLOB '*[^0-9]*'),
+                    0
+                )
+            )
+            WHERE name = 'queue_messages'
+            """,
+        ),
+    ),
 )
 
 

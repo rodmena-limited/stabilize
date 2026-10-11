@@ -145,6 +145,10 @@ class Queue(ABC):
         """Whether any queued message targets this workflow. Default: False."""
         return False
 
+    def has_pending_message_for_stage(self, stage_id: str) -> bool:
+        """Whether any queued message (including one being handled) names this stage. Default: False."""
+        return False
+
     def extend_lock(self, message: Message, duration: timedelta | None = None) -> bool:
         """Extend the visibility lock of an in-flight message (heartbeat).
 

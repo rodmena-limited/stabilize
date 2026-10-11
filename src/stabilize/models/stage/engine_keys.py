@@ -83,8 +83,15 @@ SIGNAL_KEYS = frozenset(
     }
 )
 
+TASK_LIFECYCLE_KEYS = frozenset(
+    {
+        "_gate_checked",
+        "_task_completion",
+    }
+)
+
 ENGINE_CONTEXT_KEYS = (
-    HYDRATION_KEYS | CONFIGURATION_KEYS | CONTROL_FLOW_KEYS | LOOP_KEYS | SIGNAL_KEYS
+    HYDRATION_KEYS | CONFIGURATION_KEYS | CONTROL_FLOW_KEYS | LOOP_KEYS | SIGNAL_KEYS | TASK_LIFECYCLE_KEYS
 )
 
 TASK_VISIBLE_KEYS = frozenset(

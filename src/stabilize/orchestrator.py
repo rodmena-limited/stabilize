@@ -14,6 +14,7 @@ from stabilize.queue.messages import (
     ResumeStage,
     StartWorkflow,
 )
+from stabilize.queue.ownership import queue_table_name
 from stabilize.resilience.config import HandlerConfig, get_handler_config
 
 if TYPE_CHECKING:
@@ -109,6 +110,8 @@ class Orchestrator:
             execution_id=execution.id,
         )
 
+        if execution.queue_table is None:
+            execution.queue_table = queue_table_name(self.queue)
         if self.store:
             if not self.store.exists(execution.id):
                 try:

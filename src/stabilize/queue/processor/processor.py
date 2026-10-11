@@ -26,6 +26,7 @@ from stabilize.queue.processor.config import QueueProcessorConfig
 from stabilize.queue.processor.drain import SynchronousDrainMixin
 from stabilize.queue.processor.handler_base import MessageHandler
 from stabilize.queue.processor.lease_guard import start_lock_heartbeat
+from stabilize.queue.processor.retention import start_retention_thread
 from stabilize.queue.processor.mixins import QueueProcessorMixin
 from stabilize.resilience.config import HandlerConfig
 
@@ -110,6 +111,8 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
         self._executor: ThreadPoolExecutor | None = None
         self._poll_thread: threading.Thread | None = None
         self._recovery_thread: threading.Thread | None = None
+        self._retention_thread: threading.Thread | None = None
+        self._retention_failures = 0
         self._lock = threading.Lock()
         self._processing_lock = threading.Lock()  # Lock for process_all
         self._active_count = 0
@@ -219,6 +222,8 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
             self._recovery_thread = threading.Thread(target=self._recovery_loop, daemon=True)
             self._recovery_thread.start()
 
+        self._retention_thread = start_retention_thread(self)
+
         logger.info("Queue processor started")
 
     def stop(self, wait: bool = True, timeout: float | None = None) -> int:
@@ -242,6 +247,9 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
 
         if self._recovery_thread:
             self._recovery_thread.join(timeout=5.0)
+
+        if self._retention_thread:
+            self._retention_thread.join(timeout=60.0)
 
         if self._executor:
             self._executor.shutdown(wait=False)
@@ -336,9 +344,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
         """
         poll_interval = self.config.poll_frequency_ms / 1000.0
         dlq_interval = getattr(self.config, "dlq_check_interval_seconds", 0.0)
-        retention_interval = getattr(self.config, "retention_sweep_interval_seconds", 0.0)
         last_dlq_check = time.monotonic()
-        last_retention_sweep = time.monotonic()
 
         while self._running:
             try:
@@ -349,26 +355,6 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
                 if dlq_interval > 0 and time.monotonic() - last_dlq_check >= dlq_interval:
                     last_dlq_check = time.monotonic()
                     self._check_dlq()
-
-                if (
-                    retention_interval > 0
-                    and self._store is not None
-                    and time.monotonic() - last_retention_sweep >= retention_interval
-                ):
-                    last_retention_sweep = time.monotonic()
-                    try:
-                        removed = self._store.cleanup_old_processed_messages(
-                            max_age_hours=self.config.processed_messages_max_age_hours
-                        )
-                        claims = self._store.cleanup_completed_stage_claims()
-                        if removed or claims:
-                            logger.info(
-                                "Retention sweep removed %d processed-message record(s), %d stage claim(s)",
-                                removed,
-                                claims,
-                            )
-                    except Exception as e:
-                        logger.warning("Retention sweep failed: %s", e)
 
                 # Hold lock while checking stopping flag AND polling to prevent race
                 # condition where a message could be submitted after stop is requested

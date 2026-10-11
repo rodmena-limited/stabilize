@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
 from resilient_circuit.exceptions import RetryLimitReached
 
+from stabilize.models.stage.completion_records import record_completion
 from stabilize.persistence.store import StoreTransaction
 
 if TYPE_CHECKING:
@@ -176,6 +177,7 @@ class TransactionHelper:
                     )
 
                 if stage:
+                    _record_task_completions(stage, messages_to_push)
                     txn.store_stage(stage)
 
                 if source_message and source_message.message_id:
@@ -249,6 +251,7 @@ class TransactionHelper:
                     )
 
                 if stage:
+                    _record_task_completions(stage, messages_to_push)
                     txn.store_stage(stage)
 
                 if source_message and source_message.message_id:
@@ -302,3 +305,11 @@ def require_atomic_transaction(txn: StoreTransaction, context: str = "operation"
             "SqliteWorkflowStore or PostgresWorkflowStore for production "
             "critical systems."
         )
+
+
+def _record_task_completions(stage: StageExecution, messages: Sequence[tuple[Message, float | None]]) -> None:
+    from stabilize.queue.messages import CompleteTask
+
+    for message, _ in messages:
+        if isinstance(message, CompleteTask) and message.stage_id == stage.id:
+            record_completion(stage, message.task_id, message.status, message.original_status)

@@ -29,6 +29,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_ACTIVE_STAGE_STATUSES = frozenset(
+    {WorkflowStatus.RUNNING, WorkflowStatus.PAUSED, WorkflowStatus.SUSPENDED, WorkflowStatus.BUFFERED}
+)
+
 
 class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
     """
@@ -200,7 +204,15 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
                     return WorkflowStatus.TERMINAL
                 return WorkflowStatus.SUCCEEDED
 
-        # Still running - check retry count before re-queuing
+        active = [s for s in stages if s.status in _ACTIVE_STAGE_STATUSES]
+        if active:
+            logger.debug(
+                "CompleteWorkflow for %s: %d stage(s) still active; their completion re-evaluates the workflow",
+                execution.id,
+                len(active),
+            )
+            return None
+
         retry_count = getattr(message, "retry_count", 0) or 0
         max_retries = self.handler_config.max_stage_wait_retries
 

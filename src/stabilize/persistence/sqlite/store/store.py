@@ -122,11 +122,12 @@ class SqliteWorkflowStore(
         queue a message. This prevents orphaned workflows from crashes
         between separate store and queue operations.
 
-        SQLite implementation writes directly to the queue_messages table
-        in the same transaction, so the queue parameter is ignored.
+        SQLite implementation writes pushed messages to queue.table_name
+        (queue_messages when queue is None) on the store's own connection,
+        in the same transaction; a queue on a different database file is refused.
 
         Args:
-            queue: Ignored (for API compatibility with base class)
+            queue: The queue whose table receives pushed messages
 
         Usage:
             with store.transaction() as txn:
@@ -145,7 +146,7 @@ class SqliteWorkflowStore(
         from stabilize.persistence.sqlite.transaction import AtomicTransaction
 
         conn = self._get_connection()
-        txn = AtomicTransaction(conn, self)
+        txn = AtomicTransaction(conn, self, queue)
         # Bind a thread-local scope so event recording inside this block
         # joins the transaction (same-database event stores) and bus
         # publication is deferred until after commit.
@@ -177,9 +178,32 @@ class SqliteWorkflowStore(
         """Mark a message as successfully processed."""
         _mark_message_processed(self._get_connection(), message_id, handler_type, execution_id)
 
-    def cleanup_old_processed_messages(self, max_age_hours: float = 24.0) -> int:
-        """Clean up old processed message records."""
-        return _cleanup_old_processed_messages(self._get_connection(), max_age_hours)
+    def cleanup_old_processed_messages(
+        self,
+        max_age_hours: float = 24.0,
+        batch_size: int | None = None,
+        max_rows: int | None = None,
+    ) -> int:
+        """Delete processed-message records older than max_age_hours, in batches; returns the count."""
+        return _cleanup_old_processed_messages(self._get_connection(), max_age_hours, batch_size, max_rows)
+
+    def completed_workflow_ids(
+        self, completed_before_ms: int, limit: int, application: str | None = None
+    ) -> list[str]:
+        from stabilize.maintenance import PURGEABLE
+
+        marks = ", ".join("?" for _ in PURGEABLE)
+        sql = (
+            f"SELECT id FROM pipeline_executions WHERE status IN ({marks}) "
+            "AND end_time IS NOT NULL AND end_time < ?"
+        )
+        params: list[Any] = [*PURGEABLE, completed_before_ms]
+        if application is not None:
+            sql += " AND application = ?"
+            params.append(application)
+        sql += " ORDER BY end_time LIMIT ?"
+        params.append(limit)
+        return [r[0] for r in self._get_connection().execute(sql, params).fetchall()]
 
     def cleanup_completed_stage_claims(self) -> int:
         """Delete stage claims of executions in terminal states."""

@@ -102,3 +102,16 @@ class StoreTransaction(ABC):
             existing behavior.
         """
         return True
+
+    def lock_admission(self, key: str) -> None:
+        """Serialize admission for ``key`` until this transaction ends."""
+        raise NotImplementedError(f"{type(self).__name__} does not support admission control")
+
+    def count_running(self, pipeline_config_id: str) -> int:
+        """RUNNING workflows of the config, as this transaction sees them."""
+        raise NotImplementedError(f"{type(self).__name__} does not support admission control")
+
+    def buffered_ids(self, pipeline_config_id: str) -> list[str]:
+        """BUFFERED workflow ids of the config, oldest (lowest id) first."""
+        raise NotImplementedError(f"{type(self).__name__} does not support admission control")
+

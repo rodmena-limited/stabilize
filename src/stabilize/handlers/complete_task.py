@@ -12,6 +12,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.handlers.base import StabilizeHandler
+from stabilize.models.stage.completion_records import clear_completion
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
     CompleteStage,
@@ -28,6 +29,30 @@ if TYPE_CHECKING:
     from stabilize.queue import Queue
 
 logger = logging.getLogger(__name__)
+
+_CONTINUING_STATUSES = frozenset({WorkflowStatus.SUCCEEDED, WorkflowStatus.SKIPPED})
+_TASK_FAILED_CONTINUE = frozenset({None, WorkflowStatus.FAILED_CONTINUE})
+
+
+def continues_in_stage(message: CompleteTask) -> bool:
+    """Whether the stage goes on to its next task after this completion.
+
+    True for SUCCEEDED and SKIPPED, and for FAILED_CONTINUE returned by the
+    task itself. Every other status, including a FAILED_CONTINUE converted from
+    another status by continuePipelineOnFailure, ends the stage.
+    """
+    if message.status in _CONTINUING_STATUSES:
+        return True
+    return message.status == WorkflowStatus.FAILED_CONTINUE and message.original_status in _TASK_FAILED_CONTINUE
+
+
+def accepts_start_task_skip(task: TaskExecution, message: CompleteTask) -> bool:
+    """A CompleteTask(SKIPPED) for a task StartTask skipped: SKIPPED with no end_time yet."""
+    return (
+        message.status == WorkflowStatus.SKIPPED
+        and task.status == WorkflowStatus.SKIPPED
+        and task.end_time is None
+    )
 
 
 class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
@@ -73,7 +98,7 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
 
         def on_task(stage: StageExecution, task: TaskExecution) -> None:
             # Idempotency check - only complete tasks that are RUNNING
-            if task.status != WorkflowStatus.RUNNING:
+            if task.status != WorkflowStatus.RUNNING and not accepts_start_task_skip(task, message):
                 logger.debug(
                     "Ignoring CompleteTask for %s (%s) - already %s",
                     task.name,
@@ -93,6 +118,7 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
             # Update task status
             self.set_task_status(task, message.status)
             task.end_time = self.current_time_millis()
+            clear_completion(stage, task.id)
 
             logger.debug("Task %s completed with status %s", task.name, message.status)
 
@@ -144,8 +170,9 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
                         )
                 return
 
-            # Check for next task
-            next_task = stage.next_task(task)
+            next_task = stage.next_task(task) if continues_in_stage(message) else None
+            if next_task is None:
+                self._skip_tasks_after(stage, task)
 
             # Atomic: store stage + push next message together
             with self.repository.transaction(self.queue) as txn:
@@ -180,3 +207,14 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
                     )
 
         self.with_task(message, on_task)
+
+    def _skip_tasks_after(self, stage: StageExecution, task: TaskExecution) -> None:
+        try:
+            index = stage.tasks.index(task)
+        except ValueError:
+            return
+        now = self.current_time_millis()
+        for later in stage.tasks[index + 1 :]:
+            if later.status == WorkflowStatus.NOT_STARTED:
+                self.set_task_status(later, WorkflowStatus.SKIPPED)
+                later.end_time = now

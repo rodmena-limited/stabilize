@@ -115,14 +115,14 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
                         start_time_expiry, trigger, is_canceled, canceled_by,
                         cancellation_reason, paused, pipeline_config_id,
                         is_limit_concurrent, max_concurrent_executions,
-                        keep_waiting_pipelines, origin
+                        keep_waiting_pipelines, origin, queue_table
                     ) VALUES (
                         %(id)s, %(type)s, %(application)s, %(name)s, %(status)s,
                         %(context)s::jsonb, %(start_time)s, %(end_time)s, %(start_time_expiry)s,
                         %(trigger)s::jsonb, %(is_canceled)s, %(canceled_by)s,
                         %(cancellation_reason)s, %(paused)s::jsonb, %(pipeline_config_id)s,
                         %(is_limit_concurrent)s, %(max_concurrent_executions)s,
-                        %(keep_waiting_pipelines)s, %(origin)s
+                        %(keep_waiting_pipelines)s, %(origin)s, %(queue_table)s
                     )
                     """,
                     execution_to_dict(execution),

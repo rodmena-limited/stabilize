@@ -10,7 +10,11 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
+from stabilize.error_codes import classify_error
+from stabilize.errors import truncate_error
 from stabilize.handlers.base import StabilizeHandler
+from stabilize.handlers.run_task.execution import resolve_task
+from stabilize.models.stage.completion_records import mark_gate_checked, record_completion
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
     CompleteTask,
@@ -92,13 +96,18 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
                         )
                 return
 
-            # Check if task should be skipped
             try:
-                task_impl = self.task_registry.get(task_model.implementing_class)
-                if isinstance(task_impl, SkippableTask) and not task_impl.is_enabled(stage):
+                task_impl = resolve_task(task_model.implementing_class, task_model, self.task_registry)
+            except TaskNotFoundError:
+                task_impl = None
+            if isinstance(task_impl, SkippableTask):
+                try:
+                    enabled = task_impl.is_enabled(stage)
+                except Exception as gate_error:
+                    self._fail_on_gate_error(stage, task_model, message, gate_error)
+                    return
+                if not enabled:
                     logger.info("Skipping task %s (disabled)", task_model.name)
-
-                    # Mark as skipped - use atomic transaction
                     self.set_task_status(task_model, WorkflowStatus.SKIPPED)
                     with self.repository.transaction(self.queue) as txn:
                         txn.store_stage(stage)
@@ -118,10 +127,7 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
                             )
                         )
                     return
-            except TaskNotFoundError:
-                # If implementation not found, RunTaskHandler will handle the error.
-                # We proceed to start it so the error is reported in the proper phase.
-                pass
+                mark_gate_checked(stage, task_model.id)
 
             # Update task status
             self.set_task_status(task_model, WorkflowStatus.RUNNING)
@@ -160,3 +166,37 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
             )
 
         self.with_task(message, on_task)
+
+    def _fail_on_gate_error(
+        self,
+        stage: StageExecution,
+        task_model: TaskExecution,
+        message: StartTask,
+        error: Exception,
+    ) -> None:
+        logger.error("is_enabled raised for task %s: %s", task_model.name, error)
+        text = truncate_error(f"is_enabled raised {type(error).__name__}: {error}")
+        details = {"details": {"error": text, "errors": [text], "error_code": classify_error(error).value}}
+        stage.context["exception"] = details
+        task_model.task_exception_details["exception"] = details
+        self.set_task_status(task_model, WorkflowStatus.RUNNING)
+        task_model.start_time = self.current_time_millis()
+        record_completion(stage, task_model.id, WorkflowStatus.TERMINAL, WorkflowStatus.TERMINAL)
+        with self.repository.transaction(self.queue) as txn:
+            txn.store_stage(stage)
+            if message.message_id:
+                txn.mark_message_processed(
+                    message_id=message.message_id,
+                    handler_type="StartTask",
+                    execution_id=message.execution_id,
+                )
+            txn.push_message(
+                CompleteTask(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
+                    task_id=message.task_id,
+                    status=WorkflowStatus.TERMINAL,
+                    original_status=WorkflowStatus.TERMINAL,
+                )
+            )

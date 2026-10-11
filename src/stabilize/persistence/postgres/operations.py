@@ -152,20 +152,41 @@ def mark_message_processed(
         conn.commit()
 
 
-def cleanup_old_processed_messages(pool: Any, max_age_hours: float = 24.0) -> int:
-    """Clean up old processed message records."""
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                DELETE FROM processed_messages
-                WHERE processed_at < NOW() - make_interval(hours => %(hours)s)
-                """,
-                {"hours": max_age_hours},
-            )
-            deleted: int = cur.rowcount or 0
-        conn.commit()
-        return deleted
+PG_RETENTION_BATCH = 10_000
+
+_DELETE_STALE_BATCH = """
+    DELETE FROM processed_messages
+    WHERE message_id IN (
+        SELECT message_id FROM processed_messages
+        WHERE processed_at < NOW() - %(hours)s * INTERVAL '1 hour'
+        ORDER BY processed_at
+        LIMIT %(n)s
+        FOR UPDATE SKIP LOCKED
+    )
+    AND processed_at < NOW() - %(hours)s * INTERVAL '1 hour'
+"""
+
+
+def cleanup_old_processed_messages(
+    pool: Any,
+    max_age_hours: float = 24.0,
+    batch_size: int | None = None,
+    max_rows: int | None = None,
+) -> int:
+    """Delete processed_messages rows older than max_age_hours, one transaction per batch."""
+    batch = int(batch_size or PG_RETENTION_BATCH)
+    total = 0
+    while max_rows is None or total < max_rows:
+        n = batch if max_rows is None else min(batch, max_rows - total)
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(_DELETE_STALE_BATCH, {"hours": float(max_age_hours), "n": n})
+                deleted = int(cur.rowcount or 0)
+            conn.commit()
+        total += deleted
+        if deleted < n:
+            break
+    return total
 
 
 def cleanup_completed_stage_claims(pool: Any) -> int:

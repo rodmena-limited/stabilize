@@ -15,6 +15,9 @@ if TYPE_CHECKING:
     from stabilize.queue.messages import Message
 
 
+ADMISSION_LOCK_CLASS = 0x5354424C
+
+
 class PostgresTransaction(StoreTransaction):
     """Atomic transaction spanning store and queue operations for PostgreSQL.
 
@@ -86,7 +89,8 @@ class PostgresTransaction(StoreTransaction):
                 UPDATE pipeline_executions SET
                     status = %(status)s,
                     start_time = %(start_time)s,
-                    end_time = %(end_time)s
+                    end_time = %(end_time)s,
+                    queue_table = COALESCE(%(queue_table)s, queue_table)
                 WHERE id = %(id)s
                 """,
                 {
@@ -94,6 +98,7 @@ class PostgresTransaction(StoreTransaction):
                     "status": workflow.status.name,
                     "start_time": workflow.start_time,
                     "end_time": workflow.end_time,
+                    "queue_table": workflow.queue_table,
                 },
             )
 
@@ -220,6 +225,34 @@ class PostgresTransaction(StoreTransaction):
                     return bool(cur.rowcount == 1)
 
             return False
+
+    def lock_admission(self, key: str) -> None:
+        with self._conn.cursor() as cur:
+            cur.execute("SET LOCAL lock_timeout = '30s'")
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(%(class_id)s, hashtext(%(key)s))",
+                {"class_id": ADMISSION_LOCK_CLASS, "key": key},
+            )
+
+    def count_running(self, pipeline_config_id: str) -> int:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM pipeline_executions "
+                "WHERE pipeline_config_id = %(c)s AND status = 'RUNNING'",
+                {"c": pipeline_config_id},
+            )
+            row = cur.fetchone()
+        return int(row["n"] if isinstance(row, dict) else row[0])
+
+    def buffered_ids(self, pipeline_config_id: str) -> list[str]:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM pipeline_executions "
+                "WHERE pipeline_config_id = %(c)s AND status = 'BUFFERED' ORDER BY id",
+                {"c": pipeline_config_id},
+            )
+            rows = cur.fetchall()
+        return [r["id"] if isinstance(r, dict) else r[0] for r in rows]
 
 
 # Forward reference for type hint

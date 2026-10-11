@@ -53,6 +53,10 @@ def process_result(
     if result.outputs and isinstance(result.outputs, dict):
         stage.outputs.update(result.outputs)
 
+    if result.status == WorkflowStatus.REDIRECT and not result.target_stage_ref_id:
+        result = replace(result, status=WorkflowStatus.TERMINAL)
+        stage.context["error"] = "REDIRECT result without target_stage_ref_id"
+
     # Handle based on status - use atomic transactions
     if result.status == WorkflowStatus.RUNNING:
         _handle_running(stage, task_model, message, txn_helper, get_backoff_fn)

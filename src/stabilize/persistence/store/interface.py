@@ -20,6 +20,7 @@ from stabilize.errors.workflow import WorkflowNotFoundError as _WorkflowNotFound
 from stabilize.persistence.store.criteria import (
     WorkflowNotFoundError as _WorkflowNotFoundErrorStore,
 )
+from stabilize.persistence.store.maintenance_defaults import MaintenanceDefaults
 from stabilize.persistence.store.signal_defaults import SignalStoreDefaults
 
 # Both spellings exist in the tree and different backends raise different
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
     from .transaction import StoreTransaction
 
 
-class WorkflowStore(SignalStoreDefaults, ABC):
+class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, ABC):
     """Abstract interface for execution persistence."""
 
     # ========== Execution Operations ==========
@@ -372,19 +373,6 @@ class WorkflowStore(SignalStoreDefaults, ABC):
         """
         # Default implementation: no-op
         pass
-
-    def cleanup_old_processed_messages(self, max_age_hours: float = 24.0) -> int:
-        """
-        Clean up old processed message records.
-
-        Args:
-            max_age_hours: Delete records older than this many hours
-
-        Returns:
-            Number of records deleted
-        """
-        # Default implementation: no cleanup
-        return 0
 
     def get_processed_message_ids(self, limit: int | None = None) -> list[str] | None:
         """

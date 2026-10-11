@@ -162,19 +162,36 @@ def mark_message_processed(
     conn.commit()
 
 
+SQLITE_RETENTION_BATCH = 2_000
+
+_DELETE_STALE_BATCH = (
+    "DELETE FROM processed_messages WHERE rowid IN ("
+    "SELECT rowid FROM processed_messages "
+    "WHERE processed_at < :cutoff AND julianday(processed_at) < julianday(:cutoff) "
+    "ORDER BY processed_at LIMIT :n"
+    ") AND processed_at < :cutoff AND julianday(processed_at) < julianday(:cutoff)"
+)
+
+
 def cleanup_old_processed_messages(
     conn: sqlite3.Connection,
     max_age_hours: float = 24.0,
+    batch_size: int | None = None,
+    max_rows: int | None = None,
 ) -> int:
-    """Clean up old processed message records."""
-    cutoff = datetime.now(UTC) - timedelta(hours=max_age_hours)
-    cursor = conn.execute(
-        "DELETE FROM processed_messages "
-        "WHERE processed_at < :cutoff AND julianday(processed_at) < julianday(:cutoff)",
-        {"cutoff": cutoff.isoformat()},
-    )
-    conn.commit()
-    return cursor.rowcount
+    """Delete processed_messages rows older than max_age_hours, one transaction per batch."""
+    cutoff = (datetime.now(UTC) - timedelta(hours=max_age_hours)).isoformat()
+    batch = int(batch_size or SQLITE_RETENTION_BATCH)
+    total = 0
+    while max_rows is None or total < max_rows:
+        n = batch if max_rows is None else min(batch, max_rows - total)
+        cursor = conn.execute(_DELETE_STALE_BATCH, {"cutoff": cutoff, "n": n})
+        conn.commit()
+        deleted = int(cursor.rowcount or 0)
+        total += deleted
+        if deleted < n:
+            break
+    return total
 
 
 def cleanup_completed_stage_claims(conn: sqlite3.Connection) -> int:

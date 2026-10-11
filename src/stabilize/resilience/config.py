@@ -218,6 +218,20 @@ class HandlerConfig:
 _default_handler_config: HandlerConfig | None = None
 
 
+def env_settings_overridden(config: HandlerConfig) -> list[str]:
+    """HandlerConfig fields set through STABILIZE_* that ``config`` gives a different value."""
+    from dataclasses import fields
+
+    from_env = HandlerConfig.from_env()
+    defaults = HandlerConfig()
+    return sorted(
+        f.name
+        for f in fields(HandlerConfig)
+        if getattr(from_env, f.name) != getattr(defaults, f.name)
+        and getattr(config, f.name) != getattr(from_env, f.name)
+    )
+
+
 def get_handler_config() -> HandlerConfig:
     """Get the default HandlerConfig, loading from environment on first call.
 
