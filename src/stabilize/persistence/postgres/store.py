@@ -57,6 +57,7 @@ from stabilize.persistence.store import (
     WorkflowNotFoundError,
     WorkflowStore,
 )
+from stabilize.persistence.store.ids import check_ids
 from stabilize.persistence.store.owned_rows import WORKFLOW_OWNED_ROWS
 from stabilize.persistence.task_state import capture, commit_captured, restore_versions, versions
 
@@ -106,6 +107,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
 
     def store(self, execution: Workflow) -> None:
         """Store a complete execution."""
+        check_ids(execution)
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
