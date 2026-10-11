@@ -38,7 +38,7 @@ probe_split_namespace.py"
 PROBE_SET="${PROBE_SET:-all}"
 
 _needs_docker() {
-    printf '%s\n' "$DOCKER_PROBES" | grep -qxF "$1"
+    grep -qxF "$1" <<<"$DOCKER_PROBES"
 }
 
 declare -A EXCLUDED=(

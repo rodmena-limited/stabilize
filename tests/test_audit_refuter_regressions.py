@@ -55,8 +55,13 @@ def test_canceling_a_sibling_does_not_cancel_a_running_branch(repository: Workfl
         repository, queue, {"slow": Slow, "ok": Ok}, task_backoff_min_delay_ms=100, task_backoff_max_delay_ms=100
     )
     wf = start(repository, queue, [stage("running", ["slow"]), stage("other", ["ok"], needs={"running"})])
-    drive(processor, repository, wf.id, timeout=0.2, idle=0.1)
-    before = repository.retrieve(wf.id)
+    deadline = time.monotonic() + 15
+    while True:
+        drive(processor, repository, wf.id, timeout=0.1, idle=0.05)
+        before = repository.retrieve(wf.id)
+        if next(s for s in before.stages if s.ref_id == "running").status != WorkflowStatus.NOT_STARTED:
+            break
+        assert time.monotonic() < deadline, "running stage never started"
     sibling = next(s for s in before.stages if s.ref_id == "other")
     assert next(s for s in before.stages if s.ref_id == "running").status == WorkflowStatus.RUNNING
     assert sibling.status == WorkflowStatus.NOT_STARTED

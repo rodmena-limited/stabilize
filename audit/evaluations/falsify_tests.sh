@@ -42,7 +42,7 @@ for entry in "${EXPECT[@]}"; do
         echo ">>> RED FOR ANOTHER REASON: pytest exit $rc (collection, usage or no tests), not an assertion failure"
         printf '%s\n' "$out" | tail -20
         bad=$((bad + 1))
-    elif ! printf '%s\n' "$out" | grep -qF -- "$marker"; then
+    elif ! grep -qF -- "$marker" <<<"$out"; then
         echo ">>> RED FOR ANOTHER REASON: output lacks the stated marker '$marker'"
         printf '%s\n' "$out" | tail -30
         bad=$((bad + 1))
