@@ -1,7 +1,7 @@
 """Delivery keys: how a queue row is named in processed_messages.
 
 A message polled from the table named queue_messages keeps its row id as its
-key, as in every release before 1.0.0; a message from any other table is
+key, as in every release before 0.33.0; a message from any other table is
 "<table>:<row id>", so two tables with independent id sequences never share a
 key in the store-wide processed_messages table.
 """

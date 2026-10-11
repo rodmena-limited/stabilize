@@ -172,7 +172,7 @@ class WorkflowRecovery:
             if unowned:
                 logger.warning(
                     "Recovery on queue table %s skipped %d workflow(s) with no recorded queue table "
-                    "(written before 1.0.0, read as queue_messages)",
+                    "(written before 0.33.0, read as queue_messages)",
                     own_table,
                     unowned,
                 )

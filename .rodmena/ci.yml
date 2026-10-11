@@ -102,3 +102,14 @@ jobs:
           PATH="$PWD/.old/bin:$PATH" .old/bin/python audit/evaluations/upgrade_inflight.py --phase old
           PATH="$PWD/.venv/bin:$PATH" .venv/bin/python audit/evaluations/upgrade_inflight.py --phase new
 
+  soak:
+    name: "Sustained run: 30 min on PostgreSQL (release candidate only)"
+    image: containers.rodmena.co.uk/rodmena/ci-python:3.14
+    services: [postgres]
+    timeout_minutes: 45
+    steps:
+      - name: Install
+        run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
+      - name: Soak
+        run: PATH="$PWD/.venv/bin:$PATH" STABILIZE_PROBE_DSN="$DATABASE_URL" SOAK_MINUTES=30 .venv/bin/python audit/evaluations/soak.py
+

@@ -1,14 +1,16 @@
 # Changelog
 
-## [1.0.0] - UNRELEASED
+## [0.33.0] - UNRELEASED
 
-First release under the stability promise in `docs/guide/stability.rst`
-(public API = `stabilize.__all__`, message types, persisted schema, CLI).
+Release candidate for 1.0.0: the public API and guarantees are written down in
+`docs/guide/stability.rst` (public API = `stabilize.__all__`, message types,
+persisted schema, CLI); 1.0.0 will promote this release unchanged once it has
+run in production.
 Audit release (#77): every fix below was reproduced live on published 0.32.1
 and its regression test and probe were observed failing there for the stated
 reason before the fix (ci.rodmena.co.uk pipelines 2930, 2933, 2935, 2936,
 2938). **On PostgreSQL run `stabilize mg-up` with the owner role before
-starting 1.0.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
+starting 0.33.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
 
 ### Fixed — a side effect ran that must not, or ran twice
 
@@ -79,7 +81,7 @@ starting 1.0.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
 - `docs/guide/stability.rst`: public API, versioning, delivery guarantees as
   measured, the rules for several queue tables (#90).
 - CI on Python 3.11 (declared floor) alongside 3.14; an upgrade job that
-  starts work under published 0.32.1 and finishes it under 1.0.0.
+  starts work under published 0.32.1 and finishes it under 0.33.0.
 
 ### Changed (behaviour)
 
@@ -98,9 +100,9 @@ starting 1.0.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
 - PostgreSQL migration `01M4PAJCF82KCKYT5X4GMZH2XG`: adds
   `pipeline_executions.queue_table`, an index on `queue_messages`'
   `payload->>'stage_id'`, and advances `queue_messages_id_seq` past the largest
-  numeric `processed_messages.message_id`. Run it before 1.0.0 workers.
+  numeric `processed_messages.message_id`. Run it before 0.33.0 workers.
 - SQLite migration 4 adds the same column (applied by `create_tables=True`);
-  a 1.0.0 store on an unmigrated SQLite database keeps working without it.
+  a 0.33.0 store on an unmigrated SQLite database keeps working without it.
 - Deployments with several queue tables: start workflows through
   `Orchestrator(queue).start()`; pre-1.0 rows without `queue_table` belong to
   `queue_messages`.

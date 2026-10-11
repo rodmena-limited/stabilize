@@ -1,10 +1,10 @@
-Stability and delivery guarantees (1.0)
-=======================================
+Stability and delivery guarantees
+=================================
 
 Public API
 ----------
 
-The public API of stabilize 1.x is:
+The public API of stabilize, as of 0.33.0 and frozen at 1.0.0, is:
 
 * every name in ``stabilize.__all__``;
 * the message types in ``stabilize.queue.messages`` and their fields;
@@ -20,13 +20,14 @@ in a minor release.
 Versioning
 ----------
 
-stabilize follows Semantic Versioning 2.0.0 from 1.0.0:
+stabilize will follow Semantic Versioning 2.0.0 from 1.0.0, which promotes 0.33.0
+unchanged once it has run in production:
 
 * a public name, message type, persisted column or CLI command is not removed
   or changed incompatibly before 2.0.0;
 * a deprecation warns for at least one minor release before removal in a
   major release;
-* every migration is forward-only and additive within 1.x, and ``mg-up``
+* every migration is forward-only and additive within 1.x (already true from 0.33.0), and ``mg-up``
   upgrades a 0.32.x database in place with in-flight work resumed (exercised
   in CI by ``audit/evaluations/upgrade_inflight.py``).
 
@@ -68,9 +69,9 @@ with its own task registry. Then:
   workflow belongs to, so its ``queue_table`` is recorded before any recovery
   sweep can see it;
 * each processor recovers only the workflows whose ``queue_table`` is its own;
-  rows written before 1.0.0 have no ``queue_table`` and belong to
+  rows written before 0.33.0 have no ``queue_table`` and belong to
   ``queue_messages``;
 * processed-message keys of a table other than ``queue_messages`` are
-  ``"<table>:<row id>"``; records written before 1.0.0 for such a table under
+  ``"<table>:<row id>"``; records written before 0.33.0 for such a table under
   the bare row id stop matching after the upgrade, so a message of that table
   in flight across the upgrade can be handled once more.

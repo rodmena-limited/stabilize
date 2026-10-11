@@ -1,4 +1,4 @@
-"""Deterministic engine driver for the 1.0.0 probes.
+"""Deterministic engine driver for the 0.33.0 audit probes.
 
 A processor built on a (store, queue) pair from _backends, stepped with
 process_one() on the calling thread so a probe's outcome does not depend on
