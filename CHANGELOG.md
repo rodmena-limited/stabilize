@@ -1,5 +1,110 @@
 # Changelog
 
+## [1.0.0] - UNRELEASED
+
+First release under the stability promise in `docs/guide/stability.rst`
+(public API = `stabilize.__all__`, message types, persisted schema, CLI).
+Audit release (#77): every fix below was reproduced live on published 0.32.1
+and its regression test and probe were observed failing there for the stated
+reason before the fix (ci.rodmena.co.uk pipelines 2930, 2933, 2935, 2936,
+2938). **On PostgreSQL run `stabilize mg-up` with the owner role before
+starting 1.0.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
+
+### Fixed — a side effect ran that must not, or ran twice
+
+- **A failed task stops its stage (#78).** After a task completed TERMINAL,
+  STOPPED or CANCELED — or FAILED_CONTINUE converted by
+  `continuePipelineOnFailure` — the next task of the same stage still
+  started. The stage now ends there and its later tasks are SKIPPED. A task
+  that itself returns `TaskResult.failed_continue()` still lets the stage
+  continue. A REDIRECT result without a target now fails the task instead of
+  leaving the stage RUNNING.
+- **The lock heartbeat survives a failed renewal (#79).** One exception from
+  `extend_lock` ended renewal for the rest of the handler; another worker then
+  executed the still-running task (2 executions). Renewal now retries; ack,
+  extend_lock and reschedule are fenced on the poll's attempt count, so a
+  worker whose lease was taken cannot extend, clear or delete the new holder's.
+- **Several queue tables in one store (#81).** Messages of a non-default table
+  whose row id had been handled from another table were dropped as
+  duplicates; SQLite transactional pushes ignored the queue's table; a recovery
+  sweep re-issued work in flight on another table into its own. Dedup keys of
+  non-default tables are now `"<table>:<row id>"`; each workflow records its
+  queue table and recovery handles only its own.
+- **Recovery never re-runs a task whose result was committed (#84).** A lost
+  CompleteTask made recovery push RunTask and run the task again. The
+  completion is now recorded with the result and re-issued as CompleteTask.
+- **limitConcurrent admits at most N (#82).** Concurrent starts overshot the
+  limit (peak 4–6 RUNNING at limit 2). Admission is now serialized per
+  pipeline config (PostgreSQL advisory transaction lock, SQLite
+  `BEGIN IMMEDIATE`) and buffered workflows are promoted oldest first.
+
+### Fixed — work stranded or a false outcome reported
+
+- **A running branch is never failed by the completion wait budget (#86).**
+  With one leaf finished, a branch running longer than
+  `max_stage_wait_retries × handler_retry_delay_seconds` (1 h by default) was
+  marked TERMINAL and canceled; the same held for parallel before/after stages.
+- **A StartTask skip completes its stage (#80).** A task disabled through
+  `SkippableTask.is_enabled` left its stage RUNNING forever.
+- **Recovery re-issues the exact lost message (#84):** CompleteStage and
+  CompleteWorkflow are rebuilt when lost; a recovered RunTask keeps the task's
+  bulkhead; a parent's tasks wait for its before-stages.
+- **Buffered work always starts (#82):** a lost StartWaitingWorkflows is healed
+  by recovery; purged buffered workflows end CANCELED instead of BUFFERED.
+- **Raising hooks end their task once (#83):** a raising `on_timeout` or
+  `is_enabled` was called on every redelivery (10×) and stranded the task.
+  Canceling a workflow now calls `on_cancel` and `on_cleanup` (they were never
+  called); `on_cleanup` and finalizers run once per committed completion
+  instead of once per version-conflict retry. A task raising `SystemExit` is a
+  recorded TERMINAL failure.
+- **Task exceptions keep their own error code and text (#88)** instead of
+  `BULKHEAD_FULL` / "Execution failed: …".
+- **`QueueProcessor(handler_config=...)` reaches every handler (#85);** 17 of
+  19 handlers used the environment instead.
+
+### Fixed — retention
+
+- **The PostgreSQL retention sweep never deleted a row (#87).** Its cutoff used
+  `make_interval(hours => double precision)`, which does not exist; every
+  sweep failed and was logged at WARNING. It now deletes in batches
+  (`retention_batch_size`, default 10,000; `retention_max_rows_per_sweep`,
+  default 200,000), one transaction per batch, on its own thread, and a failed
+  sweep is logged at ERROR.
+
+### Added
+
+- `stabilize prune-processed` and `stabilize purge-workflows` CLI commands;
+  `WorkflowStore.purge_completed_workflows()` and
+  `stabilize.maintenance.purge_completed_workflows()` (#87, #89).
+- `docs/guide/stability.rst`: public API, versioning, delivery guarantees as
+  measured, the rules for several queue tables (#90).
+- CI on Python 3.11 (declared floor) alongside 3.14; an upgrade job that
+  starts work under published 0.32.1 and finishes it under 1.0.0.
+
+### Changed (behaviour)
+
+- `SkippableTask.execute()` no longer evaluates `is_enabled`; the engine
+  evaluates it once, at StartTask. Code calling `execute()` directly no longer
+  gets the check.
+- Later tasks of a stage that ended early are SKIPPED (not NOT_STARTED).
+- `CompleteWorkflow` no longer marks a workflow TERMINAL while any top-level
+  stage is RUNNING, PAUSED, SUSPENDED or BUFFERED; a wedged stage now leaves
+  its workflow RUNNING (visible) rather than failing it after 1 h.
+- A `HandlerConfig` passed to `QueueProcessor` now overrides `STABILIZE_*`
+  environment settings in every handler; a warning names the overridden fields.
+
+### Upgrade notes
+
+- PostgreSQL migration `01M4PAJCF82KCKYT5X4GMZH2XG`: adds
+  `pipeline_executions.queue_table`, an index on `queue_messages`'
+  `payload->>'stage_id'`, and advances `queue_messages_id_seq` past the largest
+  numeric `processed_messages.message_id`. Run it before 1.0.0 workers.
+- SQLite migration 4 adds the same column (applied by `create_tables=True`);
+  a 1.0.0 store on an unmigrated SQLite database keeps working without it.
+- Deployments with several queue tables: start workflows through
+  `Orchestrator(queue).start()`; pre-1.0 rows without `queue_table` belong to
+  `queue_messages`.
+
 ## [0.32.1] - 2026-10-06
 
 Documentation only; no code or schema change from 0.32.0 and no migration.

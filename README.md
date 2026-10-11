@@ -10,8 +10,10 @@ server or scheduler to operate.
 The engine was built for reliable orchestration in general, and it turns out to
 be a particularly good foundation for **agentic systems**: LLM agents are
 long-running, make expensive external calls, loop, wait on humans, and must not
-lose progress or repeat side effects when something fails. Those are exactly the
-guarantees Stabilize provides. This document is organised around building
+lose progress when something fails. Stabilize persists every step, recovers lost
+work from committed state, and records each handled message so a redelivery is
+not handled twice; the cases in which a task's side effect can still repeat are
+listed in docs/guide/stability.rst. This document is organised around building
 agentic workflows, from a single model call to a multi-agent system, but the
 same primitives apply to any pipeline.
 
