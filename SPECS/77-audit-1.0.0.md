@@ -166,3 +166,20 @@ New claims from Phase 4 (SUSPECTED until reproduced; round 2 probes):
 
 New CONFIRMED (from the Phase 4 refuter's suspected list): N1 (#78), N2 (#84), N4 and N6 (#83), N7 (#82), N8 and B86-2 (#86). C38 detail: int max_age_hours works on PostgreSQL (2 M rows in 1.43 s), float fails.
 Still SUSPECTED, not reproduced: N3 (zombie re-plan race), N5 (JumpToStage context lost update).
+
+## Phase 6 — refutation of the fix diff (fresh-context refuter, read-only, 2026-10-11)
+
+Findings against c1725aa..5195655, all adopted (fixes in 60475c0, regression tests in e8f6717):
+- F1 CERTAIN false outcome: CancelStage's new CompleteWorkflow push met the "any CANCELED stage" rule before the active-stage check; a deferred-choice loser or a cancel region canceled running branches. Fixed by waiting for active stages unless the workflow itself was canceled. Regression: test_canceling_a_sibling_does_not_cancel_a_running_branch.
+- F2 CERTAIN duplicate side effect: on_cancel could run twice (RunTask before its commit, CancelStage after its own). Fixed: whichever commit wins the RUNNING task's cancellation (optimistic lock on the stage) is the only caller of on_cancel.
+- F3 CERTAIN missed compensation: RunTask for an already-complete workflow never called on_cancel. Fixed.
+- F4 CERTAIN stranding with recovery off: an orphan BUFFERED row blocked a config. Fixed: a wake-up is pushed when buffering behind older work with a free slot. Regression test.
+- F5 CERTAIN broken upgrade: SQLite migration 4's ALTER autocommitted and was not idempotent. Fixed: migrations run in one BEGIN IMMEDIATE transaction.
+- F6 POSSIBLE stall: second pooled connection under the advisory lock. Fixed: status read on the transaction's connection; promotion loads candidates outside the lock.
+- F7 CERTAIN minor: promotion skipped start_time_expiry, the created event and audit. Fixed.
+- F8 POSSIBLE false outcome: a stale recovery CompleteTask could complete a restarted run. Fixed: CompleteTask carries task_start_time from recovery and is ignored when it differs.
+- F9 CERTAIN minor: gate error ignored continuePipelineOnFailure. Fixed. Regression test.
+- F10 CERTAIN minor: a StartTask-skipped task's late CompleteTask was accepted after cancel. Fixed.
+- F11 POSSIBLE minor compatibility: old one-argument cleanup signature, stores without admission support, alias-registered tasks in cancel hooks, heartbeat on unparsable ids. Fixed.
+Attacks that found nothing: halt rule paths and redelivery; completion-record producers (RUNNING / transient / held paths push no CompleteTask); attempts fencing (every caller holds the polled message); default-table keys unchanged; nothing runs on the SQLite connection before lock_admission; no CompleteWorkflow/CancelStage loop; no import cycle; gate record persisted before RunTask; base-exception catch order; retention thread lifecycle; PostgreSQL migration additive; bulkman capacity/timeout/shutdown errors are typed and never unwrapped; all 19 handlers registered once.
+Pipeline 2939 (5195655): lint failed (mypy **cfg typing in handlers/defaults.py, 3 ruff issues) — fixed in 60475c0.
