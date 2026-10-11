@@ -36,13 +36,36 @@ jobs:
       - name: Probe harness
         run: STABILIZE_PROBE_SCHEMA=orchestration PROBE_SET=sqlite AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" PYTHON=.venv/bin/python bash audit/evaluations/run_all.sh
 
-  falsify:
-    name: "New probes go red on 0.31.0"
+  py311:
+    name: "Tests on Python 3.11 (declared floor)"
+    image: containers.rodmena.co.uk/rodmena/ci-python:3.12
+    services: [postgres]
+    timeout_minutes: 45
+    steps:
+      - name: Install on a managed CPython 3.11
+        run: uv venv -p 3.11 .venv311 && .venv311/bin/python -c "import sys; print(sys.version); sys.exit(0 if sys.version_info[:2] == (3, 11) else 1)" && uv pip install -p .venv311/bin/python -e '.[dev,observability,cli]'
+      - name: Unit and golden tests
+        run: STABILIZE_TEST_DSN="$DATABASE_URL" .venv311/bin/python -m pytest tests golden_standard_tests -q -n 3 -p no:cacheprovider --timeout 600 -rfE
+
+  baseline:
+    name: "Published 0.32.1 from PyPI: existing suite and probes"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
-    timeout_minutes: 30
+    timeout_minutes: 50
     steps:
-      - name: Install published 0.31.0
-        run: uv venv .old-venv && uv pip install -p .old-venv/bin/python 'stabilize[postgres,cli]==0.31.0'
-      - name: Each new probe must fail against 0.31.0
-        run: AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" STABILIZE_PROBE_SQLITE_QUEUE_TABLES=1 PYTHON=.old-venv/bin/python bash audit/evaluations/falsify_previous.sh
+      - name: Install stabilize 0.32.1 from PyPI, not the checkout
+        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.32.1' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml
+      - name: Installed package is the published one
+        run: .old/bin/python -c "import stabilize, sys; print(stabilize.__version__, stabilize.__file__); sys.exit(0 if stabilize.__version__ == '0.32.1' and 'site-packages' in stabilize.__file__ else 1)"
+      - name: Existing suite against 0.32.1 (new red tests listed in expect/0.32.1.tests are excluded)
+        run: |
+          set -eu
+          IGN=$(cut -d'|' -f1 audit/evaluations/expect/0.32.1.tests | cut -d':' -f1 | sort -u | sed '/^$/d; s/^/--ignore=/' | tr '\n' ' ')
+          echo "ignored: $IGN"
+          PATH="$PWD/.old/bin:$PATH" STABILIZE_TEST_DSN="$DATABASE_URL" .old/bin/python -m pytest tests golden_standard_tests $IGN -q -n 3 -p no:cacheprovider --timeout 600 -rfE
+      - name: Existing probes against 0.32.1 (new red probes listed in expect/0.32.1.probes are excluded)
+        run: |
+          set -eu
+          export PATH="$PWD/.old/bin:$PATH"
+          .old/bin/stabilize mg-up --db-url "$DATABASE_URL?schema=orchestration"
+          PROBE_EXCLUDE_FILE=audit/evaluations/expect/0.32.1.probes STABILIZE_PROBE_SCHEMA=orchestration PROBE_SET=sqlite AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" PYTHON=.old/bin/python bash audit/evaluations/run_all.sh
