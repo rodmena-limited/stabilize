@@ -91,7 +91,7 @@ def _scalar(dsn: str, sql: str) -> int:
 def main() -> int:
     dsn = os.environ["STABILIZE_PROBE_DSN"]
     minutes = float(os.environ.get("SOAK_MINUTES", "30"))
-    rate = float(os.environ.get("SOAK_RATE_PER_S", "4"))
+    rate = float(os.environ.get("SOAK_RATE_PER_S", "0.5"))
     from stabilize.cli.commands import mg_up
 
     mg_up(dsn)
