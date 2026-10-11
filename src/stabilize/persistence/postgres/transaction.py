@@ -254,13 +254,17 @@ class PostgresTransaction(StoreTransaction):
             rows = cur.fetchall()
         return [r["id"] if isinstance(r, dict) else r[0] for r in rows]
 
-    def workflow_status(self, workflow_id: str) -> str | None:
+    def workflow_status(self, workflow_id: str) -> tuple[str | None, bool]:
         with self._conn.cursor() as cur:
-            cur.execute("SELECT status FROM pipeline_executions WHERE id = %(id)s", {"id": workflow_id})
+            cur.execute(
+                "SELECT status, is_canceled FROM pipeline_executions WHERE id = %(id)s", {"id": workflow_id}
+            )
             row = cur.fetchone()
         if row is None:
-            return None
-        return str(row["status"] if isinstance(row, dict) else row[0])
+            return None, False
+        if isinstance(row, dict):
+            return str(row["status"]), bool(row["is_canceled"])
+        return str(row[0]), bool(row[1])
 
 
 # Forward reference for type hint

@@ -150,6 +150,14 @@ def _validate_migrations(migrations: tuple[Migration, ...], baseline_version: in
         seen.add(migration.version)
 
 
+def _current_version(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").fetchone()
+    if row is None:
+        return 0
+    value = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
+    return int(value[0] or 0) if value else 0
+
+
 def apply_migrations(
     conn: sqlite3.Connection,
     migrations: tuple[Migration, ...] = MIGRATIONS,
@@ -171,6 +179,9 @@ def apply_migrations(
         The schema version after migration.
     """
     _validate_migrations(migrations, baseline_version)
+    latest = max([baseline_version, *(m.version for m in migrations)])
+    if _current_version(conn) >= latest:
+        return latest
     if conn.in_transaction:
         conn.commit()
     conn.execute("BEGIN IMMEDIATE")

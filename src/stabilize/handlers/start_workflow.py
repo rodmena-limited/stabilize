@@ -124,7 +124,7 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
     def _admit_locked(
         self, txn: StoreTransaction, execution: Workflow, message: StartWorkflow, config_id: str
     ) -> list[StageExecution] | None:
-        if txn.workflow_status(execution.id) != WorkflowStatus.NOT_STARTED.name:
+        if txn.workflow_status(execution.id)[0] != WorkflowStatus.NOT_STARTED.name:
             self._mark(txn, message)
             return None
         limit = execution.max_concurrent_executions

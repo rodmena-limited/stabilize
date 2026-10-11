@@ -70,13 +70,12 @@ def handle_cancellation(
         if fresh_task is None or fresh_task.status != WorkflowStatus.RUNNING:
             txn_helper.execute_atomic(source_message=message, handler_name="RunTask")
             return
-        txn_helper.execute_atomic(
+        won["value"] = txn_helper.execute_atomic(
             stage=fresh_stage,
             source_message=message,
             messages_to_push=[(complete, None)],
             handler_name="RunTask",
         )
-        won["value"] = True
 
     retry_on_concurrency_error(do_cancel, f"canceling task {message.task_id}")
     if not won["value"] or not hasattr(task, "on_cancel"):

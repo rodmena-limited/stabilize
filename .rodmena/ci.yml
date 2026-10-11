@@ -62,7 +62,7 @@ jobs:
           set -eu
           IGN=$(cut -d'|' -f1 audit/evaluations/expect/0.32.1.tests | cut -d':' -f1 | sort -u | sed '/^$/d; s/^/--ignore=/' | tr '\n' ' ')
           echo "ignored: $IGN"
-          PATH="$PWD/.old/bin:$PATH" STABILIZE_TEST_DSN="$DATABASE_URL" .old/bin/python -m pytest tests golden_standard_tests $IGN --deselect tests/test_engine_context_keys.py::test_every_engine_written_key_is_registered --deselect tests/test_migration_discovery.py::test_get_migrations_finds_them_from_a_source_checkout -q -n 3 -p no:cacheprovider --timeout 600 -rfE
+          PATH="$PWD/.old/bin:$PATH" STABILIZE_TEST_DSN="$DATABASE_URL" .old/bin/python -m pytest tests golden_standard_tests $IGN --deselect tests/test_engine_context_keys.py::test_every_engine_written_key_is_registered --deselect tests/test_migration_discovery.py::test_get_migrations_finds_them_from_a_source_checkout --deselect tests/test_resilience.py::TestExecuteWithResilience::test_exception_propagates --ignore=tests/test_audit_refuter_regressions.py -q -n 3 -p no:cacheprovider --timeout 600 -rfE
       - name: Existing probes against 0.32.1 (new red probes listed in expect/0.32.1.probes are excluded)
         run: |
           set -eu

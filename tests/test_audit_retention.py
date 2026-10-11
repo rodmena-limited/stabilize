@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from stabilize.persistence.store import WorkflowStore
 
 
@@ -7,6 +9,7 @@ def _mark(repository: WorkflowStore, n: int, prefix: str) -> list[str]:
     ids = [f"{prefix}-{i}" for i in range(n)]
     for mid in ids:
         repository.mark_message_processed(message_id=mid, handler_type="RunTask", execution_id=None)
+    time.sleep(0.05)
     return ids
 
 

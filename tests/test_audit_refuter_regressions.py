@@ -55,12 +55,16 @@ def test_canceling_a_sibling_does_not_cancel_a_running_branch(repository: Workfl
         repository, queue, {"slow": Slow, "ok": Ok}, task_backoff_min_delay_ms=100, task_backoff_max_delay_ms=100
     )
     wf = start(repository, queue, [stage("running", ["slow"]), stage("other", ["ok"], needs={"running"})])
-    drive(processor, repository, wf.id, timeout=0.5, idle=0.2)
-    sibling = next(s for s in repository.retrieve(wf.id).stages if s.ref_id == "other")
+    drive(processor, repository, wf.id, timeout=0.2, idle=0.1)
+    before = repository.retrieve(wf.id)
+    sibling = next(s for s in before.stages if s.ref_id == "other")
+    assert next(s for s in before.stages if s.ref_id == "running").status == WorkflowStatus.RUNNING
+    assert sibling.status == WorkflowStatus.NOT_STARTED
     queue.push(CancelStage(execution_type=wf.type.value, execution_id=wf.id, stage_id=sibling.id))
     result = drive(processor, repository, wf.id, timeout=15, idle=1.5)
     running = next(s for s in result.stages if s.ref_id == "running")
     assert running.status == WorkflowStatus.SUCCEEDED, f"F1 running branch ended {running.status.name}"
+    assert next(s for s in result.stages if s.ref_id == "other").status == WorkflowStatus.CANCELED
     assert POLLS.get(running.id) == 5
 
 

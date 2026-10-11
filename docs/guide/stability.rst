@@ -48,9 +48,10 @@ they are stated as measured, not as aspirations.
   this); a worker dies after the task's side effect and before its result
   commits; a task returns ``RUNNING`` and is polled again, by design.
 * **Task hooks** (``on_timeout``, ``on_cancel``, ``on_cleanup``) and stage
-  finalizers run once per committed transition; across a crash between the
-  commit and the hook they can run again on redelivery, or not at all if the
-  process dies after the commit and before the hook. Hooks must be idempotent.
+  finalizers run once per committed transition, after the commit: a process
+  that dies between the commit and the hook does not run it (at most once).
+  ``on_cancel``'s returned context and outputs are saved in a later
+  transaction, so the workflow can complete before they are visible.
 * **A failed task ends its stage**: no later task of the stage starts after a
   task completes TERMINAL, STOPPED or CANCELED, or FAILED_CONTINUE converted by
   ``continuePipelineOnFailure``. A task returning ``TaskResult.failed_continue``

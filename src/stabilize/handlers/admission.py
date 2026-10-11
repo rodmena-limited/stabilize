@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.models.status import WorkflowStatus
 from stabilize.persistence.store import WorkflowCriteria
-from stabilize.queue.messages import StartStage, StartWorkflow
+from stabilize.queue.messages import StartStage
 from stabilize.queue.ownership import queue_table_name
 
 if TYPE_CHECKING:
@@ -87,8 +87,11 @@ def promote_waiting(handler: Any, config_id: str, purge: bool, message: Any) -> 
             running = sum(1 for _ in _by_status(repository, config_id, WorkflowStatus.RUNNING))
         now = handler.current_time_millis()
         for execution in candidates:
-            if locked and txn.workflow_status(execution.id) != WorkflowStatus.BUFFERED.name:
-                continue
+            if locked:
+                status, is_canceled = txn.workflow_status(execution.id)
+                if status != WorkflowStatus.BUFFERED.name:
+                    continue
+                execution.is_canceled = execution.is_canceled or is_canceled
             limit = execution.max_concurrent_executions
             free = limit <= 0 or running < limit
             expired = execution.start_time_expiry is not None and now > execution.start_time_expiry
@@ -102,9 +105,10 @@ def promote_waiting(handler: Any, config_id: str, purge: bool, message: Any) -> 
                 continue
             initial = execution.initial_stages()
             if not initial:
-                handler.set_workflow_status(execution, WorkflowStatus.NOT_STARTED)
+                handler.set_workflow_status(execution, WorkflowStatus.RUNNING)
+                handler.set_workflow_status(execution, WorkflowStatus.TERMINAL)
+                execution.end_time = now
                 txn.update_workflow_status(execution)
-                txn.push_message(StartWorkflow(execution_type=execution.type.value, execution_id=execution.id))
                 continue
             start_running(handler, txn, execution, initial)
             running += 1

@@ -363,9 +363,11 @@ class AtomicTransaction(StoreTransaction):
         ).fetchall()
         return [r[0] for r in rows]
 
-    def workflow_status(self, workflow_id: str) -> str | None:
-        row = self._conn.execute("SELECT status FROM pipeline_executions WHERE id = ?", (workflow_id,)).fetchone()
-        return None if row is None else str(row[0])
+    def workflow_status(self, workflow_id: str) -> tuple[str | None, bool]:
+        row = self._conn.execute(
+            "SELECT status, is_canceled FROM pipeline_executions WHERE id = ?", (workflow_id,)
+        ).fetchone()
+        return (None, False) if row is None else (str(row[0]), bool(row[1]))
 
 
 

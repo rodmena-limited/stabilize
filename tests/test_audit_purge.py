@@ -51,8 +51,10 @@ def test_purge_removes_completed_workflows_and_keeps_live_ones(
     assert repository.retrieve(live.id).status == WorkflowStatus.RUNNING
 
 
-def test_prune_processed_cli_removes_old_records(repository: WorkflowStore, backend: str) -> None:
+def test_prune_processed_cli_removes_old_records(file_repository: WorkflowStore, backend: str) -> None:
+    repository = file_repository
     repository.mark_message_processed(message_id="cli-prune-1", handler_type="RunTask", execution_id=None)
+    time.sleep(0.05)
     url = repository.connection_string
     result = subprocess.run(
         [sys.executable, "-m", "stabilize.cli.main", "prune-processed", "--db-url", url, "--older-than-hours", "0"],

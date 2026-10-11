@@ -9,6 +9,7 @@ batch.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import threading
 import time
@@ -17,17 +18,25 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _accepts_batches(store: Any) -> bool:
+    try:
+        params = inspect.signature(store.cleanup_old_processed_messages).parameters
+    except (TypeError, ValueError):
+        return False
+    return "max_rows" in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
 def sweep_once(processor: Any) -> int:
     store = processor._store
     cfg = processor.config
     try:
-        try:
+        if _accepts_batches(store):
             removed = store.cleanup_old_processed_messages(
                 max_age_hours=cfg.processed_messages_max_age_hours,
                 batch_size=cfg.retention_batch_size,
                 max_rows=cfg.retention_max_rows_per_sweep,
             )
-        except TypeError:
+        else:
             removed = store.cleanup_old_processed_messages(max_age_hours=cfg.processed_messages_max_age_hours)
         claims = store.cleanup_completed_stage_claims()
     except Exception as e:

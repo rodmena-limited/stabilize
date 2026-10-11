@@ -192,21 +192,17 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
         if WorkflowStatus.TERMINAL in statuses:
             return WorkflowStatus.TERMINAL
 
+        if WorkflowStatus.STOPPED in statuses and not self._other_branches_incomplete(stages):
+            if self._should_override_success(execution):
+                return WorkflowStatus.TERMINAL
+            return WorkflowStatus.SUCCEEDED
+
         active = [s for s in stages if s.status in _ACTIVE_STAGE_STATUSES]
         if active and not execution.is_canceled:
             return None
 
-        # Any CANCELED -> CANCELED
         if WorkflowStatus.CANCELED in statuses:
             return WorkflowStatus.CANCELED
-
-        # Any STOPPED and no other branches incomplete
-        if WorkflowStatus.STOPPED in statuses:
-            if not self._other_branches_incomplete(stages):
-                # Check for override
-                if self._should_override_success(execution):
-                    return WorkflowStatus.TERMINAL
-                return WorkflowStatus.SUCCEEDED
 
         if active:
             logger.debug(
