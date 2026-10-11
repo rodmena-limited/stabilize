@@ -42,6 +42,12 @@ starting 0.33.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
 
 ### Fixed — work stranded or a false outcome reported
 
+- **A jump no longer reverts context another handler committed to its target (#91, N5).**
+  JumpToStage copied the target's whole context before its transaction and wrote
+  that copy over the row it re-read inside the transaction, so a key committed
+  in between (for example by a second jump to the same target from a parallel
+  branch) was reset to its earlier value. The jump now applies only its own keys
+  to the row it re-reads.
 - **A running branch is never failed by the completion wait budget (#86).**
   With one leaf finished, a branch running longer than
   `max_stage_wait_retries × handler_retry_delay_seconds` (1 h by default) was
