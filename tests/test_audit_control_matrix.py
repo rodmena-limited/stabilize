@@ -212,3 +212,21 @@ def test_pause_after_the_last_stage_before_the_workflow_completes(repository: Wo
     final = drive(processor, repository, wf.id, timeout=15, idle=2.0)
     assert isinstance(held, CompleteWorkflow)
     _assert_done(final, "pause between the last stage and CompleteWorkflow, then resume")
+
+
+def test_cancel_of_a_paused_workflow_ends_canceled(repository: WorkflowStore, queue: Queue) -> None:
+    processor = _processor(repository, queue)
+    wf = _start(
+        repository,
+        queue,
+        Workflow.create(
+            application="c18", name="pause-cancel", stages=[stage("a", ["poll"]), stage("b", ["ok"], needs={"a"})]
+        ),
+    )
+    _until(processor, repository, wf.id, lambda w: w.stages[0].status == WorkflowStatus.RUNNING)
+    repository.pause(wf.id, paused_by="audit")
+    paused = _until(processor, repository, wf.id, lambda w: w.status == WorkflowStatus.PAUSED, seconds=10)
+    Orchestrator(queue, store=repository).cancel(paused, user="audit", reason="stop")
+    final = drive(processor, repository, wf.id, timeout=20, idle=2.0)
+    states = {s.ref_id: s.status.name for s in final.stages}
+    assert final.status == WorkflowStatus.CANCELED, f"C18 cancel while PAUSED: workflow {final.status.name}, {states}"

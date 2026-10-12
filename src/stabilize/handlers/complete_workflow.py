@@ -84,7 +84,7 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
                 )
                 return
 
-            if execution.status == WorkflowStatus.PAUSED:
+            if execution.status == WorkflowStatus.PAUSED and not execution.is_canceled:
                 logger.info("Execution %s is PAUSED; completion waits for unpause", execution.id)
                 return
 
