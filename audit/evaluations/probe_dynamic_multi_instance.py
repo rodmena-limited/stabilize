@@ -40,6 +40,35 @@ def _build(initial_count: int) -> tuple[StageExecution, list[StageExecution]]:
     return parent, stages
 
 
+def _drive_add(initial_count: int) -> tuple[bool, str]:
+    import tempfile
+    from datetime import timedelta
+
+    from stabilize import Orchestrator, QueueProcessor, SqliteQueue, SqliteWorkflowStore, TaskRegistry, Workflow
+    from stabilize.queue.messages import AddMultiInstance
+
+    with tempfile.TemporaryDirectory() as d:
+        url = f"sqlite:///{d}/mi.db"
+        store = SqliteWorkflowStore(url, create_tables=True)
+        queue = SqliteQueue(url, table_name="queue_messages")
+        queue._create_table()
+        parent, stages = _build(initial_count)
+        wf = Workflow.create(application="probe", name="mi", stages=[parent, *[s for s in stages if s is not parent]])
+        store.store(wf)
+        Orchestrator(queue, store=store).start(wf)
+        proc = QueueProcessor(queue, store=store, task_registry=TaskRegistry())
+        proc.config.retry_delay = timedelta(milliseconds=50)
+        queue.push(AddMultiInstance(execution_type=wf.type.value, execution_id=wf.id, stage_id=parent.id))
+        for _ in range(40):
+            if not proc.process_one():
+                break
+        refs = sorted(s.ref_id for s in store.retrieve(wf.id).stages if "_instance_" in s.ref_id)
+        queue.close()
+        store.close()
+    want = f"parent_instance_{initial_count + 1}"
+    return want in refs, f"instance stages after AddMultiInstance: {refs} (want {want} among them)"
+
+
 def main() -> int:
     results: list[tuple[str, bool, str]] = []
 
@@ -65,26 +94,10 @@ def main() -> int:
 
     print()
     print("=== D. AddMultiInstance IS ACCEPTED, not merely permitted by a flag ===")
-    print("    the handler is where the WARNING came from, so ask the handler")
-    from stabilize.handlers.add_multi_instance import AddMultiInstanceHandler
-
-    source = AddMultiInstanceHandler.__module__
-    refusal_reads_flag = False
-    try:
-        import inspect
-
-        src = inspect.getsource(sys.modules[source])
-        refusal_reads_flag = "allow_dynamic" in src
-    except Exception:
-        pass
-    print(f"    handler gates on mi_config.allow_dynamic: {refusal_reads_flag}")
-    print(f"    parent presents allow_dynamic={p2.mi_config.allow_dynamic} -> would be accepted: "
-          f"{refusal_reads_flag and p2.mi_config.allow_dynamic}")
-    results.append((
-        "a seeded parent would be accepted by the handler",
-        refusal_reads_flag and p2.mi_config.allow_dynamic is True,
-        f"gate_present={refusal_reads_flag} flag={p2.mi_config.allow_dynamic}",
-    ))
+    print("    drive the handler through a processor and look for the instance row")
+    added, detail = _drive_add(initial_count=2)
+    print(f"    {detail}")
+    results.append(("a seeded parent accepts AddMultiInstance (instance row created)", added, detail))
 
     print()
     failures = 0
