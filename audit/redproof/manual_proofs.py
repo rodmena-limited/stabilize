@@ -1,0 +1,112 @@
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+MANUAL = REPO / "audit" / "redproof" / "manual"
+PYTHON = os.environ.get("MANUAL_PROOFS_PYTHON", str(REPO / ".venv" / "bin" / "python"))
+EXPORT = ["src", "tests", "migrations", "pyproject.toml"]
+
+
+def wait_host() -> None:
+    while True:
+        load = float(Path("/proc/loadavg").read_text().split()[0])
+        avail = 0
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                avail = int(line.split()[1]) // 1024
+        if load < 8 and avail >= 6144:
+            return
+        time.sleep(20)
+
+
+def export(dest: Path) -> None:
+    archive = subprocess.run(["git", "-C", str(REPO), "archive", "HEAD", *EXPORT], check=True, capture_output=True)
+    subprocess.run(["tar", "-x", "-C", str(dest)], input=archive.stdout, check=True)
+
+
+def env_for(tree: Path) -> dict[str, str]:
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(tree / "src")
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env.pop("VIRTUAL_ENV", None)
+    return env
+
+
+def imports_tree(tree: Path) -> bool:
+    out = subprocess.run(
+        [PYTHON, "-c", "import stabilize; print(stabilize.__file__)"],
+        cwd=tree,
+        env=env_for(tree),
+        capture_output=True,
+        text=True,
+    )
+    return out.stdout.strip().startswith(str(tree / "src") + "/")
+
+
+def run_test(tree: Path, test_id: str) -> tuple[int, str]:
+    wait_host()
+    proc = subprocess.run(
+        [PYTHON, "-m", "pytest", test_id, "-q", "-p", "no:cacheprovider", "-p", "no:logging", "-rf", "--timeout", "300"],
+        cwd=tree,
+        env=env_for(tree),
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+    return proc.returncode, proc.stdout + proc.stderr
+
+
+def prove(diff: Path) -> tuple[bool, str]:
+    lines = diff.read_text().splitlines()
+    if not lines or not lines[0].startswith("test-id: "):
+        return False, "diff has no test-id header"
+    test_id = lines[0][len("test-id: ") :].strip()
+    work = Path(tempfile.mkdtemp(prefix="manual-proof-"))
+    try:
+        clean = work / "clean"
+        mutant = work / "mutant"
+        for tree in (clean, mutant):
+            tree.mkdir()
+            export(tree)
+            if not imports_tree(tree):
+                return False, f"stabilize is not imported from {tree / 'src'}"
+        rc, out = run_test(clean, test_id)
+        if rc != 0:
+            return False, f"not green on the unmutated tree (pytest exit {rc}): {out.strip().splitlines()[-1:]}"
+        applied = subprocess.run(["patch", "-p1", "-s", "-i", str(diff)], cwd=mutant, capture_output=True, text=True)
+        if applied.returncode != 0:
+            return False, f"patch failed: {applied.stdout.strip()} {applied.stderr.strip()}"
+        rc, out = run_test(mutant, test_id)
+        failed = [line for line in out.splitlines() if line.startswith(f"FAILED {test_id}")]
+        if rc != 1 or not failed:
+            return False, f"mutant did not fail in the call phase (pytest exit {rc}): {out.strip().splitlines()[-1:]}"
+        return True, failed[0]
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def main() -> int:
+    diffs = sorted(MANUAL.glob("*.diff"))
+    if not diffs:
+        print("[FAIL] no manual proofs found; an empty check proves nothing")
+        return 1
+    bad = 0
+    for diff in diffs:
+        ok, detail = prove(diff)
+        test_id = diff.read_text().splitlines()[0].removeprefix("test-id: ")
+        print(f"[{'PASS' if ok else 'FAIL'}] {test_id} {detail}", flush=True)
+        if not ok:
+            bad += 1
+    print(f"manual proofs: {len(diffs) - bad} of {len(diffs)} red on their mutant and green without it")
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

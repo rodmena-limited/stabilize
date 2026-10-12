@@ -1,0 +1,12 @@
+test-id: tests/test_pool_options_and_lifetime.py::TestIsHealthyIsBounded::test_default_health_timeout_is_well_under_a_probe_budget
+--- a/src/stabilize/persistence/pool_options.py
++++ b/src/stabilize/persistence/pool_options.py
+@@ -13,7 +13,7 @@
+ DEFAULT_MIN_SIZE = 5
+ DEFAULT_MAX_SIZE = 15
+ 
+-DEFAULT_HEALTH_TIMEOUT_SECONDS = 2.0
++DEFAULT_HEALTH_TIMEOUT_SECONDS = 10.0
+ 
+ 
+ @dataclass(frozen=True)

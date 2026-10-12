@@ -1,0 +1,12 @@
+test-id: tests/events/test_event_store.py::TestEventQuery::test_filter_by_entity
+--- a/src/stabilize/events/store/sqlite/events.py
++++ b/src/stabilize/events/store/sqlite/events.py
+@@ -100,7 +100,7 @@
+             sql_parts.append("AND entity_type = ?")
+             params.append(query.entity_type.value)
+ 
+-        if query.entity_id is not None:
++        if False:
+             sql_parts.append("AND entity_id = ?")
+             params.append(query.entity_id)
+ 

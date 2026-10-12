@@ -1,0 +1,12 @@
+test-id: tests/test_config_versioning.py::TestHandlerConfig::test_config_fingerprint_deterministic
+--- a/src/stabilize/resilience/config.py
++++ b/src/stabilize/resilience/config.py
+@@ -200,7 +200,7 @@
+         """
+         # Create a deterministic string representation of all fields
+         content = (
+-            f"HandlerConfig:"
++            f"HandlerConfig:{id(self)}:"
+             f"{self.concurrency_max_retries}:{self.concurrency_min_delay_ms}:"
+             f"{self.concurrency_max_delay_ms}:{self.concurrency_backoff_factor}:"
+             f"{self.concurrency_jitter}:{self.error_handling_max_retries}:"

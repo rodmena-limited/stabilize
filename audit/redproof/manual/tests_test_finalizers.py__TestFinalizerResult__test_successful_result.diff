@@ -1,0 +1,12 @@
+test-id: tests/test_finalizers.py::TestFinalizerResult::test_successful_result
+--- a/src/stabilize/finalizers.py
++++ b/src/stabilize/finalizers.py
+@@ -51,7 +51,7 @@
+ 
+     name: str
+     success: bool
+-    error: str | None = None
++    error: str | None = ""
+     duration_ms: float = 0
+ 
+ 

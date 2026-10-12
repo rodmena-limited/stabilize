@@ -1,0 +1,12 @@
+test-id: tests/test_schema_and_exists.py::TestExistsDistinguishesAbsenceFromBreakage::test_absent_error_tuple_covers_both_spellings
+--- a/src/stabilize/persistence/store/interface.py
++++ b/src/stabilize/persistence/store/interface.py
+@@ -25,7 +25,7 @@
+ 
+ # Both spellings exist in the tree and different backends raise different
+ # ones; exists() must treat either as "absent" and nothing else.
+-WORKFLOW_ABSENT_ERRORS = (_WorkflowNotFoundErrorStore, _WorkflowNotFoundErrorModel)
++WORKFLOW_ABSENT_ERRORS = (_WorkflowNotFoundErrorStore,)
+ 
+ if TYPE_CHECKING:
+     from stabilize.models.stage import StageExecution

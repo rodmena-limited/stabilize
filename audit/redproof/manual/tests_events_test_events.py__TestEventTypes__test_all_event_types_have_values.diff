@@ -1,0 +1,12 @@
+test-id: tests/events/test_events.py::TestEventTypes::test_all_event_types_have_values
+--- a/src/stabilize/events/base.py
++++ b/src/stabilize/events/base.py
+@@ -46,7 +46,7 @@
+     """
+ 
+     # Workflow lifecycle
+-    WORKFLOW_CREATED = "workflow.created"
++    WORKFLOW_CREATED = "workflow_created"
+     WORKFLOW_STARTED = "workflow.started"
+     WORKFLOW_COMPLETED = "workflow.completed"
+     WORKFLOW_FAILED = "workflow.failed"

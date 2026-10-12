@@ -1,0 +1,12 @@
+test-id: tests/test_failure_scenarios.py::TestErrorHierarchy::test_error_codes
+--- a/src/stabilize/errors/transient.py
++++ b/src/stabilize/errors/transient.py
+@@ -34,7 +34,7 @@
+         )
+     """
+ 
+-    code: int = 101
++    code: int = 109
+ 
+     @property
+     def error_code(self) -> ErrorCode:

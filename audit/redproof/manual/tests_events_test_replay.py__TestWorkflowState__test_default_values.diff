@@ -1,0 +1,12 @@
+test-id: tests/events/test_replay.py::TestWorkflowState::test_default_values
+--- a/src/stabilize/events/replay.py
++++ b/src/stabilize/events/replay.py
+@@ -45,7 +45,7 @@
+     """Reconstructed workflow state from events."""
+ 
+     workflow_id: str
+-    status: str | None = None
++    status: str | None = "RUNNING"
+     application: str | None = None
+     name: str | None = None
+     start_time: datetime | None = None

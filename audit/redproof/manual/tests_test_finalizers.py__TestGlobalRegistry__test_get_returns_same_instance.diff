@@ -1,0 +1,12 @@
+test-id: tests/test_finalizers.py::TestGlobalRegistry::test_get_returns_same_instance
+--- a/src/stabilize/finalizers.py
++++ b/src/stabilize/finalizers.py
+@@ -316,7 +316,7 @@
+     global _finalizer_registry
+     if _finalizer_registry is None:
+         _finalizer_registry = FinalizerRegistry()
+-    return _finalizer_registry
++    return FinalizerRegistry()
+ 
+ 
+ def set_finalizer_registry(registry: FinalizerRegistry) -> None:

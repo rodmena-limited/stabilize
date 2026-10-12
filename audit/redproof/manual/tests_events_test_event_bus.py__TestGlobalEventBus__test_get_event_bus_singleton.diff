@@ -1,0 +1,12 @@
+test-id: tests/events/test_event_bus.py::TestGlobalEventBus::test_get_event_bus_singleton
+--- a/src/stabilize/events/bus.py
++++ b/src/stabilize/events/bus.py
+@@ -330,7 +330,7 @@
+         with _bus_lock:
+             if _event_bus is None:
+                 _event_bus = EventBus()
+-    return _event_bus
++    return EventBus()
+ 
+ 
+ def reset_event_bus() -> None:

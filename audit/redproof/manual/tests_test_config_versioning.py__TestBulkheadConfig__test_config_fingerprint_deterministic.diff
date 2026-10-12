@@ -1,0 +1,12 @@
+test-id: tests/test_config_versioning.py::TestBulkheadConfig::test_config_fingerprint_deterministic
+--- a/src/stabilize/resilience/config.py
++++ b/src/stabilize/resilience/config.py
+@@ -266,7 +266,7 @@
+ 
+     def config_fingerprint(self) -> str:
+         """Return deterministic hash of all field values."""
+-        content = f"BulkheadConfig:{self.max_concurrent}:{self.max_queue_size}:{self.timeout_seconds}"
++        content = f"BulkheadConfig:{id(self)}:{self.max_concurrent}:{self.max_queue_size}:{self.timeout_seconds}"
+         return hashlib.sha256(content.encode()).hexdigest()[:16]
+ 
+ 
