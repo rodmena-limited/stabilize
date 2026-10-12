@@ -59,6 +59,20 @@ they are stated as measured, not as aspirations.
 * **Recovery** re-issues, for one lost message, exactly the message the normal
   path would have pushed, rebuilt from committed state; it never re-runs a task
   whose result was committed.
+* **Recovery window**: recovery examines only workflows whose ``start_time`` is
+  within ``recovery_max_age_hours`` (24 h by default) or not yet set. A RUNNING
+  workflow that started earlier and lost a message is not recovered, however
+  recent its last stage or task activity; raise ``recovery_max_age_hours`` (or
+  pass ``max_age_hours`` to ``recover_on_startup``) to cover workflows that run
+  longer than the window. Probed in both directions by
+  ``tests/test_recovery_window.py``.
+* **Retention keeps live dedup records**: the processor's retention sweep and
+  ``stabilize prune-processed`` delete a ``processed_messages`` record only when
+  its message is no longer in its queue table, so a message whose handler
+  committed but whose ack was lost is never handled again after retention.
+  ``prune-processed`` reads the queue tables from ``--db-url`` unless
+  ``--queue-db-url`` is given; when the queue is in another database it must be
+  given.
 
 Several queue tables in one store
 ---------------------------------
