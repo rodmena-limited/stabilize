@@ -171,3 +171,13 @@ def test_pause_of_a_completed_workflow_leaves_it_completed(repository: WorkflowS
     repository.pause(wf.id, paused_by="audit")
     after = repository.retrieve(wf.id)
     assert after.status == WorkflowStatus.SUCCEEDED, f"C18 pause rewrote a SUCCEEDED workflow to {after.status.name}"
+
+
+def test_cancel_of_a_completed_workflow_leaves_it_uncanceled(repository: WorkflowStore, queue: Queue) -> None:
+    processor = _processor(repository, queue)
+    wf = _start(repository, queue, Workflow.create(application="c18", name="done", stages=[stage("a", ["ok"])]))
+    _assert_done(drive(processor, repository, wf.id, timeout=15, idle=1.0), "completed before cancel")
+    repository.cancel(wf.id, canceled_by="audit", reason="late")
+    after = repository.retrieve(wf.id)
+    assert after.status == WorkflowStatus.SUCCEEDED
+    assert not after.is_canceled, "C18 cancel flagged a SUCCEEDED workflow as canceled"
