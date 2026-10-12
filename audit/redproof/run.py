@@ -420,7 +420,7 @@ def check(out: Path, allowlist: Path) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["prepare", "baseline", "prove", "check", "all"])
+    ap.add_argument("command", choices=["prepare", "baseline", "prove", "fallback", "check", "all"])
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--sha", default="HEAD")
@@ -434,6 +434,12 @@ def main() -> int:
         baseline(a.out)
     if a.command in ("prove", "all"):
         prove(a.out, a.workers, a.budget_hours * 3600)
+    if a.command == "fallback":
+        import fallback
+
+        state = State(a.out)
+        fallback.run(state, a.out, a.workers, a.budget_hours * 3600, try_mutant, wait_host, log)
+        report(a.out, state)
     if a.command in ("check", "all"):
         return check(a.out, a.allowlist)
     return 0
