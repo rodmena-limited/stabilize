@@ -38,3 +38,5 @@ tests/test_audit_zombie_replan.py::test_zombie_replan_racing_the_original_runs_b
 tests/test_audit_zombie_replan.py::test_duplicate_complete_stage_runs_the_after_stage_once|N3 after-stage: task executed 2 times|tests/test_audit_zombie_replan.py::test_after_stage_control_without_duplicate
 tests/test_audit_multi_instance_crash.py::test_add_instance_interrupted_after_its_commit_still_adds_it|MI interrupted add: parent counts 1 instance(s), store has []|tests/test_audit_multi_instance_crash.py::test_add_instance_control_without_fault
 tests/test_audit_control_matrix.py::test_pause_after_the_last_stage_before_the_workflow_completes|C18 pause between the last stage and CompleteWorkflow, then resume: workflow PAUSED|tests/test_audit_control_matrix.py::test_pause_while_a_stage_runs_and_its_successor_has_not_started
+tests/test_config_version_persisted.py::test_orchestrator_start_persists_the_config_fingerprint|config_version lost after Orchestrator.start
+tests/test_config_version_persisted.py::test_config_version_set_before_store_is_read_back|config_version lost by store()
