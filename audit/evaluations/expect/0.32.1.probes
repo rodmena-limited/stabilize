@@ -18,3 +18,4 @@ probe_base_exception_task.py|[FAIL] sqlite A SystemExit|[PASS] sqlite B CONTROL 
 probe_cleanup_once_on_conflict.py|[FAIL] sqlite A one conflict at completion|[PASS] sqlite B CONTROL no conflict
 probe_purge_cancels_buffered.py|[FAIL] sqlite A keep_waiting_pipelines=False|[PASS] sqlite B CONTROL keep_waiting_pipelines=True
 probe_redirect_without_target.py|[FAIL] sqlite A REDIRECT without target|[PASS] sqlite B CONTROL success
+probe_heartbeat_survives_blip.py|[FAIL] sqlite A one renewal raises|[PASS] sqlite B CONTROL no fault
