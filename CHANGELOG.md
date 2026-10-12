@@ -55,6 +55,12 @@ starting 0.33.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
   stage (redelivery, recovery) planned its own copy, lost the update, and on
   retry started both copies: the after-stage's task ran twice. They are now
   written in the transaction that updates the parent.
+- **A dynamically added multi-instance stage is never lost (#91, N3).**
+  AddMultiInstance committed the parent's instance count first and inserted
+  the instance and pushed its StartStage afterwards, outside the transaction;
+  an interruption in between left the parent counting an instance that did
+  not exist, and the redelivered message was deduplicated. All three are now
+  one transaction.
 - **Before-stages are stored in the transaction that claims their parent (#91, N3).**
   Planning inserted each before-stage on its own, before the parent's
   version-checked update. A duplicate StartStage arriving while the first was
