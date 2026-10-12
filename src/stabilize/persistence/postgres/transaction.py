@@ -81,6 +81,13 @@ class PostgresTransaction(StoreTransaction):
         self._staged_objects.extend(task_versions)
         self._written_tasks.extend(capture(stage.tasks))
 
+    def set_config_version(self, workflow_id: str, config_version: str) -> None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE pipeline_executions SET config_version = %(v)s WHERE id = %(id)s",
+                {"v": config_version, "id": workflow_id},
+            )
+
     def update_workflow_status(self, workflow: Workflow) -> None:
         """Update workflow status within the transaction."""
         with self._conn.cursor() as cur:

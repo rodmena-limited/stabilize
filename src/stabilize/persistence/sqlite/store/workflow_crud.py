@@ -17,7 +17,7 @@ from stabilize.persistence.sqlite.converters import (
     row_to_stage,
     row_to_task,
 )
-from stabilize.persistence.sqlite.helpers import has_queue_table_column, insert_stage
+from stabilize.persistence.sqlite.helpers import has_execution_column, has_queue_table_column, insert_stage
 from stabilize.persistence.store import WorkflowNotFoundError
 from stabilize.persistence.store.ids import check_ids
 from stabilize.persistence.store.owned_rows import WORKFLOW_OWNED_ROWS
@@ -49,7 +49,16 @@ class SqliteWorkflowCrudMixin:
         conn.commit()
 
     def _insert_execution(self, conn: sqlite3.Connection, execution: Workflow) -> None:
-        owned = has_queue_table_column(conn)
+        extra = [
+            c
+            for c, ok in (
+                ("queue_table", has_queue_table_column(conn)),
+                ("config_version", has_execution_column(conn, "config_version")),
+            )
+            if ok
+        ]
+        columns = "".join(f", {c}" for c in extra)
+        values = "".join(f", :{c}" for c in extra)
         conn.execute(
             f"""
             INSERT INTO pipeline_executions (
@@ -57,13 +66,13 @@ class SqliteWorkflowCrudMixin:
                 start_time_expiry, trigger, is_canceled, canceled_by,
                 cancellation_reason, paused, pipeline_config_id,
                 is_limit_concurrent, max_concurrent_executions,
-                keep_waiting_pipelines, origin{", queue_table" if owned else ""}
+                keep_waiting_pipelines, origin{columns}
             ) VALUES (
                 :id, :type, :application, :name, :status, :context, :start_time, :end_time,
                 :start_time_expiry, :trigger, :is_canceled, :canceled_by,
                 :cancellation_reason, :paused, :pipeline_config_id,
                 :is_limit_concurrent, :max_concurrent_executions,
-                :keep_waiting_pipelines, :origin{", :queue_table" if owned else ""}
+                :keep_waiting_pipelines, :origin{values}
             )
             """,
             execution_to_dict(execution),

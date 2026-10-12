@@ -49,6 +49,11 @@ starting 0.33.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
 
 ### Fixed — work stranded or a false outcome reported
 
+- **The configuration fingerprint of a workflow is stored (#92, C23).**
+  `Orchestrator.start` set `Workflow.config_version`, and the resilience guide
+  documents drift detection against it, but no store wrote or read the field:
+  it was None on every retrieve. It is now stored by `store()` and by
+  `Orchestrator.start` for a workflow stored beforehand.
 - **After-stages and on-failure stages run once when CompleteStage is duplicated (#91, N3).**
   CompleteStage inserted each planned after-stage (or on-failure stage) before
   the parent's version-checked update; a second CompleteStage for the same
@@ -154,8 +159,10 @@ starting 0.33.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
   `pipeline_executions.queue_table`, an index on `queue_messages`'
   `payload->>'stage_id'`, and advances `queue_messages_id_seq` past the largest
   numeric `processed_messages.message_id`. Run it before 0.33.0 workers.
-- SQLite migration 4 adds the same column (applied by `create_tables=True`);
-  a 0.33.0 store on an unmigrated SQLite database keeps working without it.
+- PostgreSQL migration `01M4Q8VTM40WEC4HR2X31Q07A5`: adds `pipeline_executions.config_version`.
+  Run `stabilize mg-up` before 0.33.0 workers; it applies both migrations.
+- SQLite migrations 4 and 5 add the same columns (applied by `create_tables=True`);
+  a 0.33.0 store on an unmigrated SQLite database keeps working without them.
 - `prune-processed` checks each record against the queue table: pass
   `--queue-table` once per queue table (default `queue_messages`), and
   `--queue-db-url` when the queue tables are not in `--db-url`. Without it, an

@@ -122,6 +122,7 @@ class Orchestrator:
                     if not self.store.exists(execution.id):
                         raise
             with self.store.transaction(self.queue) as txn:
+                txn.set_config_version(execution.id, execution.config_version)
                 txn.push_message(message)
         else:
             self.queue.push(message)

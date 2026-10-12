@@ -45,6 +45,10 @@ class StoreTransaction(ABC):
         """Update workflow status within the transaction."""
         pass
 
+    def set_config_version(self, workflow_id: str, config_version: str) -> None:
+        """Record the configuration fingerprint of a workflow within the transaction."""
+        return None
+
     @abstractmethod
     def push_message(self, message: Message, delay: float = 0) -> None:
         """Push a message to the queue within the transaction."""

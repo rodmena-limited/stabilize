@@ -11,7 +11,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from stabilize.errors import ConcurrencyError
-from stabilize.persistence.sqlite.helpers import has_queue_table_column, insert_stage, upsert_task
+from stabilize.persistence.sqlite.helpers import has_execution_column, has_queue_table_column, insert_stage, upsert_task
 from stabilize.persistence.store import StoreTransaction
 from stabilize.persistence.task_state import Captured, capture, commit_captured
 
@@ -165,6 +165,14 @@ class AtomicTransaction(StoreTransaction):
         else:
             insert_stage(self._conn, stage, stage.execution.id)
         self._written_tasks.extend(capture(stage.tasks))
+
+    def set_config_version(self, workflow_id: str, config_version: str) -> None:
+        if not has_execution_column(self._conn, "config_version"):
+            return
+        self._conn.execute(
+            "UPDATE pipeline_executions SET config_version = :v WHERE id = :id",
+            {"v": config_version, "id": workflow_id},
+        )
 
     def update_workflow_status(self, workflow: Workflow) -> None:
         """Update workflow status within the transaction.

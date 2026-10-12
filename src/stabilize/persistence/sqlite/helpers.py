@@ -17,6 +17,17 @@ if TYPE_CHECKING:
 _QUEUE_TABLE_COLUMN: dict[int, bool] = {}
 
 
+_COLUMNS: dict[tuple[int, str], bool] = {}
+
+
+def has_execution_column(conn: sqlite3.Connection, name: str) -> bool:
+    key = (id(conn), name)
+    if not _COLUMNS.get(key):
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(pipeline_executions)").fetchall()}
+        _COLUMNS[key] = name in columns
+    return _COLUMNS[key]
+
+
 def has_queue_table_column(conn: sqlite3.Connection) -> bool:
     """Whether pipeline_executions has queue_table (SQLite migration 4 applied on this database)."""
     key = id(conn)

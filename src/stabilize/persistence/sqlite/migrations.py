@@ -115,6 +115,11 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        5,
+        "add_workflow_config_version",
+        ("ALTER TABLE pipeline_executions ADD COLUMN config_version TEXT",),
+    ),
 )
 
 
