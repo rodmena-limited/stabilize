@@ -86,3 +86,62 @@ def test_zombie_replan_control_without_interleaving(repository: WorkflowStore, q
     result = _run(repository, queue, zombie=False)
     assert RUNS == {"before": 1, "main": 1}
     assert result.status == WorkflowStatus.SUCCEEDED
+
+
+class N3After(Task):
+    def execute(self, stage: StageExecution) -> TaskResult:
+        RUNS["after"] = RUNS.get("after", 0) + 1
+        return TaskResult.success()
+
+
+class N3WithAfterStageBuilder(StageDefinitionBuilder):
+    def build_tasks(self, stage: StageExecution) -> list[TaskExecution]:
+        return [TaskExecution.create("main", "n3main", stage_start=True, stage_end=True)]
+
+    def after_stages(self, stage: StageExecution, graph: Any) -> None:
+        after = StageExecution.create_synthetic(
+            type="n3after", name="after", parent=stage, owner=SyntheticStageOwner.STAGE_AFTER
+        )
+        graph.add(after)
+
+
+class N3AfterStageBuilder(StageDefinitionBuilder):
+    def build_tasks(self, stage: StageExecution) -> list[TaskExecution]:
+        return [TaskExecution.create("after", "n3after", stage_start=True, stage_end=True)]
+
+
+def _run_after(repository: WorkflowStore, queue: Queue, duplicate: bool) -> Workflow:
+    from stabilize.queue.messages import CompleteStage
+
+    register_builder(N3WithAfterStageBuilder())
+    register_builder(N3AfterStageBuilder())
+    processor = make_processor(repository, queue, {"n3main": N3Main, "n3after": N3After})
+    wf = start(repository, queue, [StageExecution(ref_id="p", type="n3withafter", name="p", context={})])
+    handler = processor._handlers[CompleteStage]
+    original = handler._plan_after_stages
+    state = {"done": False}
+
+    def plan(stage: StageExecution) -> Any:
+        if duplicate and not state["done"] and stage.ref_id == "p":
+            state["done"] = True
+            handler.handle(CompleteStage(execution_type=wf.type.value, execution_id=wf.id, stage_id=stage.id))
+        return original(stage)
+
+    handler._plan_after_stages = plan
+    result = drive(processor, repository, wf.id, timeout=20, idle=1.5)
+    if duplicate:
+        assert state["done"], "the duplicate CompleteStage was never interleaved"
+    return result
+
+
+def test_duplicate_complete_stage_runs_the_after_stage_once(repository: WorkflowStore, queue: Queue) -> None:
+    result = _run_after(repository, queue, duplicate=True)
+    states = [(s.name, s.status.name) for s in result.stages]
+    assert RUNS.get("after") == 1, f"N3 after-stage: task executed {RUNS.get('after')} times; {states}"
+    assert result.status == WorkflowStatus.SUCCEEDED, f"N3 after-stage: workflow {result.status.name}; {states}"
+
+
+def test_after_stage_control_without_duplicate(repository: WorkflowStore, queue: Queue) -> None:
+    result = _run_after(repository, queue, duplicate=False)
+    assert RUNS == {"main": 1, "after": 1}
+    assert result.status == WorkflowStatus.SUCCEEDED
