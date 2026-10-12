@@ -200,6 +200,9 @@ def cleanup_old_processed_messages(
     return total
 
 
+KEPT_LIMIT = 5_000
+
+
 def cleanup_processed_not_in_queue(
     conn: sqlite3.Connection,
     max_age_hours: float,
@@ -218,25 +221,25 @@ def cleanup_processed_not_in_queue(
     stale = "processed_at < :cutoff AND julianday(processed_at) < julianday(:cutoff)"
     batch = int(batch_size or SQLITE_RETENTION_BATCH)
     total = 0
-    after: tuple[str, str] | None = None
+    kept: list[str] = []
     while max_rows is None or total < max_rows:
         params: dict[str, Any] = {"cutoff": cutoff, "n": batch, "prefix": prefix, "plen": len(prefix or "")}
-        page = ""
-        if after is not None:
-            page = " AND (processed_at, message_id) > (:after_at, :after_id)"
-            params.update(after_at=after[0], after_id=after[1])
+        exclude = ""
+        if kept:
+            exclude = " AND message_id NOT IN (" + ",".join(f":x{i}" for i in range(len(kept))) + ")"
+            params.update({f"x{i}": k for i, k in enumerate(kept)})
         rows = conn.execute(
-            f"SELECT message_id, processed_at FROM processed_messages WHERE {stale} AND {owner}{page} "
-            "ORDER BY processed_at, message_id LIMIT :n",
+            f"SELECT message_id FROM processed_messages WHERE {stale} AND {owner}{exclude} "
+            "ORDER BY processed_at LIMIT :n",
             params,
         ).fetchall()
         conn.commit()
         if not rows:
             break
         keys = [str(r[0]) for r in rows]
-        after = (str(rows[-1][1]), keys[-1])
         still_queued = live(keys)
         gone = [k for k in keys if k not in still_queued]
+        kept.extend(k for k in keys if k in still_queued)
         if max_rows is not None:
             gone = gone[: max_rows - total]
         for i in range(0, len(gone), 500):
@@ -247,7 +250,7 @@ def cleanup_processed_not_in_queue(
             cursor = conn.execute(f"DELETE FROM processed_messages WHERE message_id IN ({marks}) AND {stale}", args)
             total += int(cursor.rowcount or 0)
         conn.commit()
-        if len(rows) < batch:
+        if len(rows) < batch or len(kept) > KEPT_LIMIT:
             break
     return total
 

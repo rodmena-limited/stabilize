@@ -198,6 +198,9 @@ def _field(row: Any, name: str, index: int) -> Any:
     return row[name] if isinstance(row, dict) else row[index]
 
 
+KEPT_LIMIT = 5_000
+
+
 def cleanup_processed_not_in_queue(
     pool: Any,
     max_age_hours: float,
@@ -212,23 +215,15 @@ def cleanup_processed_not_in_queue(
     batch = int(batch_size or PG_RETENTION_BATCH)
     stale = "processed_at < NOW() - %(hours)s * INTERVAL '1 hour'"
     total = 0
-    after: tuple[Any, str] | None = None
+    kept: list[str] = []
     while max_rows is None or total < max_rows:
-        params: dict[str, Any] = {
-            "hours": float(max_age_hours),
-            "n": batch,
-            "prefix": prefix,
-            "plen": len(prefix or ""),
-        }
-        page = ""
-        if after is not None:
-            page = " AND (processed_at, message_id) > (%(after_at)s::timestamptz, %(after_id)s::text)"
-            params.update(after_at=after[0], after_id=after[1])
+        params: dict[str, Any] = {"hours": float(max_age_hours), "n": batch, "kept": kept}
+        params.update(prefix=prefix, plen=len(prefix or ""))
         with pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT message_id, processed_at FROM processed_messages WHERE {stale} AND {owner}{page} "
-                    "ORDER BY processed_at, message_id LIMIT %(n)s",
+                    f"SELECT message_id FROM processed_messages WHERE {stale} AND {owner} "
+                    "AND message_id <> ALL(%(kept)s) ORDER BY processed_at LIMIT %(n)s",
                     params,
                 )
                 rows = cur.fetchall()
@@ -236,9 +231,9 @@ def cleanup_processed_not_in_queue(
         if not rows:
             break
         keys = [str(_field(r, "message_id", 0)) for r in rows]
-        after = (_field(rows[-1], "processed_at", 1), keys[-1])
         still_queued = live(keys)
         gone = [k for k in keys if k not in still_queued]
+        kept.extend(k for k in keys if k in still_queued)
         if max_rows is not None:
             gone = gone[: max_rows - total]
         if gone:
@@ -250,7 +245,7 @@ def cleanup_processed_not_in_queue(
                     )
                     total += int(cur.rowcount or 0)
                 conn.commit()
-        if len(rows) < batch:
+        if len(rows) < batch or len(kept) > KEPT_LIMIT:
             break
     return total
 
