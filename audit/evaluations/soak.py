@@ -144,10 +144,14 @@ def main() -> int:
             if _scalar(dsn, "SELECT COUNT(*) FROM pipeline_executions WHERE application='soak' AND status='SUCCEEDED'") >= len(ids):
                 break
             time.sleep(2)
+        proc.stop(wait=True, timeout=30)
+        final = [store.retrieve(w).status.name for w in ids]
     finally:
         proc.stop(wait=True, timeout=30)
-    statuses = [store.retrieve(w).status.name for w in ids[-200:]]
-    succeeded = _scalar(dsn, "SELECT COUNT(*) FROM pipeline_executions WHERE application='soak' AND status='SUCCEEDED'")
+        queue.close()
+        store.close()
+    statuses = final[-200:]
+    succeeded = final.count("SUCCEEDED")
     at5 = next((s for s in samples if s["t_s"] >= 300), samples[0] if samples else None)
     at10 = next((s for s in samples if s["t_s"] >= 600), samples[-1] if samples else None)
     last = samples[-1] if samples else None
