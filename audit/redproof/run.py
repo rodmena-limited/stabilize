@@ -232,6 +232,7 @@ class State:
         self.file_tries: dict[str, int] = defaultdict(int)
         self.file_proofs: dict[str, int] = defaultdict(int)
         self.broad_results: list[int] = []
+        self.file_recent: dict[str, list[int]] = {}
         self._resume()
 
     def _resume(self) -> None:
@@ -264,8 +265,8 @@ class State:
                 for k, cov in self.cover.items():
                     if k in self.tried or k in self.in_flight:
                         continue
-                    path = self.mutants[k].path
-                    weight = (1 + self.file_proofs[path]) / (1 + self.file_tries[path])
+                    recent = self.file_recent.get(self.mutants[k].path)
+                    weight = 1 + (sum(recent) / len(recent) if recent else 5)
                     score = len(cov & act) * weight
                     if score > best_score:
                         best_key, best_score = k, score
@@ -357,9 +358,11 @@ def prove(out: Path, workers: int, budget_s: float) -> None:
             m, ids = picked
             confirmed, discarded = try_mutant(ws, i, m, ids)
             state.record(m, ids, confirmed, discarded)
-            if broad:
-                with state.lock:
+            with state.lock:
+                if broad:
                     state.broad_results.append(len(confirmed))
+                if not discarded:
+                    state.file_recent[m.path] = (state.file_recent.get(m.path, []) + [len(confirmed)])[-3:]
             log(
                 f"w{i} {m.key} ran={len(ids)} proven+={len(confirmed)} discarded={discarded} "
                 f"total_proven={len(state.proven)}/{len(state.passing)} active={len(state.active())}"
