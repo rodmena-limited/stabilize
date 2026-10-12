@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.33.0] - UNRELEASED
+## [0.33.0] - 2026-10-12
 
 Release candidate for 1.0.0: the public API and guarantees are written down in
 `docs/guide/stability.rst` (public API = `stabilize.__all__`, message types,

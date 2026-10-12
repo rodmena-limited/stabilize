@@ -187,3 +187,94 @@ Pipeline 2939 (5195655): lint failed (mypy **cfg typing in handlers/defaults.py,
 ## Release number
 
 RELEASE NUMBER CORRECTION (operator, 2026-10-11): this release ships as 0.33.0, not 1.0.0. 0.33.0 is built to the 1.0 bar; the operator promotes it to 1.0.0 later. Version strings, CHANGELOG and docs/guide/stability.rst updated; ci-conductor told.
+
+
+## Audit report (0.33.0)
+
+### Findings, ranked by customer harm (all CONFIRMED live on published 0.32.1 unless marked)
+
+Duplicate or unwanted side effects
+1. C0 (#78): a task after a failed task in the same stage still ran (TERMINAL, raise, STOPPED, CANCELED, continue-on-failure TERMINAL).
+2. C33 (#84): a lost CompleteTask made recovery re-run the task.
+3. C27 (#79): one failed lock renewal let a second worker execute a running task; B79-1: a worker whose lease had been taken could extend, clear or delete the new holder's.
+4. C31 (#81): an unfiltered recovery sweep pushed a duplicate RunTask for work in flight on another queue table.
+5. C4 (#82): limitConcurrent admitted beyond its limit (peak 4-7 at limit 2).
+6. N4 (#83): on_cleanup and finalizers ran once per version-conflict retry.
+7. C11 (#83): a raising on_timeout / is_enabled was called on every redelivery (10x).
+7a. C2 (#91): `stabilize prune-processed` run while a committed RunTask was still unacked (worker crashed) deleted its dedup record; the redelivered RunTask executed the task a second time. Reproduced on 433f187; 0.32.1 has no prune-processed, its store primitive does the same. Class: retention vs live messages.
+7b. N3 class (#91): a duplicate CompleteStage arriving while the first was planning after-stages made the after-stage's task run twice (two after-stage rows, both SUCCEEDED). Class: rows inserted outside the transaction that claims their parent.
+
+Work stranded or lost
+8. C1 (#81): messages on a second queue table with its own sequence were dropped as duplicates.
+9. C6 (#81): SQLite transactional pushes ignored the queue's table.
+10. C8 (#80): a StartTask skip wedged its stage.
+11. C32/C34 (#84): a lost CompleteStage / CompleteWorkflow stranded the workflow.
+12. C5 (#82): a lost wake-up left BUFFERED work forever; N7: purged workflows were left NOT_STARTED.
+13. N1 (#78), N8 (#86): REDIRECT without a target, and a FAILED_CONTINUE before-stage, wedged their stage.
+14. N6 (#83): a task raising SystemExit escaped the processor and was stranded.
+15. C38 (#87): the PostgreSQL retention sweep never deleted a row (make_interval with a float).
+15a. C18 (#91): a workflow paused before it started, or while BUFFERED, stayed PAUSED forever after unpause (StartWorkflow consumed while PAUSED; unpause only resumes PAUSED stages). The monitor's resume set RUNNING and pushed nothing.
+15b. N3 (#91): a duplicate StartStage arriving while the first was planning left an orphan before-stage with no tasks; the parent waited on it forever. The same rows were left by a crash between the insert and the parent update.
+15c. N3 class (#91): AddMultiInstance interrupted after its first commit left the parent counting an instance that never existed; the redelivery was deduplicated.
+
+False outcome
+16. C9 (#86) and B86-2: a branch (or before-stage) running longer than the wait budget was failed TERMINAL and canceled.
+17. N2 (#84): recovery started a parent's task before its before-stage ended.
+18. C12 (#83): cancel never called on_cancel or on_cleanup.
+19. C7 (#84): a recovered RunTask ran in the default bulkhead.
+20. C13 (#80): is_enabled was re-evaluated on every poll; dotted class names skipped the StartTask check.
+21. C10 (#88): task exceptions were recorded as BULKHEAD_FULL.
+22. C37 (#85): QueueProcessor(handler_config=...) reached 2 of 19 handlers.
+23. C3 (#87): retention ran as one unbounded DELETE on the poll thread.
+24. C26: over-long ids failed at the database instead of validation.
+25. C23 (#90): docs claimed finalizers survive a crash (in-memory registry) and that side effects never repeat.
+26. C18 (#91): `store.pause()` rewrote a SUCCEEDED workflow to PAUSED and `store.cancel()` flagged it canceled.
+27. N5 (#91): JumpToStage wrote a pre-transaction copy of the target's context over the row, reverting a key a concurrent jump had committed.
+
+Harness defects found by red-proofing (#92): 36 probes had never been seen red. Run against a source mutant of the property each claims to guard, 31 went red; probe_schema_namespace_resolution, probe_split_namespace, probe_heartbeat_survives_blip and probe_ssrf_rebinding could not fail for their stated reason, probe_circuit_storage_honesty never checked the level it claimed, probe_dynamic_multi_instance check D read source text. All rewritten and shown red on their mutants. The red-proof tool itself was caught once: per-test coverage collected under xdist covered 791 of 2377 tests; the baseline now runs in one process and refuses a map below 90 %. The gate watchdog was shown to kill a decoy group and to leave it alone under real thresholds.
+
+Defects found in our own fixes by the two fix-diff refuters (none shipped): F1-F11 and N1-N9 of the final pass, recorded under "Phase 6"; the worst were F1 (canceling a deferred-choice loser canceled the winner) and F2/N1 (on_cancel twice).
+
+### Not reproduced
+
+- C29: continuePipelineOnFailure already applies on timeout / unregistered-task paths (CompleteStage applies failure_status).
+- C17: two processor processes on one table executed every task exactly once (20 workflows x 6 tasks, both backends).
+- C5-FIFO: oldest-first held at page size 2 on 0.32.1.
+- C28: SQLite queue ids are AUTOINCREMENT; no sequence reset exists.
+- C35: an apparent duplicate in a probe was cross-case leakage in the probe database.
+- C16 (#91): SIGKILL after each handler's commit and before its ack, 7 message types, a second process finishing: every task executed once and every workflow SUCCEEDED on both backends, HEAD and 0.32.1. The probe goes red (RunTask twice) with the durable dedup check removed. It observes duplicates through task executions only.
+- C18 pause of a RUNNING stage and a jump into a RUNNING stage: terminal and correct before and after the fixes.
+- C30 (#91): recovery skips a RUNNING workflow started before recovery_max_age_hours even if recently active; kept as a documented limit, probed both ways.
+
+Observations, not fixed: dynamically added MI instances skip one index after seeded ones (seeded 0..n-1, next dynamic n+1); an exception escaping stage completion is reported as an invalid SUCCEEDED -> TERMINAL transition, masking the original error (only reachable with both signal-storage guards removed).
+
+26a. C23 (#92, found by the red-proof): `Workflow.config_version` was stored by no store; the fingerprint Orchestrator.start attaches, which the resilience guide documents for drift detection, read back as None on both backends (0.32.1 too). Fixed with migration 01M4Q8VTM40WEC4HR2X31Q07A5 and SQLite migration 5.
+
+## Evidence: local gate on vm-1 (operator override of the CI-only rule; RunFlow had no capacity)
+
+Gate script `~/.cache/stabilize-gate/gate2.sh`, CPython 3.14.6 (GIL build) and 3.11, PostgreSQL 18 in container stabilize-gate-pg (1 GB cap), every job on a fresh database, a watchdog on load/memory/PSI (shown to kill a decoy group at threshold 0 and leave it alone at the real thresholds).
+
+| Job | Commit | Result |
+|---|---|---|
+| lint (ruff, mypy) | 6762925, 531e808 | pass |
+| tests (sqlite + postgres) | 6762925 | pass, 2409+ passed |
+| probes (60 ran, 7 Docker-only skipped in this set) | 6762925 | ALL PROBES PASSED |
+| py311 | 6762925 | pass |
+| baseline: published 0.32.1 runs the existing suite and the non-expected probes | 6762925 | pass |
+| falsify: every new test and probe red on published 0.32.1 for its stated reason | 6762925 | 42 tests, 21 probes |
+| upgrade: work started on 0.32.1, finished on this commit after mg-up | 6762925 | pass |
+| soak 5 min at 0.5 wf/s, 0.33.0 and 0.32.1 | 6762925 | both 150/150 SUCCEEDED, RSS/connections/processed_messages bounded, no PythonFinalizationError |
+| red-proof: each test fails in its call phase on an engine mutant, 2/2, green on the clean tree | ce60468 | 2405 proven + 40 allowlisted with reasons = 2445 collected, 0 violations |
+| manual proofs (39 recorded mutations) | 531e808 | 39/39 |
+
+src/ and migrations/ are identical between 6762925 and 531e808.
+
+Throughput (R6): workflows SUCCEEDED by t=300 s at 4 wf/s offered, PostgreSQL 18, 8 workers, interleaved runs: 0.32.1 215/204/179 (median 204), 0.33.0 199/216/228 (median 216) = 105.9 %. Host load 6.6-8.7 during the runs. RSS 86 MB vs 68 MB.
+
+## Closing statement
+
+What was exercised. Every handler path the 2445 tests and 60 probes drive, on SQLite and on PostgreSQL 18, with the processor in-process and, for the crash and two-process probes, in separate processes killed with SIGKILL between a handler's commit and its ack for all 7 lifecycle message types. Every new regression test and listed probe was observed red on published 0.32.1 for its stated reason before its fix. Every test in the suite was observed to fail on at least one deliberate mutation of the engine (or of its own detector, for 6 known-positive controls), except 40 listed with reasons. The upgrade from the 0.32.1 schema with work in flight, Python 3.11 and 3.14, a 5-minute sustained run at 0.5 wf/s on each version, and a 5-minute overload run at 4 wf/s three times each.
+
+What was not tested at all. Sustained load beyond 5 minutes, and any run longer than about 900 workflows. More than two processor processes. Real network partitions or a PostgreSQL failover (only connection loss inside one call is injected). Disk full. The 7 Docker-only probes inside the gate (they were run once against a shim on the gate PostgreSQL during the probe mutation pass, PostgreSQL 18 rather than their stated 16). The opt-in network certification test (CERT_NETWORK_TESTS=1). Multi-tenant contention beyond the RLS probe. ci.rodmena.co.uk itself: no CI pipeline has run any of this; the evidence is the local gate above.
+
+What I remain unsure about, and why. The 7 tests of psycopg, bulkman and resilient_circuit behaviour prove nothing about stabilize; they are allowlisted. `prune-processed` cannot tell whether --db-url holds the queue the processors use; when the queue is elsewhere it must be given --queue-db-url, and that is documented, not enforced. The recovery window keys on start_time, so a RUNNING workflow older than recovery_max_age_hours that loses a message is not recovered; documented, probed both ways. Throughput was measured on a loaded host; single runs varied by about 12 %. The SIGKILL probe observes duplicates only through task executions. 23 code files exceed the 500-line soft cap, 15 the 550-line hard cap, all at that size in v0.32.1 (#93, not done in this release).
