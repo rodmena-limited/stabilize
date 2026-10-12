@@ -12,7 +12,6 @@ addition is caught here rather than in a consumer's forensic diff.
 
 from __future__ import annotations
 
-import ast
 import re
 from pathlib import Path
 
@@ -113,13 +112,17 @@ def test_signal_keys_stay_visible_to_tasks() -> None:
 
 @pytest.mark.parametrize("key", sorted(HIDDEN_FROM_TASK_INPUT))
 def test_hidden_keys_are_excluded_from_task_input(key: str) -> None:
-    """The exclusion set PythonTask applies must cover every hidden key."""
-    source = (SRC_ROOT / "tasks" / "python.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
+    from stabilize import StageExecution
+    from stabilize.tasks.python import PythonTask
 
-    uses_inventory = any(
-        isinstance(node, ast.Name) and node.id == "HIDDEN_FROM_TASK_INPUT"
-        for node in ast.walk(tree)
+    stage = StageExecution(
+        ref_id="s",
+        type="python",
+        name="s",
+        context={"script": "RESULT = sorted(INPUT)", key: {"engine": "value"}, "caller_value": 1},
     )
-    assert uses_inventory, "PythonTask no longer filters INPUT by the published inventory"
-    assert key in HIDDEN_FROM_TASK_INPUT
+    result = PythonTask().execute(stage)
+    seen = (result.outputs or {}).get("result")
+    assert isinstance(seen, list), f"PythonTask returned no INPUT listing: {result.outputs!r}"
+    assert "caller_value" in seen, f"the control key is missing from INPUT: {seen}"
+    assert key not in seen, f"engine key {key} reached the task's INPUT: {seen}"
