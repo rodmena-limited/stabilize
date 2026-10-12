@@ -162,3 +162,12 @@ def test_jump_into_a_stage_that_is_still_running(repository: WorkflowStore, queu
     final = drive(processor, repository, wf.id, timeout=30, idle=2.0)
     assert final.status.is_complete, f"C18 jump into RUNNING: workflow {final.status.name}"
     _assert_done(final, "jump into a RUNNING stage")
+
+
+def test_pause_of_a_completed_workflow_leaves_it_completed(repository: WorkflowStore, queue: Queue) -> None:
+    processor = _processor(repository, queue)
+    wf = _start(repository, queue, Workflow.create(application="c18", name="done", stages=[stage("a", ["ok"])]))
+    _assert_done(drive(processor, repository, wf.id, timeout=15, idle=1.0), "completed before pause")
+    repository.pause(wf.id, paused_by="audit")
+    after = repository.retrieve(wf.id)
+    assert after.status == WorkflowStatus.SUCCEEDED, f"C18 pause rewrote a SUCCEEDED workflow to {after.status.name}"
