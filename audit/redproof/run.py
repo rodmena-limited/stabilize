@@ -399,9 +399,30 @@ def report(out: Path, state: State) -> None:
     log(f"proven {len(state.proven)}; unproven or not run {len(rows)}; see {out / 'unproven.tsv'}")
 
 
-def check(out: Path, allowlist: Path) -> int:
-    baseline = json.loads((out / "baseline.json").read_text())
+def collected_now() -> dict[str, dict[str, str]]:
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", *SUITES],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+    ids = [line.strip() for line in proc.stdout.splitlines() if "::" in line and not line.startswith(" ")]
+    return {i: {"outcome": "collected"} for i in ids}
+
+
+def manual_proven() -> set[str]:
+    found: set[str] = set()
+    for diff in sorted((REPO / "audit" / "redproof" / "manual").glob("*.diff")):
+        first = diff.read_text().splitlines()[:1]
+        if first and first[0].startswith("test-id: "):
+            found.add(first[0][len("test-id: ") :].strip())
+    return found
+
+
+def check(out: Path, allowlist: Path, collect: bool = False) -> int:
+    baseline = collected_now() if collect else json.loads((out / "baseline.json").read_text())
     proven = {line.split("\t")[0] for line in (out / "proof.tsv").read_text().splitlines()[1:]}
+    proven |= manual_proven()
     allowed: dict[str, str] = {}
     bad = 0
     if allowlist.exists():
@@ -435,6 +456,7 @@ def main() -> int:
     ap.add_argument("--sha", default="HEAD")
     ap.add_argument("--budget-hours", type=float, default=3.0)
     ap.add_argument("--allowlist", type=Path, default=REPO / "audit" / "redproof" / "unproven_allowed.txt")
+    ap.add_argument("--collect", action="store_true", help="check the tests collected now instead of the baseline's")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     if a.command in ("prepare", "all"):
@@ -450,7 +472,7 @@ def main() -> int:
         fallback.run(state, a.out, a.workers, a.budget_hours * 3600, try_mutant, wait_host, log)
         report(a.out, state)
     if a.command in ("check", "all"):
-        return check(a.out, a.allowlist)
+        return check(a.out, a.allowlist, a.collect)
     return 0
 
 

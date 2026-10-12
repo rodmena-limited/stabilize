@@ -53,7 +53,8 @@ def imports_tree(tree: Path) -> bool:
 def run_test(tree: Path, test_id: str) -> tuple[int, str]:
     wait_host()
     proc = subprocess.run(
-        [PYTHON, "-m", "pytest", test_id, "-q", "-p", "no:cacheprovider", "-p", "no:logging", "-rf", "--timeout", "300"],
+        [PYTHON, "-m", "pytest", test_id, "-q", "-p", "no:cacheprovider", "-p", "no:logging", "-rf"]
+        + ["--timeout", "300"],
         cwd=tree,
         env=env_for(tree),
         capture_output=True,
