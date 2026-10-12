@@ -349,7 +349,7 @@ def prove(out: Path, workers: int, budget_s: float) -> None:
             with state.lock:
                 counter["n"] += 1
                 recent = state.broad_results[-5:]
-                paying = len(recent) < 5 or sum(recent) / len(recent) >= 10
+                paying = len(recent) < 5 or sorted(recent)[2] >= 10
                 broad = counter["n"] % 2 == 1 and paying
             picked = state.pick(broad)
             if picked is None:
