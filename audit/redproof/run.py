@@ -176,7 +176,7 @@ def baseline(out: Path) -> None:
     cov_env_file = out / ".coverage"
     os.environ["COVERAGE_FILE"] = str(cov_env_file)
     res = run_pytest(
-        ws, 0, SUITES, ["-n", "3", "--cov=stabilize", "--cov-context=test", "--cov-report="], 7200
+        ws, 0, SUITES, ["--cov=stabilize", "--cov-context=test", "--cov-report="], 7200
     )
     os.environ.pop("COVERAGE_FILE")
     results = res["results"]
@@ -188,7 +188,13 @@ def baseline(out: Path) -> None:
             if again.get(k, {}).get("outcome") == "passed":
                 results[k] = {"outcome": "passed", "kind": "flaky-baseline"}
     (out / "baseline.json").write_text(json.dumps(results))
-    (out / "coverage_map.json").write_text(json.dumps(coverage_map(out, ws)))
+    cmap = coverage_map(out, ws)
+    (out / "coverage_map.json").write_text(json.dumps(cmap))
+    passing = {k for k, v in results.items() if v["outcome"] == "passed"}
+    covered = set().union(*cmap.values()) & passing if cmap else set()
+    log(f"coverage map: {len(cmap)} lines, {len(covered)}/{len(passing)} passing tests with at least one line")
+    if len(covered) < 0.9 * len(passing):
+        raise SystemExit(f"coverage map implausible: only {len(covered)} of {len(passing)} passing tests covered")
     counts = defaultdict(int)
     for v in results.values():
         counts[v["outcome"]] += 1
