@@ -49,6 +49,12 @@ starting 0.33.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
 
 ### Fixed — work stranded or a false outcome reported
 
+- **After-stages and on-failure stages run once when CompleteStage is duplicated (#91, N3).**
+  CompleteStage inserted each planned after-stage (or on-failure stage) before
+  the parent's version-checked update; a second CompleteStage for the same
+  stage (redelivery, recovery) planned its own copy, lost the update, and on
+  retry started both copies: the after-stage's task ran twice. They are now
+  written in the transaction that updates the parent.
 - **Before-stages are stored in the transaction that claims their parent (#91, N3).**
   Planning inserted each before-stage on its own, before the parent's
   version-checked update. A duplicate StartStage arriving while the first was

@@ -18,35 +18,26 @@ class CompleteStagePlannerMixin:
     if TYPE_CHECKING:
         repository: WorkflowStore
 
-    def _plan_after_stages(self, stage: StageExecution) -> None:
-        """Plan after stages using the stage definition builder."""
+    def _plan_after_stages(self, stage: StageExecution) -> list[StageExecution]:
+        """Plan after stages; the caller stores the returned stages in its transaction."""
         builder = get_default_factory().get(stage.type)
         graph = StageGraphBuilder.after_stages(stage)
         builder.after_stages(stage, graph)
 
-        for s in graph.build():
+        planned = list(graph.build())
+        for s in planned:
             s.execution = stage.execution
-            stage.execution.stages.append(s)  # Add to in-memory list for first_after_stages()
-            self.repository.add_stage(s)
+            stage.execution.stages.append(s)
+        return planned
 
-    def _plan_on_failure_stages(self, stage: StageExecution) -> bool:
-        """
-        Plan on-failure stages using the stage definition builder.
-
-        Returns:
-            True if on-failure stages were added
-        """
+    def _plan_on_failure_stages(self, stage: StageExecution) -> list[StageExecution]:
+        """Plan on-failure stages; the caller stores the returned stages in its transaction."""
         builder = get_default_factory().get(stage.type)
         graph = StageGraphBuilder.after_stages(stage)
         builder.on_failure_stages(stage, graph)
 
-        new_stages = graph.build()
-        if not new_stages:
-            return False
-
-        for s in new_stages:
+        planned = list(graph.build())
+        for s in planned:
             s.execution = stage.execution
-            stage.execution.stages.append(s)  # Add to in-memory list for first_after_stages()
-            self.repository.add_stage(s)
-
-        return True
+            stage.execution.stages.append(s)
+        return planned

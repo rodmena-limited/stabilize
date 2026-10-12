@@ -123,10 +123,11 @@ class CompleteStageHandler(CompleteStageSupport):
                             ):
                                 should_handle_after_stages = True
 
+                planned: list[StageExecution] = []
                 if should_handle_after_stages:
                     after_stages = stage.first_after_stages()
                     if not after_stages:
-                        self._plan_after_stages(stage)
+                        planned = self._plan_after_stages(stage)
                         after_stages = stage.first_after_stages()
 
                     not_started = [s for s in after_stages if s.status == WorkflowStatus.NOT_STARTED]
@@ -138,6 +139,8 @@ class CompleteStageHandler(CompleteStageSupport):
                         # after-stages run and cancel a healthy workflow.
                         with self.repository.transaction(self.queue) as txn:
                             txn.store_stage(stage)
+                            for s in planned:
+                                txn.store_stage(s)
                             if message.message_id:
                                 txn.mark_message_processed(
                                     message_id=message.message_id,
@@ -180,8 +183,8 @@ class CompleteStageHandler(CompleteStageSupport):
                     # after they completed must fall through to final failure
                     # handling, not spawn duplicate on-failure stages.
                     already_planned = bool(stage.context.get("_on_failure_planned", False))
-                    has_on_failure = False if already_planned else self._plan_on_failure_stages(stage)
-                    if has_on_failure:
+                    planned = [] if already_planned else self._plan_on_failure_stages(stage)
+                    if planned:
                         stage.context["_on_failure_planned"] = True
                         after_stages = stage.first_after_stages()
                         # Only push StartStage for on-failure stages that are NOT_STARTED
@@ -192,6 +195,8 @@ class CompleteStageHandler(CompleteStageSupport):
                             # on-failure stage messages together
                             with self.repository.transaction(self.queue) as txn:
                                 txn.store_stage(stage)
+                                for s in planned:
+                                    txn.store_stage(s)
                                 if message.message_id:
                                     txn.mark_message_processed(
                                         message_id=message.message_id,
