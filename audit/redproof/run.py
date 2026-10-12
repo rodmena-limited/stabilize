@@ -50,6 +50,13 @@ def wait_host() -> None:
 
 
 def fresh_db(name: str) -> str:
+    if not PG_CONTAINER:
+        import psycopg
+
+        with psycopg.connect(f"{PG}/postgres", autocommit=True) as conn:
+            conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+            conn.execute(f'CREATE DATABASE "{name}"')
+        return f"{PG}/{name}"
     subprocess.run(
         [
             "docker",
@@ -177,9 +184,7 @@ def baseline(out: Path) -> None:
     cov_env_file = out / ".coverage"
     os.environ["COVERAGE_FILE"] = str(cov_env_file)
     os.environ["COVERAGE_CORE"] = "ctrace"
-    res = run_pytest(
-        ws, 0, SUITES, ["--cov=stabilize", "--cov-context=test", "--cov-report="], 7200
-    )
+    res = run_pytest(ws, 0, SUITES, ["--cov=stabilize", "--cov-context=test", "--cov-report="], 7200)
     os.environ.pop("COVERAGE_FILE")
     os.environ.pop("COVERAGE_CORE")
     results = res["results"]
@@ -195,9 +200,13 @@ def baseline(out: Path) -> None:
     (out / "coverage_map.json").write_text(json.dumps(cmap))
     passing = {k for k, v in results.items() if v["outcome"] == "passed"}
     covered = set().union(*cmap.values()) & passing if cmap else set()
-    log(f"coverage map: {len(cmap)} lines, {len(covered)}/{len(passing)} passing tests with at least one line")
+    log(
+        f"coverage map: {len(cmap)} lines, {len(covered)}/{len(passing)} passing tests with at least one line"
+    )
     if len(covered) < 0.9 * len(passing):
-        raise SystemExit(f"coverage map implausible: only {len(covered)} of {len(passing)} passing tests covered")
+        raise SystemExit(
+            f"coverage map implausible: only {len(covered)} of {len(passing)} passing tests covered"
+        )
     counts = defaultdict(int)
     for v in results.values():
         counts[v["outcome"]] += 1
@@ -434,7 +443,7 @@ def main() -> int:
         baseline(a.out)
     if a.command in ("prove", "all"):
         prove(a.out, a.workers, a.budget_hours * 3600)
-    if a.command == "fallback":
+    if a.command in ("fallback", "all"):
         import fallback
 
         state = State(a.out)

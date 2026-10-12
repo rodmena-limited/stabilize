@@ -113,3 +113,17 @@ jobs:
       - name: Soak
         run: PATH="$PWD/.venv/bin:$PATH" STABILIZE_PROBE_DSN="$DATABASE_URL" SOAK_MINUTES=5 .venv/bin/python audit/evaluations/soak.py
 
+
+  redproof:
+    name: "Every test fails on at least one engine mutant (red-proof)"
+    image: containers.rodmena.co.uk/rodmena/ci-python:3.14
+    services: [postgres]
+    resources: { memory_mb: 3072 }
+    timeout_minutes: 600
+    steps:
+      - name: Install
+        run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
+      - name: Mutation red-proof of the whole suite, then the allowlist check
+        run: REDPROOF_PG="${DATABASE_URL%/*}" REDPROOF_PG_CONTAINER= REDPROOF_PYTHON="$(command -v python3.14)" .venv/bin/python audit/redproof/run.py all --out "$PWD/.redproof" --workers 2 --sha HEAD --budget-hours 4
+      - name: Manual proofs (each diff must make its test fail and the clean tree pass)
+        run: if [ -f audit/redproof/manual_proofs.py ]; then .venv/bin/python audit/redproof/manual_proofs.py; fi
