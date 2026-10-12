@@ -1729,7 +1729,7 @@ class TestBugDocumentation:
         final = drive(processor, store, wf.id, timeout=15, idle=1.5)
         a = final.stages[0]
         assert a.status == WorkflowStatus.TERMINAL, f"_max_jumps=0 still allowed a jump: stage {a.status.name}"
-        assert "Max jump count exceeded" in str(a.context.get("jump_error"))
+        assert a.context.get("jump_error") == "Max jump count exceeded: 0/0", a.context.get("jump_error")
         queue.close()
         store.close()
 
