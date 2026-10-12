@@ -84,6 +84,16 @@ def _annotation_ids(tree: ast.Module) -> set[int]:
     return ids
 
 
+def _quiet_ids(tree: ast.Module) -> set[int]:
+    ids: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr) or _is_logging_call(node):
+            ids.update(id(n) for n in ast.walk(node) if n is not node or isinstance(node, ast.JoinedStr))
+        if isinstance(node, ast.Raise) and node.exc is not None:
+            ids.update(id(n) for n in ast.walk(node.exc) if isinstance(n, ast.Constant))
+    return ids
+
+
 def _is_logging_call(node: ast.AST) -> bool:
     if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
         return False
@@ -115,6 +125,8 @@ def _candidates(node: ast.AST) -> list[tuple[str, ast.AST, str]]:
         out.append(("bool-const", node, repr(not node.value)))
     elif isinstance(node, ast.Constant) and type(node.value) is int:
         out.append(("int-const", node, repr(node.value + 1)))
+    elif isinstance(node, ast.Constant) and type(node.value) is str and len(node.value) <= 200:
+        out.append(("str-const", node, repr(node.value + "_mut" if node.value else "mut")))
     elif isinstance(node, (ast.If, ast.While)):
         out.append(("cond-negate", node.test, "(not " + _expr(node.test) + ")"))
     elif isinstance(node, ast.Return) and node.value is not None:
@@ -136,6 +148,7 @@ def mutants_for_file(path: Path, rel: str) -> list[Mutant]:
     tree = ast.parse(source)
     inert = _inert_ranges(tree)
     annotation = _annotation_ids(tree)
+    quiet = _quiet_ids(tree)
     lines = source.splitlines(keepends=True)
     result: list[Mutant] = []
     for node in ast.walk(tree):
@@ -144,6 +157,8 @@ def mutants_for_file(path: Path, rel: str) -> list[Mutant]:
         if any(a <= node.lineno <= b for a, b in inert):
             continue
         for op, target, replacement in _candidates(node):
+            if op == "str-const" and id(node) in quiet:
+                continue
             line, col, end_line, end_col = _segment_lines(lines, target)
             if end_line != line and replacement != "pass":
                 replacement = replacement.replace("\n", " ")
