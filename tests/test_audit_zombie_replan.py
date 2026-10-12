@@ -61,11 +61,11 @@ def _run(repository: WorkflowStore, queue: Queue, zombie: bool) -> Workflow:
     original = handler._plan_stage
     state = {"done": False}
 
-    def plan(stage: StageExecution) -> None:
+    def plan(stage: StageExecution) -> Any:
         if zombie and not state["done"] and stage.ref_id == "p":
             state["done"] = True
             handler.handle(StartStage(execution_type=wf.type.value, execution_id=wf.id, stage_id=stage.id))
-        original(stage)
+        return original(stage)
 
     handler._plan_stage = plan
     result = drive(processor, repository, wf.id, timeout=20, idle=1.5)

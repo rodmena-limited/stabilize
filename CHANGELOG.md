@@ -49,6 +49,14 @@ starting 0.33.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
 
 ### Fixed — work stranded or a false outcome reported
 
+- **Before-stages are stored in the transaction that claims their parent (#91, N3).**
+  Planning inserted each before-stage on its own, before the parent's
+  version-checked update. A duplicate StartStage arriving while the first was
+  planning (redelivery, recovery) re-planned the parent; the first planner's
+  update then failed, but its before-stage row stayed: an orphan with no tasks
+  that the parent waited on forever. A crash between the insert and the
+  update left the same wedge. The rows are now written with the parent's
+  update, so a conflict or a crash rolls them back together.
 - **A workflow paused before it starts, or while BUFFERED, starts on unpause (#91, C18).**
   Its StartWorkflow was consumed while PAUSED, a paused BUFFERED workflow left
   the set StartWaitingWorkflows admits from, and `Orchestrator.unpause` pushed

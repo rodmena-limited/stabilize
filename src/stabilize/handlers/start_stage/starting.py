@@ -298,7 +298,7 @@ class StartStageStarting(
 
         # Now we have exclusive ownership - safe to do expensive planning
         try:
-            self._plan_stage(stage)
+            planned = self._plan_stage(stage)
         except Exception as e:
             logger.error(
                 "Failed to plan stage %s (%s) in execution %s: %s",
@@ -310,12 +310,14 @@ class StartStageStarting(
             raise
 
         # Collect messages to push BEFORE starting the transaction
-        messages_to_push = self._collect_start_messages(stage, message)
+        messages_to_push = self._collect_start_messages(stage, message, planned)
 
         # Atomic: store planned stage + push all start messages together
         try:
             with self.repository.transaction(self.queue) as txn:
                 txn.store_stage(stage)
+                for synthetic in planned:
+                    txn.store_stage(synthetic)
 
                 # Message deduplication
                 if message.message_id:
