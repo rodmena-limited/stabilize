@@ -35,7 +35,7 @@ with PostgresContainer("postgres:16") as c:
         conn.execute("CREATE SCHEMA IF NOT EXISTS stabilize")
         for t in ("events", "snapshots", "event_subscriptions"):
             conn.execute(f"ALTER TABLE {t} SET SCHEMA stabilize")
-        conn.execute("CREATE TABLE public.events (id int)")   # the shadow
+        conn.execute("CREATE TABLE public.events (LIKE stabilize.events INCLUDING ALL)")
 
     # search_path reaches public FIRST, so the bare name resolves to the shadow
     dsn = admin + "?options=" + "-c%20search_path%3Dpublic%2Cstabilize"
@@ -46,6 +46,10 @@ with PostgresContainer("postgres:16") as c:
         sys.exit(1)
     except EventStoreSchemaError as e:
         print(f"  RAISED: {str(e)[:130]}")
+        if "resolves to the wrong namespace" not in str(e):
+            print("  [FAIL] refused, but not by the namespace check (the shadow is a full column copy)")
+            sys.exit(1)
+        print("  [PASS] refused by the namespace check")
 
     print()
     print("=== CONTROL: same DSN, no shadow -> must construct ===")

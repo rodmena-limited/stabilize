@@ -46,7 +46,9 @@ def _run_task(url: str) -> tuple[str, str]:
     stage = StageExecution(ref_id="s", name="s", context={"url": url, "timeout": 5})
     result = HTTPTask().execute(stage)
     ctx = result.context or {}
-    return str(result.status), str(ctx.get("error") or ctx.get("body", ""))[:160]
+    out = result.outputs or {}
+    detail = " | ".join(str(v) for v in (ctx.get("error"), out.get("error"), out.get("body"), ctx.get("body")) if v)
+    return str(result.status), detail[:300]
 
 
 def main() -> int:

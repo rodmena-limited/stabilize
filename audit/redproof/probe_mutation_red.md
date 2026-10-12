@@ -68,3 +68,15 @@ None. Every probe ran on its mutant. The testcontainers probes ran through the s
 ## Cleanup
 
 All `mut_*` and `tc_*` databases and the probe-created roles were dropped from `stabilize-gate-pg`. No venvs were created; the mutant trees and diffs remain under `~/.cache/stabilize-gate/mut/`. The repository was not modified.
+
+## Re-verification after the probe fixes (2026-10-12)
+
+| probe | change | mutant result (verbatim) | engine result (verbatim) | verdict |
+|---|---|---|---|---|
+| probe_ssrf_rebinding | reads `result.outputs` as well as `result.context` | `detail: INTERNAL SECRET` / `>>> FAIL: rebinding succeeded, the private service was read` | `>>> PASS: refused at CONNECT time on the real peer address` | RED-PROVEN |
+| probe_schema_namespace_resolution | shadow is a full column copy (`LIKE stabilize.events INCLUDING ALL`); asserts the namespace message | `CONSTRUCTED — the shadow satisfied the check` (exit 1) | `[PASS] refused by the namespace check` | RED-PROVEN |
+| probe_split_namespace | same; asserts the split message | `CONSTRUCTED — the split went undetected` (exit 1) | `[PASS] refused by the split check` | RED-PROVEN |
+| probe_circuit_storage_honesty | formatter with level name; only ERROR/CRITICAL lines count; consequence looked for in those lines | `ERROR-level lines  : 0` / `>>> FAIL: degradation is silent (no ERROR)` (DEBUG mutant) | `>>> PASS: loud, and names the consequence` | RED-PROVEN |
+| probe_heartbeat_survives_blip | counts redeliveries of the in-flight RunTask to worker A (its own poller re-polls an expired lock first) and to worker B; B's poll errors are reported, not swallowed | stop-after-first-failure mutant: `[FAIL] sqlite A one renewal raises: in-flight RunTask redelivered 1 time(s)`, `[FAIL] postgres A ... 2 time(s)`, controls PASS; heartbeat-removed mutant: all four FAIL | `VERDICT: PASS — a heartbeat blip does not let a second worker run the task` | RED-PROVEN |
+| probe_event_store_ddl_on_construction | none | reports behaviour, asserts nothing; excluded from run_all.sh | | NOT A GUARD (historical reproduction for SPECS/39) |
+| probe_signal_storage_degrades | none yet | check C (`workflow succeeds without the grant`) stays PASS under the always-usable mutant because its workflow never touches signal storage | | RED-PROVEN by checks A and B only; check C does not exercise the InsufficientPrivilege path |

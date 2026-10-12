@@ -2,18 +2,19 @@
 
 QueueProcessor renews the lock of an in-flight message with a heartbeat thread
 so a handler running longer than the queue's lock_duration does not become
-visible to other workers. The task lease that would also stop a second
-execution is off by default. This probe makes one heartbeat renewal raise (a
-connection blip) and checks that a second worker PROCESS polling the same
-table does not execute the still-running task.
+visible to other workers. This probe makes one heartbeat renewal raise (a
+connection blip) and checks, through the queue API of a second worker PROCESS
+polling the same table and through worker A's own polls, that the in-flight
+RunTask is never delivered again while the task runs.
 
 Worker A (this process, start()): lock_duration 1 s, heartbeat every 0.25 s,
-runs a task that takes 6 s. Worker B (a subprocess, process_one loop) starts
-once A is inside the task and polls for 7 s. Executions are counted in a file
-each execution appends its pid to.
+runs a task that takes 6 s. Worker B (a subprocess, poll_one loop) starts once
+A is inside the task and polls for 4.5 s, recording the type of every message
+it receives; worker A's RunTask deliveries are counted as they are polled.
+Executions are counted in a file each execution appends its pid to.
 
-  A  one extend_lock call raises: executions 1
-  B  CONTROL: no fault: executions 1
+  A  one extend_lock call raises: RunTask redelivered 0 times, executions 1
+  B  CONTROL: no fault: RunTask redelivered 0 times, executions 1
 
     python audit/evaluations/probe_heartbeat_survives_blip.py
 """
@@ -67,19 +68,26 @@ def _open(kind: str, url: str, create: bool) -> tuple[Any, Any]:
     return PostgresWorkflowStore(url), PostgresQueue(url, table_name="queue_messages", lock_duration=LOCK)
 
 
-def worker(kind: str, url: str, seconds: float) -> int:
-    from stabilize import QueueProcessor
+def worker(kind: str, url: str, seconds: float, seen_path: str) -> int:
+    from stabilize.queue.messages import get_message_type_name
 
     store, queue = _open(kind, url, create=False)
-    proc = QueueProcessor(queue, store=store, task_registry=_registry())
-    proc.config.retry_delay = timedelta(milliseconds=50)
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         try:
-            if not proc.process_one():
-                time.sleep(0.05)
-        except Exception:
-            pass
+            msg = queue.poll_one()
+        except Exception as exc:
+            with open(seen_path, "a") as fh:
+                fh.write(f"ERROR {type(exc).__name__}: {exc}\n".replace("\n", " ") + "\n")
+            time.sleep(0.05)
+            continue
+        if msg is None:
+            time.sleep(0.05)
+            continue
+        with open(seen_path, "a") as fh:
+            fh.write(f"{get_message_type_name(msg)}\n")
+    queue.close()
+    store.close()
     return 0
 
 
@@ -92,15 +100,28 @@ def _backend_urls() -> Any:
         yield "postgres", dsn
 
 
-def run_case(kind: str, url: str, inject: bool) -> int:
+def run_case(kind: str, url: str, inject: bool) -> tuple[int, int]:
     from stabilize import Orchestrator, QueueProcessor, StageExecution, TaskExecution, Workflow
 
     store, queue = _open(kind, url, create=True)
     queue.clear()
     marker = tempfile.NamedTemporaryFile(delete=False, suffix=".exec").name
+    seen = tempfile.NamedTemporaryFile(delete=False, suffix=".seen").name
     proc = QueueProcessor(queue, store=store, task_registry=_registry())
     proc.config.retry_delay = timedelta(milliseconds=50)
     proc.config.lock_heartbeat_interval_seconds = 0.25
+    from stabilize.queue.messages import get_message_type_name
+
+    a_runtask_polls: list[float] = []
+    poll_one = queue.poll_one
+
+    def counting_poll_one() -> Any:
+        msg = poll_one()
+        if msg is not None and get_message_type_name(msg) == "RunTask":
+            a_runtask_polls.append(time.monotonic())
+        return msg
+
+    queue.poll_one = counting_poll_one
     if inject:
         original = queue.extend_lock
         state = {"raised": False}
@@ -133,7 +154,7 @@ def run_case(kind: str, url: str, inject: bool) -> int:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline and not Path(marker).read_text():
             time.sleep(0.02)
-        child = subprocess.Popen([sys.executable, __file__, "--worker", kind, url, str(TASK_SECONDS + 1)])
+        child = subprocess.Popen([sys.executable, __file__, "--worker", kind, url, str(TASK_SECONDS - 1.5), seen])
         child.wait(timeout=30)
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline and not store.retrieve(wf.id).status.is_complete:
@@ -145,13 +166,20 @@ def run_case(kind: str, url: str, inject: bool) -> int:
         queue.close()
         store.close()
     lines = [x for x in Path(marker).read_text().splitlines() if x]
+    seen_lines = [x for x in Path(seen).read_text().splitlines() if x]
+    errors = [x for x in seen_lines if x.startswith("ERROR ")]
+    if errors:
+        print(f"[FAIL] {kind} PROBE INVALID: worker B could not poll: {errors[0][:200]}")
+    stolen = [x for x in seen_lines if x == "RunTask"]
     os.unlink(marker)
-    return len(lines)
+    os.unlink(seen)
+    redelivered = max(0, len(a_runtask_polls) - 1) + len(stolen)
+    return len(lines), redelivered + (100 if errors else 0)
 
 
 def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "--worker":
-        return worker(sys.argv[2], sys.argv[3], float(sys.argv[4]))
+        return worker(sys.argv[2], sys.argv[3], float(sys.argv[4]), sys.argv[5])
     os.environ.setdefault("STABILIZE_CIRCUIT_BREAKER_ENABLED", "false")
     failures: list[str] = []
     for kind, url in _backend_urls():
@@ -159,9 +187,12 @@ def main() -> int:
             print(f"[SKIP] {kind}: no PostgreSQL available")
             continue
         for label, inject in (("A one renewal raises", True), ("B CONTROL no fault", False)):
-            executions = run_case(kind, url, inject)
-            ok = executions == 1
-            print(f"[{'PASS' if ok else 'FAIL'}] {kind} {label}: executions={executions} (want 1)")
+            executions, stolen = run_case(kind, url, inject)
+            ok = executions == 1 and stolen == 0
+            print(
+                f"[{'PASS' if ok else 'FAIL'}] {kind} {label}: in-flight RunTask redelivered "
+                f"{stolen} time(s) to worker A or B (want 0); executions={executions} (want 1)"
+            )
             if not ok:
                 failures.append(f"{kind}/{label}")
     a_failed = any("/A" in f for f in failures)
