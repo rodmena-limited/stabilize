@@ -127,6 +127,10 @@ def _candidates(node: ast.AST) -> list[tuple[str, ast.AST, str]]:
         out.append(("int-const", node, repr(node.value + 1)))
     elif isinstance(node, ast.Constant) and type(node.value) is str and len(node.value) <= 200:
         out.append(("str-const", node, repr(node.value + "_mut" if node.value else "mut")))
+    elif isinstance(node, ast.ClassDef) and node.bases:
+        for base in node.bases:
+            others = [b for b in node.bases if b is not base]
+            out.append(("base-drop", base, ast.unparse(others[0]) if others else "object"))
     elif isinstance(node, (ast.If, ast.While)):
         out.append(("cond-negate", node.test, "(not " + _expr(node.test) + ")"))
     elif isinstance(node, ast.Return) and node.value is not None:

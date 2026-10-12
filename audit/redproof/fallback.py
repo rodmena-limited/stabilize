@@ -9,8 +9,8 @@ from typing import Any
 
 from mutants import Mutant, all_mutants
 
-PER_FILE_MUTANTS = 40
-OPERATOR_ORDER = {"str-const": 0, "bool-const": 1, "int-const": 2, "return-none": 3}
+PER_FILE_MUTANTS = 60
+OPERATOR_ORDER = {"base-drop": 0, "str-const": 1, "bool-const": 2, "int-const": 3, "return-none": 4}
 
 
 def imported_sources(test_file: Path, src_root: Path) -> list[str]:
@@ -38,6 +38,43 @@ def imported_sources(test_file: Path, src_root: Path) -> list[str]:
     return sorted(set(found))
 
 
+def defining_sources(test_file: Path, ws: Path) -> list[str]:
+    import json
+    import subprocess
+
+    tree = ast.parse(test_file.read_text())
+    names: list[tuple[str, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("stabilize"):
+            names.extend((node.module, a.name) for a in node.names)
+    script = (
+        "import importlib, inspect, json, sys\n"
+        "out = set()\n"
+        "for mod, name in json.loads(sys.argv[1]):\n"
+        "    try:\n"
+        "        m = importlib.import_module(mod)\n"
+        "        obj = getattr(m, name, None)\n"
+        "        plain = isinstance(obj, (int, str, float, tuple, frozenset, set, dict, list))\n"
+        "        f = inspect.getsourcefile(obj) if obj is not None and not plain else None\n"
+        "        out.add(f or inspect.getsourcefile(m))\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "print(json.dumps(sorted(x for x in out if x)))\n"
+    )
+    proc = subprocess.run(
+        [str(ws / ".venv/bin/python"), "-c", script, json.dumps(names)],
+        cwd=ws,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        files = json.loads(proc.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return []
+    marker = str(ws / "src") + "/"
+    return sorted({"src/" + f[len(marker) :] for f in files if f.startswith(marker)})
+
+
 def plan(state: Any, ws0: Path) -> list[tuple[Mutant, list[str]]]:
     remaining = sorted(t for t in state.passing if t not in state.proven)
     by_file: dict[str, list[str]] = defaultdict(list)
@@ -50,7 +87,9 @@ def plan(state: Any, ws0: Path) -> list[tuple[Mutant, list[str]]]:
     covered_lines = {k for k, v in state.line_tests.items() if v}
     jobs: list[tuple[Mutant, list[str]]] = []
     for test_file, tests in sorted(by_file.items()):
-        sources = imported_sources(ws0 / test_file, src_root)
+        sources = sorted(
+            set(imported_sources(ws0 / test_file, src_root)) | set(defining_sources(ws0 / test_file, ws0))
+        )
         pool = [m for p in sources for m in by_path.get(p, []) if m.key not in state.tried]
         pool.sort(
             key=lambda m: (f"{m.path}:{m.line}" in covered_lines, OPERATOR_ORDER.get(m.operator, 9), m.key)
