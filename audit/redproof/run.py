@@ -353,6 +353,9 @@ def prove(out: Path, workers: int, budget_s: float) -> None:
     log(
         f"mutants {len(state.mutants)}, passing tests {len(state.passing)}, proven so far {len(state.proven)}"
     )
+    import replay
+
+    replay.run(state, out, workers, try_mutant, wait_host, log)
     deadline = time.monotonic() + budget_s
     counter = {"n": 0}
 
@@ -454,7 +457,7 @@ def check(out: Path, allowlist: Path, collect: bool = False) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["prepare", "baseline", "prove", "fallback", "check", "all"])
+    ap.add_argument("command", choices=["prepare", "baseline", "prove", "fallback", "check", "all", "export-known"])
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--sha", default="HEAD")
@@ -475,6 +478,11 @@ def main() -> int:
         state = State(a.out)
         fallback.run(state, a.out, a.workers, a.budget_hours * 3600, try_mutant, wait_host, log)
         report(a.out, state)
+    if a.command == "export-known":
+        import replay
+
+        log(f"known proofs: {replay.write_known(a.out / 'proof.tsv')}")
+        return 0
     if a.command in ("check", "all"):
         return check(a.out, a.allowlist, a.collect)
     return 0
