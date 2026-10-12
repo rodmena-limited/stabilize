@@ -21,6 +21,7 @@ REPO = Path(__file__).resolve().parents[2]
 PER_LINE_CAP = 12
 PER_TEST_TRIES = 30
 BATCH_CAP = 400
+SPECIFIC_BATCH = 50
 PG = os.environ.get("REDPROOF_PG", "postgresql://postgres:gate@127.0.0.1:55432")
 PG_CONTAINER = os.environ.get("REDPROOF_PG_CONTAINER", "stabilize-gate-pg")
 PYTHON = os.environ.get(
@@ -230,6 +231,7 @@ class State:
         self.no_candidates: set[str] = set()
         self.file_tries: dict[str, int] = defaultdict(int)
         self.file_proofs: dict[str, int] = defaultdict(int)
+        self.broad_results: list[int] = []
         self._resume()
 
     def _resume(self) -> None:
@@ -245,8 +247,9 @@ class State:
                 mkey, *ids = line.split("\t")
                 self.tried.add(mkey)
                 self.file_tries[mkey.split(":", 1)[0]] += 1
-                for t in ids:
-                    self.tries[t] += 1
+                if len(ids) <= SPECIFIC_BATCH:
+                    for t in ids:
+                        self.tries[t] += 1
 
     def active(self) -> set[str]:
         return {t for t in self.passing if t not in self.proven and self.tries[t] < PER_TEST_TRIES}
@@ -294,8 +297,9 @@ class State:
                 fh.write("\t".join([m.key, *([] if discarded else ran)]) + "\n")
             if discarded:
                 return
-            for t in ran:
-                self.tries[t] += 1
+            if len(ran) <= SPECIFIC_BATCH:
+                for t in ran:
+                    self.tries[t] += 1
             proof = self.out / "proof.tsv"
             new = not proof.exists()
             with open(proof, "a") as fh:
@@ -344,13 +348,18 @@ def prove(out: Path, workers: int, budget_s: float) -> None:
             wait_host()
             with state.lock:
                 counter["n"] += 1
-                broad = counter["n"] % 2 == 1
+                recent = state.broad_results[-5:]
+                paying = len(recent) < 5 or sum(recent) / len(recent) >= 10
+                broad = counter["n"] % 2 == 1 and paying
             picked = state.pick(broad)
             if picked is None:
                 return
             m, ids = picked
             confirmed, discarded = try_mutant(ws, i, m, ids)
             state.record(m, ids, confirmed, discarded)
+            if broad:
+                with state.lock:
+                    state.broad_results.append(len(confirmed))
             log(
                 f"w{i} {m.key} ran={len(ids)} proven+={len(confirmed)} discarded={discarded} "
                 f"total_proven={len(state.proven)}/{len(state.passing)} active={len(state.active())}"
