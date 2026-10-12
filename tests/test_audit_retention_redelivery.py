@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 import time
 from datetime import timedelta
 from typing import Any
@@ -9,7 +11,6 @@ import pytest
 from stabilize import StageExecution, TaskResult
 from stabilize.models.status import WorkflowStatus
 from stabilize.persistence.store import WorkflowStore
-from stabilize.queue import Queue
 from stabilize.queue.messages import get_message_type_name
 from stabilize.tasks.interface import Task
 from tests.audit_support import make_processor, stage, start
@@ -31,8 +32,18 @@ def _env(monkeypatch: pytest.MonkeyPatch) -> None:
     CALLS.clear()
 
 
+def _queue(repository: WorkflowStore) -> Any:
+    from stabilize.persistence.factory import create_queue
+
+    q = create_queue(repository.connection_string, table_name="queue_messages", lock_duration=timedelta(seconds=1))
+    create = getattr(q, "_create_table", None)
+    if callable(create):
+        create()
+    q.clear()
+    return q
+
+
 def _drain(processor: Any, repository: WorkflowStore, wf_id: str, crash_on: str | None) -> bool:
-    crashed = False
     deadline = time.monotonic() + 15
     idle_since = time.monotonic()
     while time.monotonic() < deadline:
@@ -44,37 +55,57 @@ def _drain(processor: Any, repository: WorkflowStore, wf_id: str, crash_on: str 
             continue
         idle_since = time.monotonic()
         processor._handle_message(msg)
-        if crash_on is not None and not crashed and get_message_type_name(msg) == crash_on:
+        if crash_on is not None and get_message_type_name(msg) == crash_on:
             return True
         processor.queue.ack(msg)
-    return crashed
+    return False
 
 
-def _run(repository: WorkflowStore, queue: Queue, crash_on: str, sweep: bool) -> tuple[WorkflowStatus, int]:
-    queue.lock_duration = timedelta(seconds=1)
+def _prune(repository: WorkflowStore) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "stabilize.cli.main",
+            "prune-processed",
+            "--db-url",
+            repository.connection_string,
+            "--older-than-hours",
+            "0",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, f"prune-processed failed: {result.stderr[-400:]}"
+
+
+def _run(repository: WorkflowStore, crash_on: str, prune: bool) -> tuple[WorkflowStatus, int]:
+    queue = _queue(repository)
     first = make_processor(repository, queue, {"effect": Effect})
     wf = start(repository, queue, [stage("s", ["effect"])])
     assert _drain(first, repository, wf.id, crash_on), f"{crash_on} never handled"
     time.sleep(0.05)
-    if sweep:
-        repository.cleanup_old_processed_messages(max_age_hours=0)
+    if prune:
+        _prune(repository)
     time.sleep(1.2)
     second = make_processor(repository, queue, {"effect": Effect})
-    _drain(second, repository, wf.id, None)
+    try:
+        _drain(second, repository, wf.id, None)
+    finally:
+        queue.close()
     return repository.retrieve(wf.id).status, CALLS.get(wf.id, 0)
 
 
 @pytest.mark.parametrize("crash_on", TYPES)
-def test_redelivery_after_retention_does_not_repeat_work(
-    repository: WorkflowStore, queue: Queue, crash_on: str
-) -> None:
-    status, calls = _run(repository, queue, crash_on, sweep=True)
-    assert status == WorkflowStatus.SUCCEEDED, f"C2 {crash_on} redelivered after retention: workflow {status.name}"
-    assert calls == 1, f"C2 {crash_on} redelivered after retention: task executed {calls} times"
+def test_prune_during_outage_does_not_repeat_work(file_repository: WorkflowStore, crash_on: str) -> None:
+    status, calls = _run(file_repository, crash_on, prune=True)
+    assert status == WorkflowStatus.SUCCEEDED, f"C2 {crash_on} after prune-processed: workflow {status.name}"
+    assert calls == 1, f"C2 {crash_on} redelivered after prune-processed: task executed {calls} times"
 
 
 @pytest.mark.parametrize("crash_on", TYPES)
-def test_redelivery_control_without_retention(repository: WorkflowStore, queue: Queue, crash_on: str) -> None:
-    status, calls = _run(repository, queue, crash_on, sweep=False)
+def test_redelivery_control_without_prune(file_repository: WorkflowStore, crash_on: str) -> None:
+    status, calls = _run(file_repository, crash_on, prune=False)
     assert status == WorkflowStatus.SUCCEEDED
     assert calls == 1
