@@ -14,6 +14,13 @@ starting 0.33.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
 
 ### Fixed — a side effect ran that must not, or ran twice
 
+- **Retention keeps the dedup record of a message that is still queued (#91, C2).**
+  The processor's retention sweep and `stabilize prune-processed` deleted every
+  `processed_messages` record older than the cutoff. A RunTask whose handler had
+  committed but whose ack was lost (crash) stays in the queue; once its record
+  was deleted (for example by `prune-processed` during an outage), the
+  redelivered message ran the task a second time. Both now delete only records
+  of their own queue table whose message is no longer in that table.
 - **A failed task stops its stage (#78).** After a task completed TERMINAL,
   STOPPED or CANCELED — or FAILED_CONTINUE converted by
   `continuePipelineOnFailure` — the next task of the same stage still
@@ -111,6 +118,13 @@ starting 0.33.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
   numeric `processed_messages.message_id`. Run it before 0.33.0 workers.
 - SQLite migration 4 adds the same column (applied by `create_tables=True`);
   a 0.33.0 store on an unmigrated SQLite database keeps working without it.
+- `prune-processed` checks each record against the queue table: pass
+  `--queue-table` once per queue table (default `queue_messages`), and
+  `--queue-db-url` when the queue tables are not in `--db-url`. Without it, an
+  unused queue table of the same name in `--db-url` reports every message as
+  gone. Records of tables not named are kept. A processor's sweep removes only
+  records of its own queue table. `WorkflowStore.cleanup_old_processed_messages`
+  called without `live` keeps its 0.32 behaviour (no queue check).
 - Deployments with several queue tables: start workflows through
   `Orchestrator(queue).start()`; pre-1.0 rows without `queue_table` belong to
   `queue_messages`.

@@ -73,6 +73,10 @@ class Queue(ABC):
         """
         pass
 
+    def live_delivery_keys(self, keys: list[str]) -> set[str]:
+        """The keys among keys whose message is still in this queue; every key when the queue cannot tell."""
+        return set(keys)
+
     @abstractmethod
     def ack(self, message: Message) -> None:
         """

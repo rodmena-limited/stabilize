@@ -20,7 +20,7 @@ from stabilize.persistence.connection import release_pool_once
 from stabilize.persistence.pool_options import PoolOptions, with_schema
 from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.interface import Queue
-from stabilize.queue.message_ids import delivery_key, row_id
+from stabilize.queue.message_ids import delivery_key, own_row_ids, row_id
 from stabilize.queue.messages import Message, get_message_type_name
 
 _VALID_TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
@@ -82,9 +82,7 @@ class PostgresQueue(Queue):
         self.schema = schema
         self._pool_options = with_schema(options, schema, connection_string)
         self._manager = get_connection_manager()
-        self._pool = self._manager.get_postgres_pool(
-            connection_string, options=self._pool_options
-        )
+        self._pool = self._manager.get_postgres_pool(connection_string, options=self._pool_options)
         self._pending: dict[int, dict[str, Any]] = {}
         # Size caching
         self._size_cache: int | None = None
@@ -301,6 +299,17 @@ class PostgresQueue(Queue):
             conn.commit()
 
         self._pending.pop(msg_id, None)
+
+    def live_delivery_keys(self, keys: list[str]) -> set[str]:
+        owned = own_row_ids(self.table_name, keys)
+        if not owned:
+            return set()
+        pool = self._get_pool()
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT id FROM {self.table_name} WHERE id = ANY(%(ids)s)", {"ids": list(owned)})
+                rows = cur.fetchall()
+        return {owned[int(r["id"])] for r in rows}
 
     def size(self) -> int:
         """Get the number of messages in the queue (cached)."""

@@ -14,12 +14,15 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 from stabilize.persistence.sqlite.operations import (
     cleanup_old_processed_messages as _cleanup_old_processed_messages,
+)
+from stabilize.persistence.sqlite.operations import (
+    cleanup_processed_not_in_queue as _cleanup_processed_not_in_queue,
 )
 from stabilize.persistence.sqlite.operations import (
     get_processed_message_ids as _get_processed_message_ids,
@@ -33,6 +36,7 @@ from stabilize.persistence.sqlite.store.queries import SqliteQueriesMixin
 from stabilize.persistence.sqlite.store.stage_ops import SqliteStageOpsMixin
 from stabilize.persistence.sqlite.store.workflow_crud import SqliteWorkflowCrudMixin
 from stabilize.persistence.store import WorkflowStore
+from stabilize.queue.ownership import DEFAULT_TABLE
 
 if TYPE_CHECKING:
     from stabilize.persistence.store import StoreTransaction
@@ -183,20 +187,25 @@ class SqliteWorkflowStore(
         max_age_hours: float = 24.0,
         batch_size: int | None = None,
         max_rows: int | None = None,
+        table_name: str | None = None,
+        live: Callable[[list[str]], set[str]] | None = None,
     ) -> int:
-        """Delete processed-message records older than max_age_hours, in batches; returns the count."""
+        """Delete processed-message records older than max_age_hours, in batches; returns the count.
+
+        With live, only records of table_name's messages are considered, and a record is kept while
+        live() reports its message still in the queue.
+        """
+        if live is not None:
+            return _cleanup_processed_not_in_queue(
+                self._get_connection(), max_age_hours, batch_size, max_rows, table_name or DEFAULT_TABLE, live
+            )
         return _cleanup_old_processed_messages(self._get_connection(), max_age_hours, batch_size, max_rows)
 
-    def completed_workflow_ids(
-        self, completed_before_ms: int, limit: int, application: str | None = None
-    ) -> list[str]:
+    def completed_workflow_ids(self, completed_before_ms: int, limit: int, application: str | None = None) -> list[str]:
         from stabilize.maintenance import PURGEABLE
 
         marks = ", ".join("?" for _ in PURGEABLE)
-        sql = (
-            f"SELECT id FROM pipeline_executions WHERE status IN ({marks}) "
-            "AND end_time IS NOT NULL AND end_time < ?"
-        )
+        sql = f"SELECT id FROM pipeline_executions WHERE status IN ({marks}) AND end_time IS NOT NULL AND end_time < ?"
         params: list[Any] = [*PURGEABLE, completed_before_ms]
         if application is not None:
             sql += " AND application = ?"
@@ -278,12 +287,10 @@ class SqliteWorkflowStore(
 
         return len(get_pending_signals(self._get_connection(), execution_id, stage_ref_id))
 
-
     def discard_signals(self, execution_id: str, stage_ref_id: str) -> int:
         conn = self._get_connection()
         cur = conn.execute(
-            "DELETE FROM workflow_signals WHERE execution_id = :e "
-            "AND stage_ref_id = :s AND consumed = 0",
+            "DELETE FROM workflow_signals WHERE execution_id = :e AND stage_ref_id = :s AND consumed = 0",
             {"e": execution_id, "s": stage_ref_id},
         )
         conn.commit()

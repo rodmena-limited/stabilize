@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 
 class MaintenanceDefaults:
     def cleanup_old_processed_messages(
@@ -9,6 +11,8 @@ class MaintenanceDefaults:
         max_age_hours: float = 24.0,
         batch_size: int | None = None,
         max_rows: int | None = None,
+        table_name: str | None = None,
+        live: Callable[[list[str]], set[str]] | None = None,
     ) -> int:
         """
         Clean up old processed message records.
@@ -23,9 +27,7 @@ class MaintenanceDefaults:
         """
         return 0
 
-    def completed_workflow_ids(
-        self, completed_before_ms: int, limit: int, application: str | None = None
-    ) -> list[str]:
+    def completed_workflow_ids(self, completed_before_ms: int, limit: int, application: str | None = None) -> list[str]:
         """Ids of complete workflows whose end_time is before completed_before_ms, oldest first."""
         raise NotImplementedError(f"{type(self).__name__} does not support purge")
 

@@ -6,12 +6,15 @@ import json
 import logging
 import sqlite3
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.workflow import PausedDetails
 from stabilize.persistence.signal_scope import signal_status_filter as _signal_status_filter
 from stabilize.persistence.sqlite.converters import paused_to_dict
+from stabilize.queue.message_ids import owner_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +193,58 @@ def cleanup_old_processed_messages(
         deleted = int(cursor.rowcount or 0)
         total += deleted
         if deleted < n:
+            break
+    return total
+
+
+def cleanup_processed_not_in_queue(
+    conn: sqlite3.Connection,
+    max_age_hours: float,
+    batch_size: int | None,
+    max_rows: int | None,
+    table_name: str,
+    live: Callable[[list[str]], set[str]],
+) -> int:
+    """Delete stale processed_messages rows of table_name's messages that live() reports gone from the queue."""
+    cutoff = (datetime.now(UTC) - timedelta(hours=max_age_hours)).isoformat()
+    prefix = owner_prefix(table_name)
+    if prefix is None:
+        owner = "message_id <> '' AND message_id NOT GLOB '*[^0-9]*'"
+    else:
+        owner = "substr(message_id, 1, :plen) = :prefix"
+    stale = "processed_at < :cutoff AND julianday(processed_at) < julianday(:cutoff)"
+    batch = int(batch_size or SQLITE_RETENTION_BATCH)
+    total = 0
+    after: tuple[str, str] | None = None
+    while max_rows is None or total < max_rows:
+        params: dict[str, Any] = {"cutoff": cutoff, "n": batch, "prefix": prefix, "plen": len(prefix or "")}
+        page = ""
+        if after is not None:
+            page = " AND (processed_at, message_id) > (:after_at, :after_id)"
+            params.update(after_at=after[0], after_id=after[1])
+        rows = conn.execute(
+            f"SELECT message_id, processed_at FROM processed_messages WHERE {stale} AND {owner}{page} "
+            "ORDER BY processed_at, message_id LIMIT :n",
+            params,
+        ).fetchall()
+        conn.commit()
+        if not rows:
+            break
+        keys = [str(r[0]) for r in rows]
+        after = (str(rows[-1][1]), keys[-1])
+        still_queued = live(keys)
+        gone = [k for k in keys if k not in still_queued]
+        if max_rows is not None:
+            gone = gone[: max_rows - total]
+        for i in range(0, len(gone), 500):
+            chunk = gone[i : i + 500]
+            marks = ",".join(f":k{j}" for j in range(len(chunk)))
+            args: dict[str, Any] = {f"k{j}": k for j, k in enumerate(chunk)}
+            args["cutoff"] = cutoff
+            cursor = conn.execute(f"DELETE FROM processed_messages WHERE message_id IN ({marks}) AND {stale}", args)
+            total += int(cursor.rowcount or 0)
+        conn.commit()
+        if len(rows) < batch:
             break
     return total
 

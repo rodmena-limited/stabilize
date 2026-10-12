@@ -53,7 +53,14 @@ def test_purge_removes_completed_workflows_and_keeps_live_ones(
 
 def test_prune_processed_cli_removes_old_records(file_repository: WorkflowStore, backend: str) -> None:
     repository = file_repository
-    repository.mark_message_processed(message_id="cli-prune-1", handler_type="RunTask", execution_id=None)
+    from stabilize.persistence.factory import create_queue
+
+    q = create_queue(repository.connection_string, table_name="queue_messages")
+    create = getattr(q, "_create_table", None)
+    if callable(create):
+        create()
+    q.close()
+    repository.mark_message_processed(message_id="987654321", handler_type="RunTask", execution_id=None)
     time.sleep(0.05)
     url = repository.connection_string
     result = subprocess.run(
@@ -64,4 +71,4 @@ def test_prune_processed_cli_removes_old_records(file_repository: WorkflowStore,
     )
     assert result.returncode == 0, f"C3 prune-processed CLI failed: {result.stderr[-300:]}"
     assert "Removed" in result.stdout
-    assert not repository.is_message_processed("cli-prune-1")
+    assert not repository.is_message_processed("987654321")

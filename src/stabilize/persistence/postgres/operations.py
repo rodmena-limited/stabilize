@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Callable
 from typing import Any
 
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.workflow import PausedDetails
 from stabilize.persistence.postgres.converters import paused_to_dict
 from stabilize.persistence.signal_scope import signal_status_filter as _signal_status_filter
+from stabilize.queue.message_ids import owner_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +191,67 @@ def cleanup_old_processed_messages(
     return total
 
 
+def _field(row: Any, name: str, index: int) -> Any:
+    return row[name] if isinstance(row, dict) else row[index]
+
+
+def cleanup_processed_not_in_queue(
+    pool: Any,
+    max_age_hours: float,
+    batch_size: int | None,
+    max_rows: int | None,
+    table_name: str,
+    live: Callable[[list[str]], set[str]],
+) -> int:
+    """Delete stale processed_messages rows of table_name's messages that live() reports gone from the queue."""
+    prefix = owner_prefix(table_name)
+    owner = "message_id ~ '^[0-9]+$'" if prefix is None else "left(message_id, %(plen)s) = %(prefix)s"
+    batch = int(batch_size or PG_RETENTION_BATCH)
+    stale = "processed_at < NOW() - %(hours)s * INTERVAL '1 hour'"
+    total = 0
+    after: tuple[Any, str] | None = None
+    while max_rows is None or total < max_rows:
+        params: dict[str, Any] = {
+            "hours": float(max_age_hours),
+            "n": batch,
+            "prefix": prefix,
+            "plen": len(prefix or ""),
+        }
+        page = ""
+        if after is not None:
+            page = " AND (processed_at, message_id) > (%(after_at)s::timestamptz, %(after_id)s::text)"
+            params.update(after_at=after[0], after_id=after[1])
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT message_id, processed_at FROM processed_messages WHERE {stale} AND {owner}{page} "
+                    "ORDER BY processed_at, message_id LIMIT %(n)s",
+                    params,
+                )
+                rows = cur.fetchall()
+            conn.commit()
+        if not rows:
+            break
+        keys = [str(_field(r, "message_id", 0)) for r in rows]
+        after = (_field(rows[-1], "processed_at", 1), keys[-1])
+        still_queued = live(keys)
+        gone = [k for k in keys if k not in still_queued]
+        if max_rows is not None:
+            gone = gone[: max_rows - total]
+        if gone:
+            with pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"DELETE FROM processed_messages WHERE message_id = ANY(%(ids)s) AND {stale}",
+                        {"ids": gone, "hours": float(max_age_hours)},
+                    )
+                    total += int(cur.rowcount or 0)
+                conn.commit()
+        if len(rows) < batch:
+            break
+    return total
+
+
 def cleanup_completed_stage_claims(pool: Any) -> int:
     """Delete stage claims belonging to executions in terminal states.
 
@@ -246,9 +309,7 @@ def count_buffered_signal_stages(
     statuses: list[str] | None = None,
 ) -> int:
     """Count stage rows carrying a _buffered_signals buffer."""
-    sql = (
-        "SELECT COUNT(*) AS n FROM stage_executions WHERE context ? '_buffered_signals'"
-    )
+    sql = "SELECT COUNT(*) AS n FROM stage_executions WHERE context ? '_buffered_signals'"
     selected = _signal_status_filter(only_complete, statuses)
     params: dict[str, Any] = {}
     if selected is not None:

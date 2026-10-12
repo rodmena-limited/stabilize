@@ -109,6 +109,15 @@ def main() -> None:
     processed_parser.add_argument("--older-than-hours", type=float, default=168.0, help="Age cutoff (default 168)")
     processed_parser.add_argument("--batch-size", type=int, default=10_000, help="Rows per transaction (default 10000)")
     processed_parser.add_argument("--max-rows", type=int, default=None, help="Stop after this many rows (no limit)")
+    processed_parser.add_argument(
+        "--queue-table",
+        action="append",
+        default=None,
+        help="Queue table whose records are pruned (repeatable; default queue_messages)",
+    )
+    processed_parser.add_argument(
+        "--queue-db-url", default=None, help="Database holding the queue tables, when it is not --db-url"
+    )
 
     purge_parser = subparsers.add_parser(
         "purge-workflows",
@@ -153,7 +162,14 @@ def main() -> None:
     elif args.command == "prune-signals":
         prune_signals(args.db_url, args.include_active, args.dry_run, args.statuses)
     elif args.command == "prune-processed":
-        prune_processed(args.db_url, args.older_than_hours, args.batch_size, args.max_rows)
+        prune_processed(
+            args.db_url,
+            args.older_than_hours,
+            args.batch_size,
+            args.max_rows,
+            args.queue_table or ["queue_messages"],
+            args.queue_db_url,
+        )
     elif args.command == "purge-workflows":
         purge_workflows(
             args.db_url,

@@ -1,7 +1,8 @@
 """The processed-message retention sweep, on its own thread.
 
-Each sweep deletes processed_messages rows older than
-processed_messages_max_age_hours in batches of retention_batch_size rows, one
+Each sweep deletes processed_messages rows of this processor's queue table
+older than processed_messages_max_age_hours whose message is no longer in
+that table, in batches of retention_batch_size rows, one
 transaction per batch, and stops after retention_max_rows_per_sweep rows, so
 message polling never waits for it and no transaction holds more than one
 batch.
@@ -18,19 +19,28 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def _accepts_batches(store: Any) -> bool:
+def _accepts(store: Any, name: str) -> bool:
     try:
         params = inspect.signature(store.cleanup_old_processed_messages).parameters
     except (TypeError, ValueError):
         return False
-    return "max_rows" in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+    return name in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
 def sweep_once(processor: Any) -> int:
     store = processor._store
     cfg = processor.config
     try:
-        if _accepts_batches(store):
+        if _accepts(store, "live"):
+            queue = processor.queue
+            removed = store.cleanup_old_processed_messages(
+                max_age_hours=cfg.processed_messages_max_age_hours,
+                batch_size=cfg.retention_batch_size,
+                max_rows=cfg.retention_max_rows_per_sweep,
+                table_name=getattr(queue, "table_name", None),
+                live=queue.live_delivery_keys,
+            )
+        elif _accepts(store, "max_rows"):
             removed = store.cleanup_old_processed_messages(
                 max_age_hours=cfg.processed_messages_max_age_hours,
                 batch_size=cfg.retention_batch_size,

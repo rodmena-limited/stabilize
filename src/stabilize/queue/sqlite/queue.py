@@ -22,7 +22,7 @@ from typing import Any
 
 from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.interface import Queue
-from stabilize.queue.message_ids import delivery_key, row_id
+from stabilize.queue.message_ids import delivery_key, own_row_ids, row_id
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.sqlite.dlq import SqliteDLQMixin
 from stabilize.queue.sqlite.schema import create_queue_tables
@@ -311,6 +311,20 @@ class SqliteQueue(SqliteDLQMixin, Queue):
 
         self._pending.pop(msg_id, None)
         logger.debug("Rescheduled message (id=%s, deliver_at=%s)", msg_id, deliver_at)
+
+    def live_delivery_keys(self, keys: list[str]) -> set[str]:
+        owned = own_row_ids(self.table_name, keys)
+        if not owned:
+            return set()
+        conn = self._get_connection()
+        found: set[str] = set()
+        ids = list(owned)
+        for i in range(0, len(ids), 500):
+            chunk = ids[i : i + 500]
+            marks = ",".join("?" for _ in chunk)
+            for row in conn.execute(f"SELECT id FROM {self.table_name} WHERE id IN ({marks})", chunk):
+                found.add(owned[int(row[0])])
+        return found
 
     def size(self) -> int:
         """Get the number of messages in the queue."""
