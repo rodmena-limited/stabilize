@@ -175,10 +175,12 @@ def baseline(out: Path) -> None:
     log("baseline with per-test coverage contexts")
     cov_env_file = out / ".coverage"
     os.environ["COVERAGE_FILE"] = str(cov_env_file)
+    os.environ["COVERAGE_CORE"] = "ctrace"
     res = run_pytest(
         ws, 0, SUITES, ["--cov=stabilize", "--cov-context=test", "--cov-report="], 7200
     )
     os.environ.pop("COVERAGE_FILE")
+    os.environ.pop("COVERAGE_CORE")
     results = res["results"]
     failed = sorted(k for k, v in results.items() if v["outcome"] in ("failed", "error"))
     if failed:
