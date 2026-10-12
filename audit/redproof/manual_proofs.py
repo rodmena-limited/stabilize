@@ -27,8 +27,17 @@ def wait_host() -> None:
 
 
 def export(dest: Path) -> None:
-    archive = subprocess.run(["git", "-C", str(REPO), "archive", "HEAD", *EXPORT], check=True, capture_output=True)
-    subprocess.run(["tar", "-x", "-C", str(dest)], input=archive.stdout, check=True)
+    if (REPO / ".git").exists():
+        archive = subprocess.run(["git", "-C", str(REPO), "archive", "HEAD", *EXPORT], check=True, capture_output=True)
+        subprocess.run(["tar", "-x", "-C", str(dest)], input=archive.stdout, check=True)
+        return
+    skip = shutil.ignore_patterns("__pycache__", "*.pyc")
+    for name in EXPORT:
+        source = REPO / name
+        if source.is_dir():
+            shutil.copytree(source, dest / name, ignore=skip)
+        else:
+            shutil.copy2(source, dest / name)
 
 
 def env_for(tree: Path) -> dict[str, str]:

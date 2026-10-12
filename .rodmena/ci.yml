@@ -126,4 +126,4 @@ jobs:
       - name: Mutation red-proof of the whole suite, then the allowlist check
         run: REDPROOF_PG="${DATABASE_URL%/*}" REDPROOF_PG_CONTAINER= REDPROOF_PYTHON="$(command -v python3.14)" .venv/bin/python audit/redproof/run.py all --out "$PWD/.redproof" --workers 2 --sha HEAD --budget-hours 4
       - name: Manual proofs (each diff must make its test fail and the clean tree pass)
-        run: if [ -f audit/redproof/manual_proofs.py ]; then .venv/bin/python audit/redproof/manual_proofs.py; fi
+        run: STABILIZE_TEST_DSN="$DATABASE_URL" .venv/bin/python audit/redproof/manual_proofs.py
