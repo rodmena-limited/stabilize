@@ -84,6 +84,10 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
                 )
                 return
 
+            if execution.status == WorkflowStatus.PAUSED:
+                logger.info("Execution %s is PAUSED; completion waits for unpause", execution.id)
+                return
+
             # Determine final status
             status = self._determine_final_status(execution, message)
             if status is None:

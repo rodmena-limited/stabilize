@@ -75,8 +75,13 @@ starting 0.33.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
   ResumeStage only for PAUSED stages, of which there were none: the workflow
   stayed PAUSED forever. `unpause` now returns such a workflow to NOT_STARTED
   and pushes StartWorkflow in one transaction, so admission (and its
-  concurrency limit) runs again. The monitor's resume key uses `unpause`; it
-  used `store.resume`, which set RUNNING and pushed nothing.
+  concurrency limit) runs again. A workflow paused after its last stage
+  finished, before CompleteWorkflow, stayed PAUSED for the same reason
+  (CompleteWorkflow raised PAUSED -> SUCCEEDED): CompleteWorkflow now leaves a
+  PAUSED workflow alone, and `unpause` of a started workflow with no PAUSED
+  stage restores RUNNING and pushes CompleteWorkflow, which completes it or,
+  while stages are active, does nothing. The monitor's resume key uses
+  `unpause`; it used `store.resume`, which set RUNNING and pushed nothing.
 - **Pause and cancel no longer rewrite a finished workflow (#91, C18).**
   `store.pause()` set a SUCCEEDED (or any complete) workflow to PAUSED, and
   `store.cancel()` flagged it canceled. Pause now applies only to RUNNING,
