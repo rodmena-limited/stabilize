@@ -82,10 +82,14 @@ def prepare(out: Path, workers: int, sha: str) -> None:
         if (ws / ".venv").exists():
             continue
         ws.mkdir(parents=True, exist_ok=True)
-        archive = subprocess.run(
-            ["git", "-C", str(REPO), "archive", sha], check=True, capture_output=True
-        ).stdout
-        subprocess.run(["tar", "-x", "-C", str(ws)], input=archive, check=True)
+        if (REPO / ".git").exists():
+            archive = subprocess.run(
+                ["git", "-C", str(REPO), "archive", sha], check=True, capture_output=True
+            ).stdout
+            subprocess.run(["tar", "-x", "-C", str(ws)], input=archive, check=True)
+        else:
+            skip = shutil.ignore_patterns(".venv*", ".old", ".redproof", "__pycache__", "*.log", ".coverage*")
+            shutil.copytree(REPO, ws, ignore=skip, dirs_exist_ok=True)
         shutil.copytree(REPO / "audit" / "redproof", ws / "audit" / "redproof", dirs_exist_ok=True)
         for extra in EXTRA_TESTS:
             shutil.copy(extra, ws / "tests" / Path(extra).name)
