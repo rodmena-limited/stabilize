@@ -36,7 +36,8 @@ class TestSsrfMustBlock:
 
     @pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://example.com/x", "gopher://x/y"])
     def test_only_http_schemes_are_permitted(self, url: str) -> None:
-        with pytest.raises(ValueError):
+        scheme = url.split(":", 1)[0]
+        with pytest.raises(ValueError, match=f"scheme '{scheme}' is not permitted"):
             _validate_url_safety(url)
 
     def test_unresolvable_host_fails_closed(self) -> None:

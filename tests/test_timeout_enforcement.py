@@ -6,6 +6,7 @@ it exceeds the configured timeout.
 
 import time
 from datetime import timedelta
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -94,28 +95,45 @@ class TestGetTaskTimeout:
         assert config.default_task_timeout_seconds == 14400.0
         assert timedelta(seconds=config.default_task_timeout_seconds) == timedelta(hours=4)
 
-    def test_retryable_task_uses_dynamic_timeout(self) -> None:
-        """RetryableTask should use get_dynamic_timeout."""
+    def test_retryable_task_uses_dynamic_timeout(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        from stabilize import Orchestrator, Workflow
+        from stabilize.persistence.sqlite import SqliteWorkflowStore
+        from stabilize.queue.sqlite import SqliteQueue
         from stabilize.tasks.interface import RetryableTask
+        from tests.audit_support import drive, make_processor, stage
 
         class CustomRetryableTask(RetryableTask):
             def execute(self, stage: StageExecution) -> TaskResult:
-                return TaskResult.success()
+                return TaskResult.running()
 
             def get_timeout(self) -> timedelta:
-                return timedelta(seconds=60)  # Base timeout
+                return timedelta(seconds=60)
 
             def get_dynamic_timeout(self, stage: StageExecution) -> timedelta:
-                return timedelta(seconds=30)  # Dynamic override
+                return timedelta(milliseconds=300)
 
             def get_backoff_period(self, stage: StageExecution, elapsed: timedelta) -> timedelta:
-                return timedelta(seconds=5)
+                return timedelta(milliseconds=50)
 
-        task = CustomRetryableTask()
-        stage = MagicMock(spec=StageExecution)
-
-        timeout = task.get_dynamic_timeout(stage)
-        assert timeout == timedelta(seconds=30)
+        monkeypatch.setenv("STABILIZE_CIRCUIT_BREAKER_ENABLED", "false")
+        url = f"sqlite:///{tmp_path}/timeout.db"
+        store = SqliteWorkflowStore(url, create_tables=True)
+        queue = SqliteQueue(url, table_name="queue_messages")
+        queue._create_table()
+        processor = make_processor(
+            store, queue, {"custom": CustomRetryableTask}, task_backoff_min_delay_ms=50, task_backoff_max_delay_ms=50
+        )
+        wf = Workflow.create(application="test", name="dynamic-timeout", stages=[stage("s", ["custom"])])
+        store.store(wf)
+        Orchestrator(queue, store=store).start(wf)
+        started = time.monotonic()
+        final = drive(processor, store, wf.id, timeout=20, idle=3.0)
+        elapsed = time.monotonic() - started
+        task = final.stages[0].tasks[0]
+        assert task.status == WorkflowStatus.TERMINAL, f"task {task.status.name} after {elapsed:.1f} s"
+        assert elapsed < 15, f"timed out after {elapsed:.1f} s, not at the 0.3 s dynamic timeout"
+        queue.close()
+        store.close()
 
 
 class TestTimeoutWithOnTimeoutHook:

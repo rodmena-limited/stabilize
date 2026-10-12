@@ -1,0 +1,12 @@
+test-id: tests/test_critical_corner_cases.py::TestBugDocumentation::test_bug_max_jumps_zero_treated_as_falsy
+--- a/src/stabilize/handlers/jump_to_stage/handler.py
++++ b/src/stabilize/handlers/jump_to_stage/handler.py
+@@ -338,7 +338,7 @@
+ 
+         jump_count = source_stage.context.get("_jump_count", 0)
+         # Use explicit None checks to allow max_jumps=0 (disables jumps)
+-        max_jumps = execution.context.get("_max_jumps")
++        max_jumps = execution.context.get("_max_jumps") or DEFAULT_MAX_JUMPS
+         if max_jumps is None:
+             max_jumps = source_stage.context.get("_max_jumps")
+         if max_jumps is None:

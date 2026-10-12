@@ -1,0 +1,12 @@
+test-id: tests/events/test_events.py::TestEventMetadata::test_create_metadata
+--- a/src/stabilize/events/recorder/context.py
++++ b/src/stabilize/events/recorder/context.py
+@@ -47,7 +47,7 @@
+     """
+     return EventMetadata(
+         correlation_id=_correlation_id.get(),
+-        causation_id=_causation_id.get(),
++        causation_id=None,
+         actor=_actor.get(),
+         source_handler=source_handler,
+     )

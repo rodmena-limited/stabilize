@@ -36,9 +36,16 @@ class _RecordingPool:
         pass
 
 
+def _in_error(needle: str, text: str) -> bool:
+    return needle in text
+
+
 @pytest.mark.parametrize("dsn", MALFORMED)
-def test_detector_can_see_the_secret(dsn: str) -> None:
-    assert SECRET in dsn
+def test_detector_can_see_the_secret(manager: Any, dsn: str) -> None:
+    with pytest.raises(ValueError) as raised:
+        manager.get_postgres_pool(dsn)
+    echoed = dsn.replace(SECRET, "***").split("://", 1)[1]
+    assert _in_error(echoed, str(raised.value)), f"the error does not echo the redacted DSN: {raised.value}"
 
 
 @pytest.mark.parametrize("dsn", MALFORMED)
@@ -49,8 +56,8 @@ def test_malformed_dsn_raises_without_the_password(manager: Any, dsn: str, caplo
         manager.get_postgres_pool(dsn)
     elapsed = time.monotonic() - started
 
-    assert SECRET not in str(raised.value)
-    assert SECRET not in "".join(traceback.format_exception(raised.value))
+    assert not _in_error(SECRET, str(raised.value))
+    assert not _in_error(SECRET, "".join(traceback.format_exception(raised.value)))
     assert raised.value.__cause__ is None
     assert raised.value.__suppress_context__ is True
     assert not any(SECRET in record.getMessage() for record in caplog.records)

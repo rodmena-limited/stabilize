@@ -1,0 +1,12 @@
+test-id: tests/events/test_events.py::TestEvent::test_create_event
+--- a/src/stabilize/events/base.py
++++ b/src/stabilize/events/base.py
+@@ -267,7 +267,7 @@
+     return Event(
+         event_type=event_type,
+         entity_type=EntityType.WORKFLOW,
+-        entity_id=workflow_id,
++        entity_id="",
+         workflow_id=workflow_id,
+         version=version,
+         data=data,

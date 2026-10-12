@@ -25,15 +25,12 @@ class TestValidationError:
         assert str(error) == "missing required field"
 
     def test_attributes(self) -> None:
-        """Test error attributes."""
-        error = ValidationError(
-            path="config.timeout",
-            message="must be positive",
-            value=-1,
-            constraint="minimum",
-        )
-        assert error.path == "config.timeout"
-        assert error.message == "must be positive"
+        validator = SchemaValidator({"type": "object", "properties": {"timeout": {"type": "integer", "minimum": 0}}})
+        errors = validator.validate({"timeout": -1})
+        assert len(errors) == 1
+        error = errors[0]
+        assert error.path == "timeout"
+        assert error.message == "must be >= 0"
         assert error.value == -1
         assert error.constraint == "minimum"
 

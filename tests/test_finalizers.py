@@ -37,16 +37,14 @@ class TestFinalizerResult:
         assert result.error is None
 
     def test_failed_result(self) -> None:
-        """Failed result has success=False and error message."""
-        result = FinalizerResult(
-            name="cleanup",
-            success=False,
-            error="Connection refused",
-            duration_ms=100.0,
-        )
+        registry = FinalizerRegistry()
 
-        assert not result.success
-        assert result.error == "Connection refused"
+        def cleanup() -> None:
+            raise ConnectionRefusedError("Connection refused")
+
+        registry.register("stage-1", "cleanup", cleanup)
+        results = registry.execute("stage-1", timeout=5.0)
+        assert [(r.name, r.success, r.error) for r in results] == [("cleanup", False, "Connection refused")]
 
 
 class TestFinalizerRegistry:

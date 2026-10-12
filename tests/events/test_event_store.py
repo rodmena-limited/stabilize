@@ -173,34 +173,33 @@ class TestEventQuery:
         assert query.ascending is True
 
     def test_filter_by_entity(self) -> None:
-        """Test entity filtering."""
-        query = EventQuery(
-            entity_type=EntityType.STAGE,
-            entity_id="stage-123",
+        store = SqliteEventStore("sqlite:///:memory:", create_tables=True)
+        store.append(Event(event_type=EventType.STAGE_STARTED, entity_type=EntityType.STAGE, entity_id="stage-123"))
+        store.append(Event(event_type=EventType.STAGE_STARTED, entity_type=EntityType.STAGE, entity_id="stage-999"))
+        store.append(
+            Event(event_type=EventType.WORKFLOW_STARTED, entity_type=EntityType.WORKFLOW, entity_id="stage-123")
         )
 
-        assert query.entity_type == EntityType.STAGE
-        assert query.entity_id == "stage-123"
+        found = list(store.get_events(EventQuery(entity_type=EntityType.STAGE, entity_id="stage-123")))
+
+        assert [(e.entity_type, e.entity_id) for e in found] == [(EntityType.STAGE, "stage-123")]
 
     def test_sequence_range(self) -> None:
-        """Test sequence range filtering."""
-        query = EventQuery(
-            from_sequence=100,
-            to_sequence=200,
-        )
+        store = SqliteEventStore("sqlite:///:memory:", create_tables=True)
+        sequences = [store.append(Event(event_type=EventType.WORKFLOW_STARTED)).sequence for _ in range(5)]
 
-        assert query.from_sequence == 100
-        assert query.to_sequence == 200
+        found = list(store.get_events(EventQuery(from_sequence=sequences[1], to_sequence=sequences[3])))
+
+        assert [e.sequence for e in found] == sequences[2:4]
 
     def test_time_range(self) -> None:
-        """Test time range filtering."""
-        start = datetime.now(UTC) - timedelta(hours=1)
-        end = datetime.now(UTC)
+        store = SqliteEventStore("sqlite:///:memory:", create_tables=True)
+        now = datetime.now(UTC)
+        for hours, name in ((3, "old"), (1, "inside"), (-1, "future")):
+            store.append(
+                Event(event_type=EventType.WORKFLOW_STARTED, entity_id=name, timestamp=now - timedelta(hours=hours))
+            )
 
-        query = EventQuery(
-            from_timestamp=start,
-            to_timestamp=end,
-        )
+        found = list(store.get_events(EventQuery(from_timestamp=now - timedelta(hours=2), to_timestamp=now)))
 
-        assert query.from_timestamp == start
-        assert query.to_timestamp == end
+        assert [e.entity_id for e in found] == ["inside"]

@@ -1,0 +1,12 @@
+test-id: tests/test_timeout_enforcement.py::TestGetTaskTimeout::test_retryable_task_uses_dynamic_timeout
+--- a/src/stabilize/handlers/run_task/handler.py
++++ b/src/stabilize/handlers/run_task/handler.py
+@@ -253,7 +253,7 @@
+             # Total-lifecycle timeout for RetryableTask (execute_with_timeout only caps single calls)
+             if isinstance(task, RetryableTask) and task_model.start_time:
+                 elapsed_ms = self.current_time_millis() - task_model.start_time
+-                allowed_ms = task.get_dynamic_timeout(stage).total_seconds() * 1000
++                allowed_ms = task.get_timeout().total_seconds() * 1000
+                 if elapsed_ms > allowed_ms:
+                     logger.info(
+                         "RetryableTask %s exceeded total timeout (%dms > %dms)",

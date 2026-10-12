@@ -13,21 +13,31 @@ from stabilize.events.base import (
     create_task_event,
     create_workflow_event,
 )
+from stabilize.events.recorder import EventRecorder, set_event_context
+from stabilize.events.store import EventQuery, SqliteEventStore
+from stabilize.models.workflow import Workflow
+
+
+def _recorder() -> tuple[SqliteEventStore, EventRecorder]:
+    store = SqliteEventStore("sqlite:///:memory:", create_tables=True)
+    return store, EventRecorder(store, publish_to_bus=False)
 
 
 class TestEventMetadata:
     """Tests for EventMetadata."""
 
     def test_create_metadata(self) -> None:
-        """Test creating event metadata."""
-        metadata = EventMetadata(
-            correlation_id="workflow-123",
-            causation_id="event-456",
-            actor="user@example.com",
-            source_handler="StartWorkflowHandler",
-        )
-
-        assert metadata.correlation_id == "workflow-123"
+        store, recorder = _recorder()
+        workflow = Workflow.create(application="test-app", name="meta", stages=[])
+        set_event_context(correlation_id=workflow.id, causation_id="event-456", actor="user@example.com")
+        try:
+            recorder.record_workflow_created(workflow, source_handler="StartWorkflowHandler")
+        finally:
+            set_event_context(correlation_id="")
+        stored = list(store.get_events(EventQuery(workflow_id=workflow.id)))
+        assert len(stored) == 1
+        metadata = stored[0].metadata
+        assert metadata.correlation_id == workflow.id
         assert metadata.causation_id == "event-456"
         assert metadata.actor == "user@example.com"
         assert metadata.source_handler == "StartWorkflowHandler"
@@ -69,21 +79,15 @@ class TestEvent:
     """Tests for Event model."""
 
     def test_create_event(self) -> None:
-        """Test creating an event."""
-        metadata = EventMetadata(correlation_id="workflow-123")
-        event = Event(
-            event_type=EventType.WORKFLOW_CREATED,
-            entity_type=EntityType.WORKFLOW,
-            entity_id="workflow-123",
-            workflow_id="workflow-123",
-            version=1,
-            data={"application": "test-app"},
-            metadata=metadata,
-        )
-
+        store, recorder = _recorder()
+        workflow = Workflow.create(application="test-app", name="created", stages=[])
+        recorder.record_workflow_created(workflow)
+        stored = list(store.get_events(EventQuery(workflow_id=workflow.id)))
+        assert len(stored) == 1
+        event = stored[0]
         assert event.event_type == EventType.WORKFLOW_CREATED
         assert event.entity_type == EntityType.WORKFLOW
-        assert event.entity_id == "workflow-123"
+        assert event.entity_id == workflow.id
         assert event.data["application"] == "test-app"
 
     def test_event_has_id(self) -> None:

@@ -16,10 +16,14 @@ from stabilize.cli.config import (
 SECRET = "SUPERSECRETPW123"
 
 
+def _leaks(text: str) -> bool:
+    return SECRET in text
+
+
 class TestRedactionAssertionIsNotVacuous:
     def test_known_positive_an_unredacted_url_does_contain_the_secret(self) -> None:
-        url = f"postgresql://someuser:{SECRET}@host:5432/db"
-        assert SECRET in url
+        out = redact_db_url(f"postgresql://someuser:pw@host:5432/{SECRET}")
+        assert _leaks(out), f"the detector cannot see {SECRET} in the redactor output {out!r}"
 
     def test_known_positive_redactor_leaves_a_passwordless_url_alone(self) -> None:
         url = "postgresql://someuser@host:5432/db"
@@ -44,7 +48,7 @@ class TestRedactDbUrl:
         ],
     )
     def test_secret_never_survives_redaction(self, url: str) -> None:
-        assert SECRET not in redact_db_url(url)
+        assert not _leaks(redact_db_url(url))
 
     def test_newline_cannot_forge_a_second_log_line(self) -> None:
         out = redact_db_url(f"postgresql://u:{SECRET}@h/db\nError: all clear")
