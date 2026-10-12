@@ -7,9 +7,10 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from mutants import Mutant, all_mutants
+from mutants import Mutant, all_mutants, mutants_for_file
 
 PER_FILE_MUTANTS = 60
+HELPER_MUTANTS = 20
 OPERATOR_ORDER = {"base-drop": 0, "str-const": 1, "bool-const": 2, "int-const": 3, "return-none": 4}
 
 
@@ -75,6 +76,16 @@ def defining_sources(test_file: Path, ws: Path) -> list[str]:
     return sorted({"src/" + f[len(marker) :] for f in files if f.startswith(marker)})
 
 
+def helper_mutants(test_file: Path, rel: str) -> list[Mutant]:
+    tree = ast.parse(test_file.read_text())
+    spans = [
+        (n.lineno, n.end_lineno or n.lineno)
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test")
+    ]
+    return [m for m in mutants_for_file(test_file, rel) if not any(a <= m.line <= b for a, b in spans)]
+
+
 def plan(state: Any, ws0: Path) -> list[tuple[Mutant, list[str]]]:
     remaining = sorted(t for t in state.passing if t not in state.proven)
     by_file: dict[str, list[str]] = defaultdict(list)
@@ -95,6 +106,9 @@ def plan(state: Any, ws0: Path) -> list[tuple[Mutant, list[str]]]:
             key=lambda m: (f"{m.path}:{m.line}" in covered_lines, OPERATOR_ORDER.get(m.operator, 9), m.key)
         )
         jobs.extend((m, tests) for m in pool[:PER_FILE_MUTANTS])
+        helpers = [m for m in helper_mutants(ws0 / test_file, test_file) if m.key not in state.tried]
+        helpers.sort(key=lambda m: (OPERATOR_ORDER.get(m.operator, 9), m.key))
+        jobs.extend((m, tests) for m in helpers[:HELPER_MUTANTS])
     return jobs
 
 
