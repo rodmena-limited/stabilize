@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
     CancelWorkflow,
     RestartStage,
@@ -175,6 +176,17 @@ class Orchestrator:
         else:
             self.queue.push(message)
 
+    def _restart_unstarted(self, execution: Workflow) -> None:
+        assert self.store is not None
+        with self.store.transaction(self.queue) as txn:
+            status, _ = txn.workflow_status(execution.id)
+            if status != WorkflowStatus.PAUSED.name:
+                return
+            execution.resume()
+            execution.status = WorkflowStatus.NOT_STARTED
+            txn.update_workflow_status(execution)
+            txn.push_message(StartWorkflow(execution_type=execution.type.value, execution_id=execution.id))
+
     def unpause(self, execution: Workflow) -> None:
         """
         Resume a paused execution atomically.
@@ -203,6 +215,10 @@ class Orchestrator:
                         stage_id=stage.id,
                     )
                 )
+
+        if self.store and not messages and execution.status == WorkflowStatus.PAUSED and execution.start_time is None:
+            self._restart_unstarted(execution)
+            return
 
         # Push all messages atomically if store available
         if self.store and messages:

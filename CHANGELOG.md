@@ -49,6 +49,19 @@ starting 0.33.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
 
 ### Fixed — work stranded or a false outcome reported
 
+- **A workflow paused before it starts, or while BUFFERED, starts on unpause (#91, C18).**
+  Its StartWorkflow was consumed while PAUSED, a paused BUFFERED workflow left
+  the set StartWaitingWorkflows admits from, and `Orchestrator.unpause` pushed
+  ResumeStage only for PAUSED stages, of which there were none: the workflow
+  stayed PAUSED forever. `unpause` now returns such a workflow to NOT_STARTED
+  and pushes StartWorkflow in one transaction, so admission (and its
+  concurrency limit) runs again. The monitor's resume key uses `unpause`; it
+  used `store.resume`, which set RUNNING and pushed nothing.
+- **Pause and cancel no longer rewrite a finished workflow (#91, C18).**
+  `store.pause()` set a SUCCEEDED (or any complete) workflow to PAUSED, and
+  `store.cancel()` flagged it canceled. Pause now applies only to RUNNING,
+  NOT_STARTED and BUFFERED workflows; cancel applies to workflows that are not
+  complete, or already CANCELED.
 - **A jump no longer reverts context another handler committed to its target (#91, N5).**
   JumpToStage copied the target's whole context before its transaction and wrote
   that copy over the row it re-read inside the transaction, so a key committed

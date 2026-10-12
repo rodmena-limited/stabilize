@@ -10,6 +10,7 @@ from typing import Any
 
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.workflow import PausedDetails
+from stabilize.persistence.control_states import PAUSABLE
 from stabilize.persistence.postgres.converters import paused_to_dict
 from stabilize.persistence.signal_scope import signal_status_filter as _signal_status_filter
 from stabilize.queue.message_ids import owner_prefix
@@ -31,10 +32,11 @@ def pause_execution(pool: Any, execution_id: str, paused_by: str) -> None:
                 UPDATE pipeline_executions SET
                     status = %(status)s,
                     paused = %(paused)s::jsonb
-                WHERE id = %(id)s
+                WHERE id = %(id)s AND status = ANY(%(pausable)s)
                 """,
                 {
                     "id": execution_id,
+                    "pausable": [s.name for s in PAUSABLE],
                     "status": WorkflowStatus.PAUSED.name,
                     "paused": json.dumps(paused_to_dict(paused)),
                 },
@@ -90,10 +92,11 @@ def cancel_execution(pool: Any, execution_id: str, canceled_by: str, reason: str
                     is_canceled = TRUE,
                     canceled_by = %(canceled_by)s,
                     cancellation_reason = %(reason)s
-                WHERE id = %(id)s
+                WHERE id = %(id)s AND NOT (status = ANY(%(complete)s))
                 """,
                 {
                     "id": execution_id,
+                    "complete": [s.name for s in WorkflowStatus if s.is_complete and s is not WorkflowStatus.CANCELED],
                     "canceled_by": canceled_by,
                     "reason": reason,
                 },

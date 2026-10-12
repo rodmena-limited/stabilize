@@ -12,6 +12,7 @@ from typing import Any
 
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.workflow import PausedDetails
+from stabilize.persistence.control_states import PAUSABLE
 from stabilize.persistence.signal_scope import signal_status_filter as _signal_status_filter
 from stabilize.persistence.sqlite.converters import paused_to_dict
 from stabilize.queue.message_ids import owner_prefix
@@ -35,8 +36,8 @@ def pause_execution(
         UPDATE pipeline_executions SET
             status = :status,
             paused = :paused
-        WHERE id = :id
-        """,
+        WHERE id = :id AND status IN ({pausable})
+        """.format(pausable=", ".join(f"'{s.name}'" for s in PAUSABLE)),
         {
             "id": execution_id,
             "status": WorkflowStatus.PAUSED.name,
@@ -102,8 +103,10 @@ def cancel_execution(
             is_canceled = 1,
             canceled_by = :canceled_by,
             cancellation_reason = :reason
-        WHERE id = :id
-        """,
+        WHERE id = :id AND status NOT IN ({complete})
+        """.format(complete=", ".join(
+            f"'{s.name}'" for s in WorkflowStatus if s.is_complete and s is not WorkflowStatus.CANCELED
+        )),
         {
             "id": execution_id,
             "canceled_by": canceled_by,

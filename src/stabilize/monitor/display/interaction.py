@@ -133,7 +133,12 @@ def handle_workflow_action(
             data_fetcher.store.pause(wf_id, paused_by="monitor")
             show_message(stdscr, f"Paused workflow {wf_id}")
         elif action == "resume":
-            data_fetcher.store.resume(wf_id)
+            if data_fetcher.queue is None:
+                show_message(stdscr, "Resume needs the queue; it is not available", color=curses.COLOR_RED)
+                return
+            from stabilize.orchestrator import Orchestrator
+
+            Orchestrator(data_fetcher.queue, store=data_fetcher.store).unpause(data_fetcher.store.retrieve(wf_id))
             show_message(stdscr, f"Resumed workflow {wf_id}")
         elif action == "cancel":
             reason = get_input(stdscr, "Cancellation reason: ")
