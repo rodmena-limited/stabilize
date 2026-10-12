@@ -181,3 +181,34 @@ def test_cancel_of_a_completed_workflow_leaves_it_uncanceled(repository: Workflo
     after = repository.retrieve(wf.id)
     assert after.status == WorkflowStatus.SUCCEEDED
     assert not after.is_canceled, "C18 cancel flagged a SUCCEEDED workflow as canceled"
+
+
+def test_pause_after_the_last_stage_before_the_workflow_completes(repository: WorkflowStore, queue: Queue) -> None:
+    from stabilize.queue.messages import CompleteWorkflow, get_message_type_name
+
+    processor = _processor(repository, queue)
+    wf = _start(repository, queue, Workflow.create(application="c18", name="late-pause", stages=[stage("a", ["ok"])]))
+    deadline = time.monotonic() + 15
+    held = None
+    while time.monotonic() < deadline:
+        msg = queue.poll_one()
+        if msg is None:
+            time.sleep(0.02)
+            continue
+        if get_message_type_name(msg) == "CompleteWorkflow":
+            held = msg
+            break
+        processor._handle_message(msg)
+        queue.ack(msg)
+    assert held is not None, "CompleteWorkflow never queued"
+    repository.pause(wf.id, paused_by="audit")
+    try:
+        processor._handle_message(held)
+        queue.ack(held)
+    except Exception as exc:
+        held.set_error_context(exc)
+        queue.reschedule(held, timedelta(milliseconds=50))
+    Orchestrator(queue, store=repository).unpause(repository.retrieve(wf.id))
+    final = drive(processor, repository, wf.id, timeout=15, idle=2.0)
+    assert isinstance(held, CompleteWorkflow)
+    _assert_done(final, "pause between the last stage and CompleteWorkflow, then resume")
