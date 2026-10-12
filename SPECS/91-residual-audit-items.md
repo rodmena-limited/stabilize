@@ -30,3 +30,18 @@ ALTERNATIVES:
 - R3: last-activity predicate from stage/task timestamps [CANDIDATE] vs raising the default window [REJECTED: moves the cliff, does not remove it] vs documenting the limit [REJECTED unless the probe shows recovery of such a workflow is unsafe].
 - R5: re-read and merge under the stage version check [CANDIDATE] vs a stage row lock [REJECTED: no row-lock pattern in the store API; version check is the established pattern].
 - R1: SIGKILL at instrumented points via an env-driven hook in the probe's task/handler wrapper [CANDIDATE] vs timing-based kill [REJECTED: nondeterministic, cannot target the commit/ack window].
+
+## Outcomes (2026-10-12)
+
+| Item | Result | Evidence |
+|---|---|---|
+| R1 C16 SIGKILL after commit, before ack | NOT REPRODUCED | `audit/evaluations/probe_sigkill_before_ack.py`: 7 types x sqlite/postgres, executions 1 and SUCCEEDED, on HEAD and published 0.32.1; worker exit checked to be -SIGKILL. Red-proven: durable dedup check disabled -> RunTask executions=2 on both backends. Limit: duplicates observed through task executions only. |
+| R2 C18 pause/resume/jump | CONFIRMED x3, fixed (d0941eb) | `tests/test_audit_control_matrix.py`: paused-before-start and paused-BUFFERED workflows stayed PAUSED forever after unpause; `store.pause()` rewrote SUCCEEDED to PAUSED; `store.cancel()` flagged SUCCEEDED as canceled. Red on HEAD and 0.32.1, both backends. Pause of a RUNNING stage and a jump into a RUNNING stage: green before and after. Monitor resume moved to `Orchestrator.unpause`. |
+| R3 C30 recovery window | Documented limit (692a2bc) | `tests/test_recovery_window.py`: 30 h-old RUNNING workflow skipped at 24 h, recovered and SUCCEEDED at 72 h; each direction red on its own mutant. `docs/guide/stability.rst`. |
+| R4 N3 zombie re-plan | CONFIRMED (wedge), fixed (9c85bea); class: duplicate after-stage execution CONFIRMED, fixed (391c1fa); AddMultiInstance instance loss CONFIRMED, fixed (6983b69) | `tests/test_audit_zombie_replan.py`, `tests/test_audit_multi_instance_crash.py`; all red on HEAD and 0.32.1, both backends. |
+| R5 N5 jump lost update | CONFIRMED, fixed (de07526) | `tests/test_audit_jump_lost_update.py`, red on HEAD and 0.32.1. |
+| R6 throughput | pending | interleaved 3 x (0.32.1, 0.33.0), 5 min at 4 wf/s |
+| R7 C2 retention vs redelivery | CONFIRMED, fixed (50c12d4) | `tests/test_audit_retention_redelivery.py` (prune-processed during an outage: RunTask executed twice; red on 433f187; 0.32.1 has no prune-processed, its store primitive shows the same at 85c7bde); `tests/test_retention_guard.py` both directions. |
+| R8 soak exit | Driver defect, fixed (ca94c9b) | 433f187 gate soak logs end in PythonFinalizationError (driver never closed its pools); verification in the R6 runs. |
+
+Synthesis change (R7): the guard lives in the queue (`live_delivery_keys`) because store and queue may be in different databases; a store-side SQL join was rejected for that reason. `prune-processed` needs `--queue-db-url` when the queue is elsewhere (documented; cannot be detected).
