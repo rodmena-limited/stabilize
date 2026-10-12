@@ -1,0 +1,12 @@
+test-id: tests/test_resilience.py::TestResilienceConfig::test_bulkhead_config_defaults
+--- a/src/stabilize/resilience/config.py
++++ b/src/stabilize/resilience/config.py
+@@ -261,7 +261,7 @@
+     """
+ 
+     max_concurrent: int = 5
+-    max_queue_size: int = 20
++    max_queue_size: int = 21
+     timeout_seconds: float = 14400.0  # 4 hours for long-running workflows
+ 
+     def config_fingerprint(self) -> str:

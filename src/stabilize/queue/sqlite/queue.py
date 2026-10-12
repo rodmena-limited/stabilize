@@ -22,12 +22,15 @@ from typing import Any
 
 from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.interface import Queue
+from stabilize.queue.message_ids import delivery_key, own_row_ids, row_id
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.sqlite.dlq import SqliteDLQMixin
 from stabilize.queue.sqlite.schema import create_queue_tables
 from stabilize.queue.sqlite.serialization import serialize_message
 
 logger = logging.getLogger(__name__)
+
+_FENCE = " AND (:attempts IS NULL OR attempts = :attempts)"
 
 
 class SqliteQueue(SqliteDLQMixin, Queue):
@@ -222,7 +225,7 @@ class SqliteQueue(SqliteDLQMixin, Queue):
             self.move_to_dlq(msg_id, error=f"Deserialization failed: {exc}")
             return None
 
-        message.message_id = str(msg_id)
+        message.message_id = delivery_key(self.table_name, msg_id)
         message.attempts = attempts + 1
 
         self._pending[msg_id] = {
@@ -239,18 +242,20 @@ class SqliteQueue(SqliteDLQMixin, Queue):
             return
 
         try:
-            msg_id = int(message.message_id)
+            msg_id = row_id(message.message_id)
         except ValueError:
             logger.error("Invalid message_id format in ack(): %s", message.message_id)
             return
 
         conn = self._get_connection()
 
-        conn.execute(
-            f"DELETE FROM {self.table_name} WHERE id = :id",
-            {"id": msg_id},
+        cursor = conn.execute(
+            f"DELETE FROM {self.table_name} WHERE id = :id{_FENCE}",
+            {"id": msg_id, "attempts": getattr(message, "attempts", None)},
         )
         conn.commit()
+        if cursor.rowcount == 0:
+            logger.warning("ack(%s): the lease was taken by another worker; not deleted", message.message_id)
 
         self._pending.pop(msg_id, None)
         logger.debug("Acked message (id=%s)", msg_id)
@@ -259,16 +264,13 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         """Extend the visibility lock of an in-flight message (heartbeat)."""
         if not message.message_id:
             return False
-        try:
-            msg_id = int(message.message_id)
-        except ValueError:
-            return False
+        msg_id = row_id(message.message_id)
 
         locked_until = datetime.now(UTC) + (duration or self.lock_duration)
         conn = self._get_connection()
         cursor = conn.execute(
-            f"UPDATE {self.table_name} SET locked_until = :locked_until WHERE id = :id",
-            {"locked_until": locked_until.isoformat(), "id": msg_id},
+            f"UPDATE {self.table_name} SET locked_until = :locked_until WHERE id = :id{_FENCE}",
+            {"locked_until": locked_until.isoformat(), "id": msg_id, "attempts": getattr(message, "attempts", None)},
         )
         conn.commit()
         return cursor.rowcount == 1
@@ -292,7 +294,7 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         if not message.message_id:
             return
 
-        msg_id = int(message.message_id)
+        msg_id = row_id(message.message_id)
         deliver_at = datetime.now(UTC) + delay
         conn = self._get_connection()
 
@@ -301,14 +303,28 @@ class SqliteQueue(SqliteDLQMixin, Queue):
             UPDATE {self.table_name}
             SET deliver_at = :deliver_at,
                 locked_until = NULL
-            WHERE id = :id
+            WHERE id = :id{_FENCE}
             """,
-            {"id": msg_id, "deliver_at": deliver_at.isoformat()},
+            {"id": msg_id, "deliver_at": deliver_at.isoformat(), "attempts": getattr(message, "attempts", None)},
         )
         conn.commit()
 
         self._pending.pop(msg_id, None)
         logger.debug("Rescheduled message (id=%s, deliver_at=%s)", msg_id, deliver_at)
+
+    def live_delivery_keys(self, keys: list[str]) -> set[str]:
+        owned = own_row_ids(self.table_name, keys)
+        if not owned:
+            return set()
+        conn = self._get_connection()
+        found: set[str] = set()
+        ids = list(owned)
+        for i in range(0, len(ids), 500):
+            chunk = ids[i : i + 500]
+            marks = ",".join("?" for _ in chunk)
+            for row in conn.execute(f"SELECT id FROM {self.table_name} WHERE id IN ({marks})", chunk):
+                found.add(owned[int(row[0])])
+        return found
 
     def size(self) -> int:
         """Get the number of messages in the queue."""
@@ -325,6 +341,18 @@ class SqliteQueue(SqliteDLQMixin, Queue):
 
         self._pending.clear()
         logger.debug("Cleared queue")
+
+    def has_pending_message_for_stage(self, stage_id: str) -> bool:
+        row = (
+            self._get_connection()
+            .execute(
+                f"SELECT 1 FROM {self.table_name} WHERE CASE WHEN json_valid(payload) "
+                "THEN json_extract(payload, '$.stage_id') END = ? LIMIT 1",
+                (stage_id,),
+            )
+            .fetchone()
+        )
+        return row is not None
 
     def has_pending_message_for_execution(self, execution_id: str) -> bool:
         """Whether any queued message targets this workflow."""

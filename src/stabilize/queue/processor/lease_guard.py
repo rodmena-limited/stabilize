@@ -88,16 +88,27 @@ def start_lock_heartbeat(
 
     stop = threading.Event()
 
+    retry = min(interval, 1.0)
+
     def beat() -> None:
-        while not stop.wait(interval):
+        wait = interval
+        while not stop.wait(wait):
             try:
                 if not extend(message):
-                    return  # message gone (acked/moved); nothing to renew
+                    return
+            except ValueError as exc:
+                logger.error("Lock heartbeat for %s stopped: %s", get_message_type_name(message), exc)
+                return
             except Exception as exc:
                 logger.warning(
-                    "Lock heartbeat failed for %s: %s", get_message_type_name(message), exc
+                    "Lock heartbeat failed for %s, retrying in %.2fs: %s",
+                    get_message_type_name(message),
+                    retry,
+                    exc,
                 )
-                return
+                wait = retry
+                continue
+            wait = interval
 
     threading.Thread(target=beat, daemon=True, name="stabilize-lock-heartbeat").start()
     return stop

@@ -10,7 +10,7 @@ from stabilize.handlers.base import StabilizeHandler
 from stabilize.handlers.complete_stage.planner import CompleteStagePlannerMixin
 from stabilize.handlers.complete_stage.split_logic import CompleteStagesSplitMixin
 from stabilize.models.status import WorkflowStatus
-from stabilize.queue.messages import CompleteStage, StartStage
+from stabilize.queue.messages import CompleteStage, CompleteWorkflow, StartStage
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -135,3 +135,33 @@ class CompleteStageSupport(
             len(firings),
         )
         return True
+
+    def _handle_not_running(self, stage: StageExecution, message: CompleteStage) -> None:
+        """A CompleteStage for a stage that is not RUNNING: a stale message, or a halted stage's redelivery.
+
+        A stage reset to NOT_STARTED (a jump_to retry loop) ignores it. A stage
+        already halted (e.g. marked TERMINAL by JumpToStage) still drives its
+        workflow's (or parent's) completion.
+        """
+        logger.debug("CompleteStage for %s with status %s", stage.name, stage.status)
+        with self.repository.transaction(self.queue) as txn:
+            if message.message_id:
+                txn.mark_message_processed(
+                    message_id=message.message_id,
+                    handler_type="CompleteStage",
+                    execution_id=message.execution_id,
+                )
+            if stage.status == WorkflowStatus.NOT_STARTED or not stage.status.is_halt:
+                return
+            if stage.synthetic_stage_owner is None or stage.parent_stage_id is None:
+                execution = stage.execution
+                txn.push_message(CompleteWorkflow(execution_type=execution.type.value, execution_id=execution.id))
+            else:
+                txn.push_message(
+                    CompleteStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=stage.parent_stage_id,
+                    )
+                )
+

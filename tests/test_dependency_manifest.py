@@ -134,15 +134,18 @@ def test_no_runtime_dependency_is_unimported(imported_modules: dict[str, set[str
     )
 
 
-def test_the_pending_use_exemptions_are_still_pending() -> None:
-    """An exemption that has been taken up must be removed, or it hides the next one."""
-    imported = _imported_top_level_modules()
+def _stale_exemptions(exemptions: dict[str, str]) -> list[str]:
     provided: set[str] = set()
-    for module in imported:
+    for module in _imported_top_level_modules():
         provided |= _distributions_for(module)
+    return sorted(set(exemptions) & provided)
 
-    now_used = sorted(set(DECLARED_PENDING_USE) & provided)
 
+def test_the_pending_use_exemptions_are_still_pending() -> None:
+    assert _stale_exemptions({"psycopg": "control: imported by src/stabilize"}) == ["psycopg"], (
+        "the check does not report an exemption for a distribution src imports"
+    )
+    now_used = _stale_exemptions(DECLARED_PENDING_USE)
     assert not now_used, (
         "these are now imported, so their DECLARED_PENDING_USE entry is stale "
         "and must be deleted: " + ", ".join(now_used)

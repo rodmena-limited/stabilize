@@ -100,6 +100,41 @@ def main() -> None:
         help="Restrict to stages in this status (repeatable, e.g. --status SUCCEEDED)",
     )
 
+    from stabilize.cli.maintenance_commands import PRUNE_PROCESSED_HELP, prune_processed, purge_workflows
+
+    processed_parser = subparsers.add_parser(
+        "prune-processed", help="Delete old processed-message records in batches", description=PRUNE_PROCESSED_HELP
+    )
+    processed_parser.add_argument("--db-url", help="Database URL (postgres://... or sqlite:///...)")
+    processed_parser.add_argument("--older-than-hours", type=float, default=168.0, help="Age cutoff (default 168)")
+    processed_parser.add_argument("--batch-size", type=int, default=10_000, help="Rows per transaction (default 10000)")
+    processed_parser.add_argument("--max-rows", type=int, default=None, help="Stop after this many rows (no limit)")
+    processed_parser.add_argument(
+        "--queue-table",
+        action="append",
+        default=None,
+        help="Queue table whose records are pruned (repeatable; default queue_messages)",
+    )
+    processed_parser.add_argument(
+        "--queue-db-url", default=None, help="Database holding the queue tables, when it is not --db-url"
+    )
+
+    purge_parser = subparsers.add_parser(
+        "purge-workflows",
+        help="Delete completed workflows, with their owned rows and dead-lettered messages",
+        description=(
+            "Delete workflows whose status is complete and whose end_time is older than "
+            "--completed-before-days, through the store's delete(), in batches. "
+            "Workflows that are not complete are never selected; event-store rows are kept."
+        ),
+    )
+    purge_parser.add_argument("--db-url", help="Database URL (postgres://... or sqlite:///...)")
+    purge_parser.add_argument("--completed-before-days", type=float, required=True)
+    purge_parser.add_argument("--application", default=None, help="Only this application")
+    purge_parser.add_argument("--queue-table", default="queue_messages", help="Queue table whose DLQ is purged too")
+    purge_parser.add_argument("--batch-size", type=int, default=500)
+    purge_parser.add_argument("--dry-run", action="store_true", help="Count without deleting")
+
     args = parser.parse_args()
 
     if args.command == "mg-up":
@@ -126,6 +161,24 @@ def main() -> None:
         monitor(args.db_url, args.app, args.refresh, args.status)
     elif args.command == "prune-signals":
         prune_signals(args.db_url, args.include_active, args.dry_run, args.statuses)
+    elif args.command == "prune-processed":
+        prune_processed(
+            args.db_url,
+            args.older_than_hours,
+            args.batch_size,
+            args.max_rows,
+            args.queue_table or ["queue_messages"],
+            args.queue_db_url,
+        )
+    elif args.command == "purge-workflows":
+        purge_workflows(
+            args.db_url,
+            args.completed_before_days,
+            args.application,
+            args.queue_table,
+            args.batch_size,
+            args.dry_run,
+        )
     else:
         parser.print_help()
         sys.exit(1)

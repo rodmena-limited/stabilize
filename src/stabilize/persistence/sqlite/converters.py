@@ -42,6 +42,8 @@ def execution_to_dict(execution: Workflow) -> dict[str, Any]:
         "is_limit_concurrent": 1 if execution.is_limit_concurrent else 0,
         "max_concurrent_executions": execution.max_concurrent_executions,
         "keep_waiting_pipelines": 1 if execution.keep_waiting_pipelines else 0,
+        "queue_table": execution.queue_table,
+        "config_version": execution.config_version,
         "origin": execution.origin,
     }
 
@@ -93,6 +95,8 @@ def row_to_execution(row: sqlite3.Row) -> Workflow:
         max_concurrent_executions=row["max_concurrent_executions"] or 0,
         keep_waiting_pipelines=bool(row["keep_waiting_pipelines"]),
         origin=row["origin"] or "unknown",
+        queue_table=row["queue_table"] if "queue_table" in row.keys() else None,
+        config_version=row["config_version"] if "config_version" in row.keys() else None,
     )
 
 

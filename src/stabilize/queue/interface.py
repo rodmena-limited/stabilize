@@ -73,6 +73,10 @@ class Queue(ABC):
         """
         pass
 
+    def live_delivery_keys(self, keys: list[str]) -> set[str]:
+        """The keys among keys whose message is still in this queue; every key when the queue cannot tell."""
+        return set(keys)
+
     @abstractmethod
     def ack(self, message: Message) -> None:
         """
@@ -143,6 +147,10 @@ class Queue(ABC):
 
     def has_pending_message_for_execution(self, execution_id: str) -> bool:
         """Whether any queued message targets this workflow. Default: False."""
+        return False
+
+    def has_pending_message_for_stage(self, stage_id: str) -> bool:
+        """Whether any queued message (including one being handled) names this stage. Default: False."""
         return False
 
     def extend_lock(self, message: Message, duration: timedelta | None = None) -> bool:

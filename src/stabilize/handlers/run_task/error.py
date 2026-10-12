@@ -48,85 +48,64 @@ def handle_cancellation(
         txn_helper: Transaction helper for atomic operations
         retry_on_concurrency_error: Function to retry on concurrency errors
     """
-    result = task.on_cancel(stage) if hasattr(task, "on_cancel") else None
-
-    # Extract context/outputs to apply on retry (if result exists)
-    result_context = None
-    result_outputs = None
-    if result:
-        if result.context and isinstance(result.context, dict):
-            result_context = result.context
-        if result.outputs and isinstance(result.outputs, dict):
-            result_outputs = result.outputs
+    won = {"value": False}
 
     def do_cancel() -> None:
-        if result_context or result_outputs:
-            # Re-fetch stage to get current version on each retry attempt
-            fresh_stage = repository.retrieve_stage(message.stage_id)
-            if fresh_stage is None:
-                logger.error("Stage %s not found during cancellation", message.stage_id)
-                # Mark message processed and push CompleteTask to prevent workflow hang
-                txn_helper.execute_atomic(
-                    source_message=message,
-                    messages_to_push=[
-                        (
-                            CompleteTask(
-                                execution_type=message.execution_type,
-                                execution_id=message.execution_id,
-                                stage_id=message.stage_id,
-                                task_id=message.task_id,
-                                status=WorkflowStatus.CANCELED,
-                            ),
-                            None,
-                        )
-                    ],
-                    handler_name="RunTask",
-                )
-                return
-
-            if result_context:
-                fresh_stage.context.update(result_context)
-            if result_outputs:
-                fresh_stage.outputs.update(result_outputs)
-
-            # Atomic: store stage + mark processed + push CompleteTask together
+        won["value"] = False
+        complete = CompleteTask(
+            execution_type=message.execution_type,
+            execution_id=message.execution_id,
+            stage_id=message.stage_id,
+            task_id=message.task_id,
+            status=WorkflowStatus.CANCELED,
+        )
+        fresh_stage = repository.retrieve_stage(message.stage_id)
+        if fresh_stage is None:
+            logger.error("Stage %s not found during cancellation", message.stage_id)
             txn_helper.execute_atomic(
-                stage=fresh_stage,
-                source_message=message,
-                messages_to_push=[
-                    (
-                        CompleteTask(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=message.stage_id,
-                            task_id=message.task_id,
-                            status=WorkflowStatus.CANCELED,
-                        ),
-                        None,
-                    )
-                ],
-                handler_name="RunTask",
+                source_message=message, messages_to_push=[(complete, None)], handler_name="RunTask"
             )
-        else:
-            # No stage modification needed, no retry required
-            txn_helper.execute_atomic(
-                source_message=message,
-                messages_to_push=[
-                    (
-                        CompleteTask(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=message.stage_id,
-                            task_id=message.task_id,
-                            status=WorkflowStatus.CANCELED,
-                        ),
-                        None,
-                    )
-                ],
-                handler_name="RunTask",
-            )
+            return
+        fresh_task = next((t for t in fresh_stage.tasks if t.id == message.task_id), None)
+        if fresh_task is None or fresh_task.status != WorkflowStatus.RUNNING:
+            txn_helper.execute_atomic(source_message=message, handler_name="RunTask")
+            return
+        won["value"] = txn_helper.execute_atomic(
+            stage=fresh_stage,
+            source_message=message,
+            messages_to_push=[(complete, None)],
+            handler_name="RunTask",
+        )
 
     retry_on_concurrency_error(do_cancel, f"canceling task {message.task_id}")
+    if not won["value"] or not hasattr(task, "on_cancel"):
+        return
+    try:
+        result = task.on_cancel(stage)
+    except Exception as exc:
+        logger.error("on_cancel raised for task %s: %s", task_model.name, exc)
+        return
+    if result is None:
+        return
+    context = result.context if isinstance(result.context, dict) else None
+    outputs = result.outputs if isinstance(result.outputs, dict) else None
+    if not context and not outputs:
+        return
+
+    def keep_cancel_result() -> None:
+        fresh_stage = repository.retrieve_stage(message.stage_id)
+        if fresh_stage is None:
+            return
+        if context:
+            fresh_stage.context.update(context)
+        if outputs:
+            fresh_stage.outputs.update(outputs)
+        txn_helper.execute_atomic(stage=fresh_stage, handler_name="RunTask")
+
+    try:
+        retry_on_concurrency_error(keep_cancel_result, f"saving on_cancel result of task {message.task_id}")
+    except Exception as exc:
+        logger.warning("Could not save the on_cancel result of task %s: %s", task_model.name, exc)
 
 
 def handle_exception(

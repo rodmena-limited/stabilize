@@ -1,5 +1,7 @@
 """Tests for configuration versioning."""
 
+from typing import Any
+
 import pytest
 
 from stabilize.resilience.config import (
@@ -194,17 +196,20 @@ class TestWorkflowConfigVersion:
         assert hasattr(workflow, "config_version")
         assert workflow.config_version is None
 
-    def test_config_version_can_be_set(self) -> None:
-        """config_version can be set on workflow."""
+    def test_config_version_can_be_set(self, tmp_path: Any) -> None:
+        from stabilize import Orchestrator
         from stabilize.models.workflow import Workflow
+        from stabilize.persistence.sqlite import SqliteWorkflowStore
+        from stabilize.queue.sqlite import SqliteQueue
 
-        config = HandlerConfig()
-        fingerprint = config.config_fingerprint()
-
-        workflow = Workflow(
-            application="test",
-            name="test-workflow",
-            config_version=fingerprint,
-        )
-
-        assert workflow.config_version == fingerprint
+        url = f"sqlite:///{tmp_path}/versioning.db"
+        store = SqliteWorkflowStore(url, create_tables=True)
+        queue = SqliteQueue(url, table_name="queue_messages")
+        queue._create_table()
+        config = HandlerConfig(max_stage_wait_retries=7)
+        workflow = Workflow.create(application="test", name="versioned", stages=[])
+        Orchestrator(queue, store=store).start(workflow, handler_config=config)
+        assert workflow.config_version == config.config_fingerprint()
+        assert config.config_fingerprint() != HandlerConfig().config_fingerprint()
+        queue.close()
+        store.close()

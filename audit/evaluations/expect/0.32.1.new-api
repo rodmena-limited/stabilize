@@ -1,0 +1,2 @@
+tests/test_audit_retention_redelivery.py|uses `stabilize prune-processed`, added in 0.33.0 (#87); its red on the unfixed engine is recorded at 141a6e7 against 433f187
+tests/test_retention_guard.py|uses Queue.live_delivery_keys and cleanup_old_processed_messages(table_name=, live=), added in 0.33.0 (#91)

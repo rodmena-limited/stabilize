@@ -53,11 +53,15 @@ with PostgresContainer("postgres:16") as c:
     print()
     print("=== B. a shadow of ONE table, still no schema= configured ===")
     with psycopg.connect(admin, autocommit=True) as conn:
-        conn.execute("CREATE TABLE public.events (id int)")
+        conn.execute("CREATE TABLE public.events (LIKE stabilize.events INCLUDING ALL)")
     try:
         PostgresEventStore(dsn)
         print("  CONSTRUCTED — the split went undetected"); sys.exit(1)
     except EventStoreSchemaError as e:
         print(f"  RAISED: {str(e)[:150]}")
+        if "resolve to more than one schema" not in str(e):
+            print("  [FAIL] refused, but not by the split check (the shadow is a full column copy)")
+            sys.exit(1)
+        print("  [PASS] refused by the split check")
 print()
 print("VERDICT: PASS — the recommended configuration is protected too")

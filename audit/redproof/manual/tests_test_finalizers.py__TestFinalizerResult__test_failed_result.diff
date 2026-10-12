@@ -1,0 +1,12 @@
+test-id: tests/test_finalizers.py::TestFinalizerResult::test_failed_result
+--- a/src/stabilize/finalizers.py
++++ b/src/stabilize/finalizers.py
+@@ -237,7 +237,7 @@
+ 
+         except Exception as e:
+             duration_ms = (time.monotonic() - start_time) * 1000
+-            error = str(e)
++            error = type(e).__name__
+ 
+             logger.warning(
+                 "Finalizer '%s' failed after %.1fms: %s",

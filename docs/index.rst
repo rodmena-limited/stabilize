@@ -37,6 +37,7 @@ Key Features
    guide/event_sourcing
    guide/query_budget
    guide/agentic
+   guide/stability
 
 .. toctree::
    :maxdepth: 2

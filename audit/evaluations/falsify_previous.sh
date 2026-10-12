@@ -5,24 +5,22 @@ PYTHON="${PYTHON:?set PYTHON to the interpreter that has the OLD stabilize insta
 
 "$PYTHON" -c 'import stabilize, sys; print("stabilize", stabilize.__version__, "from", stabilize.__file__)'
 
-EXPECT=(
-    "probe_transient_retry_bounded.py|[FAIL] sqlite always_transient"
-    "probe_result_persist_failure.py|[FAIL] sqlite unavailable"
-    "probe_recovery_examines_all.py|[FAIL] sqlite all-applications"
-    "probe_orchestrator_start_store_failure.py|[FAIL] sqlite A store failure"
-    "probe_processor_stop_bounded.py|[FAIL] C LifecycleManager"
-    "probe_delete_removes_owned_rows.py|[FAIL] sqlite A X removed"
-    "probe_sqlite_dlq_exists.py|[FAIL] A/B docstring setup"
-    "probe_sqlite_queue_clock.py|[FAIL] E 1 h retention"
-    "probe_requeue_marks_source.py|[FAIL] sqlite poller mark-failure"
-    "probe_pg_queue_session_timezone.py|[FAIL] A UTC push"
-    "probe_queue_id_capacity.py|[FAIL] A pushes past 2^31"
-)
+export OLD_VERSION="${OLD_VERSION:?set OLD_VERSION to the release the probes must fail on}"
+EXPECT_FILE="${EXPECT_FILE:-audit/evaluations/expect/${OLD_VERSION}.probes}"
+mapfile -t EXPECT < <(grep -v '^[[:space:]]*$' "$EXPECT_FILE")
+if [ "${#EXPECT[@]}" -eq 0 ]; then
+    echo "FALSIFICATION CHECK FAILED: $EXPECT_FILE lists no probes; an empty check proves nothing"
+    exit 2
+fi
+"$PYTHON" -c 'import stabilize, sys, os; v = os.environ["OLD_VERSION"]; sys.exit(0 if stabilize.__version__ == v else f"installed stabilize {stabilize.__version__} is not {v}")' || exit 2
 
 bad=0
 for entry in "${EXPECT[@]}"; do
     probe="${entry%%|*}"
-    marker="${entry#*|}"
+    rest="${entry#*|}"
+    marker="${rest%%|*}"
+    control=""
+    [ "$rest" != "$marker" ] && control="${rest#*|}"
     if [ "$probe" = "probe_queue_id_capacity.py" ] && [ "${AUDIT_ALLOW_DESTRUCTIVE:-}" != "1" ]; then
         echo "--- $probe: NOT RUN (needs AUDIT_ALLOW_DESTRUCTIVE=1); counted as a failure of this check"
         bad=$((bad + 1))
@@ -35,11 +33,15 @@ for entry in "${EXPECT[@]}"; do
     if [ "$rc" -eq 0 ]; then
         echo ">>> NOT RED: $probe passed against the old release"
         bad=$((bad + 1))
-    elif ! printf '%s\n' "$out" | grep -qF -- "$marker"; then
+    elif ! grep -qF -- "$marker" <<<"$out"; then
         echo ">>> RED FOR ANOTHER REASON: expected a line starting '$marker'"
+        printf '%s\n' "$out" | tail -25
+        bad=$((bad + 1))
+    elif [ -n "$control" ] && ! grep -qF -- "$control" <<<"$out"; then
+        echo ">>> CONTROL NOT GREEN: expected a line starting '$control' on the old release"
         bad=$((bad + 1))
     else
-        echo ">>> red for the stated reason: $marker"
+        echo ">>> red for the stated reason: $marker${control:+ (control green: $control)}"
     fi
 done
 

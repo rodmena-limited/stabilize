@@ -31,6 +31,8 @@ def reset_stage_for_retry(stage: StageExecution) -> None:
         "_mm_consumed",
         "_mm_trigger",
         "_mm_firings",
+        "_task_completion",
+        "_gate_checked",
     ):
         stage.context.pop(key, None)
     for task in stage.tasks:

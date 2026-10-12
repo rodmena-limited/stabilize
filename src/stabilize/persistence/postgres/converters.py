@@ -38,6 +38,8 @@ def execution_to_dict(execution: Workflow) -> dict[str, Any]:
         "is_limit_concurrent": execution.is_limit_concurrent,
         "max_concurrent_executions": execution.max_concurrent_executions,
         "keep_waiting_pipelines": execution.keep_waiting_pipelines,
+        "queue_table": execution.queue_table,
+        "config_version": execution.config_version,
         "origin": execution.origin,
     }
 
@@ -98,6 +100,8 @@ def row_to_execution(row: dict[str, Any]) -> Workflow:
         max_concurrent_executions=row["max_concurrent_executions"] or 0,
         keep_waiting_pipelines=row["keep_waiting_pipelines"] or False,
         origin=row["origin"] or "unknown",
+        queue_table=row["queue_table"] if "queue_table" in row.keys() else None,
+        config_version=row["config_version"] if "config_version" in row.keys() else None,
     )
 
 

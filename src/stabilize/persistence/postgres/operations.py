@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Callable
 from typing import Any
 
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.workflow import PausedDetails
+from stabilize.persistence.control_states import PAUSABLE
 from stabilize.persistence.postgres.converters import paused_to_dict
 from stabilize.persistence.signal_scope import signal_status_filter as _signal_status_filter
+from stabilize.queue.message_ids import owner_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +32,11 @@ def pause_execution(pool: Any, execution_id: str, paused_by: str) -> None:
                 UPDATE pipeline_executions SET
                     status = %(status)s,
                     paused = %(paused)s::jsonb
-                WHERE id = %(id)s
+                WHERE id = %(id)s AND status = ANY(%(pausable)s)
                 """,
                 {
                     "id": execution_id,
+                    "pausable": [s.name for s in PAUSABLE],
                     "status": WorkflowStatus.PAUSED.name,
                     "paused": json.dumps(paused_to_dict(paused)),
                 },
@@ -88,10 +92,11 @@ def cancel_execution(pool: Any, execution_id: str, canceled_by: str, reason: str
                     is_canceled = TRUE,
                     canceled_by = %(canceled_by)s,
                     cancellation_reason = %(reason)s
-                WHERE id = %(id)s
+                WHERE id = %(id)s AND NOT (status = ANY(%(complete)s))
                 """,
                 {
                     "id": execution_id,
+                    "complete": [s.name for s in WorkflowStatus if s.is_complete and s is not WorkflowStatus.CANCELED],
                     "canceled_by": canceled_by,
                     "reason": reason,
                 },
@@ -152,20 +157,97 @@ def mark_message_processed(
         conn.commit()
 
 
-def cleanup_old_processed_messages(pool: Any, max_age_hours: float = 24.0) -> int:
-    """Clean up old processed message records."""
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                DELETE FROM processed_messages
-                WHERE processed_at < NOW() - make_interval(hours => %(hours)s)
-                """,
-                {"hours": max_age_hours},
-            )
-            deleted: int = cur.rowcount or 0
-        conn.commit()
-        return deleted
+PG_RETENTION_BATCH = 10_000
+
+_DELETE_STALE_BATCH = """
+    DELETE FROM processed_messages
+    WHERE message_id IN (
+        SELECT message_id FROM processed_messages
+        WHERE processed_at < NOW() - %(hours)s * INTERVAL '1 hour'
+        ORDER BY processed_at
+        LIMIT %(n)s
+        FOR UPDATE SKIP LOCKED
+    )
+    AND processed_at < NOW() - %(hours)s * INTERVAL '1 hour'
+"""
+
+
+def cleanup_old_processed_messages(
+    pool: Any,
+    max_age_hours: float = 24.0,
+    batch_size: int | None = None,
+    max_rows: int | None = None,
+) -> int:
+    """Delete processed_messages rows older than max_age_hours, one transaction per batch."""
+    batch = int(batch_size or PG_RETENTION_BATCH)
+    total = 0
+    while max_rows is None or total < max_rows:
+        n = batch if max_rows is None else min(batch, max_rows - total)
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(_DELETE_STALE_BATCH, {"hours": float(max_age_hours), "n": n})
+                deleted = int(cur.rowcount or 0)
+            conn.commit()
+        total += deleted
+        if deleted < n:
+            break
+    return total
+
+
+def _field(row: Any, name: str, index: int) -> Any:
+    return row[name] if isinstance(row, dict) else row[index]
+
+
+KEPT_LIMIT = 5_000
+
+
+def cleanup_processed_not_in_queue(
+    pool: Any,
+    max_age_hours: float,
+    batch_size: int | None,
+    max_rows: int | None,
+    table_name: str,
+    live: Callable[[list[str]], set[str]],
+) -> int:
+    """Delete stale processed_messages rows of table_name's messages that live() reports gone from the queue."""
+    prefix = owner_prefix(table_name)
+    owner = "message_id ~ '^[0-9]+$'" if prefix is None else "left(message_id, %(plen)s) = %(prefix)s"
+    batch = int(batch_size or PG_RETENTION_BATCH)
+    stale = "processed_at < NOW() - %(hours)s * INTERVAL '1 hour'"
+    total = 0
+    kept: list[str] = []
+    while max_rows is None or total < max_rows:
+        params: dict[str, Any] = {"hours": float(max_age_hours), "n": batch, "kept": kept}
+        params.update(prefix=prefix, plen=len(prefix or ""))
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT message_id FROM processed_messages WHERE {stale} AND {owner} "
+                    "AND message_id <> ALL(%(kept)s) ORDER BY processed_at LIMIT %(n)s",
+                    params,
+                )
+                rows = cur.fetchall()
+            conn.commit()
+        if not rows:
+            break
+        keys = [str(_field(r, "message_id", 0)) for r in rows]
+        still_queued = live(keys)
+        gone = [k for k in keys if k not in still_queued]
+        kept.extend(k for k in keys if k in still_queued)
+        if max_rows is not None:
+            gone = gone[: max_rows - total]
+        if gone:
+            with pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"DELETE FROM processed_messages WHERE message_id = ANY(%(ids)s) AND {stale}",
+                        {"ids": gone, "hours": float(max_age_hours)},
+                    )
+                    total += int(cur.rowcount or 0)
+                conn.commit()
+        if len(rows) < batch or len(kept) > KEPT_LIMIT:
+            break
+    return total
 
 
 def cleanup_completed_stage_claims(pool: Any) -> int:
@@ -225,9 +307,7 @@ def count_buffered_signal_stages(
     statuses: list[str] | None = None,
 ) -> int:
     """Count stage rows carrying a _buffered_signals buffer."""
-    sql = (
-        "SELECT COUNT(*) AS n FROM stage_executions WHERE context ? '_buffered_signals'"
-    )
+    sql = "SELECT COUNT(*) AS n FROM stage_executions WHERE context ? '_buffered_signals'"
     selected = _signal_status_filter(only_complete, statuses)
     params: dict[str, Any] = {}
     if selected is not None:

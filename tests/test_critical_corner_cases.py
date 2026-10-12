@@ -1705,79 +1705,33 @@ class TestSpecialCharacterHandling:
 class TestBugDocumentation:
     """Tests that document known bugs for tracking and verification after fixes."""
 
-    def test_bug_max_jumps_zero_treated_as_falsy(self) -> None:
-        """BUG: _max_jumps=0 is treated as falsy in JumpToStageHandler.
+    def test_bug_max_jumps_zero_treated_as_falsy(self, tmp_path: Any) -> None:
+        from stabilize import Orchestrator, TaskResult, Workflow
+        from stabilize.models.status import WorkflowStatus
+        from stabilize.persistence.sqlite import SqliteWorkflowStore
+        from stabilize.queue.sqlite import SqliteQueue
+        from stabilize.tasks.interface import Task
+        from tests.audit_support import drive, make_processor, stage
 
-        Location: src/stabilize/handlers/jump_to_stage/handler.py line 349
-        Code:
-            max_jumps = execution.context.get("_max_jumps") or \
-                source_stage.context.get("_max_jumps") or DEFAULT_MAX_JUMPS
+        class JumpBack(Task):
+            def execute(self, stage: StageExecution) -> TaskResult:
+                return TaskResult.jump_to("a")
 
-        Problem: The `or` operator treats 0 as falsy, so _max_jumps=0 defaults to DEFAULT_MAX_JUMPS (10).
-
-        Impact: Users cannot disable jumps by setting max_jumps to 0.
-
-        Fix: Use explicit None checks:
-            max_jumps = execution.context.get("_max_jumps")
-            if max_jumps is None:
-                max_jumps = source_stage.context.get("_max_jumps")
-            if max_jumps is None:
-                max_jumps = DEFAULT_MAX_JUMPS
-        """
-        # This is a unit test that directly tests the buggy logic
-        from stabilize.handlers.jump_to_stage.handler import DEFAULT_MAX_JUMPS
-
-        # Simulate the buggy logic
-        execution_context: dict[str, int] = {"_max_jumps": 0}
-        stage_context: dict[str, int] = {}
-
-        # Current (buggy) implementation
-        max_jumps_buggy = execution_context.get("_max_jumps") or stage_context.get("_max_jumps") or DEFAULT_MAX_JUMPS
-
-        # BUG: 0 is treated as falsy, so we get DEFAULT_MAX_JUMPS instead of 0
-        assert max_jumps_buggy == DEFAULT_MAX_JUMPS  # BUG: Should be 0
-
-        # Fixed implementation would be:
-        max_jumps_fixed = execution_context.get("_max_jumps")
-        if max_jumps_fixed is None:
-            max_jumps_fixed = stage_context.get("_max_jumps")
-        if max_jumps_fixed is None:
-            max_jumps_fixed = DEFAULT_MAX_JUMPS
-
-        # Fixed version should return 0
-        assert max_jumps_fixed == 0  # CORRECT
-
-    def test_same_falsy_bug_exists_in_get_jump_count(self) -> None:
-        """Related to max_jumps bug: Same pattern exists in other places.
-
-        The pattern `context.get("key") or default` is used throughout
-        the codebase and can cause issues with valid falsy values like:
-        - 0 (zero)
-        - "" (empty string)
-        - [] (empty list)
-        - False (boolean)
-
-        All such patterns should be audited and fixed.
-        """
-        # Document the pattern issue
-        context: dict[str, int] = {"count": 0}
-
-        # Buggy pattern
-        count_buggy = context.get("count") or 10
-        assert count_buggy == 10  # Wrong! Should be 0
-
-        # Fixed pattern
-        count_fixed = context.get("count", 10) if "count" not in context else context["count"]
-        # Or simpler with None check:
-        count_fixed = context.get("count")
-        if count_fixed is None:
-            count_fixed = 10
-        assert count_fixed == 0  # Correct
-
-
-# =============================================================================
-# 14. Stress and Boundary Tests
-# =============================================================================
+        url = f"sqlite:///{tmp_path}/jumps.db"
+        store = SqliteWorkflowStore(url, create_tables=True)
+        queue = SqliteQueue(url, table_name="queue_messages")
+        queue._create_table()
+        processor = make_processor(store, queue, {"jumpback": JumpBack})
+        wf = Workflow.create(application="test", name="no-jumps", stages=[stage("a", ["jumpback"])])
+        wf.context["_max_jumps"] = 0
+        store.store(wf)
+        Orchestrator(queue, store=store).start(wf)
+        final = drive(processor, store, wf.id, timeout=15, idle=1.5)
+        a = final.stages[0]
+        assert a.status == WorkflowStatus.TERMINAL, f"_max_jumps=0 still allowed a jump: stage {a.status.name}"
+        assert a.context.get("jump_error") == "Max jump count exceeded: 0/0", a.context.get("jump_error")
+        queue.close()
+        store.close()
 
 
 class TestStressAndBoundaryConditions:

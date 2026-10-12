@@ -1,0 +1,12 @@
+test-id: tests/test_status_transitions.py::TestValidTransitionsCompleteness::test_terminal_states_have_empty_transitions
+--- a/src/stabilize/models/status.py
++++ b/src/stabilize/models/status.py
+@@ -222,7 +222,7 @@
+         }
+     ),
+     # Terminal states - no transitions allowed
+-    WorkflowStatus.SUCCEEDED: frozenset(),
++    WorkflowStatus.SUCCEEDED: frozenset({WorkflowStatus.RUNNING}),
+     WorkflowStatus.FAILED_CONTINUE: frozenset(),
+     WorkflowStatus.TERMINAL: frozenset(),
+     WorkflowStatus.CANCELED: frozenset(),

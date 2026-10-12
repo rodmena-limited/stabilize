@@ -21,6 +21,7 @@ def _attempt(strict: bool) -> tuple[str, str]:
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
     handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
     root = logging.getLogger()
     root.addHandler(handler)
     previous_level = root.level
@@ -131,7 +132,7 @@ def main() -> int:
     print("DIRECTION 1 — default: degrade, but say so at ERROR")
     outcome, logs = _attempt(strict=False)
     print(f"  outcome            : {outcome}")
-    error_lines = [ln for ln in logs.splitlines() if "ERROR" in ln or "unavailable" in ln.lower()]
+    error_lines = [ln for ln in logs.splitlines() if ln.startswith(("ERROR ", "CRITICAL "))]
     print(f"  ERROR-level lines  : {len(error_lines)}")
     for line in error_lines:
         print(f"    {line[:150]}")
@@ -143,7 +144,7 @@ def main() -> int:
     elif claims_success:
         print("  >>> FAIL: logs claim PostgreSQL storage is in use when it is not")
         failures += 1
-    elif "PROCESS-LOCAL" not in logs:
+    elif "PROCESS-LOCAL" not in " ".join(error_lines):
         print("  >>> FAIL: the ERROR does not name the consequence")
         failures += 1
     else:

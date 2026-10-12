@@ -67,6 +67,8 @@ class QueueProcessorConfig:
     # window they guard, so enabling it is an operator decision.
     retention_sweep_interval_seconds: float = 0.0
     processed_messages_max_age_hours: float = 24.0
+    retention_batch_size: int = 10_000
+    retention_max_rows_per_sweep: int | None = 200_000
 
     # Upper bound, in seconds, on how long stop(wait=True) waits for running
     # handlers. None waits without a bound.

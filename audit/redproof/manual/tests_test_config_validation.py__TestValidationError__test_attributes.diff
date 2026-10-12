@@ -1,0 +1,12 @@
+test-id: tests/test_config_validation.py::TestValidationError::test_attributes
+--- a/src/stabilize/validation/validator.py
++++ b/src/stabilize/validation/validator.py
+@@ -265,7 +265,7 @@
+                     path,
+                     f"must be >= {schema['minimum']}",
+                     value,
+-                    "minimum",
++                    "maximum",
+                 )
+             )
+ 

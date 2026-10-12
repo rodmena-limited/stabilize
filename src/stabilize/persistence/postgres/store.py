@@ -57,6 +57,7 @@ from stabilize.persistence.store import (
     WorkflowNotFoundError,
     WorkflowStore,
 )
+from stabilize.persistence.store.ids import check_ids
 from stabilize.persistence.store.owned_rows import WORKFLOW_OWNED_ROWS
 from stabilize.persistence.task_state import capture, commit_captured, restore_versions, versions
 
@@ -106,6 +107,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
 
     def store(self, execution: Workflow) -> None:
         """Store a complete execution."""
+        check_ids(execution)
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -115,14 +117,14 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
                         start_time_expiry, trigger, is_canceled, canceled_by,
                         cancellation_reason, paused, pipeline_config_id,
                         is_limit_concurrent, max_concurrent_executions,
-                        keep_waiting_pipelines, origin
+                        keep_waiting_pipelines, origin, queue_table, config_version
                     ) VALUES (
                         %(id)s, %(type)s, %(application)s, %(name)s, %(status)s,
                         %(context)s::jsonb, %(start_time)s, %(end_time)s, %(start_time_expiry)s,
                         %(trigger)s::jsonb, %(is_canceled)s, %(canceled_by)s,
                         %(cancellation_reason)s, %(paused)s::jsonb, %(pipeline_config_id)s,
                         %(is_limit_concurrent)s, %(max_concurrent_executions)s,
-                        %(keep_waiting_pipelines)s, %(origin)s
+                        %(keep_waiting_pipelines)s, %(origin)s, %(queue_table)s, %(config_version)s
                     )
                     """,
                     execution_to_dict(execution),

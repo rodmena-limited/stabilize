@@ -1,5 +1,179 @@
 # Changelog
 
+## [0.33.0] - 2026-10-12
+
+Release candidate for 1.0.0: the public API and guarantees are written down in
+`docs/guide/stability.rst` (public API = `stabilize.__all__`, message types,
+persisted schema, CLI); 1.0.0 will promote this release unchanged once it has
+run in production.
+Audit release (#77): every fix below was reproduced live on published 0.32.1
+and its regression test and probe were observed failing there for the stated
+reason before the fix (ci.rodmena.co.uk pipelines 2930, 2933, 2935, 2936,
+2938). **On PostgreSQL run `stabilize mg-up` with the owner role before
+starting 0.33.0 workers** (migration `01M4PAJCF82KCKYT5X4GMZH2XG`).
+
+### Fixed — a side effect ran that must not, or ran twice
+
+- **Retention keeps the dedup record of a message that is still queued (#91, C2).**
+  The processor's retention sweep and `stabilize prune-processed` deleted every
+  `processed_messages` record older than the cutoff. A RunTask whose handler had
+  committed but whose ack was lost (crash) stays in the queue; once its record
+  was deleted (for example by `prune-processed` during an outage), the
+  redelivered message ran the task a second time. Both now delete only records
+  of their own queue table whose message is no longer in that table.
+- **A failed task stops its stage (#78).** After a task completed TERMINAL,
+  STOPPED or CANCELED — or FAILED_CONTINUE converted by
+  `continuePipelineOnFailure` — the next task of the same stage still
+  started. The stage now ends there and its later tasks are SKIPPED. A task
+  that itself returns `TaskResult.failed_continue()` still lets the stage
+  continue. A REDIRECT result without a target now fails the task instead of
+  leaving the stage RUNNING.
+- **The lock heartbeat survives a failed renewal (#79).** One exception from
+  `extend_lock` ended renewal for the rest of the handler; another worker then
+  executed the still-running task (2 executions). Renewal now retries; ack,
+  extend_lock and reschedule are fenced on the poll's attempt count, so a
+  worker whose lease was taken cannot extend, clear or delete the new holder's.
+- **Several queue tables in one store (#81).** Messages of a non-default table
+  whose row id had been handled from another table were dropped as
+  duplicates; SQLite transactional pushes ignored the queue's table; a recovery
+  sweep re-issued work in flight on another table into its own. Dedup keys of
+  non-default tables are now `"<table>:<row id>"`; each workflow records its
+  queue table and recovery handles only its own.
+- **Recovery never re-runs a task whose result was committed (#84).** A lost
+  CompleteTask made recovery push RunTask and run the task again. The
+  completion is now recorded with the result and re-issued as CompleteTask.
+- **limitConcurrent admits at most N (#82).** Concurrent starts overshot the
+  limit (peak 4–6 RUNNING at limit 2). Admission is now serialized per
+  pipeline config (PostgreSQL advisory transaction lock, SQLite
+  `BEGIN IMMEDIATE`) and buffered workflows are promoted oldest first.
+
+### Fixed — work stranded or a false outcome reported
+
+- **The configuration fingerprint of a workflow is stored (#92, C23).**
+  `Orchestrator.start` set `Workflow.config_version`, and the resilience guide
+  documents drift detection against it, but no store wrote or read the field:
+  it was None on every retrieve. It is now stored by `store()` and by
+  `Orchestrator.start` for a workflow stored beforehand.
+- **After-stages and on-failure stages run once when CompleteStage is duplicated (#91, N3).**
+  CompleteStage inserted each planned after-stage (or on-failure stage) before
+  the parent's version-checked update; a second CompleteStage for the same
+  stage (redelivery, recovery) planned its own copy, lost the update, and on
+  retry started both copies: the after-stage's task ran twice. They are now
+  written in the transaction that updates the parent.
+- **A dynamically added multi-instance stage is never lost (#91, N3).**
+  AddMultiInstance committed the parent's instance count first and inserted
+  the instance and pushed its StartStage afterwards, outside the transaction;
+  an interruption in between left the parent counting an instance that did
+  not exist, and the redelivered message was deduplicated. All three are now
+  one transaction.
+- **Before-stages are stored in the transaction that claims their parent (#91, N3).**
+  Planning inserted each before-stage on its own, before the parent's
+  version-checked update. A duplicate StartStage arriving while the first was
+  planning (redelivery, recovery) re-planned the parent; the first planner's
+  update then failed, but its before-stage row stayed: an orphan with no tasks
+  that the parent waited on forever. A crash between the insert and the
+  update left the same wedge. The rows are now written with the parent's
+  update, so a conflict or a crash rolls them back together.
+- **A workflow paused before it starts, or while BUFFERED, starts on unpause (#91, C18).**
+  Its StartWorkflow was consumed while PAUSED, a paused BUFFERED workflow left
+  the set StartWaitingWorkflows admits from, and `Orchestrator.unpause` pushed
+  ResumeStage only for PAUSED stages, of which there were none: the workflow
+  stayed PAUSED forever. `unpause` now returns such a workflow to NOT_STARTED
+  and pushes StartWorkflow in one transaction, so admission (and its
+  concurrency limit) runs again. A workflow paused after its last stage
+  finished, before CompleteWorkflow, stayed PAUSED for the same reason
+  (CompleteWorkflow raised PAUSED -> SUCCEEDED): CompleteWorkflow now leaves a
+  PAUSED workflow alone, and `unpause` of a started workflow with no PAUSED
+  stage restores RUNNING and pushes CompleteWorkflow, which completes it or,
+  while stages are active, does nothing. The monitor's resume key uses
+  `unpause`; it used `store.resume`, which set RUNNING and pushed nothing.
+- **Pause and cancel no longer rewrite a finished workflow (#91, C18).**
+  `store.pause()` set a SUCCEEDED (or any complete) workflow to PAUSED, and
+  `store.cancel()` flagged it canceled. Pause now applies only to RUNNING,
+  NOT_STARTED and BUFFERED workflows; cancel applies to workflows that are not
+  complete, or already CANCELED.
+- **A jump no longer reverts context another handler committed to its target (#91, N5).**
+  JumpToStage copied the target's whole context before its transaction and wrote
+  that copy over the row it re-read inside the transaction, so a key committed
+  in between (for example by a second jump to the same target from a parallel
+  branch) was reset to its earlier value. The jump now applies only its own keys
+  to the row it re-reads.
+- **A running branch is never failed by the completion wait budget (#86).**
+  With one leaf finished, a branch running longer than
+  `max_stage_wait_retries × handler_retry_delay_seconds` (1 h by default) was
+  marked TERMINAL and canceled; the same held for parallel before/after stages.
+- **A StartTask skip completes its stage (#80).** A task disabled through
+  `SkippableTask.is_enabled` left its stage RUNNING forever.
+- **Recovery re-issues the exact lost message (#84):** CompleteStage and
+  CompleteWorkflow are rebuilt when lost; a recovered RunTask keeps the task's
+  bulkhead; a parent's tasks wait for its before-stages.
+- **Buffered work always starts (#82):** a lost StartWaitingWorkflows is healed
+  by recovery; purged buffered workflows end CANCELED instead of BUFFERED.
+- **Raising hooks end their task once (#83):** a raising `on_timeout` or
+  `is_enabled` was called on every redelivery (10×) and stranded the task.
+  Canceling a workflow now calls `on_cancel` and `on_cleanup` (they were never
+  called); `on_cleanup` and finalizers run once per committed completion
+  instead of once per version-conflict retry. A task raising `SystemExit` is a
+  recorded TERMINAL failure.
+- **Task exceptions keep their own error code and text (#88)** instead of
+  `BULKHEAD_FULL` / "Execution failed: …".
+- **`QueueProcessor(handler_config=...)` reaches every handler (#85);** 17 of
+  19 handlers used the environment instead.
+- **An id longer than the 26-character columns is refused with a `ValueError`
+  before any write**, instead of a database truncation error.
+
+### Fixed — retention
+
+- **The PostgreSQL retention sweep never deleted a row (#87).** Its cutoff used
+  `make_interval(hours => double precision)`, which does not exist; every
+  sweep failed and was logged at WARNING. It now deletes in batches
+  (`retention_batch_size`, default 10,000; `retention_max_rows_per_sweep`,
+  default 200,000), one transaction per batch, on its own thread, and a failed
+  sweep is logged at ERROR.
+
+### Added
+
+- `stabilize prune-processed` and `stabilize purge-workflows` CLI commands;
+  `WorkflowStore.purge_completed_workflows()` and
+  `stabilize.maintenance.purge_completed_workflows()` (#87, #89).
+- `docs/guide/stability.rst`: public API, versioning, delivery guarantees as
+  measured, the rules for several queue tables (#90).
+- CI on Python 3.11 (declared floor) alongside 3.14; an upgrade job that
+  starts work under published 0.32.1 and finishes it under 0.33.0.
+
+### Changed (behaviour)
+
+- `SkippableTask.execute()` no longer evaluates `is_enabled`; the engine
+  evaluates it once, at StartTask. Code calling `execute()` directly no longer
+  gets the check.
+- Later tasks of a stage that ended early are SKIPPED (not NOT_STARTED).
+- `CompleteWorkflow` no longer marks a workflow TERMINAL while any top-level
+  stage is RUNNING, PAUSED, SUSPENDED or BUFFERED; a wedged stage now leaves
+  its workflow RUNNING (visible) rather than failing it after 1 h.
+- A `HandlerConfig` passed to `QueueProcessor` now overrides `STABILIZE_*`
+  environment settings in every handler; a warning names the overridden fields.
+
+### Upgrade notes
+
+- PostgreSQL migration `01M4PAJCF82KCKYT5X4GMZH2XG`: adds
+  `pipeline_executions.queue_table`, an index on `queue_messages`'
+  `payload->>'stage_id'`, and advances `queue_messages_id_seq` past the largest
+  numeric `processed_messages.message_id`. Run it before 0.33.0 workers.
+- PostgreSQL migration `01M4Q8VTM40WEC4HR2X31Q07A5`: adds `pipeline_executions.config_version`.
+  Run `stabilize mg-up` before 0.33.0 workers; it applies both migrations.
+- SQLite migrations 4 and 5 add the same columns (applied by `create_tables=True`);
+  a 0.33.0 store on an unmigrated SQLite database keeps working without them.
+- `prune-processed` checks each record against the queue table: pass
+  `--queue-table` once per queue table (default `queue_messages`), and
+  `--queue-db-url` when the queue tables are not in `--db-url`. Without it, an
+  unused queue table of the same name in `--db-url` reports every message as
+  gone. Records of tables not named are kept. A processor's sweep removes only
+  records of its own queue table. `WorkflowStore.cleanup_old_processed_messages`
+  called without `live` keeps its 0.32 behaviour (no queue check).
+- Deployments with several queue tables: start workflows through
+  `Orchestrator(queue).start()`; pre-1.0 rows without `queue_table` belong to
+  `queue_messages`.
+
 ## [0.32.1] - 2026-10-06
 
 Documentation only; no code or schema change from 0.32.0 and no migration.

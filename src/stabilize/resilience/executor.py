@@ -14,6 +14,7 @@ from typing import Any, TypeVar, cast
 from bulkman.config import ExecutionResult
 from bulkman.exceptions import (
     BulkheadCircuitOpenError,
+    BulkheadError,
     BulkheadFullError,
     BulkheadShutdownError,
     BulkheadTimeoutError,
@@ -102,7 +103,7 @@ def execute_with_resilience(
         else:
             # Re-raise the original error from the task
             if result.error:
-                raise result.error
+                raise task_exception(result.error)
             else:
                 raise RuntimeError(f"Task failed without error: {result}")
 
@@ -161,6 +162,14 @@ def execute_with_resilience(
         ) from e
 
 
+def task_exception(error: BaseException) -> BaseException:
+    """The task's own exception when bulkman wrapped it in a plain BulkheadError."""
+    cause = error.__cause__
+    if type(error) is BulkheadError and isinstance(cause, Exception):
+        return cause
+    return error
+
+
 def extract_result_or_raise(
     result: ExecutionResult,
     task_name: str = "unknown",
@@ -200,5 +209,4 @@ def extract_result_or_raise(
             cause=error,
         ) from error
 
-    # Re-raise the original error
-    raise error
+    raise task_exception(error)

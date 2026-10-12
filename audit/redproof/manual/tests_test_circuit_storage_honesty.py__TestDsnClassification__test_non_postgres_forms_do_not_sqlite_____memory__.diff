@@ -1,0 +1,20 @@
+test-id: tests/test_circuit_storage_honesty.py::TestDsnClassification::test_non_postgres_forms_do_not[sqlite:///:memory:]
+--- a/src/stabilize/resilience/circuits.py
++++ b/src/stabilize/resilience/circuits.py
+@@ -73,7 +73,7 @@
+     scheme, separator, _rest = candidate.partition("://")
+     if separator:
+         base_scheme = scheme.lower().partition("+")[0]
+-        return base_scheme in _POSTGRES_SCHEMES
++        return True
+ 
+     if candidate.lower().startswith("sqlite"):
+         return False
+@@ -135,7 +135,6 @@
+             if separator:
+                 conn_string = f"{scheme.lower()}://{rest}"
+ 
+-            require_parseable_conninfo(conn_string)
+             storage = PostgresStorage(connection_string=conn_string)
+         except ImportError as exc:
+             return _degrade_or_raise("psycopg/resilient-circuit not available", exc)

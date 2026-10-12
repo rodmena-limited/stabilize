@@ -1,0 +1,52 @@
+# 81 — Several queue tables in one store - dedup key, SQLite transactional push, recovery ownership (C1, C6, C31)
+
+Ticket: #81. Umbrella: #77 (audit 0.32.1 -> 1.0.0).
+
+Status: CONFIRMED on published 0.32.1 (pipeline 2930). C1 (postgres): with q_b on its own id sequence, workflow WB on q_b was never started (its StartWorkflow skipped as a duplicate of queue_messages id 1); shared-sequence control SUCCEEDED. C6 (sqlite): a workflow started on SqliteQueue(table_name="q_b") stayed NOT_STARTED and its message landed on queue_messages. C31 (postgres): a processor on queue_messages with recovery_application=None pushed a RunTask for a task in flight on q_b into queue_messages; filtered control did not. Probes: probe_two_queue_tables.py, probe_sqlite_txn_queue_table.py, probe_recovery_cross_table.py. Peer report v3 #1, #10, #12, item C.
+
+## EARS spec
+
+- The processor shall record a message as processed under a key unique across every queue table in the store: str(row id) for the table named queue_messages, "<table>:<row id>" for any other table.
+- When a message is pushed through store.transaction(queue) on SQLite, the store shall insert it into queue.table_name.
+- When a workflow is started through Orchestrator(queue) or promoted by a processor, the store shall record queue.table_name as the workflow's queue table (NULL means queue_messages for rows written before 1.0.0).
+- A recovery sweep shall only re-issue work for workflows whose queue table is the sweeping processor's queue table.
+- If a recovery sweep with recovery_application=None sees workflows of more than one application on its table, then it shall log one warning per sweep naming the applications.
+- The three probes shall pass on both backends; dedup of the default table shall be byte-for-byte unchanged, so messages in flight during an upgrade are not re-executed.
+
+## Technical problems
+
+1. Dedup key collision between independent id sequences in one store.
+2. SQLite transactional push bound to a hard-coded table.
+3. Recovery ownership: a sweep must know which workflows its queue carries, because its pending-message check sees only its own table.
+
+## Solution domains
+
+- Idempotent-consumer pattern: the dedup key must be unique in the dedup store's scope (here: store-wide), i.e. (source, id).
+- Ownership recorded at creation (the same idea as a partition key): the workflow row says which queue serves it.
+- Codebase: migretti migrations; queue/postgres.py and queue/sqlite/queue.py set message.message_id = str(id) at poll.
+
+## Alternatives
+
+- Dedup key: "<table>:<id>" for non-default tables, unchanged for queue_messages [CHOSEN: no re-execution of in-flight default-table messages across the upgrade] vs key on the row's UUID message_id column [REJECTED: ack/extend_lock/reschedule/DLQ use the row id; 18 mark_message_processed call sites] vs prefix every table [REJECTED: every processed record of the default table would stop matching at upgrade -> redelivered messages re-execute] vs require a shared sequence (peer's workaround) [REJECTED: a deployment convention the engine does not enforce].
+- Recovery ownership: queue_table column on the workflow [CHOSEN] vs check has_pending in every queue table [REJECTED: the store does not know other processors' tables] vs refuse unfiltered recovery [REJECTED: breaks single-table multi-application deployments that rely on it] vs skip workflows whose tasks the registry cannot resolve [REJECTED: two registries can share task names, duplicates remain].
+
+## Callers (contract change)
+
+- message.message_id is now a delivery key, not a parseable int, on non-default tables. Every int(message.message_id) site moves to one parser: queue/postgres.py ack / extend_lock / reschedule, queue/sqlite/queue.py ack / extend_lock / reschedule, queue/dlq.py, queue/sqlite/dlq.py. Dedup consumers (mixins._handle_message, txn.mark_message_processed in handlers, committed_marks) only compare the string and stay correct. To be listed exactly with grep in the implementation comment.
+
+## Die-here / two-at-once
+
+- Upgrade with default-table messages in flight: keys unchanged, dedup intact. Non-default tables: records written before the upgrade under bare ids stop matching; a non-default-table message redelivered across the upgrade window can run once more (changelog caveat; only deployments with separate sequences, which were already dropping messages).
+- Workflow created before the column exists: queue_table NULL -> treated as queue_messages; a non-default-table deployment must set it (changelog: one UPDATE per application, or recovery_application) — to be stated in the release notes.
+
+## Phase 4 design refutation (fresh-context refuter, 2026-10-11) — amendments
+
+- B81-1 (stranding after upgrade): bare-id records written by a non-default table before the upgrade collide with future default-table ids for the whole retention window. Design: a migration advances queue_messages_id_seq past the largest numeric processed_messages.message_id (PostgreSQL); SQLite: UPDATE sqlite_sequence for queue_messages to the same bound.
+- B81-2 (stranding): workflows are often stored before or outside Orchestrator.start (SubWorkflowTask, users pushing StartWorkflow, tests). Design: StartWorkflowHandler writes queue_table = self.queue.table_name in its admitting transaction (covers promotion and recovery); a non-default-table processor logs once per sweep when it sees NULL-owned RUNNING workflows.
+- B81-3 (SQLite): store.transaction(queue) inserts on the store's connection; if the SqliteQueue is a different database file, refuse (ValueError at transaction start) — atomicity cannot be provided across files.
+- B81-4: the default-table test normalises the name (strip schema qualifier and quotes) before comparing with queue_messages.
+- Parser sites confirmed: queue/postgres.py:225,249,285; queue/sqlite/queue.py:242,263,295; queue/dlq.py:34; queue/sqlite/dlq.py:50; self._pending keyed by the parsed int.
+
+## Implementation (commit 8f40cad) — callers
+
+Callers: delivery_key <- queue/postgres.py:214, queue/sqlite/queue.py:228 (poll). row_id <- postgres.py:228/253/287, sqlite/queue.py:245/267/297, queue/dlq.py:36, queue/sqlite/dlq.py:52 — every former int(message_id) site (grep for int(message finds none left). Consumers of message.message_id as a dedup key compare strings only: queue/processor/mixins._handle_message, txn.mark_message_processed in handlers, persistence/committed_marks. update_workflow_status now also writes queue_table = COALESCE(:queue_table, queue_table): callers handlers/start_workflow.py:134/155/191, handlers/admission.py:33/60/68 (set queue_table), handlers/workflow_control.py:211/296 and handlers/complete_workflow.py:137 (workflow loaded from the store carries its queue_table, so the value is unchanged; NULL leaves it as is). store.transaction(queue) on SQLite now uses queue.table_name and refuses a queue on another database file.

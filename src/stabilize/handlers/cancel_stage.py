@@ -9,18 +9,22 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from stabilize.handlers.base import StabilizeHandler
+from stabilize.handlers.run_task.execution import resolve_task
+from stabilize.models.stage.completion_records import recorded_completion
 from stabilize.models.status import WorkflowStatus
-from stabilize.queue.messages import CancelStage
+from stabilize.queue.messages import CancelStage, CompleteStage, CompleteWorkflow
 from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
     from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
+    from stabilize.models.task import TaskExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.tasks.registry import TaskRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +35,12 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
 
     Execution flow:
     1. Check if stage is still in a cancellable state
-    2. Cancel all running tasks
-    3. Set stage status to CANCELED
-    4. Set end time
-    5. Store the stage
-    6. Does NOT trigger downstream (cancellation terminates the path)
+    2. Cancel the stage's NOT_STARTED and RUNNING tasks and the stage
+    3. In one transaction: store the stage and push CompleteWorkflow (top-level
+       stage) or CompleteStage for the parent (synthetic stage)
+    4. After the commit: on_cancel for each task this handler moved from
+       RUNNING (unless RunTask already canceled it), on_cleanup for every task,
+       and the stage's finalizers
     """
 
     def __init__(
@@ -45,8 +50,10 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
         event_recorder: EventRecorder | None = None,
+        task_registry: TaskRegistry | None = None,
     ) -> None:
         super().__init__(queue, repository, retry_delay, handler_config, event_recorder=event_recorder)
+        self.task_registry = task_registry
 
     @property
     def message_type(self) -> type[CancelStage]:
@@ -56,18 +63,23 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
         """Handle the CancelStage message.
 
         Retries on ConcurrencyError (optimistic lock failure) using
-        configurable retry settings.
+        configurable retry settings; task hooks run once, after the commit.
         """
+        settled: dict[str, Any] = {}
         self.retry_on_concurrency_error(
-            lambda: self._handle_with_retry(message),
+            lambda: self._handle_with_retry(message, settled),
             f"canceling stage {message.stage_id}",
         )
+        stage = settled.get("stage")
+        if stage is not None:
+            self._run_hooks(stage, settled["moved"])
+            self.run_stage_finalizers(stage)
 
-    def _handle_with_retry(self, message: CancelStage) -> None:
+    def _handle_with_retry(self, message: CancelStage, settled: dict[str, Any]) -> None:
         """Inner handle logic to be retried."""
+        settled.clear()
 
         def on_stage(stage: StageExecution) -> None:
-            # Check if stage is still in a cancellable state
             if stage.status.is_complete:
                 logger.debug(
                     "Ignoring CancelStage for %s (%s) - already %s",
@@ -77,38 +89,47 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
                 )
                 return
 
-            # Cancel all tasks that are still running
             from stabilize.resilience.cancellation import cancel_task
 
+            moved: list[TaskExecution] = []
             for task in stage.tasks:
+                if task.status == WorkflowStatus.SKIPPED and task.end_time is None:
+                    task.end_time = self.current_time_millis()
                 if task.status in {WorkflowStatus.NOT_STARTED, WorkflowStatus.RUNNING}:
+                    if task.status == WorkflowStatus.RUNNING and not _canceled_by_run_task(stage, task):
+                        moved.append(task)
                     self.set_task_status(task, WorkflowStatus.CANCELED)
                     task.end_time = self.current_time_millis()
-                    # Signal any cooperatively-cancellable task currently executing
-                    # so it can stop early (no-op if the task isn't running here or
-                    # doesn't check for cancellation).
                     cancel_task(task.id)
 
-            # Mark stage as canceled
             self.set_stage_status(stage, WorkflowStatus.CANCELED)
-
-            # Canceled is a terminal state: release the stage's registered
-            # finalizers (containers, temp files, connections) now instead of
-            # leaking them until process shutdown.
-            self.run_stage_finalizers(stage)
             stage.end_time = self.current_time_millis()
 
-            # Atomic: store stage + message deduplication
             with self.repository.transaction(self.queue) as txn:
                 txn.store_stage(stage)
-
-                # Message deduplication
                 if message.message_id:
                     txn.mark_message_processed(
                         message_id=message.message_id,
                         handler_type="CancelStage",
                         execution_id=message.execution_id,
                     )
+                if stage.synthetic_stage_owner is not None and stage.parent_stage_id is not None:
+                    txn.push_message(
+                        CompleteStage(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=stage.parent_stage_id,
+                        )
+                    )
+                else:
+                    txn.push_message(
+                        CompleteWorkflow(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                        )
+                    )
+            settled["stage"] = stage
+            settled["moved"] = moved
 
             if self.event_recorder:
                 self.set_event_context(stage.execution.id if stage.execution else "")
@@ -116,8 +137,31 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
 
             logger.info("Canceled stage %s (%s)", stage.name, stage.id)
 
-            # Note: We do NOT call start_next() here because cancellation
-            # terminates this path of execution. The CompleteWorkflow handler
-            # will handle the final execution status determination.
-
         self.with_stage(message, on_stage)
+
+    def _run_hooks(self, stage: StageExecution, moved: list[TaskExecution]) -> None:
+        if self.task_registry is None:
+            if moved:
+                logger.warning("CancelStage has no task registry; on_cancel/on_cleanup not called for %s", stage.name)
+            return
+        moved_ids = {t.id for t in moved}
+        for task in stage.tasks:
+            try:
+                impl = resolve_task(task.implementing_class, task, self.task_registry)
+            except Exception as e:
+                logger.warning("Cannot resolve task %s for cancel hooks: %s", task.name, e)
+                continue
+            if task.id in moved_ids:
+                try:
+                    impl.on_cancel(stage)
+                except Exception as e:
+                    logger.warning("Error in on_cancel for task %s in stage %s: %s", task.name, stage.name, e)
+            try:
+                impl.on_cleanup(stage)
+            except Exception as e:
+                logger.warning("Error in on_cleanup for task %s in stage %s: %s", task.name, stage.name, e)
+
+
+def _canceled_by_run_task(stage: StageExecution, task: TaskExecution) -> bool:
+    recorded = recorded_completion(stage, task)
+    return recorded is not None and recorded[0] == WorkflowStatus.CANCELED

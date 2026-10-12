@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import uuid
 from datetime import UTC, datetime, timedelta
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from stabilize.errors import ConcurrencyError
-from stabilize.persistence.sqlite.helpers import insert_stage, upsert_task
+from stabilize.persistence.sqlite.helpers import has_execution_column, has_queue_table_column, insert_stage, upsert_task
 from stabilize.persistence.store import StoreTransaction
 from stabilize.persistence.task_state import Captured, capture, commit_captured
 
@@ -19,6 +20,9 @@ if TYPE_CHECKING:
     from stabilize.models.task import TaskExecution
     from stabilize.models.workflow import Workflow
     from stabilize.queue.messages import Message
+
+
+_QUEUE_TABLE_SET = ",\n                queue_table = COALESCE(:queue_table, queue_table)"
 
 
 class AtomicTransaction(StoreTransaction):
@@ -41,15 +45,17 @@ class AtomicTransaction(StoreTransaction):
         """SQLite transactions provide true database-level atomicity."""
         return True
 
-    def __init__(self, conn: sqlite3.Connection, store: SqliteWorkflowStore) -> None:
+    def __init__(self, conn: sqlite3.Connection, store: SqliteWorkflowStore, queue: Any = None) -> None:
         """Initialize atomic transaction.
 
         Args:
             conn: SQLite connection (will not auto-commit)
             store: Parent store for helper methods
+            queue: The queue whose table push_message writes to (queue_messages when None)
         """
         self._conn = conn
         self._store = store
+        self._queue_table = _queue_table_for(store, queue)
         # Track stage objects and their original versions for rollback
         self._staged_objects: list[tuple[StageExecution | TaskExecution, int]] = []
         self._written_tasks: Captured = []
@@ -160,6 +166,14 @@ class AtomicTransaction(StoreTransaction):
             insert_stage(self._conn, stage, stage.execution.id)
         self._written_tasks.extend(capture(stage.tasks))
 
+    def set_config_version(self, workflow_id: str, config_version: str) -> None:
+        if not has_execution_column(self._conn, "config_version"):
+            return
+        self._conn.execute(
+            "UPDATE pipeline_executions SET config_version = :v WHERE id = :id",
+            {"v": config_version, "id": workflow_id},
+        )
+
     def update_workflow_status(self, workflow: Workflow) -> None:
         """Update workflow status within the transaction.
 
@@ -171,11 +185,11 @@ class AtomicTransaction(StoreTransaction):
             workflow: Workflow with updated status
         """
         self._conn.execute(
-            """
+            f"""
             UPDATE pipeline_executions SET
                 status = :status,
                 start_time = :start_time,
-                end_time = :end_time
+                end_time = :end_time{_QUEUE_TABLE_SET if has_queue_table_column(self._conn) else ""}
             WHERE id = :id
             """,
             {
@@ -183,6 +197,7 @@ class AtomicTransaction(StoreTransaction):
                 "status": workflow.status.name,
                 "start_time": workflow.start_time,
                 "end_time": workflow.end_time,
+                "queue_table": workflow.queue_table,
             },
         )
 
@@ -226,8 +241,8 @@ class AtomicTransaction(StoreTransaction):
         payload = json.dumps(data)
 
         self._conn.execute(
-            """
-            INSERT INTO queue_messages (
+            f"""
+            INSERT INTO {self._queue_table} (
                 message_id, message_type, payload, deliver_at,
                 attempts, max_attempts, version
             ) VALUES (
@@ -336,6 +351,53 @@ class AtomicTransaction(StoreTransaction):
                 return cursor.rowcount == 1
 
         return False
+
+    def lock_admission(self, key: str) -> None:
+        if self._conn.in_transaction:
+            raise RuntimeError("lock_admission must be the first statement of its transaction")
+        self._conn.execute("BEGIN IMMEDIATE")
+
+    def count_running(self, pipeline_config_id: str) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM pipeline_executions WHERE pipeline_config_id = ? AND status = 'RUNNING'",
+            (pipeline_config_id,),
+        ).fetchone()
+        return int(row[0])
+
+    def buffered_ids(self, pipeline_config_id: str) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT id FROM pipeline_executions WHERE pipeline_config_id = ? AND status = 'BUFFERED' ORDER BY id",
+            (pipeline_config_id,),
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def workflow_status(self, workflow_id: str) -> tuple[str | None, bool]:
+        row = self._conn.execute(
+            "SELECT status, is_canceled FROM pipeline_executions WHERE id = ?", (workflow_id,)
+        ).fetchone()
+        return (None, False) if row is None else (str(row[0]), bool(row[1]))
+
+
+
+def _queue_table_for(store: Any, queue: Any) -> str:
+    if queue is None:
+        return "queue_messages"
+    from stabilize.persistence.connection import get_connection_manager
+
+    queue_cs = getattr(queue, "connection_string", None)
+    if queue_cs is not None:
+        parse = get_connection_manager()._parse_sqlite_path
+
+        def location(cs: str) -> str:
+            path = parse(cs).split("?", 1)[0]
+            return path if path.startswith(":memory:") or path.startswith("file:") else os.path.abspath(path)
+
+        if location(queue_cs) != location(store.connection_string):
+            raise ValueError(
+                "store.transaction(queue): the queue's SQLite database differs from the store's; "
+                "a push cannot be atomic with the store write"
+            )
+    return str(getattr(queue, "table_name", None) or "queue_messages")
 
 
 # Forward reference for type hint

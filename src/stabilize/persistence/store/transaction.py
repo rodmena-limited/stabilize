@@ -45,6 +45,10 @@ class StoreTransaction(ABC):
         """Update workflow status within the transaction."""
         pass
 
+    def set_config_version(self, workflow_id: str, config_version: str) -> None:
+        """Record the configuration fingerprint of a workflow within the transaction."""
+        return None
+
     @abstractmethod
     def push_message(self, message: Message, delay: float = 0) -> None:
         """Push a message to the queue within the transaction."""
@@ -102,3 +106,20 @@ class StoreTransaction(ABC):
             existing behavior.
         """
         return True
+
+    def lock_admission(self, key: str) -> None:
+        """Serialize admission for ``key`` until this transaction ends."""
+        raise NotImplementedError(f"{type(self).__name__} does not support admission control")
+
+    def count_running(self, pipeline_config_id: str) -> int:
+        """RUNNING workflows of the config, as this transaction sees them."""
+        raise NotImplementedError(f"{type(self).__name__} does not support admission control")
+
+    def buffered_ids(self, pipeline_config_id: str) -> list[str]:
+        """BUFFERED workflow ids of the config, oldest (lowest id) first."""
+        raise NotImplementedError(f"{type(self).__name__} does not support admission control")
+
+    def workflow_status(self, workflow_id: str) -> tuple[str | None, bool]:
+        """The workflow's status name and is_canceled flag as this transaction sees them."""
+        raise NotImplementedError(f"{type(self).__name__} does not support admission control")
+

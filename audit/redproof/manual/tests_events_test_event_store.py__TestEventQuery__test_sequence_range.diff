@@ -1,0 +1,12 @@
+test-id: tests/events/test_event_store.py::TestEventQuery::test_sequence_range
+--- a/src/stabilize/events/store/sqlite/events.py
++++ b/src/stabilize/events/store/sqlite/events.py
+@@ -114,7 +114,7 @@
+             params.extend(et.value for et in query.event_types)
+ 
+         if query.from_sequence is not None:
+-            sql_parts.append("AND sequence > ?")
++            sql_parts.append("AND sequence >= ?")
+             params.append(query.from_sequence)
+ 
+         if query.to_sequence is not None:

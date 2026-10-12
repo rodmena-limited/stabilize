@@ -38,7 +38,7 @@ probe_split_namespace.py"
 PROBE_SET="${PROBE_SET:-all}"
 
 _needs_docker() {
-    printf '%s\n' "$DOCKER_PROBES" | grep -qxF "$1"
+    grep -qxF "$1" <<<"$DOCKER_PROBES"
 }
 
 declare -A EXCLUDED=(
@@ -47,10 +47,22 @@ declare -A EXCLUDED=(
 
 mapfile -t ALL < <(cd audit/evaluations && ls probe_*.py | sort)
 
+declare -A EXCLUDED_BY_FILE=()
+if [ -n "${PROBE_EXCLUDE_FILE:-}" ]; then
+    while IFS= read -r line; do
+        [ -z "${line// /}" ] && continue
+        EXCLUDED_BY_FILE["${line%%|*}"]=1
+    done < "$PROBE_EXCLUDE_FILE"
+fi
+
 PROBES=()
 SKIPPED=()
 for name in "${ALL[@]}"; do
     if [ -n "${EXCLUDED[$name]:-}" ]; then
+        continue
+    fi
+    if [ -n "${EXCLUDED_BY_FILE[$name]:-}" ]; then
+        EXCLUDED["$name"]="listed in $PROBE_EXCLUDE_FILE: expected red on the release under test"
         continue
     fi
     if [ "$PROBE_SET" = "sqlite" ] && _needs_docker "$name"; then

@@ -8,6 +8,8 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from stabilize.queue.message_ids import row_id
+
 if TYPE_CHECKING:
     pass
 
@@ -47,7 +49,7 @@ class SqliteDLQMixin:
             message_id: The message ID (integer or string)
             error: Error message/details explaining why it was moved
         """
-        msg_id = int(message_id)
+        msg_id = row_id(message_id)
         conn = self._get_connection()
 
         cursor = conn.execute(

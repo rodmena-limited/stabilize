@@ -1,0 +1,12 @@
+test-id: tests/test_config_versioning.py::TestWorkflowConfigVersion::test_config_version_can_be_set
+--- a/src/stabilize/orchestrator.py
++++ b/src/stabilize/orchestrator.py
+@@ -104,7 +104,7 @@
+                            the global config from environment.
+         """
+         # Attach config fingerprint for versioning
+-        config = handler_config or get_handler_config()
++        config = get_handler_config()
+         execution.config_version = config.config_fingerprint()
+ 
+         message = StartWorkflow(

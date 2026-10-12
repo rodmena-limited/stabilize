@@ -1,0 +1,12 @@
+test-id: tests/test_a3_misc_fixes.py::TestFileAuditLoggerWritesFile::test_global_default_does_not_create_files
+--- a/src/stabilize/audit.py
++++ b/src/stabilize/audit.py
+@@ -78,7 +78,7 @@
+ # Global audit logger instance. Log-only by default: merely importing/using
+ # stabilize must not start writing audit files into the working directory.
+ # Opt in to file auditing with set_audit_logger(FileAuditLogger(path)).
+-_audit_logger: AuditLogger = LogAuditLogger()
++_audit_logger: AuditLogger = FileAuditLogger()
+ 
+ 
+ def set_audit_logger(logger: AuditLogger) -> None:

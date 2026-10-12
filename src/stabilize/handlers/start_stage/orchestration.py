@@ -37,6 +37,7 @@ class StartStageOrchestrationMixin:
         self,
         stage: StageExecution,
         message: StartStage,
+        planned: list[StageExecution] | None = None,
     ) -> list[Message]:
         """Collect messages needed to start the stage.
 
@@ -49,6 +50,8 @@ class StartStageOrchestrationMixin:
         synthetic_stages = self.repository.get_synthetic_stages(stage.execution.id, stage.id)
         if synthetic_stages is None:
             synthetic_stages = []
+        known = {s.id for s in synthetic_stages if s is not None}
+        synthetic_stages = list(synthetic_stages) + [s for s in planned or [] if s.id not in known]
 
         # Check for before stages
         before_stages = [

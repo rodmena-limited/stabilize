@@ -29,6 +29,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_ACTIVE_STAGE_STATUSES = frozenset(
+    {WorkflowStatus.RUNNING, WorkflowStatus.PAUSED, WorkflowStatus.SUSPENDED, WorkflowStatus.BUFFERED}
+)
+
 
 class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
     """
@@ -78,6 +82,10 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
                     execution.id,
                     execution.status,
                 )
+                return
+
+            if execution.status == WorkflowStatus.PAUSED and not execution.is_canceled:
+                logger.info("Execution %s is PAUSED; completion waits for unpause", execution.id)
                 return
 
             # Determine final status
@@ -188,19 +196,26 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
         if WorkflowStatus.TERMINAL in statuses:
             return WorkflowStatus.TERMINAL
 
-        # Any CANCELED -> CANCELED
+        if WorkflowStatus.STOPPED in statuses and not self._other_branches_incomplete(stages):
+            if self._should_override_success(execution):
+                return WorkflowStatus.TERMINAL
+            return WorkflowStatus.SUCCEEDED
+
+        active = [s for s in stages if s.status in _ACTIVE_STAGE_STATUSES]
+        if active and not execution.is_canceled:
+            return None
+
         if WorkflowStatus.CANCELED in statuses:
             return WorkflowStatus.CANCELED
 
-        # Any STOPPED and no other branches incomplete
-        if WorkflowStatus.STOPPED in statuses:
-            if not self._other_branches_incomplete(stages):
-                # Check for override
-                if self._should_override_success(execution):
-                    return WorkflowStatus.TERMINAL
-                return WorkflowStatus.SUCCEEDED
+        if active:
+            logger.debug(
+                "CompleteWorkflow for %s: %d stage(s) still active; their completion re-evaluates the workflow",
+                execution.id,
+                len(active),
+            )
+            return None
 
-        # Still running - check retry count before re-queuing
         retry_count = getattr(message, "retry_count", 0) or 0
         max_retries = self.handler_config.max_stage_wait_retries
 

@@ -36,14 +36,13 @@ from typing import TYPE_CHECKING
 
 from stabilize.errors import RecoveryError
 from stabilize.models.status import WorkflowStatus
-from stabilize.recovery_rules import can_start, has_started
+from stabilize.queue.ownership import DEFAULT_TABLE, queue_table_name, workflow_queue_table
+from stabilize.recovery_plan import plan_running_workflow
 
 if TYPE_CHECKING:
-    from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
-    from stabilize.queue.messages import Message
 
 logger = logging.getLogger(__name__)
 
@@ -130,8 +129,21 @@ class WorkflowRecovery:
         try:
             # Get workflows needing recovery
             workflows = self._get_workflows_for_recovery(application, cutoff_time)
+            own_table = queue_table_name(self.queue)
+            applications: set[str] = set()
+            waiting_configs: set[str] = set()
 
+            unowned = 0
             for workflow in workflows:
+                if getattr(workflow, "queue_table", None) is None and own_table != DEFAULT_TABLE:
+                    unowned += 1
+                if workflow_queue_table(workflow) != own_table:
+                    continue
+                applications.add(workflow.application)
+                if workflow.status == WorkflowStatus.BUFFERED:
+                    if workflow.pipeline_config_id:
+                        waiting_configs.add(workflow.pipeline_config_id)
+                    continue
                 try:
                     result = self._recover_workflow(workflow)
                     results.append(result)
@@ -156,6 +168,24 @@ class WorkflowRecovery:
                             message=str(e),
                         )
                     )
+
+            if unowned:
+                logger.warning(
+                    "Recovery on queue table %s skipped %d workflow(s) with no recorded queue table "
+                    "(written before 0.33.0, read as queue_messages)",
+                    own_table,
+                    unowned,
+                )
+            for config_id in sorted(waiting_configs):
+                results.append(self._wake_waiting(config_id))
+            if application is None and len(applications) > 1:
+                logger.warning(
+                    "Unfiltered recovery on queue table %s examined %d applications (%s); "
+                    "set recovery_application when processors with different task registries share a store",
+                    own_table,
+                    len(applications),
+                    ", ".join(sorted(applications)),
+                )
 
         except Exception as e:
             raise RecoveryError(
@@ -196,7 +226,7 @@ class WorkflowRecovery:
         from stabilize.persistence.store import WorkflowCriteria
 
         criteria = WorkflowCriteria(
-            statuses={WorkflowStatus.RUNNING, WorkflowStatus.NOT_STARTED},
+            statuses={WorkflowStatus.RUNNING, WorkflowStatus.NOT_STARTED, WorkflowStatus.BUFFERED},
             page_size=None,
             start_time_after=cutoff_time,
         )
@@ -210,6 +240,18 @@ class WorkflowRecovery:
             "recovery may be incomplete without application filter"
         )
         return iter(())
+
+    def _wake_waiting(self, pipeline_config_id: str) -> RecoveryResult:
+        from stabilize.queue.messages import StartWaitingWorkflows
+
+        try:
+            self.queue.push(StartWaitingWorkflows(pipeline_config_id=pipeline_config_id, purge_queue=False))
+        except Exception as e:
+            logger.warning("Failed to re-queue StartWaitingWorkflows for %s: %s", pipeline_config_id, e)
+            return RecoveryResult(workflow_id=pipeline_config_id, status="failed", message=str(e), failed_pushes=1)
+        return RecoveryResult(
+            workflow_id=pipeline_config_id, status="recovered", message="Re-queued StartWaitingWorkflows"
+        )
 
     def _recover_not_started(self, workflow: Workflow) -> RecoveryResult:
         """Re-queue StartWorkflow, so its handler's status and concurrency checks run."""
@@ -238,8 +280,6 @@ class WorkflowRecovery:
         Returns:
             RecoveryResult describing what happened
         """
-        from stabilize.queue.messages import RunTask, StartStage, StartTask
-
         # Check if workflow is actually in a state needing recovery
         if workflow.status.is_complete:
             return RecoveryResult(
@@ -252,107 +292,16 @@ class WorkflowRecovery:
         if full_workflow.status == WorkflowStatus.NOT_STARTED:
             return self._recover_not_started(full_workflow)
 
-        # Find stages that need to be re-queued
-        stages_to_requeue: list[StageExecution] = []
+        recovery_messages = plan_running_workflow(full_workflow, self.queue)
         messages_queued = 0
         failed_pushes = 0
-
-        for stage in full_workflow.stages:
-            startable = can_start(stage, full_workflow) if stage.status == WorkflowStatus.NOT_STARTED else None
-            logger.debug(
-                "Recovery eval: stage=%s ref_id=%s status=%s has_started=%s can_start=%s tasks=%d",
-                stage.name,
-                stage.ref_id,
-                stage.status,
-                has_started(stage),
-                startable,
-                len(stage.tasks),
-            )
-
-            # Stage was actively running when crash occurred
-            if stage.status == WorkflowStatus.RUNNING:
-                stages_to_requeue.append(stage)
-            # Stage is NOT_STARTED - check if it should be re-queued
-            elif stage.status == WorkflowStatus.NOT_STARTED:
-                if has_started(stage):
-                    # Stage started but crashed before status was updated to RUNNING
-                    # Need to requeue for recovery
-                    stages_to_requeue.append(stage)
-                elif can_start(stage, full_workflow):
-                    # Stage's dependencies are met - can start immediately
-                    stages_to_requeue.append(stage)
-                # else: dependencies not met, will be triggered by upstream completion
-
-        if not stages_to_requeue:
-            return RecoveryResult(
-                workflow_id=workflow.id,
-                status="skipped",
-                message="No stages need recovery",
-            )
-
-        # Collect all recovery messages, then push atomically via transaction
-        # to prevent partial recovery on crash.
-        recovery_messages: list[Message] = []
-
-        for stage in stages_to_requeue:
-            if stage.status == WorkflowStatus.RUNNING:
-                running_tasks = [t for t in stage.tasks if t.status == WorkflowStatus.RUNNING]
-                not_started_tasks = [t for t in stage.tasks if t.status == WorkflowStatus.NOT_STARTED]
-
-                if running_tasks:
-                    for task in running_tasks:
-                        if self.queue.has_pending_message_for_task(task.id):
-                            logger.debug(
-                                "Skipping recovery for task %s - message already in queue",
-                                task.id,
-                            )
-                            continue
-                        recovery_messages.append(
-                            RunTask(
-                                execution_type=full_workflow.type.value,
-                                execution_id=full_workflow.id,
-                                stage_id=stage.id,
-                                task_id=task.id,
-                                task_type=stage.type,
-                            )
-                        )
-                elif not_started_tasks and stage.start_time is not None:
-                    first_task = not_started_tasks[0]
-                    # Mirror the running-task guard: skip if a message for this
-                    # task is already queued, so a recovery sweep overlapping
-                    # normal progress cannot enqueue a duplicate StartTask.
-                    if not self.queue.has_pending_message_for_task(first_task.id):
-                        recovery_messages.append(
-                            StartTask(
-                                execution_type=full_workflow.type.value,
-                                execution_id=full_workflow.id,
-                                stage_id=stage.id,
-                                task_id=first_task.id,
-                            )
-                        )
-                else:
-                    recovery_messages.append(
-                        StartStage(
-                            execution_type=full_workflow.type.value,
-                            execution_id=full_workflow.id,
-                            stage_id=stage.id,
-                        )
-                    )
-            else:
-                recovery_messages.append(
-                    StartStage(
-                        execution_type=full_workflow.type.value,
-                        execution_id=full_workflow.id,
-                        stage_id=stage.id,
-                    )
-                )
-
         if not recovery_messages:
             return RecoveryResult(
                 workflow_id=workflow.id,
                 status="skipped",
                 message="No recovery messages to push",
             )
+        stages_requeued = len({getattr(m, "stage_id", None) for m in recovery_messages})
 
         # Push all messages atomically in a single transaction
         try:
@@ -371,8 +320,8 @@ class WorkflowRecovery:
         return RecoveryResult(
             workflow_id=workflow.id,
             status="recovered" if failed_pushes == 0 else "partial",
-            message=f"Re-queued {len(stages_to_requeue)} stages ({messages_queued} messages, {failed_pushes} failed)",
-            stages_requeued=len(stages_to_requeue),
+            message=f"Re-queued {stages_requeued} stages ({messages_queued} messages, {failed_pushes} failed)",
+            stages_requeued=stages_requeued,
             failed_pushes=failed_pushes,
         )
 

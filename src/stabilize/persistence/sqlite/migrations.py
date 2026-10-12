@@ -92,6 +92,34 @@ MIGRATIONS: tuple[Migration, ...] = (
             "CREATE INDEX IF NOT EXISTS idx_processed_messages_execution ON processed_messages(execution_id)",
         ),
     ),
+    Migration(
+        4,
+        "add_workflow_queue_table_and_advance_queue_ids",
+        (
+            "ALTER TABLE pipeline_executions ADD COLUMN queue_table TEXT",
+            """
+            INSERT INTO sqlite_sequence(name, seq)
+            SELECT 'queue_messages', 0
+            WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'queue_messages')
+            """,
+            """
+            UPDATE sqlite_sequence SET seq = MAX(
+                seq,
+                COALESCE(
+                    (SELECT MAX(CAST(message_id AS INTEGER)) FROM processed_messages
+                     WHERE message_id GLOB '[0-9]*' AND message_id NOT GLOB '*[^0-9]*'),
+                    0
+                )
+            )
+            WHERE name = 'queue_messages'
+            """,
+        ),
+    ),
+    Migration(
+        5,
+        "add_workflow_config_version",
+        ("ALTER TABLE pipeline_executions ADD COLUMN config_version TEXT",),
+    ),
 )
 
 
@@ -127,6 +155,14 @@ def _validate_migrations(migrations: tuple[Migration, ...], baseline_version: in
         seen.add(migration.version)
 
 
+def _current_version(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").fetchone()
+    if row is None:
+        return 0
+    value = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
+    return int(value[0] or 0) if value else 0
+
+
 def apply_migrations(
     conn: sqlite3.Connection,
     migrations: tuple[Migration, ...] = MIGRATIONS,
@@ -148,31 +184,35 @@ def apply_migrations(
         The schema version after migration.
     """
     _validate_migrations(migrations, baseline_version)
-    ensure_version_table(conn)
-    current = get_schema_version(conn)
-
-    # Stamp the baseline for an existing or just-created un-versioned database so
-    # the baseline DDL is never re-run on upgrade.
-    if current < baseline_version:
-        conn.execute(
-            "INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (?, ?)",
-            (baseline_version, "baseline"),
-        )
-        current = baseline_version
-
-    # Apply forward migrations strictly in version order.
-    for migration in sorted(migrations, key=lambda m: m.version):
-        if migration.version <= current:
-            continue
-        for statement in migration.statements:
-            stmt = statement.strip()
-            if stmt:
-                conn.execute(stmt)
-        conn.execute(
-            "INSERT INTO schema_migrations(version, name) VALUES (?, ?)",
-            (migration.version, migration.name),
-        )
-        current = migration.version
-
-    conn.commit()
+    latest = max([baseline_version, *(m.version for m in migrations)])
+    if _current_version(conn) >= latest:
+        return latest
+    if conn.in_transaction:
+        conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        ensure_version_table(conn)
+        current = get_schema_version(conn)
+        if current < baseline_version:
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (?, ?)",
+                (baseline_version, "baseline"),
+            )
+            current = baseline_version
+        for migration in sorted(migrations, key=lambda m: m.version):
+            if migration.version <= current:
+                continue
+            for statement in migration.statements:
+                stmt = statement.strip()
+                if stmt:
+                    conn.execute(stmt)
+            conn.execute(
+                "INSERT INTO schema_migrations(version, name) VALUES (?, ?)",
+                (migration.version, migration.name),
+            )
+            current = migration.version
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
     return current

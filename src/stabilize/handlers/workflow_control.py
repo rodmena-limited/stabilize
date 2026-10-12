@@ -309,6 +309,7 @@ class ResumeStageHandler(StabilizeHandler[ResumeStage], _ControlHandler):
                             execution_id=message.execution_id,
                             stage_id=stage.id,
                             task_id=paused_tasks[0].id,
+                            task_type=paused_tasks[0].implementing_class,
                         )
                     )
 

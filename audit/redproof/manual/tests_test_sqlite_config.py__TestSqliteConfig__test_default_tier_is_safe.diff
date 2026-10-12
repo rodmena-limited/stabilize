@@ -1,0 +1,12 @@
+test-id: tests/test_sqlite_config.py::TestSqliteConfig::test_default_tier_is_safe
+--- a/src/stabilize/persistence/sqlite_config.py
++++ b/src/stabilize/persistence/sqlite_config.py
+@@ -55,7 +55,7 @@
+         busy_timeout_ms: How long to wait on locked database
+     """
+ 
+-    tier: SqliteOptimizationTier = SqliteOptimizationTier.SAFE
++    tier: SqliteOptimizationTier = SqliteOptimizationTier.MINIMAL
+ 
+     # Individual PRAGMA overrides (None = use tier default)
+     synchronous: str | None = None  # "OFF", "NORMAL", or "FULL"

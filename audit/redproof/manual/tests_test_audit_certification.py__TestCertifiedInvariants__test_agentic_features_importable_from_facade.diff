@@ -1,0 +1,11 @@
+test-id: tests/test_audit_certification.py::TestCertifiedInvariants::test_agentic_features_importable_from_facade
+--- a/src/stabilize/__init__.py
++++ b/src/stabilize/__init__.py
+@@ -85,7 +85,6 @@
+ # Agentic ergonomics (additive, opt-in — see docs/guide)
+ from stabilize.hitl import (
+     ApprovalTask,
+-    approve,
+     get_signal,
+     reject,
+     send_signal,

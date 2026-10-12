@@ -31,6 +31,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_ACTIVE = frozenset({WorkflowStatus.RUNNING, WorkflowStatus.PAUSED, WorkflowStatus.SUSPENDED, WorkflowStatus.BUFFERED})
+
 
 class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
     """
@@ -136,8 +138,11 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
             )
             return
 
+        if not all_complete and any(s.status in _ACTIVE for s in before_stages):
+            logger.debug("ContinueParentStage for %s: a before-stage is still active", stage.name)
+            return
+
         if not all_complete:
-            # Not all before-stages complete yet - check retry count
             retry_count = message.retry_count or 0
             max_retries = self.handler_config.max_stage_wait_retries
 
@@ -303,8 +308,11 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
             )
             return
 
+        if not all_complete and any(s.status in _ACTIVE for s in after_stages):
+            logger.debug("ContinueParentStage for %s: a after-stage is still active", stage.name)
+            return
+
         if not all_complete:
-            # Not all after-stages complete yet - check retry count
             retry_count = message.retry_count or 0
             max_retries = self.handler_config.max_stage_wait_retries
 

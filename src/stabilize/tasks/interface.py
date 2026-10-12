@@ -276,9 +276,12 @@ class SkippableTask(Task):
         return True
 
     def execute(self, stage: StageExecution) -> TaskResult:
-        """Execute the task if enabled."""
-        if not self.is_enabled(stage):
-            return TaskResult.skipped()
+        """Run do_execute.
+
+        The engine evaluates is_enabled once, before the task first runs
+        (StartTask), and skips the task when it returns False; execute does not
+        evaluate it again.
+        """
         return self.do_execute(stage)
 
     @abstractmethod

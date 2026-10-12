@@ -1,0 +1,12 @@
+test-id: tests/test_timeout_enforcement.py::TestGetTaskTimeout::test_default_timeout_is_four_hours
+--- a/src/stabilize/resilience/config.py
++++ b/src/stabilize/resilience/config.py
+@@ -124,7 +124,7 @@
+     # Task execution
+     # Default timeout for task execution (4 hours for long-running workflows)
+     # Override with STABILIZE_DEFAULT_TASK_TIMEOUT_S environment variable
+-    default_task_timeout_seconds: float = 14400.0  # 4 hours
++    default_task_timeout_seconds: float = 14401.0  # 4 hours
+     task_backoff_min_delay_ms: int = 1000
+     task_backoff_max_delay_ms: int = 60000
+ 

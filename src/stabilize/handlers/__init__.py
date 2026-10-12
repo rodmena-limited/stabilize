@@ -77,23 +77,9 @@ def register_all_handlers(
         stacklevel=2,
     )
 
-    handlers = [
-        StartWorkflowHandler(queue, repository),
-        StartWaitingWorkflowsHandler(queue, repository),
-        StartStageHandler(queue, repository),
-        SkipStageHandler(queue, repository),
-        CancelStageHandler(queue, repository),
-        ContinueParentStageHandler(queue, repository),
-        JumpToStageHandler(queue, repository),
-        SignalStageHandler(queue, repository),
-        CancelRegionHandler(queue, repository),
-        AddMultiInstanceHandler(queue, repository),
-        StartTaskHandler(queue, repository, task_registry),
-        RunTaskHandler(queue, repository, task_registry),
-        CompleteTaskHandler(queue, repository),
-        CompleteStageHandler(queue, repository, task_registry=task_registry),
-        CompleteWorkflowHandler(queue, repository),
-    ]
+    from stabilize.handlers.defaults import default_handlers
+
+    handlers = default_handlers(queue, repository, task_registry)
 
     for handler in handlers:
         processor.register_handler(handler)

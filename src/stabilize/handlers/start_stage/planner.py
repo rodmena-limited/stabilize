@@ -26,7 +26,7 @@ class StartStagePlannerMixin:
 
     repository: WorkflowStore
 
-    def _plan_stage(self, stage: StageExecution) -> None:
+    def _plan_stage(self, stage: StageExecution) -> list[StageExecution]:
         """
         Plan the stage - build tasks and before stages.
         """
@@ -97,15 +97,10 @@ class StartStagePlannerMixin:
         graph = StageGraphBuilder.before_stages(stage)
         builder.before_stages(stage, graph)
 
-        # Save any new synthetic stages
-        for s in graph.build():
-            # If not already in repository, add it
-            # (StageGraphBuilder adds to execution.stages, but we need to persist)
-            # Actually StageGraphBuilder usually just modifies the object graph.
-            # We need to explicitly store new stages.
-            # Assuming graph.build() returns new stages.
-            s.execution = stage.execution  # Ensure backref
-            self.repository.add_stage(s)
+        planned = list(graph.build())
+        for s in planned:
+            s.execution = stage.execution
 
         # Add context flags
         builder.add_context_flags(stage)
+        return planned

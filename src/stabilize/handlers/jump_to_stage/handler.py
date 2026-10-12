@@ -28,12 +28,12 @@ from stabilize.handlers.jump_to_stage.reset import (
     reset_stage_to_succeeded,
     reset_stage_to_terminal,
 )
+from stabilize.handlers.jump_to_stage.target import apply_jump_to_target
 from stabilize.handlers.jump_to_stage.traversal import (
     get_downstream_stages,
     get_resettable_downstream_stages,
     get_skipped_stages,
 )
-from stabilize.handlers.start_stage.planner import HYDRATED_KEYS
 from stabilize.models.status import WorkflowStatus
 from stabilize.persistence.transaction import TransactionHelper
 from stabilize.queue.messages import (
@@ -180,9 +180,6 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             if not self._check_jump_count(message, execution, source_stage):
                 return
 
-            # Reset target stage (in-memory; persisted atomically below)
-            reset_stage_for_retry(target_stage)
-
             # Collect every stage mutation of this jump; they are applied in
             # ONE transaction together with the StartStage push at the end.
             mutations: list[tuple[str, Any]] = []
@@ -214,9 +211,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                 for skipped in get_skipped_stages(execution, source_stage, target_stage):
                     if skipped.status == WorkflowStatus.NOT_STARTED:
                         logger.debug("Marking skipped stage: %s", skipped.ref_id)
-                        mutations.append(
-                            (skipped.id, partial(reset_stage_to_skipped, end_time=end_time))
-                        )
+                        mutations.append((skipped.id, partial(reset_stage_to_skipped, end_time=end_time)))
 
             # Get jump count for context updates
             jump_count = source_stage.context.get("_jump_count", 0)
@@ -228,29 +223,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                 max_jumps = DEFAULT_MAX_JUMPS
             new_jump_count = jump_count + 1
 
-            # Merge jump context into target stage
-            if message.jump_context:
-                target_stage.context.update(message.jump_context)
-                # A jump writes these keys deliberately, so they are not the
-                # stale ancestor copies that re-entry hydration replaces. Drop
-                # them from the hydrated set for the next plan only; that plan
-                # re-records the set from its own ancestors, so ordinary
-                # ancestor precedence resumes afterwards.
-                hydrated = target_stage.context.get(HYDRATED_KEYS)
-                if isinstance(hydrated, list):
-                    target_stage.context[HYDRATED_KEYS] = [
-                        key for key in hydrated if key not in message.jump_context
-                    ]
-
-            # Make jump outputs available via special context key
-            if message.jump_outputs:
-                target_stage.context["_jump_outputs"] = message.jump_outputs
-
-            # Set bypass flag so StartStageHandler skips prerequisite checks
-            target_stage.context["_jump_bypass"] = True
-
-            # Record jump history
-            jump_history = source_stage.context.get("_jump_history", [])
+            jump_history = list(source_stage.context.get("_jump_history", []))
             jump_history.append(
                 {
                     "from_stage": source_stage.ref_id,
@@ -259,10 +232,6 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                     "context_keys": (list(message.jump_context.keys()) if message.jump_context else []),
                 }
             )
-
-            # Store jump metadata in target stage
-            target_stage.context["_jump_count"] = new_jump_count
-            target_stage.context["_jump_history"] = jump_history
 
             logger.info(
                 "Jumping from stage %s to %s (jump #%d/%d)",
@@ -297,14 +266,12 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                 if is_backward_jump:
                     mutations.extend(self._synthetic_reset_mutations(message.execution_id, source_stage.id))
 
-            # Target stage mutation
-            target_context_updates = dict(target_stage.context)
-
-            def mutate_target(s: StageExecution, updates: dict[str, Any] = target_context_updates) -> None:
-                reset_stage_for_retry(s)
-                s.context.update(updates)
-
-            mutations.append((target_stage.id, mutate_target))
+            mutations.append(
+                (
+                    target_stage.id,
+                    partial(apply_jump_to_target, message=message, jump_count=new_jump_count, history=jump_history),
+                )
+            )
 
             # Reset synthetic stages for target
             mutations.extend(self._synthetic_reset_mutations(message.execution_id, target_stage.id))

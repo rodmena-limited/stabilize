@@ -108,27 +108,22 @@ class AddMultiInstanceHandler(StabilizeHandler[AddMultiInstance]):
             new_instance.execution = execution
             execution.stages.append(new_instance)
 
-            # Persist the new instance and update parent
             with self.repository.transaction(self.queue) as txn:
                 txn.store_stage(stage)
+                txn.store_stage(new_instance)
                 if message.message_id:
                     txn.mark_message_processed(
                         message_id=message.message_id,
                         handler_type="AddMultiInstance",
                         execution_id=message.execution_id,
                     )
-
-            # Add stage to repository (outside transaction since add_stage is separate)
-            self.repository.add_stage(new_instance)
-
-            # Push start message for the new instance
-            self.queue.push(
-                StartStage(
-                    execution_type=message.execution_type,
-                    execution_id=message.execution_id,
-                    stage_id=new_instance.id,
+                txn.push_message(
+                    StartStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=new_instance.id,
+                    )
                 )
-            )
 
             logger.info(
                 "Added MI instance %s to stage %s (total: %d)",

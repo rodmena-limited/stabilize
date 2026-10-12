@@ -20,11 +20,14 @@ from stabilize.persistence.connection import release_pool_once
 from stabilize.persistence.pool_options import PoolOptions, with_schema
 from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.interface import Queue
+from stabilize.queue.message_ids import delivery_key, own_row_ids, row_id
 from stabilize.queue.messages import Message, get_message_type_name
 
 _VALID_TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 logger = logging.getLogger(__name__)
+
+_FENCE = " AND (%(attempts)s::int IS NULL OR attempts = %(attempts)s::int)"
 
 
 class PostgresQueue(Queue):
@@ -79,9 +82,7 @@ class PostgresQueue(Queue):
         self.schema = schema
         self._pool_options = with_schema(options, schema, connection_string)
         self._manager = get_connection_manager()
-        self._pool = self._manager.get_postgres_pool(
-            connection_string, options=self._pool_options
-        )
+        self._pool = self._manager.get_postgres_pool(connection_string, options=self._pool_options)
         self._pending: dict[int, dict[str, Any]] = {}
         # Size caching
         self._size_cache: int | None = None
@@ -208,7 +209,7 @@ class PostgresQueue(Queue):
             self.move_to_dlq(msg_id, error=f"Deserialization failed: {exc}")
             return None
 
-        message.message_id = str(msg_id)
+        message.message_id = delivery_key(self.table_name, msg_id)
         message.attempts = row["attempts"]
         self._pending[msg_id] = {
             "message": message,
@@ -222,7 +223,7 @@ class PostgresQueue(Queue):
             return
 
         try:
-            msg_id = int(message.message_id)
+            msg_id = row_id(message.message_id)
         except ValueError:
             logger.error("Invalid message_id format in ack(): %s", message.message_id)
             return
@@ -232,9 +233,11 @@ class PostgresQueue(Queue):
         with pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"DELETE FROM {self.table_name} WHERE id = %(id)s",
-                    {"id": msg_id},
+                    f"DELETE FROM {self.table_name} WHERE id = %(id)s{_FENCE}",
+                    {"id": msg_id, "attempts": getattr(message, "attempts", None)},
                 )
+                if cur.rowcount == 0:
+                    logger.warning("ack(%s): the lease was taken by another worker; not deleted", message.message_id)
             conn.commit()
 
         self._pending.pop(msg_id, None)
@@ -245,10 +248,7 @@ class PostgresQueue(Queue):
         """Extend the visibility lock of an in-flight message (heartbeat)."""
         if not message.message_id:
             return False
-        try:
-            msg_id = int(message.message_id)
-        except ValueError:
-            return False
+        msg_id = row_id(message.message_id)
 
         seconds = (duration or self.lock_duration).total_seconds()
         pool = self._get_pool()
@@ -256,8 +256,8 @@ class PostgresQueue(Queue):
             with conn.cursor() as cur:
                 cur.execute(
                     f"UPDATE {self.table_name} SET locked_until = NOW() + %(seconds)s * INTERVAL '1 second' "
-                    "WHERE id = %(id)s",
-                    {"seconds": seconds, "id": msg_id},
+                    f"WHERE id = %(id)s{_FENCE}",
+                    {"seconds": seconds, "id": msg_id, "attempts": getattr(message, "attempts", None)},
                 )
                 extended = bool(cur.rowcount == 1)
             conn.commit()
@@ -282,7 +282,7 @@ class PostgresQueue(Queue):
         if not message.message_id:
             return
 
-        msg_id = int(message.message_id)
+        msg_id = row_id(message.message_id)
         pool = self._get_pool()
 
         with pool.connection() as conn:
@@ -292,13 +292,24 @@ class PostgresQueue(Queue):
                     UPDATE {self.table_name}
                     SET deliver_at = NOW() + %(delay)s * INTERVAL '1 second',
                         locked_until = NULL
-                    WHERE id = %(id)s
+                    WHERE id = %(id)s{_FENCE}
                     """,
-                    {"id": msg_id, "delay": delay.total_seconds()},
+                    {"id": msg_id, "delay": delay.total_seconds(), "attempts": getattr(message, "attempts", None)},
                 )
             conn.commit()
 
         self._pending.pop(msg_id, None)
+
+    def live_delivery_keys(self, keys: list[str]) -> set[str]:
+        owned = own_row_ids(self.table_name, keys)
+        if not owned:
+            return set()
+        pool = self._get_pool()
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT id FROM {self.table_name} WHERE id = ANY(%(ids)s)", {"ids": list(owned)})
+                rows = cur.fetchall()
+        return {owned[int(r["id"])] for r in rows}
 
     def size(self) -> int:
         """Get the number of messages in the queue (cached)."""
@@ -352,6 +363,15 @@ class PostgresQueue(Queue):
                     LIMIT 1
                     """,
                     (task_id,),
+                )
+                return cur.fetchone() is not None
+
+    def has_pending_message_for_stage(self, stage_id: str) -> bool:
+        with self._get_pool().connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT 1 FROM {self.table_name} WHERE payload ->> 'stage_id' = %s LIMIT 1",
+                    (stage_id,),
                 )
                 return cur.fetchone() is not None
 

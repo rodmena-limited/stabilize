@@ -13,20 +13,22 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.audit import audit
+from stabilize.handlers.admission import limits_concurrency, start_running, try_lock_admission
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import WorkflowStatus
-from stabilize.persistence.store import WorkflowCriteria
 from stabilize.queue.messages import (
     CancelWorkflow,
-    StartStage,
+    StartWaitingWorkflows,
     StartWorkflow,
 )
+from stabilize.queue.ownership import queue_table_name
 from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
     from stabilize.events.recorder import EventRecorder
+    from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
-    from stabilize.persistence.store import WorkflowStore
+    from stabilize.persistence.store import StoreTransaction, WorkflowStore
     from stabilize.queue import Queue
 
 logger = logging.getLogger(__name__)
@@ -83,7 +85,7 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
 
             if execution.is_canceled:
                 logger.info("Execution %s was canceled before start", execution.id)
-                self._terminate(execution)
+                self._terminate(execution, message)
                 return
 
             # Check if start time has expired
@@ -99,116 +101,84 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
                 )
                 return
 
-            # Check if should queue (concurrent execution limits)
-            if self._should_queue(execution):
-                logger.info(
-                    "Execution %s queued due to concurrent execution limit (limit=%d)",
-                    execution.id,
-                    execution.max_concurrent_executions,
-                )
-                self.set_workflow_status(execution, WorkflowStatus.BUFFERED)
-                # Atomic: update execution status + message deduplication
-                with self.repository.transaction(self.queue) as txn:
-                    txn.update_workflow_status(execution)
-                    if message.message_id:
-                        txn.mark_message_processed(
-                            message_id=message.message_id,
-                            handler_type="StartWorkflow",
-                            execution_id=message.execution_id,
-                        )
+            execution.queue_table = queue_table_name(self.queue)
+            if limits_concurrency(execution):
+                self._admit(execution, message)
                 return
 
-            self._start(execution, message)
+            with self.repository.transaction(self.queue) as txn:
+                started = self._start_in(txn, execution, message)
+            self._after_start(execution, started)
 
         self.with_execution(message, on_execution)
 
-    def _should_queue(self, execution: Workflow) -> bool:
-        """Check if execution should be queued due to concurrency limits."""
-        if not execution.is_limit_concurrent or not execution.pipeline_config_id:
-            return False
+    def _admit(self, execution: Workflow, message: StartWorkflow) -> None:
+        config_id = execution.pipeline_config_id or ""
+        with self.repository.transaction(self.queue) as txn:
+            if try_lock_admission(txn, config_id):
+                started = self._admit_locked(txn, execution, message, config_id)
+            else:
+                started = self._start_in(txn, execution, message)
+        self._after_start(execution, started)
 
-        if execution.max_concurrent_executions <= 0:
-            return False
+    def _admit_locked(
+        self, txn: StoreTransaction, execution: Workflow, message: StartWorkflow, config_id: str
+    ) -> list[StageExecution] | None:
+        if txn.workflow_status(execution.id)[0] != WorkflowStatus.NOT_STARTED.name:
+            self._mark(txn, message)
+            return None
+        limit = execution.max_concurrent_executions
+        running = txn.count_running(config_id)
+        waiting_older = [w for w in txn.buffered_ids(config_id) if w < execution.id]
+        if waiting_older and running < limit:
+            txn.push_message(StartWaitingWorkflows(pipeline_config_id=config_id, purge_queue=False))
+        if running >= limit or waiting_older:
+            logger.info(
+                "Execution %s buffered (running=%d limit=%d older waiting=%d)",
+                execution.id,
+                running,
+                limit,
+                len(waiting_older),
+            )
+            self.set_workflow_status(execution, WorkflowStatus.BUFFERED)
+            txn.update_workflow_status(execution)
+            self._mark(txn, message)
+            return None
+        return self._start_in(txn, execution, message)
 
-        # Count currently running executions for this pipeline config
-        criteria = WorkflowCriteria(
-            statuses={WorkflowStatus.RUNNING},
-            page_size=execution.max_concurrent_executions + 1,  # Fetch just enough to check limit
-        )
+    def _mark(self, txn: StoreTransaction, message: StartWorkflow) -> None:
+        if message.message_id:
+            txn.mark_message_processed(
+                message_id=message.message_id,
+                handler_type="StartWorkflow",
+                execution_id=message.execution_id,
+            )
 
-        running_count = 0
-        for _ in self.repository.retrieve_by_pipeline_config_id(execution.pipeline_config_id, criteria):
-            running_count += 1
-            if running_count >= execution.max_concurrent_executions:
-                return True
-
-        return False
-
-    def _start(
-        self,
-        execution: Workflow,
-        message: StartWorkflow,
-    ) -> None:
-        """Start the execution."""
+    def _start_in(
+        self, txn: StoreTransaction, execution: Workflow, message: StartWorkflow
+    ) -> list[StageExecution] | None:
         initial_stages = execution.initial_stages()
-
         if not initial_stages:
             logger.warning("No initial stages found for execution %s", execution.id)
             self.set_workflow_status(execution, WorkflowStatus.TERMINAL)
-            # Atomic: update execution status + message deduplication
-            with self.repository.transaction(self.queue) as txn:
-                txn.update_workflow_status(execution)
-                if message.message_id:
-                    txn.mark_message_processed(
-                        message_id=message.message_id,
-                        handler_type="StartWorkflow",
-                        execution_id=message.execution_id,
-                    )
-            # Publish ExecutionComplete event
-            return
-
-        # Mark as running
-        self.set_workflow_status(execution, WorkflowStatus.RUNNING)
-        execution.start_time = self.current_time_millis()
-
-        # Atomic: update execution status + queue all initial stages + message deduplication
-        with self.repository.transaction(self.queue) as txn:
             txn.update_workflow_status(execution)
-            if message.message_id:
-                txn.mark_message_processed(
-                    message_id=message.message_id,
-                    handler_type="StartWorkflow",
-                    execution_id=message.execution_id,
-                )
-            for stage in initial_stages:
-                logger.debug(
-                    "Queuing initial stage %s (%s) for execution %s",
-                    stage.name,
-                    stage.id,
-                    execution.id,
-                )
-                txn.push_message(
-                    StartStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=stage.id,
-                    )
-                )
+            self._mark(txn, message)
+            return None
+        start_running(self, txn, execution, initial_stages)
+        self._mark(txn, message)
+        return initial_stages
 
-        # Record events if event recorder is configured
+    def _after_start(self, execution: Workflow, initial_stages: list[StageExecution] | None) -> None:
+        if initial_stages is None:
+            return
         if self.event_recorder:
             self.set_event_context(execution.id)
-            self.event_recorder.record_workflow_created(
-                execution,
-                source_handler="StartWorkflowHandler",
-            )
+            self.event_recorder.record_workflow_created(execution, source_handler="StartWorkflowHandler")
             self.event_recorder.record_workflow_started(
                 execution,
                 initial_stage_ids=[s.id for s in initial_stages],
                 source_handler="StartWorkflowHandler",
             )
-
-        # Audit log
         audit(
             event_type="WORKFLOW_LIFECYCLE",
             action="START",
@@ -221,19 +191,14 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
                 "initial_stages": len(initial_stages),
             },
         )
+        logger.info("Started execution %s with %d initial stage(s)", execution.id, len(initial_stages))
 
-        logger.info(
-            "Started execution %s with %d initial stage(s)",
-            execution.id,
-            len(initial_stages),
-        )
-
-    def _terminate(self, execution: Workflow) -> None:
-        """Terminate a canceled execution."""
-        # Publish ExecutionComplete event
-        if execution.pipeline_config_id:
-            # Queue start waiting executions
-            pass
+    def _terminate(self, execution: Workflow, message: StartWorkflow) -> None:
+        self.set_workflow_status(execution, WorkflowStatus.CANCELED)
+        execution.end_time = self.current_time_millis()
+        with self.repository.transaction(self.queue) as txn:
+            txn.update_workflow_status(execution)
+            self._mark(txn, message)
 
     def _is_after_start_time_expiry(self, execution: Workflow) -> bool:
         """Check if current time is past start time expiry."""

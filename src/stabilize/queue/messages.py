@@ -363,6 +363,7 @@ class CompleteTask(TaskLevel):
 
     status: WorkflowStatus = WorkflowStatus.SUCCEEDED
     original_status: WorkflowStatus | None = None
+    task_start_time: int | None = None
 
 
 @dataclass

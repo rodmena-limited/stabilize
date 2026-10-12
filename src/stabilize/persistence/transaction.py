@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
 from resilient_circuit.exceptions import RetryLimitReached
 
+from stabilize.models.stage.completion_records import record_completion
 from stabilize.persistence.store import StoreTransaction
 
 if TYPE_CHECKING:
@@ -137,7 +138,7 @@ class TransactionHelper:
         require_atomic: bool = False,
         *,
         during_txn: Callable[[], None] | None = None,
-    ) -> None:
+    ) -> bool:
         """
         Execute an atomic transaction to update state and queue messages.
 
@@ -176,6 +177,7 @@ class TransactionHelper:
                     )
 
                 if stage:
+                    _record_task_completions(stage, messages_to_push)
                     txn.store_stage(stage)
 
                 if source_message and source_message.message_id:
@@ -197,6 +199,7 @@ class TransactionHelper:
             _execute()
         except DuplicateDeliveryError as e:
             logger.info("%s: message %s was already processed by another delivery; rolled back", handler_name, e)
+            return False
         except RetryLimitReached as e:
             logger.error(
                 "Transaction failed after max retries due to lock contention: %s",
@@ -204,6 +207,7 @@ class TransactionHelper:
             )
             # Re-raise the original exception
             raise e.__cause__ if e.__cause__ else e from e
+        return True
 
     def execute_atomic_critical(
         self,
@@ -212,7 +216,7 @@ class TransactionHelper:
         messages_to_push: Sequence[tuple[Message, float | None]] | None = None,
         handler_name: str = "UnknownHandler",
         require_atomic: bool = False,
-    ) -> None:
+    ) -> bool:
         """
         Execute an atomic transaction with more aggressive retry for critical paths.
 
@@ -249,6 +253,7 @@ class TransactionHelper:
                     )
 
                 if stage:
+                    _record_task_completions(stage, messages_to_push)
                     txn.store_stage(stage)
 
                 if source_message and source_message.message_id:
@@ -267,6 +272,7 @@ class TransactionHelper:
             _execute()
         except DuplicateDeliveryError as e:
             logger.info("%s: message %s was already processed by another delivery; rolled back", handler_name, e)
+            return False
         except RetryLimitReached as e:
             logger.critical(
                 "CRITICAL: Transaction failed after max retries in error handling path: %s",
@@ -274,6 +280,7 @@ class TransactionHelper:
             )
             # Re-raise the original exception
             raise e.__cause__ if e.__cause__ else e from e
+        return True
 
 
 def require_atomic_transaction(txn: StoreTransaction, context: str = "operation") -> None:
@@ -302,3 +309,14 @@ def require_atomic_transaction(txn: StoreTransaction, context: str = "operation"
             "SqliteWorkflowStore or PostgresWorkflowStore for production "
             "critical systems."
         )
+
+
+def _record_task_completions(stage: StageExecution, messages: Sequence[tuple[Message, float | None]]) -> None:
+    from stabilize.queue.messages import CompleteTask
+
+    for message, _ in messages:
+        if isinstance(message, CompleteTask) and message.stage_id == stage.id:
+            record_completion(stage, message.task_id, message.status, message.original_status)
+            task = next((t for t in stage.tasks if t.id == message.task_id), None)
+            if message.task_start_time is None and task is not None:
+                message.task_start_time = task.start_time

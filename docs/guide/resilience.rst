@@ -286,7 +286,11 @@ Tasks can register cleanup callbacks (finalizers) that execute when a stage ente
 
 Finalizers are:
 
-*   **Guaranteed to run**: Even on process crash (on restart)
+*   **Run when the stage reaches a terminal state** in the process that
+    registered them, once per committed completion. The registry is held in
+    memory: finalizers registered by a process that crashes are lost, so use
+    ``on_cleanup`` (resolved from the task registry on every worker) for
+    clean-up that must survive a restart.
 *   **Timeout-protected**: Each finalizer has a 30s timeout
 *   **Logged**: Results are tracked for debugging
 

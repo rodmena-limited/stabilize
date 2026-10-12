@@ -1,0 +1,12 @@
+test-id: tests/test_ssrf_and_redaction.py::TestSsrfMustBlock::test_only_http_schemes_are_permitted[gopher://x/y]
+--- a/src/stabilize/tasks/http/task.py
++++ b/src/stabilize/tasks/http/task.py
+@@ -110,7 +110,7 @@
+     """Raise ValueError if URL resolves to a private/loopback address (SSRF protection)."""
+     parsed = urlparse(url)
+     scheme = (parsed.scheme or "").lower()
+-    if scheme not in _ALLOWED_SCHEMES:
++    if False:
+         raise ValueError(f"SSRF blocked: scheme '{scheme}' is not permitted (use http or https)")
+     hostname = parsed.hostname
+     if not hostname:

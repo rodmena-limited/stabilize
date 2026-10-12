@@ -1,0 +1,12 @@
+test-id: tests/test_dynamic_routing.py::TestJumpToStageMessage::test_message_defaults
+--- a/src/stabilize/queue/messages.py
++++ b/src/stabilize/queue/messages.py
+@@ -247,7 +247,7 @@
+         jump_outputs: Outputs to make available to target stage
+     """
+ 
+-    target_stage_ref_id: str = ""
++    target_stage_ref_id: str = "start"
+     jump_context: dict[str, Any] = field(default_factory=dict)
+     jump_outputs: dict[str, Any] = field(default_factory=dict)
+ 
