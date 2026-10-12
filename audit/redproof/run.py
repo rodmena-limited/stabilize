@@ -228,6 +228,8 @@ class State:
         self.tried: set[str] = set()
         self.in_flight: set[str] = set()
         self.no_candidates: set[str] = set()
+        self.file_tries: dict[str, int] = defaultdict(int)
+        self.file_proofs: dict[str, int] = defaultdict(int)
         self._resume()
 
     def _resume(self) -> None:
@@ -236,11 +238,13 @@ class State:
             for line in proof.read_text().splitlines()[1:]:
                 nodeid, mkey = line.split("\t")[:2]
                 self.proven[nodeid] = mkey
+                self.file_proofs[mkey.split(":", 1)[0]] += 1
         tried = self.out / "tried.tsv"
         if tried.exists():
             for line in tried.read_text().splitlines():
                 mkey, *ids = line.split("\t")
                 self.tried.add(mkey)
+                self.file_tries[mkey.split(":", 1)[0]] += 1
                 for t in ids:
                     self.tries[t] += 1
 
@@ -257,7 +261,9 @@ class State:
                 for k, cov in self.cover.items():
                     if k in self.tried or k in self.in_flight:
                         continue
-                    score = len(cov & act)
+                    path = self.mutants[k].path
+                    weight = (1 + self.file_proofs[path]) / (1 + self.file_tries[path])
+                    score = len(cov & act) * weight
                     if score > best_score:
                         best_key, best_score = k, score
             else:
@@ -283,6 +289,7 @@ class State:
         with self.lock:
             self.in_flight.discard(m.key)
             self.tried.add(m.key)
+            self.file_tries[m.path] += 1
             with open(self.out / "tried.tsv", "a") as fh:
                 fh.write("\t".join([m.key, *([] if discarded else ran)]) + "\n")
             if discarded:
@@ -297,6 +304,7 @@ class State:
                 for t, kind in confirmed.items():
                     if t not in self.proven:
                         self.proven[t] = m.key
+                        self.file_proofs[m.path] += 1
                         fh.write(f"{t}\t{m.key}\t{m.operator}\t{m.replacement[:80]}\t{kind}\n")
 
 
