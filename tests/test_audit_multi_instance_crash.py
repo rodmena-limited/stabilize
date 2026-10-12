@@ -66,18 +66,35 @@ def _run(repository: WorkflowStore, queue: Queue, crash: bool) -> tuple[Any, lis
     wf = start(repository, queue, [parent])
     drive(processor, repository, wf.id, timeout=2, idle=0.5)
     assert repository.retrieve(wf.id).stages[0].status == WorkflowStatus.RUNNING
-    original = repository.add_stage
-    state = {"raised": False}
+    from contextlib import contextmanager
 
-    def add_stage(stage: StageExecution) -> None:
-        if crash and not state["raised"]:
+    original = repository.transaction
+    state = {"armed": False, "raised": False}
+
+    @contextmanager
+    def transaction(*args: Any, **kwargs: Any) -> Any:
+        with original(*args, **kwargs) as txn:
+            yield txn
+        if crash and state["armed"] and not state["raised"]:
             state["raised"] = True
             raise ConnectionError("server closed the connection unexpectedly")
-        original(stage)
 
-    repository.add_stage = add_stage  # type: ignore[method-assign]
+    repository.transaction = transaction  # type: ignore[method-assign]
+    handler = processor._handlers[AddMultiInstance]
+    handle = handler.handle
+
+    def armed_handle(message: Any) -> None:
+        state["armed"] = True
+        try:
+            handle(message)
+        finally:
+            state["armed"] = False
+
+    handler.handle = armed_handle  # type: ignore[method-assign]
     queue.push(AddMultiInstance(execution_type=wf.type.value, execution_id=wf.id, stage_id=parent.id))
     drive(processor, repository, wf.id, timeout=6, idle=2.0)
+    if crash:
+        assert state["raised"], "the interruption after the first commit never fired"
     result = repository.retrieve(wf.id)
     instances = [s for s in result.stages if s.ref_id.startswith("mi_instance_")]
     return next(s for s in result.stages if s.ref_id == "mi"), instances
