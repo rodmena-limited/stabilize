@@ -1,0 +1,1 @@
+tests/test_purge_query_plan.py::test_purge_and_recovery_lookups_use_an_index[sqlite]|[FAIL] purge_index_plan: full scan or sort
