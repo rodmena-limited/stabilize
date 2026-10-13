@@ -24,3 +24,40 @@ Measured by ci-conductor on pg-nano-03 (2026-10-13 05:22Z, 2781 rows): the appli
 - `(status, end_time)`: REJECTED. `status = ANY(...)` across 4 values breaks the ordered scan into a merge.
 - Expression index `((payload->>'execution_id'))` on `queue_messages` and `queue_messages_dlq`: CHOSEN.
 - A stored `execution_id` column: REJECTED. It needs a schema change and a backfill on every queue table.
+
+## RESOLUTION (0.33.1)
+
+Chosen: both partial indexes on pipeline_executions, `idx_executions_end_time (end_time)` and
+`idx_executions_application_end_time (application, end_time)`, each `WHERE end_time IS NOT NULL`.
+The first serves the unfiltered call (CLI without --application) and the second the
+application-filtered call. Also expression indexes on `payload->>'execution_id'` for
+queue_messages and queue_messages_dlq, which serve purge_workflow and recovery's
+has_pending_message_for_execution. That recovery path was found by a class sweep and was not in the report.
+
+SQLite: migration 6 and SqliteQueue._create_table() create the same indexes (plus stage_id).
+completed_workflow_ids marks `+status` so that, without ANALYZE statistics, the planner orders by the
+end_time index instead of using idx_execution_status and a temp B-tree.
+
+Verification (local gate on vm-1, PostgreSQL 18.6, Python 3.14 and 3.11):
+- tests/test_purge_query_plan.py: plans of the product's own SQL, with no Seq Scan, Sort or temp B-tree.
+  Red before the fix on both backends; green after. Manual proofs remove an index and turn each leg red.
+- probe_purge_scales.py at 1,000,000 rows (purge 200; 200 lookups; limits 2 s and 0.5 s):
+
+  | backend    | call            | 0.33.0   | 0.33.1  |
+  |------------|-----------------|----------|---------|
+  | postgres   | purge all       | 32.136 s | 0.545 s |
+  | postgres   | purge app       | 26.224 s | 0.489 s |
+  | postgres   | 200 lookups     | 24.756 s | 0.100 s |
+  | sqlite     | purge all       | 102.554 s| 0.049 s |
+  | sqlite     | purge app       | 96.287 s | 0.048 s |
+  | sqlite     | 200 lookups     | 78.960 s | 0.002 s |
+
+- Gate 62cb95a: lint, tests (2414 passed), probes (61/61), baseline on 0.33.0 (2403 passed, 60/60 probes),
+  falsify (1 probe and 1 test red on 0.33.0 for the stated reason), upgrade 0.33.0 -> 0.33.1 with
+  work in flight, manual proofs 41/41, soak. Its py311 job failed once on a timing race in
+  test_audit_control_matrix; that test was made deterministic in 3219558.
+- Gate 5e6f25e (release commit): lint, tests 2414 passed on 3.14 and 3.11, manual proofs 41/41,
+  redproof 2407 proven + 40 allowlisted = 2447, 0 violations.
+
+Not tested: index build time and lock duration on a large live table. The migration uses
+CREATE INDEX, not CONCURRENTLY, so it takes a write lock on each table while the index builds.
