@@ -1168,6 +1168,7 @@ class TestAggressiveStress:
     """
 
     @pytest.mark.stress
+    @pytest.mark.timeout(600)
     def test_100_concurrent_diamonds_with_conflicts(
         self, file_repository: WorkflowStore, file_queue: Queue, backend: str
     ) -> None:
