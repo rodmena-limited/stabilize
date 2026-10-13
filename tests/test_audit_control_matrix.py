@@ -15,6 +15,7 @@ from stabilize.tasks.interface import RetryableTask, Task
 from tests.audit_support import drive, make_processor, stage
 
 POLLS: dict[str, int] = {}
+HELD: set[str] = set()
 RUNS: dict[str, int] = {}
 
 
@@ -33,7 +34,7 @@ class Poll(RetryableTask):
 
     def execute(self, stage: StageExecution) -> TaskResult:
         n = POLLS[stage.id] = POLLS.get(stage.id, 0) + 1
-        return TaskResult.success() if n >= 4 else TaskResult.running()
+        return TaskResult.success() if n >= 4 and stage.ref_id not in HELD else TaskResult.running()
 
 
 class JumpOnce(Task):
@@ -51,6 +52,7 @@ TASKS = {"ok": Ok, "poll": Poll, "jump": JumpOnce}
 def _env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("STABILIZE_CIRCUIT_BREAKER_ENABLED", "false")
     POLLS.clear()
+    HELD.clear()
     RUNS.clear()
 
 
@@ -81,6 +83,7 @@ def _start(repository: WorkflowStore, queue: Queue, wf: Workflow) -> Workflow:
 
 
 def test_pause_while_a_stage_runs_and_its_successor_has_not_started(repository: WorkflowStore, queue: Queue) -> None:
+    HELD.add("a")
     processor = _processor(repository, queue)
     wf = _start(
         repository,
@@ -93,6 +96,7 @@ def test_pause_while_a_stage_runs_and_its_successor_has_not_started(repository: 
     repository.pause(wf.id, paused_by="audit")
     paused = _until(processor, repository, wf.id, lambda w: w.status == WorkflowStatus.PAUSED, seconds=10)
     assert next(s for s in paused.stages if s.ref_id == "b").status == WorkflowStatus.NOT_STARTED
+    HELD.clear()
     started = time.monotonic()
     Orchestrator(queue, store=repository).unpause(paused)
     final = drive(processor, repository, wf.id, timeout=30, idle=2.0)
