@@ -205,7 +205,7 @@ class SqliteWorkflowStore(
         from stabilize.maintenance import PURGEABLE
 
         marks = ", ".join("?" for _ in PURGEABLE)
-        sql = f"SELECT id FROM pipeline_executions WHERE status IN ({marks}) AND end_time IS NOT NULL AND end_time < ?"
+        sql = f"SELECT id FROM pipeline_executions WHERE +status IN ({marks}) AND end_time IS NOT NULL AND end_time < ?"
         params: list[Any] = [*PURGEABLE, completed_before_ms]
         if application is not None:
             sql += " AND application = ?"

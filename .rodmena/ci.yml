@@ -48,53 +48,53 @@ jobs:
         run: PATH="$PWD/.venv311/bin:$PATH" STABILIZE_TEST_DSN="$DATABASE_URL" .venv311/bin/python -m pytest tests golden_standard_tests -q -n 3 -p no:cacheprovider --timeout 600 -rfE
 
   baseline:
-    name: "Published 0.32.1 from PyPI: existing suite and probes"
+    name: "Published 0.33.0 from PyPI: existing suite and probes"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
     timeout_minutes: 50
     steps:
-      - name: Install stabilize 0.32.1 from PyPI, not the checkout
-        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.32.1' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml
+      - name: Install stabilize 0.33.0 from PyPI, not the checkout
+        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.33.0' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml
       - name: Installed package is the published one
-        run: .old/bin/python -c "import stabilize, sys; print(stabilize.__version__, stabilize.__file__); sys.exit(0 if stabilize.__version__ == '0.32.1' and 'site-packages' in stabilize.__file__ else 1)"
-      - name: Existing suite against 0.32.1 (new red tests listed in expect/0.32.1.tests are excluded)
+        run: .old/bin/python -c "import stabilize, sys; print(stabilize.__version__, stabilize.__file__); sys.exit(0 if stabilize.__version__ == '0.33.0' and 'site-packages' in stabilize.__file__ else 1)"
+      - name: Existing suite against 0.33.0 (new red tests listed in expect/0.33.0.tests are excluded)
         run: |
           set -eu
-          IGN=$(cut -d'|' -f1 audit/evaluations/expect/0.32.1.tests audit/evaluations/expect/0.32.1.new-api | cut -d':' -f1 | sort -u | sed '/^$/d; s/^/--ignore=/' | tr '\n' ' ')
+          IGN=$(cut -d'|' -f1 audit/evaluations/expect/0.33.0.tests audit/evaluations/expect/0.33.0.new-api | cut -d':' -f1 | sort -u | sed '/^$/d; s/^/--ignore=/' | tr '\n' ' ')
           echo "ignored: $IGN"
           PATH="$PWD/.old/bin:$PATH" STABILIZE_TEST_DSN="$DATABASE_URL" .old/bin/python -m pytest tests golden_standard_tests $IGN --deselect tests/test_engine_context_keys.py::test_every_engine_written_key_is_registered --deselect tests/test_migration_discovery.py::test_get_migrations_finds_them_from_a_source_checkout --deselect tests/test_resilience.py::TestExecuteWithResilience::test_exception_propagates --ignore=tests/test_audit_refuter_regressions.py -q -n 3 -p no:cacheprovider --timeout 600 -rfE
-      - name: Existing probes against 0.32.1 (new red probes listed in expect/0.32.1.probes are excluded)
+      - name: Existing probes against 0.33.0 (new red probes listed in expect/0.33.0.probes are excluded)
         run: |
           set -eu
           export PATH="$PWD/.old/bin:$PATH"
           .old/bin/stabilize mg-up --db-url "$DATABASE_URL?schema=orchestration"
-          PROBE_EXCLUDE_FILE=audit/evaluations/expect/0.32.1.probes STABILIZE_PROBE_SCHEMA=orchestration PROBE_SET=sqlite AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" PYTHON=.old/bin/python bash audit/evaluations/run_all.sh
+          PROBE_EXCLUDE_FILE=audit/evaluations/expect/0.33.0.probes STABILIZE_PROBE_SCHEMA=orchestration PROBE_SET=sqlite AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" PYTHON=.old/bin/python bash audit/evaluations/run_all.sh
 
   falsify:
-    name: "New probes and tests go red on published 0.32.1 for their stated reason"
+    name: "New probes and tests go red on published 0.33.0 for their stated reason"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
     timeout_minutes: 50
     steps:
-      - name: Install stabilize 0.32.1 from PyPI, not the checkout
-        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.32.1' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml
-      - name: Probes listed in expect/0.32.1.probes fail on 0.32.1 with their marker, controls green
+      - name: Install stabilize 0.33.0 from PyPI, not the checkout
+        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.33.0' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml
+      - name: Probes listed in expect/0.33.0.probes fail on 0.33.0 with their marker, controls green
         run: |
           set -u
           export PATH="$PWD/.old/bin:$PATH"
-          OLD_VERSION=0.32.1 AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" STABILIZE_PROBE_SQLITE_QUEUE_TABLES=1 PYTHON=.old/bin/python bash audit/evaluations/falsify_previous.sh; p=$?
-          OLD_VERSION=0.32.1 STABILIZE_TEST_DSN="$DATABASE_URL" PYTHON=.old/bin/python bash audit/evaluations/falsify_tests.sh; t=$?
+          OLD_VERSION=0.33.0 AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" STABILIZE_PROBE_SQLITE_QUEUE_TABLES=1 PYTHON=.old/bin/python bash audit/evaluations/falsify_previous.sh; p=$?
+          OLD_VERSION=0.33.0 STABILIZE_TEST_DSN="$DATABASE_URL" PYTHON=.old/bin/python bash audit/evaluations/falsify_tests.sh; t=$?
           echo "probe falsification exit=$p test falsification exit=$t"
           [ "$p" -eq 0 ] && [ "$t" -eq 0 ]
 
   upgrade:
-    name: "Work in flight under published 0.32.1 finishes under this checkout"
+    name: "Work in flight under published 0.33.0 finishes under this checkout"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
     timeout_minutes: 25
     steps:
-      - name: Install published 0.32.1 and this checkout side by side
-        run: uv venv .old && uv pip install -p .old/bin/python 'stabilize[postgres,cli]==0.32.1' && uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
+      - name: Install published 0.33.0 and this checkout side by side
+        run: uv venv .old && uv pip install -p .old/bin/python 'stabilize[postgres,cli]==0.33.0' && uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
       - name: Old release starts the work, this checkout finishes it
         run: |
           set -eu
