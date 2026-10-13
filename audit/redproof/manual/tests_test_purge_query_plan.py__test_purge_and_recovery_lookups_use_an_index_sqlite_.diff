@@ -1,0 +1,12 @@
+test-id: tests/test_purge_query_plan.py::test_purge_and_recovery_lookups_use_an_index[sqlite]
+--- a/src/stabilize/persistence/sqlite/migrations.py	2026-10-13 05:35:10.332145848 +0000
++++ b/src/stabilize/persistence/sqlite/migrations.py	2026-10-13 05:35:10.343186686 +0000
+@@ -126,8 +126,6 @@
+         6,
+         "add_purge_and_lookup_indexes",
+         (
+-            "CREATE INDEX IF NOT EXISTS idx_execution_end_time ON pipeline_executions(end_time) "
+-            "WHERE end_time IS NOT NULL",
+             "CREATE INDEX IF NOT EXISTS idx_execution_application_end_time "
+             "ON pipeline_executions(application, end_time) WHERE end_time IS NOT NULL",
+             *queue_lookup_indexes("queue_messages"),

@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.33.1] - 2026-10-13
+
+Patch release: indexes for purge and recovery lookups (#94, reported by ci-conductor).
+Schema only, plus one SQLite query; no API or behaviour change. **On PostgreSQL run
+`stabilize mg-up` before starting 0.33.1 workers** (migration `01M4SVVY5XE3S18Y0CPQ8TATDP`).
+
+### Fixed
+
+- **`purge-workflows` and `purge_completed_workflows` no longer scan and sort
+  `pipeline_executions`.** `completed_workflow_ids` selected by status and
+  `end_time < cutoff` ordered by `end_time`, and no index includes `end_time`: every
+  pass read every purgeable row and sorted it. New indexes on `end_time` and on
+  `(application, end_time)`, both partial on `end_time IS NOT NULL`.
+- **Purge and recovery no longer scan the queue tables per workflow.** `purge_workflow`
+  (queue and dead-letter table) and recovery's `has_pending_message_for_execution`
+  filtered on the message's `execution_id` with no index: one full scan per purged
+  workflow, and per workflow examined by every recovery sweep. New expression
+  indexes on `execution_id` for `queue_messages` and `queue_messages_dlq`; on SQLite
+  also on `stage_id`, which PostgreSQL already had.
+
+### Upgrade notes
+
+- PostgreSQL migration `01M4SVVY5XE3S18Y0CPQ8TATDP` creates `idx_executions_end_time`,
+  `idx_executions_application_end_time`, `idx_queue_messages_execution_id` and
+  `idx_queue_dlq_execution_id` (`CREATE INDEX IF NOT EXISTS`, not `CONCURRENTLY`: it
+  takes a write lock on each table while the index builds). Deployments with more
+  queue tables add the `execution_id` index to each of them; the DDL is in
+  `docs/guide/stability.rst`.
+- SQLite migration 6 creates the same indexes (applied by `create_tables=True`);
+  `SqliteQueue._create_table()` creates them for its own tables.
+
 ## [0.33.0] - 2026-10-12
 
 Release candidate for 1.0.0: the public API and guarantees are written down in

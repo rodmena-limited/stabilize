@@ -60,4 +60,18 @@ def create_queue_tables(conn: sqlite3.Connection, table_name: str) -> None:
         CREATE INDEX IF NOT EXISTS idx_{table_name}_dlq_type
         ON {table_name}_dlq(message_type)
     """)
+    for statement in queue_lookup_indexes(table_name):
+        conn.execute(statement)
     conn.commit()
+
+
+def queue_lookup_indexes(table_name: str) -> tuple[str, ...]:
+    return tuple(
+        f"CREATE INDEX IF NOT EXISTS idx_{table}_{field} ON {table}"
+        f"(CASE WHEN json_valid(payload) THEN json_extract(payload, '$.{field}') END)"
+        for table, field in (
+            (table_name, "execution_id"),
+            (table_name, "stage_id"),
+            (f"{table_name}_dlq", "execution_id"),
+        )
+    )

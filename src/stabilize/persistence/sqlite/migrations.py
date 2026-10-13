@@ -19,6 +19,8 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
+from stabilize.queue.sqlite.schema import queue_lookup_indexes
+
 # Version of the baseline schema defined in schema.SCHEMA. Bump only if the
 # baseline itself is ever redefined (normally you add a Migration instead).
 BASELINE_VERSION = 1
@@ -119,6 +121,17 @@ MIGRATIONS: tuple[Migration, ...] = (
         5,
         "add_workflow_config_version",
         ("ALTER TABLE pipeline_executions ADD COLUMN config_version TEXT",),
+    ),
+    Migration(
+        6,
+        "add_purge_and_lookup_indexes",
+        (
+            "CREATE INDEX IF NOT EXISTS idx_execution_end_time ON pipeline_executions(end_time) "
+            "WHERE end_time IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_execution_application_end_time "
+            "ON pipeline_executions(application, end_time) WHERE end_time IS NOT NULL",
+            *queue_lookup_indexes("queue_messages"),
+        ),
     ),
 )
 

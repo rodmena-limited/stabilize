@@ -337,3 +337,18 @@ red on 0.32.1 (1 renewal call after the failure).
 
 Never red (claims held on 0.32.1, probes kept as regression guards):
 probe_continue_on_failure_all_paths (C29), probe_two_processes_execute_once (C17).
+
+## 0.33.1 (#94, reported by ci-conductor; red on 0.33.0, local gate on vm-1)
+
+tests/test_purge_query_plan.py, before the fix (2026-10-13):
+- sqlite: completed_workflow_ids SEARCH by idx_execution_application / idx_execution_status
+  plus USE TEMP B-TREE FOR ORDER BY; has_pending_message_for_execution, has_pending_message_for_stage
+  and purge_workflow SCAN queue_messages / queue_messages_dlq.
+- postgres (migration 01M4SVVY5XE3S18Y0CPQ8TATDP withheld): Sort under both completed_workflow_ids
+  calls, Seq Scan on queue_messages and queue_messages_dlq for has_pending_message_for_execution and
+  purge_workflow. has_pending_message_for_stage was already indexed (idx_queue_messages_stage_id).
+- A first postgres run was red for another reason (a bare % in the seed SQL); not counted.
+The postgres leg cannot go red through falsify_tests.sh, because conftest applies the checkout's
+migrations; its red is the run above and the manual proof that removes the execution_id index.
+probe_purge_scales.py takes its migrations from the installed package, so it is red on 0.33.0 on both
+backends (falsify job).

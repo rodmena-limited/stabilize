@@ -20,7 +20,7 @@ in a minor release.
 Versioning
 ----------
 
-stabilize will follow Semantic Versioning 2.0.0 from 1.0.0, which promotes 0.33.0
+stabilize will follow Semantic Versioning 2.0.0 from 1.0.0, which promotes the latest 0.33.x
 unchanged once it has run in production:
 
 * a public name, message type, persisted column or CLI command is not removed
@@ -89,4 +89,15 @@ with its own task registry. Then:
 * processed-message keys of a table other than ``queue_messages`` are
   ``"<table>:<row id>"``; records written before 0.33.0 for such a table under
   the bare row id stop matching after the upgrade, so a message of that table
-  in flight across the upgrade can be handled once more.
+  in flight across the upgrade can be handled once more;
+* on PostgreSQL, the migrations index only ``queue_messages`` and
+  ``queue_messages_dlq``. For each further queue table, create the index that
+  serves recovery and ``purge-workflows``; without it each lookup scans the
+  table::
+
+      CREATE INDEX IF NOT EXISTS idx_<table>_execution_id
+          ON <table> ((payload ->> 'execution_id'));
+      CREATE INDEX IF NOT EXISTS idx_<table>_dlq_execution_id
+          ON <table>_dlq ((payload ->> 'execution_id'));
+
+  SQLite queue tables get these indexes when the queue creates its tables.
