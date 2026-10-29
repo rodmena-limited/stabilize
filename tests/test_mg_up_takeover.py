@@ -7,7 +7,6 @@ STABILIZE_REQUIRE_OLD_RUNNERS=1 a missing release is a failure, not a skip.
 
 from __future__ import annotations
 
-import os
 import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -22,6 +21,7 @@ from tests.mg_support import (
     legacy_rows,
     mg,
     migretti_counts,
+    old_runner,
     old_stabilize,
     output,
     relation_exists,
@@ -37,25 +37,6 @@ psycopg = pytest.importorskip("psycopg")
 PLACEHOLDER = "-- migrate: up\nSELECT 1;\n-- migrate: down\nSELECT 1;\n"
 RAG_EMBEDDINGS = ("01KDRK3TXW4R2GERC1WBCQYJGG_rag_embeddings.sql", "0c05b1306b39c39841bf4a82d229d7f5")
 INDEXES_BEFORE_8F12B3F = ("01KE39HEAN221S7AWNS4A0H750_add_performance_indexes.sql", "4f5c0456e333bbece1f355960e4e7755")
-
-
-def _runners() -> dict[str, str]:
-    found = {}
-    for entry in os.environ.get("STABILIZE_OLD_RUNNERS", "").split(";"):
-        version, _, path = entry.partition("=")
-        if version.strip() and path.strip():
-            found[version.strip()] = path.strip()
-    return found
-
-
-def old_runner(version: str) -> str:
-    path = _runners().get(version)
-    if path and os.access(path, os.X_OK):
-        return path
-    message = f"published stabilize {version} not provided in STABILIZE_OLD_RUNNERS"
-    if os.environ.get("STABILIZE_REQUIRE_OLD_RUNNERS") == "1":
-        pytest.fail(message)
-    pytest.skip(message)
 
 
 @pytest.fixture()

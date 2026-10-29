@@ -16,3 +16,8 @@ tests/test_mg_up_takeover.py::test_an_interrupted_takeover_is_completed_by_the_n
 tests/test_mg_up_takeover.py::test_four_concurrent_runs_take_over_once_and_all_succeed|0 of 4 concurrent runs recorded the takeover
 tests/test_cli_schema.py::TestMgUpSchemaPostgres::test_mg_up_lands_tables_in_target_schema_postgres|_migrations not created in stabilize schema
 tests/test_cli_schema.py::TestMgUpSchemaPostgres::test_mg_up_without_schema_still_lands_in_public_postgres|_migrations not created in public schema
+tests/test_mg_up_engine_tables.py::test_the_event_store_constructs_on_a_database_set_up_by_mg_up|the event store refused a database set up by mg-up
+tests/test_mg_up_engine_tables.py::test_the_event_store_tables_follow_the_target_schema|the event store refused a database set up by mg-up
+tests/test_mg_up_engine_tables.py::test_the_event_store_refusal_names_mg_up|the event store's refusal does not name stabilize mg-up
+tests/test_mg_up_engine_tables.py::test_a_dml_only_runtime_role_can_lease_tasks_after_mg_up|task leasing could not start for a DML-only role after mg-up
+tests/test_mg_up_engine_tables.py::test_task_leasing_on_an_old_database_names_mg_up_and_creates_nothing|task leasing created its own table at runtime

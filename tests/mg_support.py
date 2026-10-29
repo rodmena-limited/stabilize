@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
+import pytest
+
 REPO = Path(__file__).resolve().parent.parent
 SHIPPED = sorted((REPO / "migrations").glob("*.sql"))
 SHIPPED_COUNT = len(SHIPPED)
@@ -132,3 +134,23 @@ def legacy_rows(url: str, schema: str | None = None) -> list[tuple[str, str, str
 
 def output(result: subprocess.CompletedProcess[str]) -> str:
     return result.stdout + result.stderr
+
+
+def _runners() -> dict[str, str]:
+    found = {}
+    for entry in os.environ.get("STABILIZE_OLD_RUNNERS", "").split(";"):
+        version, _, path = entry.partition("=")
+        if version.strip() and path.strip():
+            found[version.strip()] = path.strip()
+    return found
+
+
+def old_runner(version: str) -> str:
+    """The `stabilize` executable of a published release, from STABILIZE_OLD_RUNNERS."""
+    path = _runners().get(version)
+    if path and os.access(path, os.X_OK):
+        return path
+    message = f"published stabilize {version} not provided in STABILIZE_OLD_RUNNERS"
+    if os.environ.get("STABILIZE_REQUIRE_OLD_RUNNERS") == "1":
+        pytest.fail(message)
+    pytest.skip(message)

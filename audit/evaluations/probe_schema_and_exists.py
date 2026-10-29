@@ -18,28 +18,11 @@ import os
 import subprocess
 import sys
 import time
-from pathlib import Path
 
 CONTAINER = "stabilize-probe-schema"
 PORT = 55435
 SCHEMA = "orchestration"
 ABSENT_ID = "01ABSENTWORKFLOWID000000000"
-
-
-def _apply_repo_migrations() -> None:
-    """Apply migrations/*.sql from the checkout into SCHEMA."""
-    root = Path(__file__).resolve().parents[2] / "migrations"
-    if not root.is_dir():
-        return
-    for path in sorted(root.glob("*.sql")):
-        content = path.read_text()
-        up = content.split("-- migrate: down")[0].replace("-- migrate: up", "")
-        script = f"SET search_path TO {SCHEMA};\n{up}"
-        subprocess.run(
-            ["docker", "exec", "-i", CONTAINER, "psql", "-U", "vu", "-d", "vdb",
-             "-v", "ON_ERROR_STOP=1", "-q"],
-            input=script, text=True, capture_output=True, check=False,
-        )
 
 
 def _start() -> str | None:
@@ -63,15 +46,10 @@ def _start() -> str | None:
                 capture_output=True, check=False,
             )
             env = {**os.environ, "MG_SCHEMA": SCHEMA, "MG_DATABASE_URL": dsn}
-            applied = subprocess.run(
+            subprocess.run(
                 [sys.executable, "-m", "stabilize.cli.main", "mg-up"],
                 env=env, capture_output=True, text=True, check=False,
             )
-            if "No migrations found in package" in (applied.stdout + applied.stderr):
-                # Editable installs do not package stabilize.migrations. Apply
-                # the repo's own SQL so the probe works from a checkout as well
-                # as from a wheel.
-                _apply_repo_migrations()
             return dsn
         time.sleep(1)
     return None
@@ -86,6 +64,13 @@ def main() -> int:
         print("SKIP: no PostgreSQL available (need docker or STABILIZE_PROBE_DSN)")
         return 0
     schema = os.environ.get("STABILIZE_PROBE_SCHEMA", SCHEMA)
+    if not owns:
+        separator = "&" if "?" in dsn else "?"
+        prepared = subprocess.run(
+            [sys.executable, "-m", "stabilize.cli.main", "mg-up", "--db-url", f"{dsn}{separator}schema={schema}"],
+            capture_output=True, text=True, check=False,
+        )
+        print(f"stabilize mg-up into schema {schema}: exit {prepared.returncode}")
 
     failures = 0
     try:
