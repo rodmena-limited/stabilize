@@ -18,7 +18,7 @@ from stabilize.cli.legacy_history import (
     PLACEHOLDER_CHECKSUM,
     RETIRED_MIGRATIONS,
     MigrettiState,
-    TakeoverRefused,
+    TakeoverRefusedError,
     plan_takeover,
 )
 from stabilize.cli.migrations import get_migration_files, get_migrations, migration_id
@@ -116,14 +116,14 @@ def test_a_retired_migration_is_reported_and_not_adopted() -> None:
 def test_history_the_takeover_cannot_vouch_for_is_refused(
     legacy_edit: dict[str, str], state: MigrettiState | None, message: str
 ) -> None:
-    with pytest.raises(TakeoverRefused, match=message):
+    with pytest.raises(TakeoverRefusedError, match=message):
         plan_takeover({**_legacy_now(), **legacy_edit}, SHIPPED, state or _state())
 
 
 def test_a_placeholder_the_old_runner_never_applied_is_refused() -> None:
     legacy = _legacy_now()
     del legacy[IDS["01M4SVVY5XE3S18Y0CPQ8TATDP"]]
-    with pytest.raises(TakeoverRefused, match="no record"):
+    with pytest.raises(TakeoverRefusedError, match="no record"):
         plan_takeover(legacy, SHIPPED, _state({"01M4SVVY5XE3S18Y0CPQ8TATDP": PLACEHOLDER_CHECKSUM}))
 
 
@@ -172,7 +172,7 @@ def test_tls_parameters_reach_migretti_in_both_directions(db: str, capsys: pytes
     )
     disabled = runner.migretti_conninfo(connection_params(parse_db_url(f"{db}?sslmode=disable")), None)
     with runner.staged(files) as root:
-        with pytest.raises(runner.MigrettiFailed):
+        with pytest.raises(runner.MigrettiFailedError):
             runner.snapshot(root, required)
         printed = capsys.readouterr().out
         assert "stabilize-root.crt" in printed or "SSL" in printed, printed
@@ -184,7 +184,7 @@ def test_migretti_output_is_printed_without_the_password(
 ) -> None:
     script = f"print('connection failed: host=h password={SENTINEL} dbname=d'); raise SystemExit(1)"
     monkeypatch.setattr(runner, "_command", lambda args: [sys.executable, "-c", script])
-    with pytest.raises(runner.MigrettiFailed):
+    with pytest.raises(runner.MigrettiFailedError):
         runner.run(["status"], tmp_path, f"host=h password={SENTINEL} dbname=d")
     printed = capsys.readouterr().out
     assert "connection failed" in printed

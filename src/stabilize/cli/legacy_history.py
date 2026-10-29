@@ -48,7 +48,7 @@ PLACEHOLDER_SQL = "-- migrate: up\nSELECT 1;\n-- migrate: down\nSELECT 1;\n"
 PLACEHOLDER_CHECKSUM = migretti_checksum(PLACEHOLDER_SQL)
 
 
-class TakeoverRefused(RuntimeError):
+class TakeoverRefusedError(RuntimeError):
     """The recorded history cannot be handed to migretti without a decision by the operator."""
 
 
@@ -76,7 +76,7 @@ def _check_legacy_rows(legacy: dict[str, str], shipped: dict[str, str]) -> None:
     for name, checksum in sorted(legacy.items()):
         known = KNOWN_LEGACY_CHECKSUMS.get(name)
         if known is None and name in shipped:
-            raise TakeoverRefused(
+            raise TakeoverRefusedError(
                 f"{LEGACY_TABLE} names {name}, which this stabilize ships but has no recorded history for; "
                 "the checksum table in stabilize.cli.legacy_history is out of date"
             )
@@ -85,7 +85,7 @@ def _check_legacy_rows(legacy: dict[str, str], shipped: dict[str, str]) -> None:
         elif checksum not in known:
             unknown.append(f"{name} (checksum {checksum} matches no committed version of the file)")
     if unknown:
-        raise TakeoverRefused(
+        raise TakeoverRefusedError(
             f"{LEGACY_TABLE} holds rows stabilize cannot vouch for; nothing was changed: " + "; ".join(unknown)
         )
 
@@ -93,7 +93,7 @@ def _check_legacy_rows(legacy: dict[str, str], shipped: dict[str, str]) -> None:
 def check_history(shipped: dict[str, str], state: MigrettiState) -> None:
     """Refuse a migretti history that holds failed migrations or migrations this stabilize does not ship."""
     if state.failed:
-        raise TakeoverRefused(
+        raise TakeoverRefusedError(
             "migretti's history records failed migrations: "
             + ", ".join(state.failed)
             + "; repair them with `mg fix <id> --applied` or `mg fix <id> --remove` first"
@@ -102,7 +102,7 @@ def check_history(shipped: dict[str, str], state: MigrettiState) -> None:
     shipped_ids = {migration_id(name): name for name in shipped}
     foreign = sorted(set(state.applied) - set(shipped_ids))
     if foreign:
-        raise TakeoverRefused(
+        raise TakeoverRefusedError(
             "migretti's history in this schema holds migrations this stabilize does not ship: "
             + ", ".join(foreign)
             + ". Either another project keeps its own migretti migrations in the same schema (give "
@@ -128,7 +128,7 @@ def plan_takeover(legacy: dict[str, str], shipped: dict[str, str], state: Migret
         recorded = state.applied.get(mig_id)
         current = migretti_checksum(shipped[name])
         if recorded == PLACEHOLDER_CHECKSUM and mig_id not in legacy_ids:
-            raise TakeoverRefused(
+            raise TakeoverRefusedError(
                 f"migretti records a takeover placeholder for {name}, but {LEGACY_TABLE} has no record "
                 "of the old runner applying it"
             )
@@ -141,7 +141,7 @@ def plan_takeover(legacy: dict[str, str], shipped: dict[str, str], state: Migret
         elif recorded == PLACEHOLDER_CHECKSUM:
             plan.fixes.append(mig_id)
         elif recorded != current:
-            raise TakeoverRefused(
+            raise TakeoverRefusedError(
                 f"migretti records {name} with checksum {recorded}, which is neither the shipped file's "
                 f"({current}) nor the takeover placeholder's; nothing was changed"
             )

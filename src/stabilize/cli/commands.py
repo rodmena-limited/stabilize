@@ -13,7 +13,13 @@ from stabilize.cli.config import (
     parse_db_url,
     validate_schema_name,
 )
-from stabilize.cli.driver import announce_driver, describe_driver, import_psycopg
+from stabilize.cli.driver import (
+    PSYCOPG_DISTRIBUTIONS,
+    announce_driver,
+    describe_driver,
+    import_psycopg,
+    print_install_hint,
+)
 from stabilize.cli.migrate import mg_status, mg_up
 from stabilize.cli.migrations import get_migrations
 from stabilize.cli.prompt_text import PROMPT_TEXT
@@ -85,9 +91,9 @@ def monitor(
             except Exception:
                 queue = None
         except ModuleNotFoundError as exc:
-            if exc.name not in _PSYCOPG_DISTRIBUTIONS:
+            if exc.name not in PSYCOPG_DISTRIBUTIONS:
                 raise
-            _print_install_hint()
+            print_install_hint()
             sys.exit(1)
     else:
         print(f"Error: Unsupported database URL: {redact_db_url(db_url)}")

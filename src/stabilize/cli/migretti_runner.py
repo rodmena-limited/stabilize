@@ -53,7 +53,7 @@ sys.stdout.write({_SNAPSHOT_MARKER!r} + json.dumps(state) + "\\n")
 """
 
 
-class MigrettiFailed(RuntimeError):
+class MigrettiFailedError(RuntimeError):
     """migretti exited non-zero."""
 
     def __init__(self, command: str, returncode: int) -> None:
@@ -114,7 +114,7 @@ def _command(args: Sequence[str]) -> list[str]:
 
 
 def run(args: Sequence[str], workdir: Path, conninfo: str, *, echo: bool = True) -> list[str]:
-    """Run one migretti command in *workdir*; print its output redacted; raise MigrettiFailed on a non-zero exit."""
+    """Run one migretti command in *workdir*; print its output redacted; raise MigrettiFailedError on a non-zero exit."""
     proc = subprocess.Popen(
         _command(args),
         cwd=workdir,
@@ -136,7 +136,7 @@ def run(args: Sequence[str], workdir: Path, conninfo: str, *, echo: bool = True)
         if not echo:
             for line in lines:
                 print(f"  migretti: {redact_against(line, conninfo)}", flush=True)
-        raise MigrettiFailed(args[0], returncode)
+        raise MigrettiFailedError(args[0], returncode)
     return lines
 
 
@@ -161,4 +161,4 @@ def snapshot(workdir: Path, conninfo: str) -> MigrettiState:
             )
     for line in (proc.stdout + proc.stderr).splitlines():
         print(f"  migretti: {redact_against(line, conninfo)}", flush=True)
-    raise MigrettiFailed("state read", proc.returncode or 1)
+    raise MigrettiFailedError("state read", proc.returncode or 1)

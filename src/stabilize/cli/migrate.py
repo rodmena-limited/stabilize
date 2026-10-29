@@ -20,7 +20,7 @@ from stabilize.cli.legacy_history import (
     PLACEHOLDER_CHECKSUM,
     RETIRED_MIGRATIONS,
     MigrettiState,
-    TakeoverRefused,
+    TakeoverRefusedError,
     check_history,
     plan_takeover,
 )
@@ -129,10 +129,10 @@ def mg_up(db_url: str | None = None, lock_timeout: float = DEFAULT_LOCK_TIMEOUT_
                 runner.run(["verify"], workdir, conninfo)
                 print("Applying pending migrations: mg apply", flush=True)
                 runner.run(["apply", "--yes"], workdir, conninfo)
-    except TakeoverRefused as e:
+    except TakeoverRefusedError as e:
         print(f"Error: {e}")
         sys.exit(1)
-    except runner.MigrettiFailed as e:
+    except runner.MigrettiFailedError as e:
         print(f"Error: {e}; stabilize mg-up stopped there")
         sys.exit(1)
     except psycopg.Error as e:
@@ -198,7 +198,7 @@ def mg_status(db_url: str | None = None) -> None:
             legacy = _read_legacy(conn) or {}
         with runner.staged(files) as workdir:
             state = runner.snapshot(workdir, conninfo)
-    except runner.MigrettiFailed as e:
+    except runner.MigrettiFailedError as e:
         print(f"Error: {e}")
         sys.exit(1)
     except psycopg.Error as e:

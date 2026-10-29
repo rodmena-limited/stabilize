@@ -5,10 +5,10 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-_PSYCOPG_DISTRIBUTIONS = frozenset({"psycopg", "psycopg_pool"})
+PSYCOPG_DISTRIBUTIONS = frozenset({"psycopg", "psycopg_pool"})
 
 
-def _print_install_hint() -> None:
+def print_install_hint() -> None:
     print("Error: psycopg not installed")
     print("Install with: pip install stabilize[postgres]")
 
@@ -22,9 +22,9 @@ def import_psycopg() -> Any:
     try:
         import psycopg
     except ModuleNotFoundError as exc:
-        if exc.name not in _PSYCOPG_DISTRIBUTIONS:
+        if exc.name not in PSYCOPG_DISTRIBUTIONS:
             raise
-        _print_install_hint()
+        print_install_hint()
         sys.exit(1)
     return psycopg
 
