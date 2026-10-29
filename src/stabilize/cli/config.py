@@ -14,9 +14,6 @@ from stabilize.redaction import redact_db_url as redact_db_url
 if TYPE_CHECKING:
     from typing import Any
 
-# Migration tracking table
-MIGRATION_TABLE = "stabilize_migrations"
-
 # Plain PostgreSQL identifier: interpolated into DDL, so nothing else is legal.
 _SCHEMA_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
