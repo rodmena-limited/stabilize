@@ -478,7 +478,10 @@ task at a time. It is **disabled by default**:
 
 When enabled, ``RunTaskHandler`` acquires a lease before executing a task and
 releases it afterward; a worker that cannot acquire the lease skips the duplicate.
-The lease table is created on demand (no migration required).
+On PostgreSQL the ``task_leases`` table is created by ``stabilize mg-up`` (0.33.2 or
+later); grant the runtime role ``SELECT, INSERT, UPDATE, DELETE`` on it. If the table
+is missing, the handler refuses to start and names ``stabilize mg-up``. On SQLite the
+table is created on demand.
 
 .. note::
 

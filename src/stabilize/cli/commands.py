@@ -106,14 +106,14 @@ def monitor(
 
 def mg_check_grants(role: str, db_url: str | None = None) -> None:
     """Report which engine tables *role* cannot SELECT, INSERT, UPDATE or DELETE."""
-    from stabilize.cli.grants import check_role_grants, engine_tables, format_report
+    from stabilize.cli.grants import check_role_grants, format_report, required_tables
 
     psycopg = import_psycopg()
     config = apply_schema_override(parse_db_url(db_url)) if db_url else load_config()
     schema = config.get("schema")
     if schema:
         schema = validate_schema_name(schema)
-    tables = engine_tables(get_migrations())
+    tables = required_tables(get_migrations())
     if not tables:
         print("Error: no engine tables found in the shipped migrations; refusing to report on an empty set")
         sys.exit(2)

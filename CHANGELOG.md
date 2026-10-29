@@ -44,6 +44,20 @@ history in migretti without running any migration SQL again.
   database all exit 0, and one of them does the hand-over.
 - **`mg-status` reports migretti's view** and creates nothing. Migrations the old runner
   applied and migretti does not yet know about are listed as `old-runner`.
+- **The event store and task-lease tables come from `mg-up`.** Migration
+  `01M64SFQG36NHV5KQ3SHH5Z832` creates `events`, `snapshots` and `event_subscriptions`,
+  and `01M64SFQGDVM97KQS2FFAJ72R5` creates `task_leases`. Both use `IF NOT EXISTS`, so
+  tables already created by hand-run DDL, by `create_tables=True` or by the lease manager
+  are left as they are. On PostgreSQL `TaskLeaseManager` no longer runs `CREATE TABLE`
+  with the runtime role. When the table is missing it refuses and names
+  `stabilize mg-up`. The event store's refusal names `stabilize mg-up` too, and
+  `PostgresEventStore(create_tables=True)` now raises a `DeprecationWarning`.
+- **`PostgresEventStore` kept its pool when it refused a database.** Each refused
+  construction left one hold on a connection pool. It now releases the hold before
+  raising.
+- **`mg-check-grants` checks the 8 core engine tables.** The event store and
+  task-lease tables are left out because only deployments using those features need
+  grants on them.
 
 ### Changed
 
@@ -55,6 +69,10 @@ history in migretti without running any migration SQL again.
 
 - `mg-up` needs `CREATE` on the target schema for migretti's two tracking tables, which
   is the same privilege the old runner needed for `stabilize_migrations`.
+- With `STABILIZE_TASK_LEASE` set, or with the PostgreSQL event store, grant the runtime
+  role `SELECT, INSERT, UPDATE, DELETE` on `task_leases`, or on `events`, `snapshots` and
+  `event_subscriptions` (and `USAGE` on their sequences). `mg-up` creates these tables
+  with the owner role.
 - An older stabilize still runs against a database that has been handed over. Its own
   `mg-up` reads `stabilize_migrations`, finds everything it ships already applied and
   exits 0.

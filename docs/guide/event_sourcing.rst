@@ -270,6 +270,10 @@ Three event store backends are available:
    from stabilize.events import PostgresEventStore
    store = PostgresEventStore("postgresql://user:pass@host/db")
 
+The store creates no tables. ``stabilize mg-up`` (0.33.2 or later) creates ``events``,
+``snapshots`` and ``event_subscriptions`` in the target schema, and the store refuses
+to construct, naming ``stabilize mg-up``, until they exist.
+
 Snapshots
 ---------
 

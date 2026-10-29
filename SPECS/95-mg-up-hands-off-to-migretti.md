@@ -42,6 +42,13 @@ the homegrown runner, which no schema test exercised.
 - R19. If migretti exits non-zero, then `mg-up` shall exit 1 and print migretti's output with any password redacted.
 - R20. The output of `mg-up` and `mg-status` shall never contain the database password.
 
+### Same defect class, found by the sweep (2026-10-29)
+- R25. stabilize shall ship the PostgreSQL event store tables (`events`, `snapshots`, `event_subscriptions`, including `events.commit_xid` on PostgreSQL 13 or later) and `task_leases` as migretti migrations applied by `mg-up`, idempotent against tables that already exist.
+- R26. On PostgreSQL, `TaskLeaseManager` shall issue no DDL; if `task_leases` is missing it shall refuse and name `stabilize mg-up`.
+- R27. If `PostgresEventStore` refuses a database, then it shall name `stabilize mg-up` and release its hold on the connection pool before raising. Tested over 5 refused constructions with the suite's held-pool teardown check.
+- R28. `PostgresEventStore(create_tables=True)` shall keep working and raise a `DeprecationWarning`.
+- R29. `mg-check-grants` shall require grants on the 8 core engine tables only.
+
 ### Tests and evidence
 - R21. The test suite shall build its PostgreSQL schema with `stabilize mg-up`, the command customers run, not with `mg apply`.
 - R22. The upgrade tests shall set up their databases with the published stabilize 0.33.1 and 0.32.1 from PyPI, not with a model of the old runner.
@@ -87,6 +94,12 @@ the homegrown runner, which no schema test exercised.
 - Foreign and failed history checked on every run from migretti's own read functions, before any change [CHOSEN, added during implementation 2026-10-29]: when no `stabilize_migrations` exists, `mg verify` alone would refuse a shared schema only with migretti's generic "no file on disk"; the explicit check names the ids and the `?schema=` remedy.
 - `mg verify` before `mg apply`, failing closed [CHOSEN]: migretti's own check covers changed files and applied ids with no file (another project's history in the same schema, or a newer stabilize's).
 - Keep the warn-only default [REJECTED: a changed applied migration is a tamper or drift signal; bank-grade requires refusing].
+
+### Event store and task-lease tables
+- Ship them as migretti migrations in stabilize's set [CHOSEN]: the house rule is migretti for all PostgreSQL migrations, and a runtime CREATE forces a standing CREATE grant on the runtime role.
+- Keep runtime DDL and hand-run `setup_ddl()` [REJECTED: schema changes outside migretti, the defect this ticket exists for].
+- A separate migretti set per feature [REJECTED: two histories per schema, which migretti's fixed `_migrations` table cannot hold].
+- Require the event store tables in `mg-check-grants` [REJECTED: would turn every existing deployment's grant check red for a feature most do not use].
 
 ### A project that runs its own migretti migrations
 - stabilize in its own schema with its own migretti history; same-schema mixing refused by `mg verify` [CHOSEN].

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import warnings
 
 from stabilize.events.store.interface import EventStore
 from stabilize.events.store.postgres.events import PostgresEventsMixin
@@ -96,10 +97,20 @@ class PostgresEventStore(
         self._lock = threading.Lock()
         self._schema = schema
 
-        if create_tables:
-            self._create_tables()
-        else:
-            self._verify_schema()
+        try:
+            if create_tables:
+                warnings.warn(
+                    "PostgresEventStore(create_tables=True) issues DDL at runtime and is deprecated; "
+                    "the event store tables are created by stabilize mg-up from 0.33.2",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                self._create_tables()
+            else:
+                self._verify_schema()
+        except BaseException:
+            release_pool_once(self, self._manager, self._pool)
+            raise
 
     def _verify_schema(self) -> None:
         """Refuse at construction when the schema is absent or out of date.
@@ -198,8 +209,9 @@ class PostgresEventStore(
             raise EventStoreSchemaError(
                 f"The event store schema is incomplete: {absent} "
                 f"{'is' if len(missing_tables) + len(missing_columns) == 1 else 'are'} missing. "
-                "This store does not create its own tables. Apply the following as the "
-                "migration operator, then construct it again:\n\n"
+                "This store does not create its own tables. Run stabilize mg-up (0.33.2 or "
+                "later) against this schema with the owner role, or apply the following as "
+                "the migration operator, then construct it again:\n\n"
                 f"{setup_ddl(self._schema)}"
             )
 

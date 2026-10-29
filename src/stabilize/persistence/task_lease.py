@@ -86,17 +86,15 @@ class TaskLeaseManager:
             pool = self._store._pool  # type: ignore[attr-defined]
             with pool.connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS task_leases (
-                            task_id TEXT PRIMARY KEY,
-                            owner TEXT NOT NULL,
-                            acquired_at BIGINT NOT NULL,
-                            expires_at BIGINT NOT NULL
-                        )
-                        """
-                    )
+                    cur.execute("SELECT to_regclass('task_leases') IS NOT NULL AS present")
+                    row = cur.fetchone()
                 conn.commit()
+            present = row["present"] if isinstance(row, dict) else (row[0] if row else False)
+            if not present:
+                raise TaskLeaseUnavailableError(
+                    "the task_leases table does not exist on this connection's search_path; "
+                    "run stabilize mg-up (0.33.2 or later) with the owner role to create it"
+                )
 
     # -- lease operations ---------------------------------------------------
 

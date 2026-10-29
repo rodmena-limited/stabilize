@@ -41,8 +41,9 @@ def build_task_lease(repository: WorkflowStore) -> TaskLeaseManager | None:
             f"initialised ({type(e).__name__}: {e}). Leasing is what keeps a task "
             "from executing on two workers at once; starting without it would "
             "silently allow the double execution this setting exists to prevent. "
-            "Grant the runtime role rights to create the task_leases table, or "
-            "unset STABILIZE_TASK_LEASE."
+            "Run stabilize mg-up (0.33.2 or later) with the owner role so the task_leases "
+            "table exists, grant the runtime role SELECT, INSERT, UPDATE and DELETE on it, "
+            "or unset STABILIZE_TASK_LEASE."
         ) from e
 
     logger.info("Distributed task lease enabled (owner=%s)", lease.owner)
