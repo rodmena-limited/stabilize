@@ -113,7 +113,7 @@ def _command(args: Sequence[str]) -> list[str]:
     return [sys.executable, "-P", "-m", "migretti", *args]
 
 
-def run(args: Sequence[str], workdir: Path, conninfo: str, *, echo: bool = True) -> list[str]:
+    """Run one migretti command in *workdir*, print its output redacted, and raise on a non-zero exit."""
     """Run one migretti command in *workdir*; print its output redacted; raise MigrettiFailedError on a non-zero exit."""
     proc = subprocess.Popen(
         _command(args),
