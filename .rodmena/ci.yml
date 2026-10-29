@@ -124,6 +124,7 @@ jobs:
     services: [postgres]
     resources: { memory_mb: 2048 }
     timeout_minutes: 600
+    artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
     steps:
       - name: Install
         run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
