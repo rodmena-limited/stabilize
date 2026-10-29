@@ -1,0 +1,18 @@
+tests/test_mg_up_handoff.py::test_mg_up_applies_every_migration_through_migretti|migretti records 0 of 14 applied after stabilize mg-up
+tests/test_mg_up_handoff.py::test_mg_up_keeps_migretti_history_in_the_target_schema|migretti records 0 of 14 applied in schema orch
+tests/test_mg_up_handoff.py::test_mg_variables_meant_for_another_project_do_not_redirect_mg_up|migretti records 0 of 14 applied in the --db-url target
+tests/test_mg_up_handoff.py::test_another_projects_migretti_history_in_the_same_schema_is_refused|mg-up exit 0 with another project's history in the schema
+tests/test_mg_up_handoff.py::test_an_applied_migration_that_no_longer_matches_its_file_stops_mg_up|mg-up did not name the changed migration
+tests/test_mg_up_handoff.py::test_a_failed_migration_in_migrettis_history_stops_mg_up|mg-up exit 0 with a failed migration in migretti's history
+tests/test_mg_up_handoff.py::test_a_held_migration_lock_stops_mg_up_and_releasing_it_lets_mg_up_run|mg-up did not stop at the held lock
+tests/test_mg_up_handoff.py::test_mg_status_reports_migrettis_state_and_creates_nothing|mg-status did not report migretti's count
+tests/test_mg_up_takeover.py::test_a_database_built_by_an_old_release_is_taken_over_in_place[0.33.1]|migretti records 0 of 14 applied after taking over a 0.33.1 database
+tests/test_mg_up_takeover.py::test_a_database_built_by_an_old_release_is_taken_over_in_place[0.32.1]|migretti records 0 of 14 applied after taking over a 0.32.1 database
+tests/test_mg_up_takeover.py::test_a_takeover_stays_inside_the_target_schema|migretti records 0 of 14 applied in schema orch
+tests/test_mg_up_takeover.py::test_a_history_row_with_an_unknown_checksum_stops_the_takeover_before_any_change|mg-up accepted a stabilize_migrations row it cannot vouch for
+tests/test_mg_up_takeover.py::test_a_history_row_for_a_file_stabilize_never_shipped_stops_the_takeover|mg-up accepted a stabilize_migrations row it cannot vouch for
+tests/test_mg_up_takeover.py::test_retired_and_superseded_history_from_early_releases_is_accepted|mg-up did not report the retired migration
+tests/test_mg_up_takeover.py::test_an_interrupted_takeover_is_completed_by_the_next_run|migretti records 7 of 14 applied after resuming a takeover
+tests/test_mg_up_takeover.py::test_four_concurrent_runs_take_over_once_and_all_succeed|0 of 4 concurrent runs recorded the takeover
+tests/test_cli_schema.py::TestMgUpSchemaPostgres::test_mg_up_lands_tables_in_target_schema_postgres|_migrations not created in stabilize schema
+tests/test_cli_schema.py::TestMgUpSchemaPostgres::test_mg_up_without_schema_still_lands_in_public_postgres|_migrations not created in public schema

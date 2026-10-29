@@ -79,15 +79,10 @@ def _tenant_dsn(container: PostgresContainer, tenant: str) -> str:
 
 
 def _apply_migrations(admin_dsn: str) -> None:
-    """Apply the shipped migrations through the CLI's own resolver."""
-    from stabilize.cli.migrations import extract_up_migration, get_migrations
+    """Apply the shipped migrations with stabilize mg-up."""
+    from stabilize.cli.commands import mg_up
 
-    sql_files = get_migrations()
-
-    with psycopg.connect(admin_dsn, autocommit=True) as conn:
-        for name, content in sql_files:
-            conn.execute(extract_up_migration(content))
-    print(f"    applied {len(sql_files)} migration(s)")
+    mg_up(admin_dsn)
 
 
 def _install_rls(admin_dsn: str) -> None:

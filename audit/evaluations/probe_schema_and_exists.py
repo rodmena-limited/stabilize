@@ -147,11 +147,6 @@ def main() -> int:
 
         print()
         print("CLAIM 3 — mg-status --db-url honours MG_SCHEMA")
-        # Assert on whether the query REACHED the schema, not on row content:
-        # an editable checkout cannot enumerate packaged migrations, so it
-        # prints an empty table even when the schema resolved correctly. The
-        # fix under test is whether MG_SCHEMA is honoured, which the presence
-        # or absence of the relation error states exactly.
         for label, env_schema, expect_missing_relation in (
             ("MG_SCHEMA set", schema, False),
             ("MG_SCHEMA unset (control)", None, True),
@@ -164,7 +159,7 @@ def main() -> int:
                 env=env, capture_output=True, text=True, check=False,
             )
             text = out.stdout + out.stderr
-            missing_relation = 'relation "stabilize_migrations" does not exist' in text
+            missing_relation = "Applied 0 of" in text
             print(f"  {label:26} -> migration table unreachable: {missing_relation}")
             print(f"     MG_SCHEMA in env: {'MG_SCHEMA' in env}")
             print(f"     first line: {text.splitlines()[0][:70] if text.splitlines() else '(empty)'}")
