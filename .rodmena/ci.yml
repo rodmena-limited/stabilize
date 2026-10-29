@@ -122,7 +122,7 @@ jobs:
     name: "Every test fails on at least one engine mutant (red-proof)"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
-    resources: { memory_mb: 3072 }
+    resources: { memory_mb: 2048 }
     timeout_minutes: 600
     steps:
       - name: Install
