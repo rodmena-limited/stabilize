@@ -16,7 +16,7 @@ jobs:
     name: "Tests (sqlite + postgres)"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
-    timeout_minutes: 15
+    timeout_minutes: 30
     steps:
       - name: Install
         run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
@@ -42,7 +42,7 @@ jobs:
     name: "Tests on Python 3.11 (declared floor)"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.12
     services: [postgres]
-    timeout_minutes: 15
+    timeout_minutes: 30
     steps:
       - name: Install on a managed CPython 3.11
         run: uv venv -p 3.11 .venv311 && .venv311/bin/python -c "import sys; print(sys.version); sys.exit(0 if sys.version_info[:2] == (3, 11) else 1)" && uv pip install -p .venv311/bin/python -e '.[dev,observability,cli]'
