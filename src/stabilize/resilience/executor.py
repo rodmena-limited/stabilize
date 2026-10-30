@@ -24,6 +24,7 @@ from resilient_circuit.exceptions import ProtectedCallError
 
 from stabilize.errors import TaskTimeoutError, TransientError
 from stabilize.resilience.bulkheads import TaskBulkheadManager
+from stabilize.threads import in_context
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ def execute_with_resilience(
         def protected_execute() -> ExecutionResult:
             return bulkhead_manager.execute_with_timeout(
                 task_type,
-                func,
+                in_context(func),
                 *func_args,
                 timeout=timeout,
                 **func_kwargs,

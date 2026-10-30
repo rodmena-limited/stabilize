@@ -37,6 +37,8 @@ from collections.abc import Callable
 from types import FrameType
 from typing import TYPE_CHECKING, Any
 
+from stabilize.threads import in_context
+
 if TYPE_CHECKING:
     from stabilize.queue.processor import QueueProcessor
     from stabilize.resilience.bulkheads import TaskBulkheadManager
@@ -257,7 +259,7 @@ class LifecycleManager:
         if not self._shutdown_requested.is_set():
             self._shutdown_requested.set()
             # Run shutdown in separate thread to avoid blocking signal handler
-            threading.Thread(target=self._shutdown, daemon=True).start()
+            threading.Thread(target=in_context(self._shutdown), daemon=True).start()
 
     def _shutdown(self) -> None:
         """

@@ -27,6 +27,7 @@ from stabilize.events.store.postgres.schema import (
 from stabilize.events.store.postgres.snapshots import PostgresSnapshotsMixin
 from stabilize.events.store.postgres.subscriptions import PostgresSubscriptionsMixin
 from stabilize.persistence.connection import get_connection_manager, release_pool_once
+from stabilize.persistence.pool_options import PoolOptions
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ class PostgresEventStore(
         connection_string: str,
         create_tables: bool = False,
         schema: str | None = None,
+        options: PoolOptions | None = None,
     ) -> None:
         """
         Initialize PostgreSQL event store.
@@ -90,10 +92,13 @@ class PostgresEventStore(
                 migration operator instead.
             schema: Schema holding the event tables, used to qualify the DDL
                 named in a refusal.
+            options: Pool and connection options. Pass the PoolOptions given to
+                the workflow store and the queue to share their pool, and with it
+                their ``on_borrow`` and ``reset``.
         """
         self._connection_string = connection_string
         self._manager = get_connection_manager()
-        self._pool = self._manager.get_postgres_pool(connection_string)
+        self._pool = self._manager.get_postgres_pool(connection_string, options=options)
         self._lock = threading.Lock()
         self._schema = schema
 

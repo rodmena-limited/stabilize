@@ -32,16 +32,18 @@ def _finished(repository: WorkflowStore, workflow_id: str, seconds: float = 30.0
     raise AssertionError(f"workflow {workflow_id} did not finish in {seconds} s")
 
 
-def test_tasks_run_in_the_context_the_processor_was_started_in(repository: WorkflowStore, queue: Queue) -> None:
-    processor = make_processor(repository, queue, {"sees": SeesContext})
+def test_tasks_run_in_the_context_the_processor_was_started_in(
+    file_repository: WorkflowStore, file_queue: Queue
+) -> None:
+    processor = make_processor(file_repository, file_queue, {"sees": SeesContext})
     token = TENANT.set("tenant-a")
     try:
         processor.start()
     finally:
         TENANT.reset(token)
     try:
-        workflow = start(repository, queue, [stage("a", ["sees"])])
-        final = _finished(repository, workflow.id)
+        workflow = start(file_repository, file_queue, [stage("a", ["sees"])])
+        final = _finished(file_repository, workflow.id)
     finally:
         processor.stop(wait=True)
     assert final.status == WorkflowStatus.SUCCEEDED
@@ -49,20 +51,22 @@ def test_tasks_run_in_the_context_the_processor_was_started_in(repository: Workf
     assert seen == "tenant-a", f"the task saw context {seen!r}, not the context the processor was started in"
 
 
-def test_two_processors_started_in_different_contexts_keep_them_apart(repository: WorkflowStore, queue: Queue) -> None:
+def test_two_processors_started_in_different_contexts_keep_them_apart(
+    file_repository: WorkflowStore, file_queue: Queue
+) -> None:
     processors = []
     for tenant in ("tenant-a", "tenant-b"):
         token = TENANT.set(tenant)
         try:
-            processor = make_processor(repository, queue, {"sees": SeesContext})
+            processor = make_processor(file_repository, file_queue, {"sees": SeesContext})
             processor.start()
             processors.append(processor)
         finally:
             TENANT.reset(token)
     try:
-        workflows = [start(repository, queue, [stage("a", ["sees"])]) for _ in range(6)]
+        workflows = [start(file_repository, file_queue, [stage("a", ["sees"])]) for _ in range(6)]
         for workflow in workflows:
-            assert _finished(repository, workflow.id).status == WorkflowStatus.SUCCEEDED
+            assert _finished(file_repository, workflow.id).status == WorkflowStatus.SUCCEEDED
     finally:
         for processor in processors:
             processor.stop(wait=True)

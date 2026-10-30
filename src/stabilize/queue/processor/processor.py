@@ -29,6 +29,7 @@ from stabilize.queue.processor.lease_guard import start_lock_heartbeat
 from stabilize.queue.processor.mixins import QueueProcessorMixin
 from stabilize.queue.processor.retention import start_retention_thread
 from stabilize.resilience.config import HandlerConfig
+from stabilize.threads import in_context
 
 if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
@@ -213,13 +214,13 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
 
         self._running = True
         self._executor = ThreadPoolExecutor(max_workers=self.config.max_workers)
-        self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
+        self._poll_thread = threading.Thread(target=in_context(self._poll_loop), daemon=True)
         self._poll_thread.start()
 
         # Opt-in: periodic background recovery sweeps for long-running/distributed
         # deployments (catch workflows orphaned by a crashed peer worker).
         if self.config.recovery_interval_seconds and self.config.recovery_interval_seconds > 0:
-            self._recovery_thread = threading.Thread(target=self._recovery_loop, daemon=True)
+            self._recovery_thread = threading.Thread(target=in_context(self._recovery_loop), daemon=True)
             self._recovery_thread.start()
 
         self._retention_thread = start_retention_thread(self)
@@ -438,7 +439,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
         try:
             if self._executor is None:
                 raise RuntimeError("processor is not running")
-            self._executor.submit(process_and_ack)
+            self._executor.submit(in_context(process_and_ack))
         except RuntimeError:
             with self._lock:
                 self._active_count -= 1

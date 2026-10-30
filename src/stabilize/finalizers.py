@@ -35,6 +35,8 @@ from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from typing import Any
 
+from stabilize.threads import in_context
+
 logger = logging.getLogger(__name__)
 
 
@@ -199,7 +201,7 @@ class FinalizerRegistry:
             # the executor is shut down without waiting and the hung thread
             # is abandoned.
             executor = ThreadPoolExecutor(max_workers=1)
-            future = executor.submit(finalizer.callback)
+            future = executor.submit(in_context(finalizer.callback))
             try:
                 future.result(timeout=timeout)
                 duration_ms = (time.monotonic() - start_time) * 1000

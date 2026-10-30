@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import Event, EventType
+from stabilize.threads import in_context
 
 if TYPE_CHECKING:
     from stabilize.events.store.interface import EventStore
@@ -223,7 +224,7 @@ class SubscriptionManager:
             return
 
         self._running = True
-        self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
+        self._poll_thread = threading.Thread(target=in_context(self._poll_loop), daemon=True)
         self._poll_thread.start()
         logger.info("Subscription manager started")
 

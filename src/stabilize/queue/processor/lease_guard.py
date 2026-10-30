@@ -20,6 +20,8 @@ import threading
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
+from stabilize.threads import in_context
+
 if TYPE_CHECKING:
     from stabilize.queue.interface import Queue
     from stabilize.queue.messages import Message
@@ -110,5 +112,5 @@ def start_lock_heartbeat(
                 continue
             wait = interval
 
-    threading.Thread(target=beat, daemon=True, name="stabilize-lock-heartbeat").start()
+    threading.Thread(target=in_context(beat), daemon=True, name="stabilize-lock-heartbeat").start()
     return stop

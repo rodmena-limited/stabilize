@@ -13,6 +13,7 @@ Casebound sets its tenant with a GUC and wants one engine pool to serve many ten
 - R5. The engine shall run every thread it starts and every callable it submits to an executor (queue processor poll, recovery, handlers, retention, lock heartbeat, event bus, subscriptions, finalizers, bulkheads) in a copy of the contextvars context of the code that started or submitted it.
 - R6. With one pool, an on_borrow that sets a session GUC from a caller contextvar, a reset that clears it, restrictive RLS on the engine tables keyed on that GUC, and one QueueProcessor per tenant started under that tenant's context: each tenant's workflow shall reach SUCCEEDED, neither tenant shall see the other's rows (checked both ways), and the rows shall exist when RLS is bypassed.
 - R7. Where on_borrow is not set, borrowing shall behave exactly as in 0.33.2.
+- R8. PostgresEventStore shall accept the same PoolOptions as the workflow store and the queue, so that event writes share their pool and run on_borrow; R6 shall hold with event sourcing configured on that store (each tenant reads its own workflow's events and none of the other's).
 
 ## Technical problems
 1. A hook on every borrow from a shared psycopg pool.

@@ -38,6 +38,19 @@ class PoolOptions:
     callback leaves INTRANS, so a callback issuing ``SET`` without a commit
     destroys every connection and borrows then fail with PoolTimeout. Call
     ``conn.commit()``, or set ``conn.autocommit = True`` first.
+
+    ``check`` and ``reset`` are psycopg_pool's: ``check`` runs each time a
+    connection is handed out, ``reset`` each time one is returned.
+    ``max_idle`` is the seconds an idle connection above ``min_size`` is kept
+    (psycopg_pool's default is 600).
+
+    ``on_borrow`` runs on the connection each time the engine borrows one,
+    before any engine statement, for reads and transactions alike. It must
+    leave the connection outside a transaction, as ``configure`` must; a
+    session-level setting made there lasts for the whole borrow, and
+    ``reset`` can clear it when the connection is returned. Engine threads
+    and executor jobs run in a copy of the contextvars context of the code
+    that started them, so ``on_borrow`` can read the caller's context.
     """
 
     min_size: int = DEFAULT_MIN_SIZE
@@ -45,6 +58,16 @@ class PoolOptions:
     acquire_timeout: float | None = None
     connect_kwargs: dict[str, Any] = field(default_factory=dict)
     configure: Callable[[Any], None] | None = None
+    check: Callable[[Any], None] | None = None
+    max_idle: float | None = None
+    on_borrow: Callable[[Any], None] | None = None
+    reset: Callable[[Any], None] | None = None
+
+    def __post_init__(self) -> None:
+        if self.max_idle is not None and (
+            isinstance(self.max_idle, bool) or not isinstance(self.max_idle, (int, float)) or not self.max_idle > 0
+        ):
+            raise ValueError(f"max_idle must be a positive number of seconds, not {self.max_idle!r}")
 
     def key(self) -> tuple[Any, ...]:
         """A hashable identity for pool sharing."""
@@ -53,8 +76,16 @@ class PoolOptions:
             self.max_size,
             self.acquire_timeout,
             tuple(sorted(self.connect_kwargs.items())),
-            id(self.configure) if self.configure is not None else None,
+            _identity(self.configure),
+            _identity(self.check),
+            self.max_idle,
+            _identity(self.on_borrow),
+            _identity(self.reset),
         )
+
+
+def _identity(callback: Callable[[Any], None] | None) -> int | None:
+    return id(callback) if callback is not None else None
 
 
 DEFAULT_POOL_OPTIONS = PoolOptions()

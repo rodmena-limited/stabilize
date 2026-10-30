@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from psycopg_pool import ConnectionPool
 
 
+from stabilize.persistence.borrow_hook import borrow_hook_pool_class
 from stabilize.persistence.pool_options import DEFAULT_POOL_OPTIONS, PoolOptions
 
 
@@ -154,10 +155,20 @@ class ConnectionManager(metaclass=SingletonMeta):
                     pool_kwargs["timeout"] = resolved.acquire_timeout
                 if resolved.configure is not None:
                     pool_kwargs["configure"] = resolved.configure
+                if resolved.check is not None:
+                    pool_kwargs["check"] = resolved.check
+                if resolved.reset is not None:
+                    pool_kwargs["reset"] = resolved.reset
+                if resolved.max_idle is not None:
+                    pool_kwargs["max_idle"] = resolved.max_idle
 
+                pool_class: Any = ConnectionPool
+                if resolved.on_borrow is not None:
+                    pool_class = borrow_hook_pool_class()
+                    pool_kwargs["on_borrow"] = resolved.on_borrow
                 pool = cast(
                     "ConnectionPool[Connection[DictRow]]",
-                    ConnectionPool(connection_string, **pool_kwargs),
+                    pool_class(connection_string, **pool_kwargs),
                 )
                 self._postgres_pools[key] = pool
                 self._postgres_keys_by_dsn.setdefault(connection_string, []).append(key)

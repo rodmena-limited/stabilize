@@ -17,6 +17,7 @@ from enum import Enum
 from typing import Any
 
 from stabilize.events.base import EntityType, Event, EventType
+from stabilize.threads import in_context
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +242,7 @@ class EventBus:
                     self._handle_error(subscription.id, next_event, e)
 
         try:
-            self._executor.submit(_drain)
+            self._executor.submit(in_context(_drain))
         except RuntimeError:
             # Executor shut down — fall back to sync draining
             logger.warning(
