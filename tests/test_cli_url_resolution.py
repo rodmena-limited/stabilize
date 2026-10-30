@@ -61,7 +61,11 @@ MONITOR_URLS = [
 @pytest.mark.parametrize("url", MONITOR_URLS, ids=["tls", "socket", "keyword", "ipv6"])
 def test_the_monitor_connects_where_mg_up_does(url: str) -> None:
     config = parse_db_url(url)
-    rebuilt = conninfo_to_dict(build_db_url(config))
+    built = build_db_url(config)
+    try:
+        rebuilt = conninfo_to_dict(built)
+    except Exception as exc:
+        rebuilt = {"libpq rejects it": str(exc)}
     wanted = {key: str(value) for key, value in connection_params(config).items()}
     assert rebuilt == wanted, f"the monitor's URL resolves to {rebuilt}, mg-up's to {wanted}"
 

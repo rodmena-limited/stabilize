@@ -33,4 +33,3 @@ tests/test_cli_url_resolution.py::test_the_cli_connects_where_libpq_and_the_runt
 tests/test_cli_url_resolution.py::test_the_monitor_connects_where_mg_up_does[tls]|the monitor's URL resolves to
 tests/test_cli_url_resolution.py::test_the_monitor_connects_where_mg_up_does[socket]|the monitor's URL resolves to
 tests/test_cli_url_resolution.py::test_the_monitor_connects_where_mg_up_does[keyword]|the monitor's URL resolves to
-tests/test_cli_url_resolution.py::test_the_monitor_connects_where_mg_up_does[ipv6]|the monitor's URL resolves to
