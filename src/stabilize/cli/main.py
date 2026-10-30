@@ -18,14 +18,21 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # mg-up command
-    up_parser = subparsers.add_parser("mg-up", help="Apply pending PostgreSQL migrations")
+    up_parser = subparsers.add_parser("mg-up", help="Apply pending PostgreSQL migrations with migretti")
     up_parser.add_argument(
         "--db-url",
         help="Database URL (postgres://user:pass@host:port/dbname)",
     )
+    up_parser.add_argument(
+        "--lock-timeout",
+        type=float,
+        default=900.0,
+        metavar="SECONDS",
+        help="How long to wait for another mg-up on the same database (default 900)",
+    )
 
     # mg-status command
-    status_parser = subparsers.add_parser("mg-status", help="Show migration status")
+    status_parser = subparsers.add_parser("mg-status", help="Show migration status as migretti records it")
     status_parser.add_argument(
         "--db-url",
         help="Database URL (postgres://user:pass@host:port/dbname)",
@@ -139,7 +146,7 @@ def main() -> None:
 
     if args.command == "mg-up":
         try:
-            mg_up(args.db_url)
+            mg_up(args.db_url, lock_timeout=args.lock_timeout)
         except MigrationsNotFoundError as exc:
             print(exc, file=sys.stderr)
             sys.exit(1)

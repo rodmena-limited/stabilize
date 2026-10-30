@@ -1,8 +1,8 @@
 """Shared pytest fixtures for parameterized backend testing."""
 
 import os
-import shutil
 import subprocess
+import sys
 import threading
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
@@ -187,23 +187,14 @@ def postgres_url(postgres_container: Any) -> str:
     if "+psycopg2" in url:
         url = url.replace("+psycopg2", "")
 
-    # Run migrations using mg command
-    # mg needs to run from project root where mg.yaml and migrations/ exist
-    # Find mg: prefer PATH lookup (works in CI), fall back to local .venv
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    venv_mg = shutil.which("mg") or os.path.join(project_root, ".venv", "bin", "mg")
-    env = os.environ.copy()
-    env["MG_DATABASE_URL"] = url
     result = subprocess.run(
-        [venv_mg, "apply", "--yes"],
-        env=env,
-        cwd=project_root,
+        [sys.executable, "-m", "stabilize.cli.main", "mg-up", "--db-url", url],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
         raise RuntimeError(
-            f"Migration failed (exit {result.returncode}): stdout={result.stdout}, stderr={result.stderr}"
+            f"stabilize mg-up failed (exit {result.returncode}): stdout={result.stdout}, stderr={result.stderr}"
         )
 
     return str(url)

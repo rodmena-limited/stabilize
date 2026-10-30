@@ -84,13 +84,6 @@ class TestSchemaConfig:
 # =============================================================================
 
 
-def _repo_migrations() -> list[tuple[str, str]]:
-    """Load migrations from the repo checkout (editable installs package none)."""
-    migrations = sorted((PROJECT_ROOT / "migrations").glob("*.sql"))
-    assert migrations, "expected repo-root migrations/*.sql"
-    return [(p.name, p.read_text()) for p in migrations]
-
-
 def _tables_in_schema(url: str, schema: str) -> set[str]:
     with psycopg.connect(url) as conn, conn.cursor() as cur:
         cur.execute(
@@ -121,12 +114,10 @@ class TestMgUpSchemaPostgres:
     ) -> None:
         from stabilize.cli import commands
 
-        monkeypatch.setattr(commands, "get_migrations", _repo_migrations)
-
         commands.mg_up(fresh_database + "?schema=stabilize")
 
         in_schema = _tables_in_schema(fresh_database, "stabilize")
-        for expected in ("stabilize_migrations", "queue_messages", "stage_executions", "task_executions"):
+        for expected in ("_migrations", "queue_messages", "stage_executions", "task_executions"):
             assert expected in in_schema, f"{expected} not created in stabilize schema"
 
         in_public = _tables_in_schema(fresh_database, "public")
@@ -134,7 +125,7 @@ class TestMgUpSchemaPostgres:
 
         # Idempotence: a second run applies nothing and does not error.
         commands.mg_up(fresh_database + "?schema=stabilize")
-        assert "All migrations already applied" in capsys.readouterr().out
+        assert "No pending migrations" in capsys.readouterr().out
 
         # The documented runtime path resolves tables in the target schema:
         # a DSN with options=-csearch_path connects and queries cleanly.
@@ -154,20 +145,16 @@ class TestMgUpSchemaPostgres:
     ) -> None:
         from stabilize.cli import commands
 
-        monkeypatch.setattr(commands, "get_migrations", _repo_migrations)
-
         commands.mg_up(fresh_database)
 
         in_public = _tables_in_schema(fresh_database, "public")
-        for expected in ("stabilize_migrations", "queue_messages", "stage_executions"):
+        for expected in ("_migrations", "queue_messages", "stage_executions"):
             assert expected in in_public, f"{expected} not created in public schema"
 
     def test_mg_status_reads_target_schema_postgres(
         self, fresh_database: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         from stabilize.cli import commands
-
-        monkeypatch.setattr(commands, "get_migrations", _repo_migrations)
 
         commands.mg_up(fresh_database + "?schema=stabilize")
         capsys.readouterr()

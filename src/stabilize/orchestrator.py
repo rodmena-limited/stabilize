@@ -22,6 +22,7 @@ from stabilize.resilience.config import HandlerConfig, get_handler_config
 if TYPE_CHECKING:
     from stabilize.models.workflow import Workflow
     from stabilize.persistence.store import WorkflowStore
+    from stabilize.persistence.store.transaction import StoreTransaction
     from stabilize.queue import Queue
 
 
@@ -184,16 +185,37 @@ class Orchestrator:
             status, _ = txn.workflow_status(execution.id)
             if status != WorkflowStatus.PAUSED.name:
                 return
+            self._resume_workflow(txn, execution)
+
+    def _resume_workflow(self, txn: StoreTransaction, execution: Workflow) -> None:
+        execution.resume()
+        if execution.start_time is None:
+            execution.status = WorkflowStatus.NOT_STARTED
+            message: StartWorkflow | CompleteWorkflow = StartWorkflow(
+                execution_type=execution.type.value, execution_id=execution.id
+            )
+        else:
+            message = CompleteWorkflow(execution_type=execution.type.value, execution_id=execution.id)
+        txn.update_workflow_status(execution)
+        txn.push_message(message)
+
+    def _unpause_locked(self, txn: StoreTransaction, execution: Workflow) -> None:
+        from stabilize.persistence.store.transaction import workflow_control_key
+
+        txn.lock_admission(workflow_control_key(execution.id))
+        status, _ = txn.workflow_status(execution.id)
+        paused = txn.paused_stage_ids(execution.id)
+        if not paused:
+            if status == WorkflowStatus.PAUSED.name:
+                self._resume_workflow(txn, execution)
+            return
+        if status == WorkflowStatus.PAUSED.name:
             execution.resume()
-            if execution.start_time is None:
-                execution.status = WorkflowStatus.NOT_STARTED
-                message: StartWorkflow | CompleteWorkflow = StartWorkflow(
-                    execution_type=execution.type.value, execution_id=execution.id
-                )
-            else:
-                message = CompleteWorkflow(execution_type=execution.type.value, execution_id=execution.id)
             txn.update_workflow_status(execution)
-            txn.push_message(message)
+        for stage_id in paused:
+            txn.push_message(
+                ResumeStage(execution_type=execution.type.value, execution_id=execution.id, stage_id=stage_id)
+            )
 
     def unpause(self, execution: Workflow) -> None:
         """
@@ -211,6 +233,13 @@ class Orchestrator:
             fresh_execution = self.store.retrieve(execution.id)
             if fresh_execution:
                 execution = fresh_execution
+            try:
+                with self.store.transaction(self.queue) as txn:
+                    if txn.is_atomic:
+                        self._unpause_locked(txn, execution)
+                        return
+            except NotImplementedError:
+                pass
 
         # Collect all resume messages
         messages = []

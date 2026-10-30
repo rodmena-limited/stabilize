@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from stabilize.cli import commands
-from stabilize.cli.grants import engine_tables
+from stabilize.cli.grants import engine_tables, required_tables
 from stabilize.cli.migrations import get_migrations
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
@@ -16,9 +16,16 @@ pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 def test_engine_tables_come_from_the_shipped_migrations() -> None:
     tables = engine_tables(get_migrations())
-    assert len(tables) == 8
+    assert len(tables) == 12
     assert {"pipeline_executions", "queue_messages", "workflow_signals", "stage_claims"} <= set(tables)
+    assert {"events", "snapshots", "event_subscriptions", "task_leases"} <= set(tables)
     assert "stabilize_migrations" not in tables
+
+
+def test_the_grant_check_requires_the_core_tables_and_not_the_optional_features() -> None:
+    tables = required_tables(get_migrations())
+    assert len(tables) == 8
+    assert not {"events", "snapshots", "event_subscriptions", "task_leases"} & set(tables)
 
 
 def test_a_table_dropped_by_a_later_migration_is_not_required() -> None:

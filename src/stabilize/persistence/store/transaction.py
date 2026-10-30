@@ -123,3 +123,12 @@ class StoreTransaction(ABC):
         """The workflow's status name and is_canceled flag as this transaction sees them."""
         raise NotImplementedError(f"{type(self).__name__} does not support admission control")
 
+    def paused_stage_ids(self, workflow_id: str) -> list[str]:
+        """Ids of the workflow's PAUSED stages as this transaction sees them, lowest first."""
+        raise NotImplementedError(f"{type(self).__name__} does not support pause control")
+
+
+def workflow_control_key(workflow_id: str) -> str:
+    """The lock key that serializes pausing and resuming one workflow."""
+    return f"workflow-control:{workflow_id}"
+

@@ -71,6 +71,16 @@ Required for "Airport Grade" production deployments.
     export MG_DATABASE_URL="postgres://user:pass@localhost:5432/stabilize"
     stabilize mg-up
 
+``mg-up`` runs migretti (``mg verify``, then ``mg apply``) on the migration files
+shipped in the package, and migretti records them in ``_migrations`` in the target
+schema. On a database set up by stabilize 0.33.1 or earlier, the first ``mg-up``
+records the existing history in migretti without running the SQL again and leaves
+the old ``stabilize_migrations`` table in place. It stops with exit 1 before
+changing anything when an applied migration's file has changed, when a history row
+matches no shipped version of its file, or when the schema holds another project's
+migretti history. Concurrent runs against one database wait for each other, up to
+``--lock-timeout`` seconds (default 900).
+
 By default tables are created in the connection's default schema (usually
 ``public``). To keep them in a dedicated schema, add ``?schema=`` to the URL
 (or set ``MG_SCHEMA``, or a ``schema:`` key under ``database:`` in

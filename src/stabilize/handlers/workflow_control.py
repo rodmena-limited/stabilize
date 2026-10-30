@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.handlers.jump_to_stage.reset import reset_stage_for_retry
 from stabilize.models.status import WorkflowStatus
+from stabilize.persistence.store.transaction import workflow_control_key
 from stabilize.queue.messages import (
     CancelStage,
     CancelWorkflow,
@@ -363,10 +364,38 @@ class PauseTaskHandler(StabilizeHandler[PauseTask], _ControlHandler):
                 self._mark_processed_only(message, "PauseTask")
                 return
 
-            self.set_task_status(task, WorkflowStatus.PAUSED)
-            self.set_stage_status(stage, WorkflowStatus.PAUSED)
-
             with self.repository.transaction(self.queue) as txn:
+                if txn.is_atomic:
+                    try:
+                        txn.lock_admission(workflow_control_key(message.execution_id))
+                        status, _ = txn.workflow_status(message.execution_id)
+                    except NotImplementedError:
+                        status = WorkflowStatus.PAUSED.name
+                    if status != WorkflowStatus.PAUSED.name:
+                        txn.push_message(
+                            RunTask(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=stage.id,
+                                task_id=task.id,
+                                task_type=task.implementing_class,
+                            )
+                        )
+                        if message.message_id:
+                            txn.mark_message_processed(
+                                message_id=message.message_id,
+                                handler_type="PauseTask",
+                                execution_id=message.execution_id,
+                            )
+                        logger.info(
+                            "Workflow %s is %s, no longer paused; re-dispatching task %s instead of parking it",
+                            message.execution_id,
+                            status,
+                            task.id,
+                        )
+                        return
+                self.set_task_status(task, WorkflowStatus.PAUSED)
+                self.set_stage_status(stage, WorkflowStatus.PAUSED)
                 txn.store_stage(stage)
                 if message.message_id:
                     txn.mark_message_processed(

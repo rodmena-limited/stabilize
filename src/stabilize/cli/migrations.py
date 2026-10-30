@@ -15,17 +15,13 @@ class MigrationsNotFoundError(RuntimeError):
     """No migration files could be located in any known location."""
 
 
-def _package_migrations() -> list[tuple[str, str]]:
+def _package_migrations() -> list[tuple[str, bytes]]:
     try:
         pkg = files(PACKAGE_LOCATION)
     except (ModuleNotFoundError, FileNotFoundError):
         return []
     try:
-        return [
-            (item.name, item.read_text())
-            for item in pkg.iterdir()
-            if item.name.endswith(".sql")
-        ]
+        return [(item.name, item.read_bytes()) for item in pkg.iterdir() if item.name.endswith(".sql")]
     except (FileNotFoundError, NotADirectoryError):
         return []
 
@@ -34,15 +30,15 @@ def _checkout_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent.parent
 
 
-def _checkout_migrations() -> list[tuple[str, str]]:
+def _checkout_migrations() -> list[tuple[str, bytes]]:
     root = _checkout_root() / "migrations"
     if not root.is_dir():
         return []
-    return [(p.name, p.read_text()) for p in root.glob("*.sql")]
+    return [(p.name, p.read_bytes()) for p in root.glob("*.sql")]
 
 
-def get_migrations() -> list[tuple[str, str]]:
-    """Return every migration as (filename, sql), in ULID order.
+def get_migration_files() -> list[tuple[str, bytes]]:
+    """Return every shipped migration as (filename, raw bytes), in ULID order.
 
     The .sql files live at the repository root and are force-included into the
     wheel under stabilize/migrations at build time, so an installed package and
@@ -63,9 +59,23 @@ def get_migrations() -> list[tuple[str, str]]:
     return migrations
 
 
+def migration_text(raw: bytes) -> str:
+    """Decode a migration file the way a text-mode read does (UTF-8, universal newlines)."""
+    return raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def get_migrations() -> list[tuple[str, str]]:
+    """Return every shipped migration as (filename, text), in ULID order."""
+    return [(name, migration_text(raw)) for name, raw in get_migration_files()]
+
+
+def migration_id(filename: str) -> str:
+    """Return the migretti id of a migration filename (the part before the first underscore)."""
+    return filename.split("_", 1)[0]
+
+
 def extract_up_migration(content: str) -> str:
     """Extract the UP migration from SQL content."""
-    # Find content between "-- migrate: up" and "-- migrate: down"
     up_match = re.search(
         r"--\s*migrate:\s*up\s*\n(.*?)(?:--\s*migrate:\s*down|$)",
         content,
@@ -76,6 +86,6 @@ def extract_up_migration(content: str) -> str:
     return content
 
 
-def compute_checksum(content: str) -> str:
-    """Compute MD5 checksum of migration content."""
-    return hashlib.md5(content.encode()).hexdigest()
+def migretti_checksum(content: str) -> str:
+    """Checksum migretti records in _migrations: SHA-256 of the text."""
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()

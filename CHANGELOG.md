@@ -1,5 +1,93 @@
 # Changelog
 
+## [0.33.2] - 2026-10-30
+
+Patch release (#95, reported by casebound-audit on 2026-10-29). `stabilize mg-up` had
+never called migretti. Since it was written on 2025-12-23 it ran its own apply loop,
+recorded progress in its own table `stabilize_migrations`, took no lock, and only warned
+when an applied migration's file had changed. From this release `mg-up` and `mg-status`
+hand the work to migretti. **Run `stabilize mg-up` once with the owner role after
+upgrading.** On a database set up by an earlier release, that run records the existing
+history in migretti without running any migration SQL again.
+
+### Fixed
+
+- **`mg-up` applies migrations with migretti.** It copies the migration files shipped in
+  the package into a private temporary directory and runs `mg verify` and then
+  `mg apply` there. migretti records them in `_migrations` and `_migrations_log` in the
+  target schema. The connection and every libpq parameter given to `mg-up`, including
+  the TLS settings, reach migretti through `MG_DATABASE_URL`. `MG_ENV`, `MG_LOCK_ID` and
+  the `MG_DB_*` variables are removed from migretti's environment, because they belong
+  to whatever other migretti project the shell was set up for.
+- **Existing databases are handed over in place.** When the target schema holds
+  `stabilize_migrations`, `mg-up` checks each row against the checksums of every
+  committed version of that file. It then has migretti record each applied migration:
+  `mg apply` records a `SELECT 1` placeholder under the migration's id, and
+  `mg fix <id> --applied` replaces it with the shipped file's checksum. migretti's log
+  therefore shows an UP entry and a FIX entry for each migration taken over.
+  `stabilize_migrations` is left as it was and keeps the original times. A run that is
+  interrupted part way is finished by the next one. Tested from databases built by the
+  published 0.33.1 and 0.32.1.
+- **Two retired migrations are left out of migretti's history.** `rag_embeddings`
+  (shipped in 0.9.2 to 0.12.1) and `widen_queue_ids_to_bigint` (committed, never released) are
+  reported and skipped. Nothing they created is dropped.
+- **`mg-up` stops with exit 1, before changing anything, when it cannot vouch for the
+  history.** That covers a `stabilize_migrations` row whose checksum matches no committed
+  version of its file, a row for a file stabilize never shipped, an applied migration
+  whose file has changed (reported by `mg verify`), a failed migration in migretti's
+  history, and migretti history from another project in the same schema. The last case
+  needs stabilize in a schema of its own (`?schema=`). The checksum warning and
+  `STABILIZE_STRICT_MIGRATIONS` are gone.
+- **Concurrent `mg-up` runs against one database take turns.** Each run holds an
+  advisory lock for its whole duration and waits up to `--lock-timeout` seconds
+  (default 900) for another run to finish. Four simultaneous runs against a 0.33.1
+  database all exit 0, and one of them does the hand-over.
+- **`mg-status` reports migretti's view** and creates nothing. Migrations the old runner
+  applied and migretti does not yet know about are listed as `old-runner`.
+- **The event store and task-lease tables come from `mg-up`.** Migration
+  `01M64SFQG36NHV5KQ3SHH5Z832` creates `events`, `snapshots` and `event_subscriptions`,
+  and `01M64SFQGDVM97KQS2FFAJ72R5` creates `task_leases`. Both use `IF NOT EXISTS`, so
+  tables already created by hand-run DDL, by `create_tables=True` or by the lease manager
+  are left as they are. On PostgreSQL `TaskLeaseManager` no longer runs `CREATE TABLE`
+  with the runtime role. When the table is missing it refuses and names
+  `stabilize mg-up`. The event store's refusal names `stabilize mg-up` too, and
+  `PostgresEventStore(create_tables=True)` now raises a `DeprecationWarning`.
+- **`PostgresEventStore` kept its pool when it refused a database.** Each refused
+  construction left one hold on a connection pool. It now releases the hold before
+  raising.
+- **A resume that arrived just after a pause could leave a workflow stuck (#96).**
+  Pausing a running stage takes two messages: `RunTask` sees the workflow PAUSED, then
+  `PauseTask` parks the task. A resume landing between them found no parked stage, set
+  the workflow RUNNING, and the stage was then parked with nothing left to resume it.
+  The workflow stayed RUNNING with a PAUSED stage. `PauseTask` and
+  `Orchestrator.unpause` now take turns on a per-workflow lock and read the state inside
+  it. A task whose workflow was resumed is re-dispatched, not parked. Found by an
+  intermittent CI failure that also occurred on published 0.33.1.
+- **`mg-check-grants` checks the 8 core engine tables.** The event store and
+  task-lease tables are left out because only deployments using those features need
+  grants on them.
+
+### Changed
+
+- The migretti floor is now 0.10.0 in the `postgres`, `c`, `all` and `dev` extras.
+- The test suite builds its PostgreSQL schema with `stabilize mg-up`. Because it used to
+  run `mg apply` directly, no test exercised the command customers run.
+
+### Upgrade notes
+
+- `mg-up` needs `CREATE` on the target schema for migretti's two tracking tables, which
+  is the same privilege the old runner needed for `stabilize_migrations`.
+- With `STABILIZE_TASK_LEASE` set, or with the PostgreSQL event store, grant the runtime
+  role `SELECT, INSERT, UPDATE, DELETE` on `task_leases`, or on `events`, `snapshots` and
+  `event_subscriptions` (and `USAGE` on their sequences). `mg-up` creates these tables
+  with the owner role.
+- An older stabilize still runs against a database that has been handed over. Its own
+  `mg-up` reads `stabilize_migrations`, finds everything it ships already applied and
+  exits 0.
+- A project that keeps its own migretti migrations should give stabilize a separate
+  schema (`?schema=stabilize`) or copy stabilize's SQL files into its own migretti
+  project and not run `mg-up`. The files in `migrations/` are plain migretti files.
+
 ## [0.33.1] - 2026-10-13
 
 Patch release: indexes for purge and recovery lookups (#94, reported by ci-conductor).

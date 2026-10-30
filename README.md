@@ -449,6 +449,14 @@ stabilize mg-up --db-url postgres://user:pass@host:5432/dbname
 stabilize mg-status --db-url postgres://user:pass@host:5432/dbname
 ```
 
+`mg-up` runs [migretti](https://pypi.org/project/migretti/) (`mg verify`, then `mg apply`)
+on the migration files shipped in the package, and migretti records them in `_migrations`
+in the target schema. On a database set up by stabilize 0.33.1 or earlier, the first
+`mg-up` records the existing history in migretti without running the SQL again and leaves
+the old `stabilize_migrations` table in place. Concurrent runs against one database wait
+for each other, up to `--lock-timeout` seconds (default 900). A project with its own
+migretti migrations should put stabilize in its own schema with `?schema=`.
+
 By default tables land in the connection's default schema (usually `public`).
 To keep stabilize's tables in a dedicated schema, add `?schema=` to the URL
 (or set `MG_SCHEMA`, or a `schema:` key under `database:` in `mg.yaml`) —

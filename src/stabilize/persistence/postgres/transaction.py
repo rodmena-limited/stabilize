@@ -273,6 +273,15 @@ class PostgresTransaction(StoreTransaction):
             return str(row["status"]), bool(row["is_canceled"])
         return str(row[0]), bool(row[1])
 
+    def paused_stage_ids(self, workflow_id: str) -> list[str]:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM stage_executions WHERE execution_id = %(id)s AND status = 'PAUSED' ORDER BY id",
+                {"id": workflow_id},
+            )
+            rows = cur.fetchall()
+        return [str(row["id"]) if isinstance(row, dict) else str(row[0]) for row in rows]
+
 
 # Forward reference for type hint
 from stabilize.persistence.postgres.store import (  # noqa: E402, F401

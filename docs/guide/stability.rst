@@ -27,9 +27,10 @@ unchanged once it has run in production:
   or changed incompatibly before 2.0.0;
 * a deprecation warns for at least one minor release before removal in a
   major release;
-* every migration is forward-only and additive within 1.x (already true from 0.33.0), and ``mg-up``
-  upgrades a 0.32.x database in place with in-flight work resumed (exercised
-  in CI by ``audit/evaluations/upgrade_inflight.py``).
+* every migration is forward-only and additive within 1.x (already true from 0.33.0). ``mg-up``
+  upgrades a 0.33.1 database in place with in-flight work resumed (exercised in CI by
+  ``audit/evaluations/upgrade_inflight.py``), and hands databases built by 0.32.1 and 0.33.1
+  over to migretti (``tests/test_mg_up_takeover.py``).
 
 Delivery guarantees
 -------------------

@@ -76,6 +76,10 @@ def _assert_done(wf: Workflow, label: str) -> None:
     assert not stuck, f"C18 {label}: stages left {stuck}"
 
 
+def _ref(wf: Workflow, ref_id: str) -> StageExecution:
+    return next(s for s in wf.stages if s.ref_id == ref_id)
+
+
 def _start(repository: WorkflowStore, queue: Queue, wf: Workflow) -> Workflow:
     repository.store(wf)
     Orchestrator(queue, store=repository).start(wf)
@@ -92,7 +96,7 @@ def test_pause_while_a_stage_runs_and_its_successor_has_not_started(repository: 
             application="c18", name="pause-running", stages=[stage("a", ["poll"]), stage("b", ["ok"], needs={"a"})]
         ),
     )
-    _until(processor, repository, wf.id, lambda w: w.stages[0].status == WorkflowStatus.RUNNING)
+    _until(processor, repository, wf.id, lambda w: _ref(w, "a").status == WorkflowStatus.RUNNING)
     repository.pause(wf.id, paused_by="audit")
     paused = _until(processor, repository, wf.id, lambda w: w.status == WorkflowStatus.PAUSED, seconds=10)
     assert next(s for s in paused.stages if s.ref_id == "b").status == WorkflowStatus.NOT_STARTED
@@ -219,6 +223,7 @@ def test_pause_after_the_last_stage_before_the_workflow_completes(repository: Wo
 
 
 def test_cancel_of_a_paused_workflow_ends_canceled(repository: WorkflowStore, queue: Queue) -> None:
+    HELD.add("a")
     processor = _processor(repository, queue)
     wf = _start(
         repository,
@@ -227,10 +232,44 @@ def test_cancel_of_a_paused_workflow_ends_canceled(repository: WorkflowStore, qu
             application="c18", name="pause-cancel", stages=[stage("a", ["poll"]), stage("b", ["ok"], needs={"a"})]
         ),
     )
-    _until(processor, repository, wf.id, lambda w: w.stages[0].status == WorkflowStatus.RUNNING)
+    _until(processor, repository, wf.id, lambda w: _ref(w, "a").status == WorkflowStatus.RUNNING)
     repository.pause(wf.id, paused_by="audit")
     paused = _until(processor, repository, wf.id, lambda w: w.status == WorkflowStatus.PAUSED, seconds=10)
     Orchestrator(queue, store=repository).cancel(paused, user="audit", reason="stop")
     final = drive(processor, repository, wf.id, timeout=20, idle=2.0)
     states = {s.ref_id: s.status.name for s in final.stages}
     assert final.status == WorkflowStatus.CANCELED, f"C18 cancel while PAUSED: workflow {final.status.name}, {states}"
+
+
+def test_a_resume_that_lands_before_the_task_is_parked_is_not_lost(
+    repository: WorkflowStore, queue: Queue, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from stabilize.handlers.workflow_control import PauseTaskHandler
+
+    HELD.add("a")
+    processor = _processor(repository, queue)
+    wf = _start(
+        repository,
+        queue,
+        Workflow.create(
+            application="c18", name="resume-race", stages=[stage("a", ["poll"]), stage("b", ["ok"], needs={"a"})]
+        ),
+    )
+    _until(processor, repository, wf.id, lambda w: _ref(w, "a").status == WorkflowStatus.RUNNING)
+
+    original = PauseTaskHandler.handle
+    resumed_first: list[str] = []
+
+    def resume_then_park(self: Any, message: Any) -> None:
+        if not resumed_first:
+            resumed_first.append(message.task_id)
+            HELD.clear()
+            Orchestrator(queue, store=repository).unpause(repository.retrieve(wf.id))
+        original(self, message)
+
+    monkeypatch.setattr(PauseTaskHandler, "handle", resume_then_park)
+    repository.pause(wf.id, paused_by="audit")
+    final = drive(processor, repository, wf.id, timeout=30, idle=2.0)
+    assert resumed_first, "PauseTask was never handled, so the interleaving under test did not happen"
+    _assert_done(final, "resume between RunTask and PauseTask")
+    assert RUNS.get("b") == 1

@@ -106,7 +106,7 @@ def main() -> int:
             conn.execute("CREATE ROLE ungranted LOGIN PASSWORD 'pw'")
             for role in ("granted", "ungranted"):
                 conn.execute(f"GRANT USAGE ON SCHEMA public TO {role}")
-                for t in ENGINE_TABLES + ("stabilize_migrations",):
+                for t in ENGINE_TABLES:
                     conn.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {t} TO {role}")
                 conn.execute(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}")
             conn.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON workflow_signals TO granted")

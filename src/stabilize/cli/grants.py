@@ -10,6 +10,8 @@ from stabilize.cli.migrations import extract_up_migration
 
 TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE")
 
+OPTIONAL_FEATURE_TABLES = frozenset({"events", "snapshots", "event_subscriptions", "task_leases"})
+
 _CREATE_RE = re.compile(r"(?i)\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?\"?([A-Za-z_][A-Za-z0-9_]*)\"?")
 _DROP_RE = re.compile(r"(?i)\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?\"?([A-Za-z_][A-Za-z0-9_]*)\"?")
 
@@ -27,6 +29,11 @@ def engine_tables(migrations: list[tuple[str, str]]) -> list[str]:
             if dropped and dropped.group(1) in tables:
                 tables.remove(dropped.group(1))
     return tables
+
+
+def required_tables(migrations: list[tuple[str, str]]) -> list[str]:
+    """The engine tables every runtime role needs: all of them except the event store's and the task leases'."""
+    return [table for table in engine_tables(migrations) if table not in OPTIONAL_FEATURE_TABLES]
 
 
 @dataclass
