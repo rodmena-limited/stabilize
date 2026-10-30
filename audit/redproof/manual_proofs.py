@@ -90,7 +90,7 @@ def prove(diff: Path) -> tuple[bool, str]:
         rc, out = run_test(clean, test_id)
         if rc != 0:
             return False, f"not green on the unmutated tree (pytest exit {rc}): {out.strip().splitlines()[-1:]}"
-        applied = subprocess.run(["patch", "-p1", "-s", "-i", str(diff)], cwd=mutant, capture_output=True, text=True)
+        applied = subprocess.run(["git", "apply", "-p1", str(diff)], cwd=mutant, capture_output=True, text=True)
         if applied.returncode != 0:
             return False, f"patch failed: {applied.stdout.strip()} {applied.stderr.strip()}"
         rc, out = run_test(mutant, test_id)
