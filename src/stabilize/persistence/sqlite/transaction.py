@@ -377,6 +377,13 @@ class AtomicTransaction(StoreTransaction):
         ).fetchone()
         return (None, False) if row is None else (str(row[0]), bool(row[1]))
 
+    def paused_stage_ids(self, workflow_id: str) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT id FROM stage_executions WHERE execution_id = ? AND status = 'PAUSED' ORDER BY id",
+            (workflow_id,),
+        ).fetchall()
+        return [str(r[0]) for r in rows]
+
 
 
 def _queue_table_for(store: Any, queue: Any) -> str:
