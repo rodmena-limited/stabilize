@@ -1,7 +1,7 @@
 test-id: tests/test_readiness.py::TestPredicatePhase::test_expected_phases_exist
---- a/src/stabilize/dag/readiness.py
-+++ b/src/stabilize/dag/readiness.py
-@@ -59,8 +59,6 @@
+--- a/src/stabilize/dag/readiness_types.py
++++ b/src/stabilize/dag/readiness_types.py
+@@ -22,8 +22,6 @@
      PRUNE = "PRUNE"
      """Every incoming edge is dead; no token can reach this stage."""
  
