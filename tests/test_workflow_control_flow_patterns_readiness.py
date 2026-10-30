@@ -16,7 +16,6 @@ from stabilize.queue import Queue
 from tests.conftest import setup_stabilize
 from tests.control_flow_support import OutputTask
 
-
 # =============================================================================
 # Section 12: TaskResult.suspend() Tests
 # =============================================================================

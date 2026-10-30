@@ -9,7 +9,6 @@ from stabilize.queue import Queue
 from tests.conftest import setup_stabilize
 from tests.corner_case_support import ConditionalFailTask, SlowTask
 
-
 # =============================================================================
 # 10. Recovery and Resilience Tests
 # =============================================================================

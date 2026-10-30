@@ -13,7 +13,6 @@ from stabilize.resilience.bulkheads import TaskBulkheadManager
 from stabilize.resilience.config import ResilienceConfig
 from stabilize.resilience.executor import execute_with_resilience
 
-
 # =============================================================================
 # Test bulkman 2.0.0 adoption (issuedb #10)
 # =============================================================================

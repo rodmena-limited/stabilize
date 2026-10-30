@@ -13,7 +13,6 @@ from stabilize import (
 from stabilize.models.task import TaskExecution
 from stabilize.models.workflow import Workflow
 
-
 # =============================================================================
 # Test Task Implementations
 # =============================================================================

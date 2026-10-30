@@ -25,7 +25,6 @@ from stabilize.persistence.store import WorkflowStore
 from stabilize.queue import Queue
 from tests.conftest import setup_stabilize
 
-
 # =============================================================================
 # Tests for Task Interface Coverage
 # =============================================================================

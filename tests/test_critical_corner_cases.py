@@ -38,7 +38,6 @@ from stabilize.queue import Queue
 from tests.conftest import setup_stabilize
 from tests.corner_case_support import JumpingTask, OutputMergingTask
 
-
 # =============================================================================
 # 1. State Determination Edge Cases
 # =============================================================================

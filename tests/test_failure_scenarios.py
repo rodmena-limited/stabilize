@@ -29,7 +29,6 @@ from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import CompleteTask, StartStage
 from stabilize.recovery import WorkflowRecovery
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================

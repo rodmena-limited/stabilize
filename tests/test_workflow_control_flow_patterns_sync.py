@@ -10,7 +10,6 @@ from stabilize.queue.messages import CancelRegion, SignalStage
 from tests.conftest import setup_stabilize
 from tests.control_flow_support import OutputTask, SlowTask, SuspendTask, TrackingTask
 
-
 # =============================================================================
 # Section 8: Mutex / Critical Section (WCP-17, 39, 40) Tests
 # =============================================================================

@@ -9,7 +9,6 @@ from stabilize import (
 )
 from stabilize.errors import PermanentError, TransientError
 
-
 # =============================================================================
 # Test Task Implementations for Corner Cases
 # =============================================================================

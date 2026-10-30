@@ -7,7 +7,6 @@ from stabilize.resilience.circuits import WorkflowCircuitFactory
 from stabilize.resilience.config import ResilienceConfig
 from stabilize.resilience.executor import execute_with_resilience
 
-
 # =============================================================================
 # Test Workflow Circuit Factory
 # =============================================================================

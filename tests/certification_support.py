@@ -16,7 +16,6 @@ from stabilize.persistence.connection import ConnectionManager, SingletonMeta
 from stabilize.tasks.http import HTTPTask
 from stabilize.tasks.shell import ShellTask
 
-
 # ---------------------------------------------------------------------------
 # Helper Functions
 # ---------------------------------------------------------------------------

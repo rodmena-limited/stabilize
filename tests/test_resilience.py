@@ -16,7 +16,6 @@ from stabilize.resilience.bulkheads import TaskBulkheadManager
 from stabilize.resilience.config import BulkheadConfig, ResilienceConfig
 from stabilize.resilience.executor import execute_with_resilience
 
-
 # =============================================================================
 # Test Circuit Breaker State Transitions
 # =============================================================================

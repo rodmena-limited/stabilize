@@ -12,7 +12,6 @@ from stabilize.queue import Queue
 from stabilize.queue.messages import StartStage
 from tests.conftest import setup_stabilize
 
-
 # =============================================================================
 # Bug Hunt Test: Workflow Context Persistence (BUG #1 - CRITICAL)
 # =============================================================================
