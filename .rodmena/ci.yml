@@ -171,7 +171,7 @@ jobs:
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
     resources: { memory_mb: 2048 }
-    timeout_minutes: 170
+    timeout_minutes: 130
     artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
     steps:
       - name: Install
@@ -179,14 +179,14 @@ jobs:
       - name: Published 0.33.1 and 0.32.1 for the takeover tests
         run: uv venv .old331 && uv pip install -p .old331/bin/python 'stabilize[postgres,cli]==0.33.1' && uv venv .old321 && uv pip install -p .old321/bin/python 'stabilize[postgres,cli]==0.32.1'
       - name: Mutation red-proof of this shard's test files, then the allowlist check
-        run: STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 REDPROOF_SHARD=1/4 REDPROOF_PG="${DATABASE_URL%/*}" REDPROOF_PG_CONTAINER= REDPROOF_PYTHON="$(command -v python3.14)" .venv/bin/python audit/redproof/run.py all --out "$PWD/.redproof" --workers 2 --sha HEAD --budget-hours 0.6
+        run: STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 REDPROOF_HOST_GATE=off REDPROOF_SHARD=1/4 REDPROOF_PG="${DATABASE_URL%/*}" REDPROOF_PG_CONTAINER= REDPROOF_PYTHON="$(command -v python3.14)" .venv/bin/python audit/redproof/run.py all --out "$PWD/.redproof" --workers 2 --sha HEAD --budget-hours 0.6
 
   redproof-2:
     name: "Red-proof shard 2 of 4: every test fails on at least one engine mutant"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
     resources: { memory_mb: 2048 }
-    timeout_minutes: 170
+    timeout_minutes: 130
     artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
     steps:
       - name: Install
@@ -194,14 +194,14 @@ jobs:
       - name: Published 0.33.1 and 0.32.1 for the takeover tests
         run: uv venv .old331 && uv pip install -p .old331/bin/python 'stabilize[postgres,cli]==0.33.1' && uv venv .old321 && uv pip install -p .old321/bin/python 'stabilize[postgres,cli]==0.32.1'
       - name: Mutation red-proof of this shard's test files, then the allowlist check
-        run: STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 REDPROOF_SHARD=2/4 REDPROOF_PG="${DATABASE_URL%/*}" REDPROOF_PG_CONTAINER= REDPROOF_PYTHON="$(command -v python3.14)" .venv/bin/python audit/redproof/run.py all --out "$PWD/.redproof" --workers 2 --sha HEAD --budget-hours 0.6
+        run: STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 REDPROOF_HOST_GATE=off REDPROOF_SHARD=2/4 REDPROOF_PG="${DATABASE_URL%/*}" REDPROOF_PG_CONTAINER= REDPROOF_PYTHON="$(command -v python3.14)" .venv/bin/python audit/redproof/run.py all --out "$PWD/.redproof" --workers 2 --sha HEAD --budget-hours 0.6
 
   redproof-3:
     name: "Red-proof shard 3 of 4: every test fails on at least one engine mutant"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
     resources: { memory_mb: 2048 }
-    timeout_minutes: 170
+    timeout_minutes: 130
     artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
     steps:
       - name: Install
@@ -209,14 +209,14 @@ jobs:
       - name: Published 0.33.1 and 0.32.1 for the takeover tests
         run: uv venv .old331 && uv pip install -p .old331/bin/python 'stabilize[postgres,cli]==0.33.1' && uv venv .old321 && uv pip install -p .old321/bin/python 'stabilize[postgres,cli]==0.32.1'
       - name: Mutation red-proof of this shard's test files, then the allowlist check
-        run: STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 REDPROOF_SHARD=3/4 REDPROOF_PG="${DATABASE_URL%/*}" REDPROOF_PG_CONTAINER= REDPROOF_PYTHON="$(command -v python3.14)" .venv/bin/python audit/redproof/run.py all --out "$PWD/.redproof" --workers 2 --sha HEAD --budget-hours 0.6
+        run: STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 REDPROOF_HOST_GATE=off REDPROOF_SHARD=3/4 REDPROOF_PG="${DATABASE_URL%/*}" REDPROOF_PG_CONTAINER= REDPROOF_PYTHON="$(command -v python3.14)" .venv/bin/python audit/redproof/run.py all --out "$PWD/.redproof" --workers 2 --sha HEAD --budget-hours 0.6
 
   redproof-4:
     name: "Red-proof shard 4 of 4: every test fails on at least one engine mutant"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
     resources: { memory_mb: 2048 }
-    timeout_minutes: 170
+    timeout_minutes: 130
     artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
     steps:
       - name: Install
@@ -224,7 +224,7 @@ jobs:
       - name: Published 0.33.1 and 0.32.1 for the takeover tests
         run: uv venv .old331 && uv pip install -p .old331/bin/python 'stabilize[postgres,cli]==0.33.1' && uv venv .old321 && uv pip install -p .old321/bin/python 'stabilize[postgres,cli]==0.32.1'
       - name: Mutation red-proof of this shard's test files, then the allowlist check
-        run: STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 REDPROOF_SHARD=4/4 REDPROOF_PG="${DATABASE_URL%/*}" REDPROOF_PG_CONTAINER= REDPROOF_PYTHON="$(command -v python3.14)" .venv/bin/python audit/redproof/run.py all --out "$PWD/.redproof" --workers 2 --sha HEAD --budget-hours 0.6
+        run: STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 REDPROOF_HOST_GATE=off REDPROOF_SHARD=4/4 REDPROOF_PG="${DATABASE_URL%/*}" REDPROOF_PG_CONTAINER= REDPROOF_PYTHON="$(command -v python3.14)" .venv/bin/python audit/redproof/run.py all --out "$PWD/.redproof" --workers 2 --sha HEAD --budget-hours 0.6
 
   manualproofs:
     name: "Manual red-proofs: each diff makes its test fail and the clean tree pass"
@@ -237,4 +237,4 @@ jobs:
       - name: Published 0.33.1 and 0.32.1 for the takeover tests
         run: uv venv .old331 && uv pip install -p .old331/bin/python 'stabilize[postgres,cli]==0.33.1' && uv venv .old321 && uv pip install -p .old321/bin/python 'stabilize[postgres,cli]==0.32.1'
       - name: Manual proofs
-        run: STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 STABILIZE_TEST_DSN="$DATABASE_URL" .venv/bin/python audit/redproof/manual_proofs.py
+        run: STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 REDPROOF_HOST_GATE=off STABILIZE_TEST_DSN="$DATABASE_URL" .venv/bin/python audit/redproof/manual_proofs.py

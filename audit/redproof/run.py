@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mutants import Mutant, all_mutants, apply  # noqa: E402
+import host  # noqa: E402
 from shards import shard_suites  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
@@ -29,7 +30,8 @@ PYTHON = os.environ.get(
     "REDPROOF_PYTHON", "/home/farshid/.local/share/uv/python/cpython-3.14-linux-x86_64-gnu/bin/python3.14"
 )
 SHARD = os.environ.get("REDPROOF_SHARD", "")
-SUITES = shard_suites(REPO, SHARD) if SHARD else os.environ.get("REDPROOF_SUITES", "tests golden_standard_tests").split()
+DEFAULT_SUITES = os.environ.get("REDPROOF_SUITES", "tests golden_standard_tests").split()
+SUITES = shard_suites(REPO, SHARD) if SHARD else DEFAULT_SUITES
 EXTRA_TESTS = [p for p in os.environ.get("REDPROOF_EXTRA_TESTS", "").split() if p]
 
 
@@ -37,18 +39,8 @@ def log(msg: str) -> None:
     print(f"{time.strftime('%H:%M:%S')} {msg}", flush=True)
 
 
-def host_ok() -> bool:
-    load = float(Path("/proc/loadavg").read_text().split()[0])
-    avail = 0
-    for line in Path("/proc/meminfo").read_text().splitlines():
-        if line.startswith("MemAvailable:"):
-            avail = int(line.split()[1]) // 1024
-    return load < 8 and avail >= 6144
-
-
 def wait_host() -> None:
-    while not host_ok():
-        time.sleep(20)
+    host.wait_host(log)
 
 
 def fresh_db(name: str) -> str:

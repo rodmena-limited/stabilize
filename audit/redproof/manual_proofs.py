@@ -5,25 +5,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
+
+import host
 
 REPO = Path(__file__).resolve().parents[2]
 MANUAL = REPO / "audit" / "redproof" / "manual"
 PYTHON = os.environ.get("MANUAL_PROOFS_PYTHON", str(REPO / ".venv" / "bin" / "python"))
 EXPORT = ["src", "tests", "migrations", "pyproject.toml"]
-
-
-def wait_host() -> None:
-    while True:
-        load = float(Path("/proc/loadavg").read_text().split()[0])
-        avail = 0
-        for line in Path("/proc/meminfo").read_text().splitlines():
-            if line.startswith("MemAvailable:"):
-                avail = int(line.split()[1]) // 1024
-        if load < 8 and avail >= 6144:
-            return
-        time.sleep(20)
 
 
 def export(dest: Path) -> None:
@@ -60,7 +49,7 @@ def imports_tree(tree: Path) -> bool:
 
 
 def run_test(tree: Path, test_id: str) -> tuple[int, str]:
-    wait_host()
+    host.wait_host()
     proc = subprocess.run(
         [PYTHON, "-m", "pytest", test_id, "-q", "-p", "no:cacheprovider", "-p", "no:logging", "-rf"]
         + ["--timeout", "300"],
