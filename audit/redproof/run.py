@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mutants import Mutant, all_mutants, apply  # noqa: E402
+from shards import shard_suites  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 PER_LINE_CAP = 12
@@ -27,7 +28,8 @@ PG_CONTAINER = os.environ.get("REDPROOF_PG_CONTAINER", "stabilize-gate-pg")
 PYTHON = os.environ.get(
     "REDPROOF_PYTHON", "/home/farshid/.local/share/uv/python/cpython-3.14-linux-x86_64-gnu/bin/python3.14"
 )
-SUITES = os.environ.get("REDPROOF_SUITES", "tests golden_standard_tests").split()
+SHARD = os.environ.get("REDPROOF_SHARD", "")
+SUITES = shard_suites(REPO, SHARD) if SHARD else os.environ.get("REDPROOF_SUITES", "tests golden_standard_tests").split()
 EXTRA_TESTS = [p for p in os.environ.get("REDPROOF_EXTRA_TESTS", "").split() if p]
 
 
@@ -441,6 +443,8 @@ def check(out: Path, allowlist: Path, collect: bool = False) -> int:
                 print(f"ALLOWLIST ENTRY WITHOUT REASON: {nodeid}")
                 bad += 1
             elif nodeid not in baseline:
+                if SHARD:
+                    continue
                 print(f"ALLOWLIST ENTRY FOR A TEST THAT DOES NOT EXIST: {nodeid}")
                 bad += 1
             elif nodeid in proven:

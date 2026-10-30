@@ -1918,7 +1918,6 @@ tests/test_schema_and_exists.py::TestUrlQueryParametersReachLibpq::test_query_pa
 tests/test_schema_and_exists.py::TestUrlQueryParametersReachLibpq::test_query_parameters_survive[sslmode-verify-full]	src/stabilize/cli/config.py:172:53:int-const
 tests/test_schema_and_exists.py::TestUrlQueryParametersReachLibpq::test_query_parameters_survive[sslrootcert-/etc/ca.crt]	src/stabilize/cli/config.py:172:53:int-const
 tests/test_schema_and_exists.py::TestUrlQueryParametersReachLibpq::test_schema_is_stabilize_s_own_and_not_sent_to_libpq	src/stabilize/cli/config.py:166:19:str-const
-tests/test_schema_and_exists.py::TestUrlQueryParametersReachLibpq::test_url_components_still_win	src/stabilize/cli/config.py:172:53:int-const
 tests/test_shell.py::TestShellTaskBasic::test_command_with_args	src/stabilize/tasks/result.py:54:8:return-none
 tests/test_shell.py::TestShellTaskBasic::test_command_with_pipe	src/stabilize/tasks/result.py:54:8:return-none
 tests/test_shell.py::TestShellTaskBasic::test_missing_command	src/stabilize/tasks/result.py:102:8:return-none

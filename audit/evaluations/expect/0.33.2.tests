@@ -1,0 +1,31 @@
+tests/test_mg_up_history_schema.py::test_an_existing_install_beside_a_host_history_is_taken_over_in_place|mg-up exit 1 beside a host's migretti history
+tests/test_mg_up_history_schema.py::test_a_host_history_without_a_way_to_keep_them_apart_is_refused_naming_the_remedy|the refusal does not name --history-schema
+tests/test_mg_up_adoption.py::test_a_schema_without_history_is_adopted_and_completed[1]|mg-up could not adopt a schema built to level 1
+tests/test_mg_up_adoption.py::test_a_schema_without_history_is_adopted_and_completed[2]|mg-up could not adopt a schema built to level 2
+tests/test_mg_up_adoption.py::test_a_schema_without_history_is_adopted_and_completed[3]|mg-up could not adopt a schema built to level 3
+tests/test_mg_up_adoption.py::test_a_schema_without_history_is_adopted_and_completed[4]|mg-up could not adopt a schema built to level 4
+tests/test_mg_up_adoption.py::test_a_schema_without_history_is_adopted_and_completed[5]|mg-up could not adopt a schema built to level 5
+tests/test_mg_up_adoption.py::test_a_schema_without_history_is_adopted_and_completed[6]|mg-up could not adopt a schema built to level 6
+tests/test_mg_up_adoption.py::test_a_schema_without_history_is_adopted_and_completed[7]|mg-up could not adopt a schema built to level 7
+tests/test_mg_up_adoption.py::test_a_schema_without_history_is_adopted_and_completed[8]|mg-up could not adopt a schema built to level 8
+tests/test_mg_up_adoption.py::test_a_schema_without_history_is_adopted_and_completed[9]|mg-up could not adopt a schema built to level 9
+tests/test_mg_up_adoption.py::test_a_schema_without_history_is_adopted_and_completed[10]|mg-up could not adopt a schema built to level 10
+tests/test_mg_up_adoption.py::test_a_schema_without_history_is_adopted_and_completed[11]|mg-up could not adopt a schema built to level 11
+tests/test_mg_up_adoption.py::test_a_schema_without_history_is_adopted_and_completed[12]|mg-up could not adopt a schema built to level 12
+tests/test_mg_up_adoption.py::test_a_schema_without_history_is_adopted_and_completed[13]|mg-up could not adopt a schema built to level 13
+tests/test_mg_up_adoption.py::test_a_schema_without_history_is_adopted_and_completed[14]|mg-up could not adopt a schema built to level 14
+tests/test_mg_up_adoption.py::test_a_schema_without_history_is_adopted_and_completed[15]|mg-up could not adopt a schema built to level 15
+tests/test_mg_up_adoption.py::test_a_schema_without_history_is_adopted_and_completed[16]|mg-up could not adopt a schema built to level 16
+tests/test_mg_up_adoption.py::test_a_column_of_the_wrong_type_stops_adoption_before_any_change|the refusal does not name the mismatch
+tests/test_mg_up_adoption.py::test_a_schema_matching_no_level_stops_adoption_before_any_change|the refusal does not say that no level matches
+tests/test_mg_up_adoption.py::test_mg_status_names_the_level_an_untracked_schema_would_be_adopted_at|mg-status did not mark the 8 adoptable migrations
+tests/test_engine_thread_context.py::test_tasks_run_in_the_context_the_processor_was_started_in[sqlite]|the task saw context 'unset'
+tests/test_engine_thread_context.py::test_two_processors_started_in_different_contexts_keep_them_apart[sqlite]|tasks saw contexts
+tests/test_engine_thread_context.py::test_tasks_run_in_the_context_the_processor_was_started_in[postgres]|the task saw context 'unset'
+tests/test_engine_thread_context.py::test_two_processors_started_in_different_contexts_keep_them_apart[postgres]|tasks saw contexts
+tests/test_cli_url_resolution.py::test_the_cli_connects_where_libpq_and_the_runtime_would[socket-host]|the CLI and libpq resolve
+tests/test_cli_url_resolution.py::test_the_cli_connects_where_libpq_and_the_runtime_would[dbname-and-port]|the CLI and libpq resolve
+tests/test_cli_url_resolution.py::test_the_cli_connects_where_libpq_and_the_runtime_would[user]|the CLI and libpq resolve
+tests/test_cli_url_resolution.py::test_an_explicit_schema_in_the_url_beats_mg_schema|MG_SCHEMA replaced the URL's own schema
+tests/test_cli_url_resolution.py::test_history_schema_is_stabilize_s_own_and_never_sent_to_libpq[url]|history_schema was not read
+tests/test_schema_and_exists.py::TestUrlQueryParametersReachLibpq::test_a_url_resolves_to_the_target_libpq_and_the_runtime_use|libpq and the runtime

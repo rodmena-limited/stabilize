@@ -187,13 +187,16 @@ class TestUrlQueryParametersReachLibpq:
 
         assert connection_params(parse_db_url(self.URL))[key] == value
 
-    def test_url_components_still_win(self) -> None:
-        """Without this, a query parameter could clobber the real target."""
+    def test_a_url_resolves_to_the_target_libpq_and_the_runtime_use(self) -> None:
+        from psycopg.conninfo import conninfo_to_dict
+
         from stabilize.cli.config import connection_params, parse_db_url
 
-        params = connection_params(parse_db_url(self.URL + "&host=evil&dbname=evil"))
-        assert params["host"] == "h"
-        assert params["dbname"] == "db"
+        url = self.URL + "&host=other-host&dbname=other_db&port=6543&user=other_user"
+        params = connection_params(parse_db_url(url))
+        libpq = conninfo_to_dict(url)
+        for key in ("host", "port", "dbname", "user"):
+            assert str(params[key]) == str(libpq[key]), f"CLI {key}={params[key]!r}, libpq and the runtime {libpq[key]!r}"
 
     def test_schema_is_stabilize_s_own_and_not_sent_to_libpq(self) -> None:
         from stabilize.cli.config import connection_params, parse_db_url

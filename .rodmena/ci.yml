@@ -55,61 +55,92 @@ jobs:
         run: PATH="$PWD/.venv311/bin:$PATH" STABILIZE_TEST_DSN="$DATABASE_URL" .venv311/bin/python -m pytest tests golden_standard_tests -q -n 3 -p no:cacheprovider --timeout 600 -rfE
 
   baseline:
-    name: "Published 0.33.1 from PyPI: existing suite and probes"
+    name: "Published 0.33.2 from PyPI: existing suite and probes"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
     timeout_minutes: 50
     steps:
-      - name: Install stabilize 0.33.1 from PyPI, not the checkout
-        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.33.1' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml
+      - name: Install stabilize 0.33.2 from PyPI, not the checkout
+        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.33.2' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml
       - name: Installed package is the published one
-        run: .old/bin/python -c "import stabilize, sys; print(stabilize.__version__, stabilize.__file__); sys.exit(0 if stabilize.__version__ == '0.33.1' and 'site-packages' in stabilize.__file__ else 1)"
-      - name: Existing suite against 0.33.1 (new red tests listed in expect/0.33.1.tests are excluded)
+        run: .old/bin/python -c "import stabilize, sys; print(stabilize.__version__, stabilize.__file__); sys.exit(0 if stabilize.__version__ == '0.33.2' and 'site-packages' in stabilize.__file__ else 1)"
+      - name: Published 0.33.1 and 0.32.1 for the takeover tests
+        run: uv venv .old331 && uv pip install -p .old331/bin/python 'stabilize[postgres,cli]==0.33.1' && uv venv .old321 && uv pip install -p .old321/bin/python 'stabilize[postgres,cli]==0.32.1'
+      - name: Existing suite against 0.33.2 (new red tests listed in expect/0.33.2.tests are excluded)
         run: |
           set -eu
-          IGN=$(cut -d'|' -f1 audit/evaluations/expect/0.33.1.tests audit/evaluations/expect/0.33.1.new-api | cut -d':' -f1 | sort -u | sed '/^$/d; s/^/--ignore=/' | tr '\n' ' ')
+          IGN=$(cut -d'|' -f1 audit/evaluations/expect/0.33.2.tests audit/evaluations/expect/0.33.2.new-api | cut -d':' -f1 | sort -u | sed '/^$/d; s/^/--ignore=/' | tr '\n' ' ')
           echo "ignored: $IGN"
-          PATH="$PWD/.old/bin:$PATH" STABILIZE_TEST_DSN="$DATABASE_URL" .old/bin/python -m pytest tests golden_standard_tests $IGN --deselect tests/test_engine_context_keys.py::test_every_engine_written_key_is_registered --deselect tests/test_migration_discovery.py::test_get_migrations_finds_them_from_a_source_checkout --deselect tests/test_resilience.py::TestExecuteWithResilience::test_exception_propagates --ignore=tests/test_audit_refuter_regressions.py -q -n 3 -p no:cacheprovider --timeout 600 -rfE
-      - name: Existing probes against 0.33.1 (new red probes listed in expect/0.33.1.probes are excluded)
+          PATH="$PWD/.old/bin:$PATH" STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 STABILIZE_TEST_DSN="$DATABASE_URL" .old/bin/python -m pytest tests golden_standard_tests $IGN --deselect tests/test_engine_context_keys.py::test_every_engine_written_key_is_registered --deselect tests/test_migration_discovery.py::test_get_migrations_finds_them_from_a_source_checkout --deselect tests/test_resilience.py::TestExecuteWithResilience::test_exception_propagates --ignore=tests/test_audit_refuter_regressions.py -q -n 3 -p no:cacheprovider --timeout 600 -rfE
+      - name: Existing probes against 0.33.2 (new red probes listed in expect/0.33.2.probes are excluded)
         run: |
           set -eu
           export PATH="$PWD/.old/bin:$PATH"
           .old/bin/stabilize mg-up --db-url "$DATABASE_URL?schema=orchestration"
-          PROBE_EXCLUDE_FILE=audit/evaluations/expect/0.33.1.probes STABILIZE_PROBE_SCHEMA=orchestration PROBE_SET=sqlite AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" PYTHON=.old/bin/python bash audit/evaluations/run_all.sh
+          PROBE_EXCLUDE_FILE=audit/evaluations/expect/0.33.2.probes STABILIZE_PROBE_SCHEMA=orchestration PROBE_SET=sqlite AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" PYTHON=.old/bin/python bash audit/evaluations/run_all.sh
 
   falsify:
-    name: "New probes and tests go red on published 0.33.1 for their stated reason"
+    name: "New probes and tests go red on published 0.33.2 for their stated reason"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
     timeout_minutes: 50
     steps:
-      - name: Install stabilize 0.33.1 from PyPI, not the checkout
-        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.33.1' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml
-      - name: Published 0.32.1 for the takeover tests
-        run: uv venv .old321 && uv pip install -p .old321/bin/python 'stabilize[postgres,cli]==0.32.1'
-      - name: Probes listed in expect/0.33.1.probes fail on 0.33.1 with their marker, controls green
+      - name: Install stabilize 0.33.2 from PyPI, not the checkout
+        run: uv venv .old && uv pip install -p .old/bin/python --no-cache --refresh 'stabilize[postgres,cli,observability]==0.33.2' pytest pytest-xdist pytest-timeout pytest-asyncio testcontainers psutil pyyaml
+      - name: Published 0.33.1 and 0.32.1 for the takeover tests
+        run: uv venv .old331 && uv pip install -p .old331/bin/python 'stabilize[postgres,cli]==0.33.1' && uv venv .old321 && uv pip install -p .old321/bin/python 'stabilize[postgres,cli]==0.32.1'
+      - name: Probes and tests listed in expect/0.33.2.* fail on 0.33.2 with their marker, controls green
         run: |
           set -u
           export PATH="$PWD/.old/bin:$PATH"
-          OLD_VERSION=0.33.1 AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" STABILIZE_PROBE_SQLITE_QUEUE_TABLES=1 PYTHON=.old/bin/python bash audit/evaluations/falsify_previous.sh; p=$?
-          STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 OLD_VERSION=0.33.1 STABILIZE_TEST_DSN="$DATABASE_URL" PYTHON=.old/bin/python bash audit/evaluations/falsify_tests.sh; t=$?
+          if grep -q '[^[:space:]]' audit/evaluations/expect/0.33.2.probes; then
+            OLD_VERSION=0.33.2 AUDIT_ALLOW_DESTRUCTIVE=1 STABILIZE_PROBE_DSN="$DATABASE_URL" STABILIZE_PROBE_SQLITE_QUEUE_TABLES=1 PYTHON=.old/bin/python bash audit/evaluations/falsify_previous.sh; p=$?
+          else
+            echo "expect/0.33.2.probes lists no probe: this release adds no probe that must fail on 0.33.2"; p=0
+          fi
+          STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 OLD_VERSION=0.33.2 STABILIZE_TEST_DSN="$DATABASE_URL" PYTHON=.old/bin/python bash audit/evaluations/falsify_tests.sh; t=$?
           echo "probe falsification exit=$p test falsification exit=$t"
           [ "$p" -eq 0 ] && [ "$t" -eq 0 ]
 
   upgrade:
-    name: "Work in flight under published 0.33.1 finishes under this checkout"
+    name: "Work in flight under published 0.33.2 finishes under this checkout"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
     timeout_minutes: 25
     steps:
-      - name: Install published 0.33.1 and this checkout side by side
-        run: uv venv .old && uv pip install -p .old/bin/python 'stabilize[postgres,cli]==0.33.1' && uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
+      - name: Install published 0.33.2 and this checkout side by side
+        run: uv venv .old && uv pip install -p .old/bin/python 'stabilize[postgres,cli]==0.33.2' && uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
       - name: Old release starts the work, this checkout finishes it
         run: |
           set -eu
           export STABILIZE_PROBE_DSN="$DATABASE_URL" UPGRADE_STATE_FILE="$PWD/upgrade-state.json"
           PATH="$PWD/.old/bin:$PATH" .old/bin/python audit/evaluations/upgrade_inflight.py --phase old
           PATH="$PWD/.venv/bin:$PATH" .venv/bin/python audit/evaluations/upgrade_inflight.py --phase new
+
+  wheel:
+    name: "The built wheel carries every packaged file"
+    image: containers.rodmena.co.uk/rodmena/ci-python:3.14
+    timeout_minutes: 15
+    steps:
+      - name: Build the sdist and the wheel
+        run: uv build --out-dir dist
+      - name: Every tracked file under src/stabilize and every migration is in the wheel
+        run: |
+          set -eu
+          git ls-files src/stabilize | sed 's#^src/##' | grep -v '/__pycache__/' > expected.txt
+          ls migrations/*.sql | sed 's#^#stabilize/#' >> expected.txt
+          python3 - <<'PY'
+          import pathlib, sys, tomllib, zipfile
+          version = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"]
+          wheels = list(pathlib.Path("dist").glob(f"stabilize-{version}-*.whl"))
+          if len(wheels) != 1:
+              sys.exit(f"expected one wheel for {version}, found {wheels}")
+          names = set(zipfile.ZipFile(wheels[0]).namelist())
+          expected = [line for line in pathlib.Path("expected.txt").read_text().splitlines() if line]
+          missing = [name for name in expected if name not in names]
+          print(f"{wheels[0].name}: {len(names)} files, {len(expected)} expected, {len(missing)} missing")
+          sys.exit(f"missing from the wheel: {missing}" if missing else 0)
+          PY
 
   soak:
     name: "Sustained run: 5 min on PostgreSQL (release candidate only)"
@@ -122,20 +153,75 @@ jobs:
       - name: Soak
         run: PATH="$PWD/.venv/bin:$PATH" STABILIZE_PROBE_DSN="$DATABASE_URL" SOAK_MINUTES=5 .venv/bin/python audit/evaluations/soak.py
 
-
-  redproof:
-    name: "Every test fails on at least one engine mutant (red-proof)"
+  redproof-1:
+    name: "Red-proof shard 1 of 4: every test fails on at least one engine mutant"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
     resources: { memory_mb: 2048 }
-    timeout_minutes: 600
+    timeout_minutes: 170
     artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
     steps:
       - name: Install
         run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
       - name: Published 0.33.1 and 0.32.1 for the takeover tests
         run: uv venv .old331 && uv pip install -p .old331/bin/python 'stabilize[postgres,cli]==0.33.1' && uv venv .old321 && uv pip install -p .old321/bin/python 'stabilize[postgres,cli]==0.32.1'
-      - name: Mutation red-proof of the whole suite, then the allowlist check
-        run: STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 REDPROOF_PG="${DATABASE_URL%/*}" REDPROOF_PG_CONTAINER= REDPROOF_PYTHON="$(command -v python3.14)" .venv/bin/python audit/redproof/run.py all --out "$PWD/.redproof" --workers 2 --sha HEAD --budget-hours 4
-      - name: Manual proofs (each diff must make its test fail and the clean tree pass)
+      - name: Mutation red-proof of this shard's test files, then the allowlist check
+        run: STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 REDPROOF_SHARD=1/4 REDPROOF_PG="${DATABASE_URL%/*}" REDPROOF_PG_CONTAINER= REDPROOF_PYTHON="$(command -v python3.14)" .venv/bin/python audit/redproof/run.py all --out "$PWD/.redproof" --workers 2 --sha HEAD --budget-hours 0.6
+
+  redproof-2:
+    name: "Red-proof shard 2 of 4: every test fails on at least one engine mutant"
+    image: containers.rodmena.co.uk/rodmena/ci-python:3.14
+    services: [postgres]
+    resources: { memory_mb: 2048 }
+    timeout_minutes: 170
+    artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
+    steps:
+      - name: Install
+        run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
+      - name: Published 0.33.1 and 0.32.1 for the takeover tests
+        run: uv venv .old331 && uv pip install -p .old331/bin/python 'stabilize[postgres,cli]==0.33.1' && uv venv .old321 && uv pip install -p .old321/bin/python 'stabilize[postgres,cli]==0.32.1'
+      - name: Mutation red-proof of this shard's test files, then the allowlist check
+        run: STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 REDPROOF_SHARD=2/4 REDPROOF_PG="${DATABASE_URL%/*}" REDPROOF_PG_CONTAINER= REDPROOF_PYTHON="$(command -v python3.14)" .venv/bin/python audit/redproof/run.py all --out "$PWD/.redproof" --workers 2 --sha HEAD --budget-hours 0.6
+
+  redproof-3:
+    name: "Red-proof shard 3 of 4: every test fails on at least one engine mutant"
+    image: containers.rodmena.co.uk/rodmena/ci-python:3.14
+    services: [postgres]
+    resources: { memory_mb: 2048 }
+    timeout_minutes: 170
+    artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
+    steps:
+      - name: Install
+        run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
+      - name: Published 0.33.1 and 0.32.1 for the takeover tests
+        run: uv venv .old331 && uv pip install -p .old331/bin/python 'stabilize[postgres,cli]==0.33.1' && uv venv .old321 && uv pip install -p .old321/bin/python 'stabilize[postgres,cli]==0.32.1'
+      - name: Mutation red-proof of this shard's test files, then the allowlist check
+        run: STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 REDPROOF_SHARD=3/4 REDPROOF_PG="${DATABASE_URL%/*}" REDPROOF_PG_CONTAINER= REDPROOF_PYTHON="$(command -v python3.14)" .venv/bin/python audit/redproof/run.py all --out "$PWD/.redproof" --workers 2 --sha HEAD --budget-hours 0.6
+
+  redproof-4:
+    name: "Red-proof shard 4 of 4: every test fails on at least one engine mutant"
+    image: containers.rodmena.co.uk/rodmena/ci-python:3.14
+    services: [postgres]
+    resources: { memory_mb: 2048 }
+    timeout_minutes: 170
+    artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
+    steps:
+      - name: Install
+        run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
+      - name: Published 0.33.1 and 0.32.1 for the takeover tests
+        run: uv venv .old331 && uv pip install -p .old331/bin/python 'stabilize[postgres,cli]==0.33.1' && uv venv .old321 && uv pip install -p .old321/bin/python 'stabilize[postgres,cli]==0.32.1'
+      - name: Mutation red-proof of this shard's test files, then the allowlist check
+        run: STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 REDPROOF_SHARD=4/4 REDPROOF_PG="${DATABASE_URL%/*}" REDPROOF_PG_CONTAINER= REDPROOF_PYTHON="$(command -v python3.14)" .venv/bin/python audit/redproof/run.py all --out "$PWD/.redproof" --workers 2 --sha HEAD --budget-hours 0.6
+
+  manualproofs:
+    name: "Manual red-proofs: each diff makes its test fail and the clean tree pass"
+    image: containers.rodmena.co.uk/rodmena/ci-python:3.14
+    services: [postgres]
+    timeout_minutes: 60
+    steps:
+      - name: Install
+        run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
+      - name: Published 0.33.1 and 0.32.1 for the takeover tests
+        run: uv venv .old331 && uv pip install -p .old331/bin/python 'stabilize[postgres,cli]==0.33.1' && uv venv .old321 && uv pip install -p .old321/bin/python 'stabilize[postgres,cli]==0.32.1'
+      - name: Manual proofs
         run: STABILIZE_OLD_RUNNERS="0.33.1=$PWD/.old331/bin/stabilize;0.32.1=$PWD/.old321/bin/stabilize" STABILIZE_REQUIRE_OLD_RUNNERS=1 STABILIZE_TEST_DSN="$DATABASE_URL" .venv/bin/python audit/redproof/manual_proofs.py
