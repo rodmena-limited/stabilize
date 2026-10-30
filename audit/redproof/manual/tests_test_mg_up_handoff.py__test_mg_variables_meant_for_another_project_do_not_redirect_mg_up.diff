@@ -1,0 +1,14 @@
+test-id: tests/test_mg_up_handoff.py::test_mg_variables_meant_for_another_project_do_not_redirect_mg_up
+--- a/src/stabilize/cli/migretti_runner.py
++++ b/src/stabilize/cli/migretti_runner.py
+@@ -90,8 +90,8 @@
+ 
+ 
+ def migretti_env(conninfo: str) -> dict[str, str]:
+-    env = {key: value for key, value in os.environ.items() if key not in SCRUBBED_ENV}
+-    env["MG_DATABASE_URL"] = conninfo
++    env = dict(os.environ)
++    env.setdefault("MG_DATABASE_URL", conninfo)
+     return env
+ 
+ 

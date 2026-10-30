@@ -1,0 +1,12 @@
+test-id: tests/test_mg_up_history_schema.py::test_a_history_schema_of_any_name_is_found_on_later_runs
+--- a/src/stabilize/cli/history_location.py
++++ b/src/stabilize/cli/history_location.py
+@@ -98,7 +98,7 @@
+             continue
+         layout = Layout(target, schema)
+         sums = {migretti_checksum(layout.stage(text)) for text in texts} | layout.placeholder_checksums(rerun)
+-        if set(state.applied.values()) & sums:
++        if not set(state.applied.values()) & sums:
+             owners.append(schema)
+         else:
+             taken[schema] = "the migretti history of stabilize's tables in another schema"

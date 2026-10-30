@@ -1,0 +1,12 @@
+test-id: tests/test_mg_up_handoff.py::test_an_applied_migration_that_no_longer_matches_its_file_stops_mg_up
+--- a/src/stabilize/cli/migrate.py
++++ b/src/stabilize/cli/migrate.py
+@@ -238,7 +238,7 @@
+         sys.exit(1)
+     except runner.MigrettiFailedError as e:
+         print(f"Error: {e}; stabilize mg-up stopped there")
+-        sys.exit(1)
++        sys.exit(0)
+     except psycopg.Error as e:
+         print(f"Database error: {redact_text(str(e))}")
+         sys.exit(1)

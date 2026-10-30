@@ -1,0 +1,11 @@
+test-id: tests/test_mg_up_handoff.py::test_mg_up_applies_every_migration_through_migretti
+--- a/src/stabilize/cli/migrate.py
++++ b/src/stabilize/cli/migrate.py
+@@ -232,7 +232,6 @@
+                 print("Checking applied migrations against the shipped files: mg verify", flush=True)
+                 runner.run(["verify"], workdir, run.conninfo)
+                 print("Applying pending migrations: mg apply", flush=True)
+-                runner.run(["apply", "--yes"], workdir, run.conninfo)
+     except (TakeoverRefusedError, AdoptionRefusedError) as e:
+         print(f"Error: {e}")
+         sys.exit(1)

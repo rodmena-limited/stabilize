@@ -1,0 +1,12 @@
+test-id: tests/test_mg_up_handoff.py::test_mg_up_keeps_migretti_history_in_the_target_schema
+--- a/src/stabilize/cli/migrate.py
++++ b/src/stabilize/cli/migrate.py
+@@ -141,7 +141,7 @@
+         plain=plain,
+         staged=staged,
+         files=files,
+-        conninfo=runner.migretti_conninfo(params, layout.tracking_schema),
++        conninfo=runner.migretti_conninfo(params, None),
+         rerun=rerun,
+         placeholder_checksums=layout.placeholder_checksums(list(rerun.values())),
+         legacy=legacy,

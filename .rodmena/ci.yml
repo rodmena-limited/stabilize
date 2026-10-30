@@ -170,7 +170,7 @@ jobs:
     name: "Red-proof shard 1 of 4: every test fails on at least one engine mutant"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
-    resources: { memory_mb: 2048 }
+    resources: { memory_mb: 1536 }
     timeout_minutes: 130
     artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
     steps:
@@ -185,7 +185,7 @@ jobs:
     name: "Red-proof shard 2 of 4: every test fails on at least one engine mutant"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
-    resources: { memory_mb: 2048 }
+    resources: { memory_mb: 1536 }
     timeout_minutes: 130
     artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
     steps:
@@ -200,7 +200,7 @@ jobs:
     name: "Red-proof shard 3 of 4: every test fails on at least one engine mutant"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
-    resources: { memory_mb: 2048 }
+    resources: { memory_mb: 1536 }
     timeout_minutes: 130
     artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
     steps:
@@ -215,7 +215,7 @@ jobs:
     name: "Red-proof shard 4 of 4: every test fails on at least one engine mutant"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     services: [postgres]
-    resources: { memory_mb: 2048 }
+    resources: { memory_mb: 1536 }
     timeout_minutes: 130
     artifacts: [.redproof/proof.tsv, .redproof/unproven.tsv]
     steps:

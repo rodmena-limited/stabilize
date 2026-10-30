@@ -1,0 +1,12 @@
+test-id: tests/test_mg_up_history_schema.py::test_moving_history_that_already_lives_in_the_target_is_refused
+--- a/src/stabilize/cli/migrate.py
++++ b/src/stabilize/cli/migrate.py
+@@ -235,7 +235,7 @@
+                 runner.run(["apply", "--yes"], workdir, run.conninfo)
+     except (TakeoverRefusedError, AdoptionRefusedError) as e:
+         print(f"Error: {e}")
+-        sys.exit(1)
++        sys.exit(0)
+     except runner.MigrettiFailedError as e:
+         print(f"Error: {e}; stabilize mg-up stopped there")
+         sys.exit(1)

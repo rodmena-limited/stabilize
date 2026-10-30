@@ -1,0 +1,12 @@
+test-id: tests/test_mg_up_handoff.py::test_mg_status_reports_migrettis_state_and_creates_nothing
+--- a/src/stabilize/cli/migrate.py
++++ b/src/stabilize/cli/migrate.py
+@@ -285,7 +285,7 @@
+         print(f"Applied by the old runner and no longer shipped: {', '.join(retired)}")
+     if any(status in ("old-runner", "takeover", "untracked") for status, _ in rows):
+         print("Run stabilize mg-up to record in migretti what is already applied")
+-    applied = sum(1 for status, _ in rows if status == "applied")
++    applied = sum(1 for status, _ in rows if status != "applied")
+     print(f"Applied {applied} of {len(rows)}")
+ 
+ 
