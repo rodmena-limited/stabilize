@@ -1,7 +1,7 @@
 test-id: tests/test_dynamic_routing.py::TestJumpToStageMessage::test_message_defaults
 --- a/src/stabilize/queue/messages.py
 +++ b/src/stabilize/queue/messages.py
-@@ -247,7 +247,7 @@
+@@ -249,7 +249,7 @@
          jump_outputs: Outputs to make available to target stage
      """
  

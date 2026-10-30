@@ -384,18 +384,18 @@ def create_release_workflow(
         test_paths = " ".join(
             [
                 "golden_standard_tests/",
-                "tests/test_workflow_control_flow_patterns.py",
-                "tests/test_diamond_pattern.py",
-                "tests/test_status_edge_cases.py",
-                "tests/test_jump_edge_cases.py",
+                "tests/test_workflow_control_flow_patterns*.py",
+                "tests/test_diamond_pattern*.py",
+                "tests/test_status_edge_cases*.py",
+                "tests/test_jump_edge_cases*.py",
                 "tests/test_synthetic_stage_edge_cases.py",
-                "tests/test_failure_scenarios.py",
+                "tests/test_failure_scenarios*.py",
                 "tests/test_dlq_atomicity.py",
                 "tests/test_concurrency.py",
-                "tests/test_stage_data_flow.py",
+                "tests/stage_data_flow/",
                 "tests/test_dynamic_routing.py",
-                "tests/test_critical_corner_cases.py",
-                "tests/test_mission_critical_certification.py",
+                "tests/test_critical_corner_cases*.py",
+                "tests/test_mission_critical_certification*.py",
             ]
         )
         # Only run SQLite backend to avoid Docker dependency and cut runtime from ~9min to ~2min

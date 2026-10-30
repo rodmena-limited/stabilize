@@ -18,6 +18,7 @@ from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
 from resilient_circuit.exceptions import RetryLimitReached
 
 from stabilize.errors import ConcurrencyError
+from stabilize.handlers.event_recording import EventRecordingMixin
 from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus, validate_transition
 from stabilize.models.task import TaskExecution
@@ -69,7 +70,7 @@ class MessageHandler(ABC, Generic[M]):
         pass
 
 
-class StabilizeHandler(MessageHandler[M], ABC):
+class StabilizeHandler(EventRecordingMixin, MessageHandler[M], ABC):
     """
     Base handler with common utilities.
 
@@ -98,44 +99,6 @@ class StabilizeHandler(MessageHandler[M], ABC):
         self.retry_delay = retry_delay or timedelta(seconds=self.handler_config.handler_retry_delay_seconds)
         # Event recording is optional - use provided recorder or global instance
         self._event_recorder = event_recorder
-
-    # ========== Event Recording ==========
-
-    @property
-    def event_recorder(self) -> EventRecorder | None:
-        """Get the event recorder, preferring instance over global."""
-        if self._event_recorder is not None:
-            return self._event_recorder
-        # Fall back to global recorder if available
-        from stabilize.events.recorder import get_event_recorder
-
-        return get_event_recorder()
-
-    def set_event_context(
-        self,
-        workflow_id: str,
-        *,
-        actor: str | None = None,
-        causation_id: str | None = None,
-    ) -> None:
-        """Set event context for correlation tracking.
-
-        Call this at the start of handler processing to establish
-        correlation context for any events recorded during handling.
-
-        Args:
-            workflow_id: The workflow ID for correlation.
-            actor: Who triggered this action, where a real identity is known.
-                Defaults to "system".
-            causation_id: The id of the event that caused this action.
-        """
-        from stabilize.events.recorder import set_event_context
-
-        set_event_context(
-            correlation_id=workflow_id,
-            causation_id=causation_id,
-            actor=actor or "system",
-        )
 
     # ========== Execution Retrieval ==========
 

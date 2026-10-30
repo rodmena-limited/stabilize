@@ -10,10 +10,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, cast
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 
 from stabilize.models.stage import SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
+from stabilize.queue.message_contract import MessageContractError as MessageContractError
+from stabilize.queue.message_contract import _adapter_for
 
 
 @dataclass
@@ -464,17 +466,6 @@ def get_message_type_name(message: Message) -> str:
     return message.__class__.__name__
 
 
-class MessageContractError(ValueError):
-    """A persisted message does not match its declared field types.
-
-    The queue row was written by another process, and on a rolling deploy by
-    another VERSION. Splatting it into a dataclass checks field NAMES and no
-    field TYPE, so a wrong value is admitted here and detonates later inside a
-    handler -- reaching the DLQ attributed to whatever code touched it rather
-    than to the deserialization that accepted it.
-    """
-
-
 def _validated(message_class: type[Message], data: dict[str, Any], type_name: str) -> Message:
     adapter = _adapter_for(message_class)
     try:
@@ -485,16 +476,6 @@ def _validated(message_class: type[Message], data: dict[str, Any], type_name: st
             for err in exc.errors()[:4]
         )
         raise MessageContractError(f"{type_name} failed its field contract: {problems}") from None
-
-
-_ADAPTERS: dict[type[Message], Any] = {}
-
-
-def _adapter_for(message_class: type[Message]) -> Any:
-    adapter = _ADAPTERS.get(message_class)
-    if adapter is None:
-        adapter = _ADAPTERS.setdefault(message_class, TypeAdapter(message_class))
-    return adapter
 
 
 def create_message_from_dict(type_name: str, data: dict[str, Any]) -> Message:

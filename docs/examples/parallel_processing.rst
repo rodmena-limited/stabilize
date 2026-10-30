@@ -23,5 +23,5 @@ This example demonstrates parallel execution branches joining into a final aggre
         ]
     )
 
-See ``examples/python-example.py`` (Example 3) for the full runnable code.
+See ``examples/python_example_pipelines.py`` (Example 3) for the full code; ``examples/python-example.py`` runs it.
 
