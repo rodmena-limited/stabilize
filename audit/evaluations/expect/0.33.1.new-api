@@ -1,1 +1,2 @@
 tests/test_mg_up_internals.py
+tests/test_cli_check_grants.py

@@ -21,3 +21,5 @@ tests/test_mg_up_engine_tables.py::test_the_event_store_tables_follow_the_target
 tests/test_mg_up_engine_tables.py::test_the_event_store_refusal_names_mg_up|the event store's refusal does not name stabilize mg-up
 tests/test_mg_up_engine_tables.py::test_a_dml_only_runtime_role_can_lease_tasks_after_mg_up|task leasing could not start for a DML-only role after mg-up
 tests/test_mg_up_engine_tables.py::test_task_leasing_on_an_old_database_names_mg_up_and_creates_nothing|task leasing created its own table at runtime
+tests/test_audit_control_matrix.py::test_a_resume_that_lands_before_the_task_is_parked_is_not_lost[sqlite]|C18 resume between RunTask and PauseTask: workflow RUNNING
+tests/test_audit_control_matrix.py::test_a_resume_that_lands_before_the_task_is_parked_is_not_lost[postgres]|C18 resume between RunTask and PauseTask: workflow RUNNING
