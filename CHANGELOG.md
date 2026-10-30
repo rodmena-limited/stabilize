@@ -55,6 +55,14 @@ history in migretti without running any migration SQL again.
 - **`PostgresEventStore` kept its pool when it refused a database.** Each refused
   construction left one hold on a connection pool. It now releases the hold before
   raising.
+- **A resume that arrived just after a pause could leave a workflow stuck (#96).**
+  Pausing a running stage takes two messages: `RunTask` sees the workflow PAUSED, then
+  `PauseTask` parks the task. A resume landing between them found no parked stage, set
+  the workflow RUNNING, and the stage was then parked with nothing left to resume it.
+  The workflow stayed RUNNING with a PAUSED stage. `PauseTask` and
+  `Orchestrator.unpause` now take turns on a per-workflow lock and read the state inside
+  it. A task whose workflow was resumed is re-dispatched, not parked. Found by an
+  intermittent CI failure that also occurred on published 0.33.1.
 - **`mg-check-grants` checks the 8 core engine tables.** The event store and
   task-lease tables are left out because only deployments using those features need
   grants on them.
