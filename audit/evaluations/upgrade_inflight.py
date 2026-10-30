@@ -11,7 +11,7 @@ different interpreter:
 
   A  every workflow started under the old release reaches SUCCEEDED
   B  each polling task resumes from its persisted poll count: total polls per
-     task == 6 (at least 2 before), none restarted from zero
+     task == POLLS_TOTAL (at least 2 before), none restarted from zero
   C  CONTROL a workflow started under the new release in the same database SUCCEEDS
 
 The task module is this file, so both interpreters register the same tasks.
@@ -31,6 +31,7 @@ from typing import Any
 logging.basicConfig(level=logging.CRITICAL)
 
 CALLS: dict[str, int] = {}
+POLLS_TOTAL = 30
 STATE_FILE = Path(os.environ.get("UPGRADE_STATE_FILE", "/tmp/stabilize-upgrade-state.json"))
 
 
@@ -48,7 +49,7 @@ def _registry() -> Any:
         def execute(self, stage: StageExecution) -> TaskResult:
             CALLS[stage.execution.id] = CALLS.get(stage.execution.id, 0) + 1
             polls = int(stage.context.get("polls", 0)) + 1
-            if polls < 6:
+            if polls < POLLS_TOTAL:
                 return TaskResult.running(context={"polls": polls})
             return TaskResult.success(outputs={"polls": polls})
 
@@ -124,7 +125,7 @@ def phase_old(dsn: str) -> int:
     before = {i: _polls(store, i) for i in ids}
     STATE_FILE.write_text(json.dumps({"ids": ids, "before": before}))
     print(f"[INFO] old phase: {len(ids)} workflows, polls before upgrade={sorted(before.values())}, queued={queue.size()}")
-    return 0 if all(2 <= v < 6 for v in before.values()) else 1
+    return 0 if all(2 <= v < POLLS_TOTAL for v in before.values()) else 1
 
 
 def phase_new(dsn: str) -> int:
@@ -153,9 +154,10 @@ def phase_new(dsn: str) -> int:
     print(f"[{'PASS' if ok_a else 'FAIL'}] A old-release workflows finish: {sorted(statuses.values())}")
     before = state["before"]
     resumed = {i: CALLS.get(i, 0) for i in ids}
-    ok_b = all(resumed[i] == 6 - int(before[i]) for i in ids)
+    ok_b = all(resumed[i] == POLLS_TOTAL - int(before[i]) for i in ids)
     detail = [f"{before[i]}+{resumed[i]}" for i in ids]
-    print(f"[{'PASS' if ok_b else 'FAIL'}] B polls resume from persisted count (before+after, want sum 6): {detail}")
+    verdict = "PASS" if ok_b else "FAIL"
+    print(f"[{verdict}] B polls resume from persisted count (before+after, want sum {POLLS_TOTAL}): {detail}")
     c = store.retrieve(control.id).status.name
     ok_c = c == "SUCCEEDED"
     print(f"[{'PASS' if ok_c else 'FAIL'}] C CONTROL new-release workflow: {c}")
