@@ -1,5 +1,9 @@
 version: 1
 
+concurrency:
+  group: ci-${{ ref }}
+  cancel_in_progress: true
+
 jobs:
   lint:
     name: "Lint and types"
