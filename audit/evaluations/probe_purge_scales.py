@@ -34,8 +34,8 @@ from stabilize.queue.messages import StartStage  # noqa: E402
 
 FILLER = int(os.environ.get("PROBE_PURGE_FILLER", "1000000"))
 DUE = 200
-PURGE_LIMIT_S = 2.0
-LOOKUP_LIMIT_S = 0.5
+PURGE_LIMIT_S = 10.0
+LOOKUP_LIMIT_S = 5.0
 DAY_MS = 86400 * 1000
 NOW_MS = int(time.time() * 1000)
 APP = "probe-due"

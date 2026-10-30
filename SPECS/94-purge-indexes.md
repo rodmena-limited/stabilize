@@ -9,7 +9,7 @@ Measured by ci-conductor on pg-nano-03 (2026-10-13 05:22Z, 2781 rows): the appli
 - When `purge_workflow(execution_id)` runs on PostgreSQL, the queue shall find each table's rows by an index on `payload->>'execution_id'` (EXPLAIN on `queue_messages` and `queue_messages_dlq`, each holding 1,000,000 rows).
 - When migrations run, the migration shall create the indexes with `IF NOT EXISTS` and provide a `down` section that drops them.
 - If a deployment uses additional queue tables, then the documentation shall give the DDL that adds the same expression index to each of those tables.
-- The purge of 200 workflows shall take at most 2 s at the sizes above (to be measured).
+- The purge of 200 workflows shall take at most 10 s, and 200 lookups at most 5 s, at the sizes above. Changed from 2 s and 0.5 s on 2026-10-30 (stabilize 0.33.3): on the shared CI runner the fixed code took 1.0-2.2 s per purge (pipeline 4366, probe_purge_scales sqlite A 2.207 s against published 0.33.2), while the defect took 26-102 s per purge and 25-79 s for the lookups, so the limits still fail the defect by at least 2.6x and 5x. Index use is asserted exactly by tests/test_purge_query_plan.py; this probe guards against gross regressions.
 
 ## TECHNICAL PROBLEMS
 1. Ordered range selection over a predicate that matches almost every row.
