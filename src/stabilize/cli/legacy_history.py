@@ -111,7 +111,12 @@ def check_history(shipped: dict[str, str], state: MigrettiState) -> None:
         )
 
 
-def plan_takeover(legacy: dict[str, str], shipped: dict[str, str], state: MigrettiState) -> TakeoverPlan:
+def plan_takeover(
+    legacy: dict[str, str],
+    shipped: dict[str, str],
+    state: MigrettiState,
+    placeholder_checksums: frozenset[str] = frozenset({PLACEHOLDER_CHECKSUM}),
+) -> TakeoverPlan:
     """Decide what must be recorded in migretti so that it knows what the old runner applied.
 
     *legacy* maps filename to the MD5 the old runner recorded, *shipped* maps
@@ -127,7 +132,7 @@ def plan_takeover(legacy: dict[str, str], shipped: dict[str, str], state: Migret
     for mig_id, name in sorted(shipped_ids.items()):
         recorded = state.applied.get(mig_id)
         current = migretti_checksum(shipped[name])
-        if recorded == PLACEHOLDER_CHECKSUM and mig_id not in legacy_ids:
+        if recorded in placeholder_checksums and mig_id not in legacy_ids:
             raise TakeoverRefusedError(
                 f"migretti records a takeover placeholder for {name}, but {LEGACY_TABLE} has no record "
                 "of the old runner applying it"
@@ -138,7 +143,7 @@ def plan_takeover(legacy: dict[str, str], shipped: dict[str, str], state: Migret
         if recorded is None:
             plan.placeholders.append(mig_id)
             plan.fixes.append(mig_id)
-        elif recorded == PLACEHOLDER_CHECKSUM:
+        elif recorded in placeholder_checksums:
             plan.fixes.append(mig_id)
         elif recorded != current:
             raise TakeoverRefusedError(

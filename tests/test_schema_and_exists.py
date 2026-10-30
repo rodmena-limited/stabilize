@@ -196,7 +196,9 @@ class TestUrlQueryParametersReachLibpq:
         params = connection_params(parse_db_url(url))
         libpq = conninfo_to_dict(url)
         for key in ("host", "port", "dbname", "user"):
-            assert str(params[key]) == str(libpq[key]), f"CLI {key}={params[key]!r}, libpq and the runtime {libpq[key]!r}"
+            assert str(params[key]) == str(libpq[key]), (
+                f"CLI {key}={params[key]!r}, libpq and the runtime {libpq[key]!r}"
+            )
 
     def test_schema_is_stabilize_s_own_and_not_sent_to_libpq(self) -> None:
         from stabilize.cli.config import connection_params, parse_db_url
@@ -212,4 +214,4 @@ class TestUrlQueryParametersReachLibpq:
         from stabilize.cli.config import connection_params, parse_db_url
 
         params = connection_params(parse_db_url("postgresql://u:p@h/db"))
-        assert set(params) == {"host", "port", "user", "dbname", "password"}
+        assert set(params) == {"host", "user", "dbname", "password"}

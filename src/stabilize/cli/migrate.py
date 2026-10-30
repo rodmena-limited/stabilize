@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from stabilize.cli import migretti_runner as runner
+from stabilize.cli.adoption import (
+    ENGINE_MARKER_TABLE,
+    AdoptionRefusedError,
+    adoption_level,
+    legacy_rows_for,
+    models_for,
+    read_catalog,
+)
 from stabilize.cli.config import (
     apply_schema_override,
     connection_params,
@@ -15,9 +24,9 @@ from stabilize.cli.config import (
     validate_schema_name,
 )
 from stabilize.cli.driver import announce_driver, import_psycopg
+from stabilize.cli.history_location import Layout, current_schema, history_candidates, resolve, survey
 from stabilize.cli.legacy_history import (
     LEGACY_TABLE,
-    PLACEHOLDER_CHECKSUM,
     RETIRED_MIGRATIONS,
     MigrettiState,
     TakeoverRefusedError,
@@ -25,19 +34,45 @@ from stabilize.cli.legacy_history import (
     plan_takeover,
 )
 from stabilize.cli.migrations import get_migration_files, migration_id, migration_text, migretti_checksum
-from stabilize.redaction import redact_text
+from stabilize.redaction import redact_db_url, redact_text
 
 MG_UP_LOCK_CLASS = 0x53544D47
 MG_UP_LOCK_KEY = "stabilize mg-up"
 DEFAULT_LOCK_TIMEOUT_SECONDS = 900.0
 
 
-def _target(db_url: str | None) -> tuple[dict[str, Any], str | None]:
+@dataclass
+class _Run:
+    layout: Layout
+    plain: dict[str, str]
+    staged: dict[str, str]
+    files: list[tuple[str, bytes]]
+    conninfo: str
+    rerun: dict[str, list[str]]
+    placeholder_checksums: frozenset[str]
+    legacy: dict[str, str] | None
+    shipped_ids: set[str] = field(default_factory=set)
+
+
+def _target(db_url: str | None, history_flag: str | None) -> tuple[dict[str, Any], str | None, str | None]:
     config = apply_schema_override(parse_db_url(db_url)) if db_url else load_config()
     schema = config.get("schema")
     if schema:
         schema = validate_schema_name(schema)
-    return connection_params(config), schema
+    history = history_flag or config.get("history_schema")
+    if history:
+        history = validate_schema_name(history)
+    return connection_params(config), schema, history
+
+
+def _describe(params: dict[str, Any]) -> str:
+    from psycopg import pq
+
+    defaults = {o.keyword.decode(): o.val.decode() for o in pq.Conninfo.get_defaults() if o.val}
+    shown = {key: params.get(key) or defaults.get(key) for key in ("user", "host", "port", "dbname")}
+    user = shown["user"] or "?"
+    target = "{}@{}:{}/{}".format(user, shown["host"] or "local socket", shown["port"] or 5432, shown["dbname"] or user)
+    return redact_db_url(target)
 
 
 def _require_migretti() -> None:
@@ -76,60 +111,129 @@ def _read_legacy(conn: Any) -> dict[str, str] | None:
         return {str(name): str(checksum) for name, checksum in cur.fetchall()}
 
 
-def _take_over(legacy: dict[str, str] | None, shipped: dict[str, str], workdir: Path, conninfo: str) -> None:
-    state = runner.snapshot(workdir, conninfo)
-    check_history(shipped, state)
+def _prepare(
+    conn: Any, params: dict[str, Any], schema: str | None, history: str | None, *, lenient: bool = False
+) -> _Run:
+    raw = get_migration_files()
+    plain = {name: migration_text(content) for name, content in raw}
+    shipped_ids = {migration_id(name) for name in plain}
+    if schema:
+        conn.execute(f'SET search_path TO "{schema}"')
+    target = schema or current_schema(conn)
+    legacy = _read_legacy(conn)
+    rerun = {migration_id(m.filename): m.rerun_on_adoption for m in models_for(plain)}
+    reader = runner.migretti_conninfo(params, target)
+    with runner.staged([]) as empty:
+        target_state = runner.snapshot(empty, reader)
+        others = runner.snapshot_schemas(empty, reader, history_candidates(conn, target))
+    elsewhere = survey(target, others, plain.values(), list(rerun.values()), shipped_ids)
+    try:
+        layout = resolve(target, history, target_state, shipped_ids, legacy is not None, elsewhere)
+    except TakeoverRefusedError as e:
+        if not lenient:
+            raise
+        print(f"Warning: {e}")
+        layout = Layout(target)
+    staged = {name: layout.stage(text) for name, text in plain.items()}
+    files = raw if layout.history is None else [(name, staged[name].encode("utf-8")) for name, _ in raw]
+    return _Run(
+        layout=layout,
+        plain=plain,
+        staged=staged,
+        files=files,
+        conninfo=runner.migretti_conninfo(params, layout.tracking_schema),
+        rerun=rerun,
+        placeholder_checksums=layout.placeholder_checksums(list(rerun.values())),
+        legacy=legacy,
+        shipped_ids=shipped_ids,
+    )
+
+
+def _untracked_rows(conn: Any, run: _Run, state: MigrettiState) -> dict[str, str] | None:
+    ours = set(state.applied) & run.shipped_ids
+    if ours and not any(state.applied[i] in run.placeholder_checksums for i in ours):
+        return None
+    catalog = read_catalog(conn, run.layout.target)
+    if ENGINE_MARKER_TABLE not in catalog.tables:
+        return None
+    models = models_for(run.plain)
+    level = adoption_level(models, catalog)
+    print(
+        f"stabilize's tables in {run.layout.target} have no migration history; the catalog matches the first "
+        f"{level} migration(s), up to {models[level - 1].filename}"
+    )
+    return legacy_rows_for(run.plain, level)
+
+
+def _take_over(conn: Any, run: _Run, workdir: Path) -> None:
+    state = runner.snapshot(workdir, run.conninfo)
+    check_history(run.staged, state)
+    legacy, adopting = run.legacy, False
+    if legacy is None:
+        legacy = _untracked_rows(conn, run, state)
+        adopting = legacy is not None
     if legacy is None:
         return
-    plan = plan_takeover(legacy, shipped, state)
+    plan = plan_takeover(legacy, run.staged, state, run.placeholder_checksums)
     for name in plan.retired:
         print(f"{name} was applied by the old runner and is no longer shipped; it is not recorded in migretti")
     if not plan.needed:
         return
-    names = {migration_id(name): name for name in shipped}
+    names = {migration_id(name): name for name in run.staged}
+    source = "the catalog shows" if adopting else f"{LEGACY_TABLE} says"
     print(
-        f"Recording in migretti {len(plan.fixes)} migration(s) that {LEGACY_TABLE} says were applied; "
-        "their SQL is not run again"
+        f"Recording in migretti {len(plan.fixes)} migration(s) that {source} were applied; their SQL is not run again"
     )
     if plan.placeholders:
-        files = runner.placeholder_files({mig_id: names[mig_id] for mig_id in plan.placeholders})
+        files = [
+            (names[i], run.layout.placeholder(run.rerun.get(i) if adopting else None).encode("utf-8"))
+            for i in plan.placeholders
+        ]
         with runner.staged(files) as placeholder_dir:
-            runner.run(["apply", "--yes", "--allow-out-of-order"], placeholder_dir, conninfo, echo=False)
-        print(f"  migretti recorded {len(plan.placeholders)} placeholder entries (SELECT 1) under those ids")
+            runner.run(["apply", "--yes", "--allow-out-of-order"], placeholder_dir, run.conninfo, echo=False)
+        print(f"  migretti recorded {len(plan.placeholders)} placeholder entries under those ids")
     for mig_id in plan.fixes:
-        runner.run(["fix", mig_id, "--applied", "--yes"], workdir, conninfo, echo=False)
+        runner.run(["fix", mig_id, "--applied", "--yes"], workdir, run.conninfo, echo=False)
         print(f"  mg fix {mig_id} --applied: {names[mig_id]} recorded with the shipped file's checksum")
-    print(f"{LEGACY_TABLE} is left unchanged as the record of what the old runner applied and when")
+    if not adopting:
+        print(f"{LEGACY_TABLE} is left unchanged as the record of what the old runner applied and when")
 
 
-def mg_up(db_url: str | None = None, lock_timeout: float = DEFAULT_LOCK_TIMEOUT_SECONDS) -> None:
-    """Apply pending migrations with migretti, first handing over any history the old runner recorded."""
+def mg_up(
+    db_url: str | None = None,
+    lock_timeout: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
+    history_schema: str | None = None,
+) -> None:
+    """Apply pending migrations with migretti, first handing over any history migretti does not hold."""
     psycopg = import_psycopg()
-    params, schema = _target(db_url)
+    params, schema, history = _target(db_url, history_schema)
     if not lock_timeout > 0:
         print("Error: --lock-timeout must be a positive number of seconds")
         sys.exit(1)
     _require_migretti()
-    files = get_migration_files()
-    shipped = {name: migration_text(raw) for name, raw in files}
     announce_driver(psycopg)
+    print(f"Database: {_describe(params)}")
 
     try:
-        conninfo = runner.migretti_conninfo(params, schema)
         with psycopg.connect(**params, autocommit=True) as conn:
             _acquire_lock(psycopg, conn, lock_timeout)
+            run = _prepare(conn, params, schema, history)
             if schema:
                 conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
-                conn.execute(f'SET search_path TO "{schema}"')
                 print(f"Target schema: {schema}")
-            legacy = _read_legacy(conn)
-            with runner.staged(files) as workdir:
-                _take_over(legacy, shipped, workdir, conninfo)
+            if run.layout.history:
+                conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{run.layout.history}"')
+                print(
+                    f"stabilize's migretti history is kept in schema {run.layout.history}; "
+                    f"its tables are in {run.layout.target}"
+                )
+            with runner.staged(run.files) as workdir:
+                _take_over(conn, run, workdir)
                 print("Checking applied migrations against the shipped files: mg verify", flush=True)
-                runner.run(["verify"], workdir, conninfo)
+                runner.run(["verify"], workdir, run.conninfo)
                 print("Applying pending migrations: mg apply", flush=True)
-                runner.run(["apply", "--yes"], workdir, conninfo)
-    except TakeoverRefusedError as e:
+                runner.run(["apply", "--yes"], workdir, run.conninfo)
+    except (TakeoverRefusedError, AdoptionRefusedError) as e:
         print(f"Error: {e}")
         sys.exit(1)
     except runner.MigrettiFailedError as e:
@@ -140,68 +244,80 @@ def mg_up(db_url: str | None = None, lock_timeout: float = DEFAULT_LOCK_TIMEOUT_
         sys.exit(1)
 
 
-def _status_rows(shipped: dict[str, str], legacy: dict[str, str], state: MigrettiState) -> list[tuple[str, str]]:
+def _status_rows(run: _Run, state: MigrettiState, untracked: set[str]) -> list[tuple[str, str]]:
+    legacy = run.legacy or {}
     rows: list[tuple[str, str]] = []
-    for name, text in shipped.items():
-        recorded = state.applied.get(migration_id(name))
-        if migration_id(name) in state.failed:
+    for name, text in run.staged.items():
+        mig_id = migration_id(name)
+        recorded = state.applied.get(mig_id)
+        if mig_id in state.failed:
             status = "failed"
         elif recorded == migretti_checksum(text):
             status = "applied"
-        elif recorded == PLACEHOLDER_CHECKSUM:
+        elif recorded in run.placeholder_checksums:
             status = "takeover"
         elif recorded is not None:
             status = "MISMATCH"
         elif name in legacy:
             status = "old-runner"
+        elif name in untracked:
+            status = "untracked"
         else:
             status = "pending"
         rows.append((status, name))
     return rows
 
 
-def _print_status(shipped: dict[str, str], legacy: dict[str, str], state: MigrettiState, schema: str | None) -> None:
-    where = f"schema {schema}" if schema else "the connection's default schema"
+def _print_status(run: _Run, state: MigrettiState, untracked: set[str]) -> None:
+    layout = run.layout
+    where = f"schema {layout.history} (tables in {layout.target})" if layout.history else f"schema {layout.target}"
     print(f"Tracked by migretti in {where}")
     print(f"{'Status':<11} {'Migration'}")
     print("-" * 80)
-    rows = _status_rows(shipped, legacy, state)
+    rows = _status_rows(run, state, untracked)
     for status, name in rows:
         print(f"{status:<11} {name}")
-    shipped_ids = {migration_id(name) for name in shipped}
-    foreign = sorted(set(state.applied) - shipped_ids)
+    foreign = sorted(set(state.applied) - run.shipped_ids)
     if foreign:
         print(f"In migretti's history but not shipped by this stabilize: {', '.join(foreign)}")
-    retired = sorted(name for name in legacy if name in RETIRED_MIGRATIONS)
+    retired = sorted(name for name in (run.legacy or {}) if name in RETIRED_MIGRATIONS)
     if retired:
         print(f"Applied by the old runner and no longer shipped: {', '.join(retired)}")
-    if any(status in ("old-runner", "takeover") for status, _ in rows):
-        print(f"Run stabilize mg-up to record in migretti what {LEGACY_TABLE} says the old runner applied")
+    if any(status in ("old-runner", "takeover", "untracked") for status, _ in rows):
+        print("Run stabilize mg-up to record in migretti what is already applied")
     applied = sum(1 for status, _ in rows if status == "applied")
     print(f"Applied {applied} of {len(rows)}")
 
 
-def mg_status(db_url: str | None = None) -> None:
+def mg_status(db_url: str | None = None, history_schema: str | None = None) -> None:
     """Report migration state from migretti, without creating or altering anything."""
     psycopg = import_psycopg()
-    params, schema = _target(db_url)
+    params, schema, history = _target(db_url, history_schema)
     _require_migretti()
-    files = get_migration_files()
-    shipped = {name: migration_text(raw) for name, raw in files}
     announce_driver(psycopg)
+    print(f"Database: {_describe(params)}")
 
+    untracked: set[str] = set()
     try:
-        conninfo = runner.migretti_conninfo(params, schema)
         with psycopg.connect(**params, autocommit=True) as conn:
-            if schema:
-                conn.execute(f'SET search_path TO "{schema}"')
-            legacy = _read_legacy(conn) or {}
-        with runner.staged(files) as workdir:
-            state = runner.snapshot(workdir, conninfo)
+            run = _prepare(conn, params, schema, history, lenient=True)
+            with runner.staged([]) as empty:
+                state = runner.snapshot(empty, run.conninfo)
+            if run.legacy is None and not set(state.applied) & run.shipped_ids:
+                catalog = read_catalog(conn, run.layout.target)
+                if ENGINE_MARKER_TABLE in catalog.tables:
+                    try:
+                        level = adoption_level(models_for(run.plain), catalog)
+                        untracked = set(sorted(run.plain)[:level])
+                    except AdoptionRefusedError as e:
+                        print(f"Warning: {e}")
+    except (TakeoverRefusedError, AdoptionRefusedError) as e:
+        print(f"Error: {e}")
+        sys.exit(1)
     except runner.MigrettiFailedError as e:
         print(f"Error: {e}")
         sys.exit(1)
     except psycopg.Error as e:
         print(f"Database error: {redact_text(str(e))}")
         sys.exit(1)
-    _print_status(shipped, legacy, state, schema)
+    _print_status(run, state, untracked)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from stabilize.cli.config import (
     apply_schema_override,
@@ -47,6 +47,12 @@ def prompt() -> None:
     print(PROMPT_TEXT)
 
 
+def monitor_target(config: dict[str, Any]) -> tuple[str, str | None]:
+    """The URL and schema the monitor reads, resolved as mg-up and the engine resolve them."""
+    schema = config.get("schema")
+    return build_db_url(config), validate_schema_name(schema) if schema else None
+
+
 def monitor(
     db_url: str | None,
     app_filter: str | None,
@@ -56,16 +62,17 @@ def monitor(
     """Launch the real-time monitoring dashboard."""
     from stabilize.monitor import run_monitor
 
-    # Create store based on db_url
+    schema: str | None = None
     if db_url is None:
-        # Try to load from config
         try:
             config = load_config()
-            db_url = build_db_url(config)
         except SystemExit:
             print("Error: No database configuration found.")
             print("Provide --db-url or set up mg.yaml / MG_DATABASE_URL")
             sys.exit(1)
+        db_url, schema = monitor_target(config)
+    elif not db_url.startswith("sqlite"):
+        db_url, schema = monitor_target(apply_schema_override(parse_db_url(db_url)))
 
     # Determine store type from URL
     store: WorkflowStore
@@ -85,9 +92,9 @@ def monitor(
             from stabilize.persistence.postgres import PostgresWorkflowStore
             from stabilize.queue import PostgresQueue
 
-            store = PostgresWorkflowStore(db_url)
+            store = PostgresWorkflowStore(db_url, schema=schema)
             try:
-                queue = PostgresQueue(db_url)
+                queue = PostgresQueue(db_url, schema=schema)
             except Exception:
                 queue = None
         except ModuleNotFoundError as exc:

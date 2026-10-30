@@ -13,7 +13,7 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
-from stabilize.cli.legacy_history import PLACEHOLDER_SQL, MigrettiState
+from stabilize.cli.legacy_history import MigrettiState
 from stabilize.redaction import redact_against
 
 SCRUBBED_ENV = (
@@ -33,20 +33,27 @@ _SNAPSHOT_SCRIPT = f"""
 import json, sys
 from migretti.db import get_connection, tracking_tables_exist
 from migretti.core import get_applied_migrations_details, check_failed_migrations
+
+def read(conn):
+    if not tracking_tables_exist(conn):
+        return {{"tracking": False, "applied": {{}}, "failed": []}}
+    return {{
+        "tracking": True,
+        "applied": {{i: c for i, _n, c in get_applied_migrations_details(conn)}},
+        "failed": [i for i, _n in check_failed_migrations(conn)],
+    }}
+
 try:
     conn = get_connection()
 except Exception as exc:
     sys.stderr.write(f"{{type(exc).__name__}}: {{exc}}\\n")
     raise SystemExit(1)
 try:
-    if tracking_tables_exist(conn):
-        state = {{
-            "tracking": True,
-            "applied": {{i: c for i, _n, c in get_applied_migrations_details(conn)}},
-            "failed": [i for i, _n in check_failed_migrations(conn)],
-        }}
-    else:
-        state = {{"tracking": False, "applied": {{}}, "failed": []}}
+    states = {{}}
+    for schema in sys.argv[1:]:
+        conn.execute("SELECT set_config('search_path', %s, false)", ('"' + schema.replace('"', '""') + '"',))
+        states[schema] = read(conn)
+    state = states if sys.argv[1:] else read(conn)
 finally:
     conn.close()
 sys.stdout.write({_SNAPSHOT_MARKER!r} + json.dumps(state) + "\\n")
@@ -105,10 +112,6 @@ def staged(migrations: Sequence[tuple[str, bytes]]) -> Iterator[Path]:
         yield root
 
 
-def placeholder_files(ids_to_names: dict[str, str]) -> list[tuple[str, bytes]]:
-    return [(name, PLACEHOLDER_SQL.encode("utf-8")) for _mig_id, name in sorted(ids_to_names.items())]
-
-
 def _command(args: Sequence[str]) -> list[str]:
     return [sys.executable, "-P", "-m", "migretti", *args]
 
@@ -140,10 +143,17 @@ def run(args: Sequence[str], workdir: Path, conninfo: str, *, echo: bool = True)
     return lines
 
 
-def snapshot(workdir: Path, conninfo: str) -> MigrettiState:
-    """Read migretti's history in the target schema through migretti's own read functions."""
+def _state(data: dict[str, Any]) -> MigrettiState:
+    return MigrettiState(
+        tracking=bool(data["tracking"]),
+        applied={str(k): str(v) for k, v in data["applied"].items()},
+        failed=tuple(str(i) for i in data["failed"]),
+    )
+
+
+def _read_states(workdir: Path, conninfo: str, schemas: Sequence[str]) -> Any:
     proc = subprocess.run(
-        [sys.executable, "-P", "-c", _SNAPSHOT_SCRIPT],
+        [sys.executable, "-P", "-c", _SNAPSHOT_SCRIPT, *schemas],
         cwd=workdir,
         env=migretti_env(conninfo),
         stdin=subprocess.DEVNULL,
@@ -153,12 +163,19 @@ def snapshot(workdir: Path, conninfo: str) -> MigrettiState:
     )
     for line in proc.stdout.splitlines():
         if line.startswith(_SNAPSHOT_MARKER):
-            data = json.loads(line[len(_SNAPSHOT_MARKER) :])
-            return MigrettiState(
-                tracking=bool(data["tracking"]),
-                applied={str(k): str(v) for k, v in data["applied"].items()},
-                failed=tuple(str(i) for i in data["failed"]),
-            )
+            return json.loads(line[len(_SNAPSHOT_MARKER) :])
     for line in (proc.stdout + proc.stderr).splitlines():
         print(f"  migretti: {redact_against(line, conninfo)}", flush=True)
     raise MigrettiFailedError("state read", proc.returncode or 1)
+
+
+def snapshot(workdir: Path, conninfo: str) -> MigrettiState:
+    """Read migretti's history in the connection's schema through migretti's own read functions."""
+    return _state(_read_states(workdir, conninfo, []))
+
+
+def snapshot_schemas(workdir: Path, conninfo: str, schemas: Sequence[str]) -> dict[str, MigrettiState]:
+    """Read migretti's history in each of *schemas*, in one migretti process."""
+    if not schemas:
+        return {}
+    return {str(schema): _state(data) for schema, data in _read_states(workdir, conninfo, schemas).items()}

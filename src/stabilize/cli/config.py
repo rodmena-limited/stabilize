@@ -87,50 +87,71 @@ def connection_params(config: dict[str, Any]) -> dict[str, Any]:
 
     Query parameters carried on the URL -- sslmode, sslrootcert, sslcert,
     sslkey, connect_timeout, application_name and the rest -- are passed
-    through. The URL's own components win over a same-named query parameter.
+    through. A query parameter wins over the same component of the URL, as
+    libpq resolves it. A URL without a user or port leaves them to libpq's
+    own defaults (PGUSER, PGPORT, the operating system user), as the engine
+    does; a mg.yaml mapping without them keeps the user postgres and port 5432.
     """
-    params: dict[str, Any] = dict(config.get("connect_params") or {})
     components = {
         "host": config.get("host"),
         "port": config.get("port", 5432),
         "user": config.get("user", "postgres"),
         "dbname": config.get("dbname"),
     }
-    params.update({key: value for key, value in components.items() if value is not None})
+    params: dict[str, Any] = {key: value for key, value in components.items() if value is not None}
     password = config.get("password")
     if password:
         params["password"] = password
+    params.update(config.get("connect_params") or {})
     return params
 
 
 def build_db_url(config: dict[str, Any]) -> str:
-    """Build a ``postgres://`` URL from *config*.
+    """Build a ``postgres://`` URL that libpq resolves as ``connection_params(config)``.
 
-    Userinfo is percent-encoded, and the password is omitted entirely when
-    absent rather than emitted as an empty value.
+    Every libpq parameter is kept, query parameters such as sslmode included,
+    and stabilize's own settings (schema, history_schema) are left out. Userinfo
+    is percent-encoded, and the password is omitted when absent rather than
+    emitted as an empty value.
     """
-    if config.get("conninfo"):
-        return str(config["conninfo"])
-    user = quote(str(config.get("user", "postgres")), safe="")
-    password = config.get("password")
-    userinfo = f"{user}:{quote(str(password), safe='')}" if password else user
-    host = config.get("host", "localhost")
-    port = config.get("port", 5432)
-    dbname = quote(str(config.get("dbname", "stabilize")), safe="")
-    return f"postgres://{userinfo}@{host}:{port}/{dbname}"
+    params = connection_params(config)
+    user = params.pop("user", None)
+    password = params.pop("password", None)
+    host = params.pop("host", None)
+    port = params.pop("port", None)
+    dbname = params.pop("dbname", None)
+    userinfo = quote(str(user), safe="") if user else ""
+    if password:
+        userinfo = f"{userinfo}:{quote(str(password), safe='')}"
+    query = {key: str(value) for key, value in params.items()}
+    netloc = ""
+    if host and not str(host).startswith("/") and "," not in str(host):
+        netloc = f"[{host}]" if ":" in str(host) else str(host)
+        if port:
+            netloc = f"{netloc}:{port}"
+    else:
+        if host:
+            query["host"] = str(host)
+        if port:
+            query["port"] = str(port)
+    if userinfo:
+        netloc = f"{userinfo}@{netloc}"
+    path = "/" + quote(str(dbname), safe="") if dbname else "/"
+    return f"postgres://{netloc}{path}" + (f"?{urlencode(query)}" if query else "")
 
 
 def apply_schema_override(config: dict[str, Any]) -> dict[str, Any]:
-    """Apply MG_SCHEMA to *config* when the URL did not carry a schema.
+    """Apply MG_SCHEMA and MG_HISTORY_SCHEMA to *config* when the URL did not carry them.
 
     Shared by both entry points. load_config() applied this and the --db-url
     path did not, so `MG_SCHEMA=x stabilize mg-status --db-url ...` silently
     looked in public and reported the migration table as nonexistent, which
     reads as "nothing has ever been applied" rather than "wrong schema".
     """
-    schema = os.environ.get("MG_SCHEMA")
-    if schema:
-        config["schema"] = schema
+    for key, variable in (("schema", "MG_SCHEMA"), ("history_schema", "MG_HISTORY_SCHEMA")):
+        value = os.environ.get(variable)
+        if value and not config.get(key):
+            config[key] = value
     return config
 
 
@@ -147,10 +168,11 @@ def parse_db_url(url: str) -> dict[str, Any]:
 
     user = match.group("user")
     password = match.group("password")
+    port = match.group("port")
     config: dict[str, Any] = {
         "host": match.group("host"),
-        "port": int(match.group("port") or 5432),
-        "user": unquote(user) if user else "postgres",
+        "port": int(port) if port else None,
+        "user": unquote(user) if user else None,
         "password": unquote(password) if password is not None else None,
         "dbname": unquote(match.group("dbname")),
     }
@@ -158,9 +180,10 @@ def parse_db_url(url: str) -> dict[str, Any]:
     query = match.group("query")
     if query:
         parsed = parse_qs(query, keep_blank_values=True)
-        schema_values = parsed.pop("schema", None)
-        if schema_values:
-            config["schema"] = schema_values[-1]
+        for key in OWN_PARAMETERS:
+            values = parsed.pop(key, None)
+            if values:
+                config[key] = values[-1]
         # Every remaining query parameter is a libpq connection parameter and
         # must survive. Dropping them silently contacted a TLS-mandatory
         # database with no TLS settings at all -- a security control the
@@ -170,30 +193,36 @@ def parse_db_url(url: str) -> dict[str, Any]:
     return config
 
 
-_KV_SCHEMA_RE = re.compile(r"(?:^|\s)schema\s*=\s*(\S+)")
+OWN_PARAMETERS = ("schema", "history_schema")
 
 
-def _split_schema(url: str) -> tuple[str, str | None]:
-    """Remove stabilize's own ``schema`` setting, which libpq does not know, from a conninfo string."""
+def _split_own(url: str) -> tuple[str, dict[str, str]]:
+    """Remove stabilize's own settings, which libpq does not know, from a conninfo string."""
+    own: dict[str, str] = {}
     if "://" in url:
         base, question, query = url.partition("?")
         if not question:
-            return url, None
+            return url, own
         parsed = parse_qs(query, keep_blank_values=True)
-        schema_values = parsed.pop("schema", None)
+        for key in OWN_PARAMETERS:
+            values = parsed.pop(key, None)
+            if values:
+                own[key] = values[-1]
         rest = urlencode([(key, value) for key, values in parsed.items() for value in values])
-        return (f"{base}?{rest}" if rest else base), (schema_values[-1] if schema_values else None)
-    found = _KV_SCHEMA_RE.search(url)
-    if not found:
-        return url, None
-    return (url[: found.start()] + url[found.end() :]).strip(), found.group(1)
+        return (f"{base}?{rest}" if rest else base), own
+    for key in OWN_PARAMETERS:
+        found = re.search(rf"(?:^|\s){key}\s*=\s*(\S+)", url)
+        if found:
+            own[key] = found.group(1)
+            url = (url[: found.start()] + url[found.end() :]).strip()
+    return url, own
 
 
 def _parse_libpq_conninfo(url: str) -> dict[str, Any]:
     """Parse any connection string libpq accepts: keyword/value, or a URL without a host (socket)."""
     from psycopg.conninfo import conninfo_to_dict
 
-    text, schema = _split_schema(url.strip())
+    text, own = _split_own(url.strip())
     try:
         params: dict[str, Any] = dict(conninfo_to_dict(text))
     except Exception:
@@ -215,8 +244,7 @@ def _parse_libpq_conninfo(url: str) -> dict[str, Any]:
         "dbname": params.pop("dbname", None),
         "conninfo": url,
     }
-    if schema:
-        config["schema"] = schema
+    config.update(own)
     if params:
         config["connect_params"] = params
     return config

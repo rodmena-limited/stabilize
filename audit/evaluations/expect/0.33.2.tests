@@ -29,3 +29,8 @@ tests/test_cli_url_resolution.py::test_the_cli_connects_where_libpq_and_the_runt
 tests/test_cli_url_resolution.py::test_an_explicit_schema_in_the_url_beats_mg_schema|MG_SCHEMA replaced the URL's own schema
 tests/test_cli_url_resolution.py::test_history_schema_is_stabilize_s_own_and_never_sent_to_libpq[url]|history_schema was not read
 tests/test_schema_and_exists.py::TestUrlQueryParametersReachLibpq::test_a_url_resolves_to_the_target_libpq_and_the_runtime_use|libpq and the runtime
+tests/test_cli_url_resolution.py::test_the_cli_connects_where_libpq_and_the_runtime_would[no-user-or-port]|the CLI and libpq resolve
+tests/test_cli_url_resolution.py::test_the_monitor_connects_where_mg_up_does[tls]|the monitor's URL resolves to
+tests/test_cli_url_resolution.py::test_the_monitor_connects_where_mg_up_does[socket]|the monitor's URL resolves to
+tests/test_cli_url_resolution.py::test_the_monitor_connects_where_mg_up_does[keyword]|the monitor's URL resolves to
+tests/test_cli_url_resolution.py::test_the_monitor_connects_where_mg_up_does[ipv6]|the monitor's URL resolves to

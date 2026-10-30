@@ -8,19 +8,25 @@ migretti keeps one history table, `_migrations`, per schema, under a fixed name.
 ## EARS spec
 - R1. Where a history schema is given (`--history-schema NAME`, `history_schema=` in the URL, or `MG_HISTORY_SCHEMA`), mg-up shall create stabilize's tables in the target schema and keep stabilize's migretti history (`_migrations`, `_migrations_log`) only in the history schema.
 - R2. While a history schema is in use, mg-up shall neither read nor write the target schema's `_migrations`, and the host's own `mg verify`, `mg status` and `mg apply` shall behave as if stabilize were absent.
-- R3. When no history schema is given and the default history schema (`stabilize_history`) already holds stabilize's history for this target, mg-up and mg-status shall use it.
+- R3. When no history schema is given and exactly one schema other than the target holds stabilize's history for this target, mg-up and mg-status shall use it, whatever its name. A history belongs to the target whose name its recorded checksums carry (the staged files set `search_path` to the target). When no schema holds it and `stabilize_history` exists with no rows, mg-up shall use `stabilize_history`.
 - R4. When no history schema is given and the target schema holds another project's migretti history and a `stabilize_migrations` table, mg-up shall use `stabilize_history` and take over `stabilize_migrations` in place, without running migration SQL again and without moving any table.
 - R5. If the target schema holds another project's migretti history and neither R3 nor R4 applies, then mg-up shall exit 1 before any change and name `--history-schema` and the move procedure.
 - R6. The history schema shall differ from the target schema; if it does not, then mg-up shall exit 1 before any change.
 - R7. mg-up shall be correct in both orders a host can run: stabilize first on an empty database then the host's migrations, and the host's migrations first then stabilize.
 - R8. mg-status shall report from the history schema in use and create nothing.
 - R9. When a database URL carries a connection parameter both in the URL itself (host, port, user, password, dbname) and as a query parameter, the CLI shall connect with the query parameter's value, as libpq and the runtime engine do.
+- R11. If a history schema is given and another schema already holds stabilize's history for this target, then mg-up shall exit 1 before any change and name that schema.
+- R12. If the history schema (given, or `stabilize_history` chosen by R4) holds another project's migretti history, or stabilize's history for a different target schema, then mg-up shall exit 1 before any change; a second stabilize target in the same database without a history schema keeps its history in its own schema.
+- R13. If more than one schema holds stabilize's history for this target, then mg-up shall exit 1 before any change and name them.
+- R14. If mg-up refuses, then it shall not have created the target schema or the history schema.
 - R10. If a stabilize migration file is marked `-- migrate: no-transaction`, then mg-up shall refuse a history schema run before any change (the schema redirect needs a transaction).
 
 ## Technical problems
 1. Directing migretti's tracking tables to one schema and stabilize's DDL to another, with migretti unchanged.
 2. Choosing the history location deterministically on every run, and on existing databases without operator action.
 3. One URL resolving to two targets between the CLI and libpq.
+
+4. Telling which target a history schema belongs to, when one database holds several stabilize schemas.
 
 ## Solution domains
 - PostgreSQL name resolution: unqualified `CREATE TABLE` and unqualified references resolve through `search_path`; `SET LOCAL` lasts until the end of the transaction (PostgreSQL manual, Schemas and SET).
@@ -34,6 +40,10 @@ migretti keeps one history table, `_migrations`, per schema, under a fixed name.
 - search_path "target, history" [REJECTED: `_migrations` resolves to the host's table in the target].
 - Move stabilize's tables to their own schema [REJECTED as the only path: impossible for hosts whose migrations depend on the tables in place; kept as documented guidance].
 - Write rows into a differently named history table [REJECTED: migretti's table name is fixed; writing its tables directly bypasses migretti].
+### Finding the history on later runs
+- Read every schema holding a `_migrations` table through migretti's own read functions (one process, search_path set per schema) and match the recorded checksums against the staged files and placeholders for this target [CHOSEN]: works for any history schema name, and tells two stabilize targets in one database apart, because the staged text carries the target name.
+- Look only for a schema named `stabilize_history` [REJECTED: found during 0.33.3 implementation; a history schema with another name is invisible to a later run without the flag, which then installs a second history in the target, and a second stabilize target in the same database writes into the first one's history].
+- Record the target name in a stabilize-owned table [REJECTED: a second source of truth beside migretti's history].
 ### URL precedence
 - Query parameters win, as libpq [CHOSEN]: the runtime engine passes the URL to libpq unchanged, so the CLI must resolve the same target.
 - Refuse when both are present [REJECTED: a valid libpq URL would stop working in the CLI only].

@@ -21,6 +21,7 @@ from tests.mg_support import (
     search_path_url,
     stabilize,
     stage,
+    with_schema,
 )
 
 psycopg = pytest.importorskip("psycopg")
@@ -113,3 +114,41 @@ def test_moving_history_that_already_lives_in_the_target_is_refused(db: str) -> 
     result = stabilize("mg-up", "--db-url", db, "--history-schema", HISTORY)
     assert result.returncode == 1, f"mg-up split stabilize's history across two schemas: {output(result)}"
     assert not relation_exists(db, f"{HISTORY}._migrations")
+
+
+def test_a_history_schema_of_any_name_is_found_on_later_runs(db: str, tmp_path: Path) -> None:
+    host = stage(tmp_path, [HOST_TENANT])
+    assert mg(host, db, "apply", "--yes").returncode == 0
+    assert stabilize("mg-up", "--db-url", db, "--history-schema", "stab_meta").returncode == 0
+    again = stabilize("mg-up", "--db-url", db)
+    assert again.returncode == 0, f"a later mg-up did not find the history in stab_meta: {output(again)}"
+    assert "kept in schema stab_meta" in output(again) and "No pending migrations" in output(again), output(again)
+    status = stabilize("mg-status", "--db-url", db)
+    assert f"Applied {SHIPPED_COUNT} of {SHIPPED_COUNT}" in output(status), output(status)
+
+
+def test_two_stabilize_schemas_in_one_database_keep_their_own_histories(db: str, tmp_path: Path) -> None:
+    first = stabilize("mg-up", "--db-url", with_schema(db, "orch_a"), "--history-schema", HISTORY)
+    assert first.returncode == 0, output(first)
+    second = stabilize("mg-up", "--db-url", with_schema(db, "orch_b"))
+    assert second.returncode == 0, f"a second stabilize schema took the first one's history: {output(second)}"
+    assert relation_exists(db, "orch_b.pipeline_executions") and relation_exists(db, "orch_b._migrations")
+    assert migretti_counts(stage(tmp_path), search_path_url(db, "orch_b")) == (SHIPPED_COUNT, 0)
+    assert _stabilize_history(tmp_path, db) == SHIPPED_COUNT
+    again = stabilize("mg-up", "--db-url", with_schema(db, "orch_a"))
+    assert again.returncode == 0 and f"kept in schema {HISTORY}" in output(again), output(again)
+
+
+def test_a_history_schema_that_belongs_elsewhere_is_refused(db: str, tmp_path: Path) -> None:
+    assert stabilize("mg-up", "--db-url", with_schema(db, "orch_a"), "--history-schema", HISTORY).returncode == 0
+    other = stabilize("mg-up", "--db-url", with_schema(db, "orch_b"), "--history-schema", HISTORY)
+    assert other.returncode == 1, f"mg-up wrote orch_b's history into orch_a's: {output(other)}"
+    assert "another schema" in output(other), output(other)
+    with psycopg.connect(db) as conn:
+        made = conn.execute("SELECT count(*) FROM pg_namespace WHERE nspname = 'orch_b'").fetchone()[0]
+    assert made == 0, "mg-up created the target schema before refusing"
+    host = stage(tmp_path, [HOST_TENANT])
+    assert mg(host, db, "apply", "--yes").returncode == 0
+    into_host = stabilize("mg-up", "--db-url", with_schema(db, "orch_c"), "--history-schema", "public")
+    assert into_host.returncode == 1 and "another project's migretti history" in output(into_host), output(into_host)
+    assert migretti_counts(host, db) == (1, 0), "the host's history changed"

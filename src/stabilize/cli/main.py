@@ -30,12 +30,22 @@ def main() -> None:
         metavar="SECONDS",
         help="How long to wait for another mg-up on the same database (default 900)",
     )
+    up_parser.add_argument(
+        "--history-schema",
+        metavar="SCHEMA",
+        help="Keep stabilize's migretti history in this schema, apart from the target schema's own",
+    )
 
     # mg-status command
     status_parser = subparsers.add_parser("mg-status", help="Show migration status as migretti records it")
     status_parser.add_argument(
         "--db-url",
         help="Database URL (postgres://user:pass@host:port/dbname)",
+    )
+    status_parser.add_argument(
+        "--history-schema",
+        metavar="SCHEMA",
+        help="Read stabilize's migretti history from this schema",
     )
 
     grants_parser = subparsers.add_parser(
@@ -146,13 +156,13 @@ def main() -> None:
 
     if args.command == "mg-up":
         try:
-            mg_up(args.db_url, lock_timeout=args.lock_timeout)
+            mg_up(args.db_url, lock_timeout=args.lock_timeout, history_schema=args.history_schema)
         except MigrationsNotFoundError as exc:
             print(exc, file=sys.stderr)
             sys.exit(1)
     elif args.command == "mg-status":
         try:
-            mg_status(args.db_url)
+            mg_status(args.db_url, history_schema=args.history_schema)
         except MigrationsNotFoundError as exc:
             print(exc, file=sys.stderr)
             sys.exit(1)
