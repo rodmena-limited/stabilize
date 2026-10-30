@@ -453,9 +453,21 @@ stabilize mg-status --db-url postgres://user:pass@host:5432/dbname
 on the migration files shipped in the package, and migretti records them in `_migrations`
 in the target schema. On a database set up by stabilize 0.33.1 or earlier, the first
 `mg-up` records the existing history in migretti without running the SQL again and leaves
-the old `stabilize_migrations` table in place. Concurrent runs against one database wait
-for each other, up to `--lock-timeout` seconds (default 900). A project with its own
-migretti migrations should put stabilize in its own schema with `?schema=`.
+the old `stabilize_migrations` table in place. A schema that has stabilize's tables and no
+migration history is adopted: `mg-up` matches the catalog against the migrations' SQL,
+records the migrations already in place without running them, and applies the rest.
+Concurrent runs against one database wait for each other, up to `--lock-timeout` seconds
+(default 900).
+
+A project whose own migretti history is in the same schema as stabilize's tables keeps
+stabilize's history apart with `--history-schema` (the tables stay where they are):
+
+```bash
+stabilize mg-up --db-url postgres://user:pass@host:5432/dbname --history-schema stabilize_history
+```
+
+Later runs find that schema without the flag. The CLI reads a URL as libpq does, so a
+query parameter such as `?dbname=` wins over the same part of the URL.
 
 By default tables land in the connection's default schema (usually `public`).
 To keep stabilize's tables in a dedicated schema, add `?schema=` to the URL
@@ -469,8 +481,10 @@ stabilize mg-up --db-url "postgres://user:pass@host:5432/dbname?schema=stabilize
 # postgres://user:pass@host:5432/dbname?options=-csearch_path%3Dstabilize
 ```
 
-To move an existing install out of `public`, run once (then use the
-schema-qualified URLs above from then on):
+To move an existing install out of `public`, run the script below once, then run
+`mg-up` with `?schema=stabilize` and use the schema-qualified URLs above from then on.
+If your own project has a table with one of these names in `public` (`events` and
+`snapshots` are common), take it out of the list first.
 
 ```sql
 CREATE SCHEMA IF NOT EXISTS stabilize;
@@ -480,7 +494,8 @@ BEGIN
            WHERE table_schema = 'public' AND (table_name LIKE 'stabilize%'
               OR table_name IN ('pipeline_executions','stage_executions','task_executions',
                                 'queue_messages','queue_messages_dlq','processed_messages',
-                                'stage_claims','workflow_signals'))
+                                'stage_claims','workflow_signals','events','snapshots',
+                                'event_subscriptions','task_leases'))
   LOOP EXECUTE format('ALTER TABLE public.%I SET SCHEMA stabilize', t);
   END LOOP;
 END $$;

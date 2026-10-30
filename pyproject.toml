@@ -1,6 +1,6 @@
 [project]
 name = "stabilize"
-version = "0.33.2"
+version = "0.33.3"
 description = "Stabilize Workflow Orchestration - Agentic Parallel Workflows"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -62,12 +62,12 @@ dependencies = [
 [project.optional-dependencies]
 postgres = [
     "psycopg[pool]>=3.0",
-    "psycopg-pool>=3.1",
+    "psycopg-pool>=3.2.0",
     "migretti>=0.10.0",
 ]
 c = [
     "psycopg[c,pool]>=3.0",
-    "psycopg-pool>=3.1",
+    "psycopg-pool>=3.2.0",
     "migretti>=0.10.0",
 ]
 cli = [
@@ -83,7 +83,7 @@ process = [
 ]
 all = [
     "psycopg[pool]>=3.0",
-    "psycopg-pool>=3.1",
+    "psycopg-pool>=3.2.0",
     "migretti>=0.10.0",
     "pyyaml>=6.0",
     "structlog>=24.0",
@@ -93,7 +93,7 @@ all = [
 ]
 dev = [
     "psycopg[pool]>=3.0",
-    "psycopg-pool>=3.1",
+    "psycopg-pool>=3.2.0",
     "migretti>=0.10.0",
     "pyyaml>=6.0",
     "pytest>=8.0",

@@ -1,5 +1,86 @@
 # Changelog
 
+## [0.33.3] - 2026-10-30
+
+Fixes the bugs reported against 0.33.2 (#97, #98, #99) and adds the pool features
+Casebound asked for (#100, #101). **Run `stabilize mg-up` once after upgrading, as for 0.33.2.**
+Installs that 0.33.2 refused, because stabilize's tables share a schema with the
+host's own migretti history, now upgrade with no change to the command.
+
+### Fixed
+
+- **stabilize's history can live apart from a host's schema (#99).** migretti keeps one
+  history table per schema, so 0.33.2 refused a schema that held a host project's
+  migretti history. `mg-up` now keeps stabilize's history in a schema of its own
+  (`--history-schema`, `history_schema=` in the URL, or `MG_HISTORY_SCHEMA`; default
+  name `stabilize_history`) while its tables stay in the target schema. An existing
+  install beside a host's history is taken over in place, with no table moved and no
+  migration SQL run again. Later runs find `stabilize_history` by themselves. A fresh
+  install that the host's migrations depend on runs `mg-up --history-schema
+  stabilize_history` first, then the host's migrations. Reported by Trace and
+  Provenance.
+- **`mg-up` adopts a schema that has stabilize's tables but no migration history (#98).**
+  It reads the catalog, finds the lowest migration level the schema matches (tables,
+  columns with their types, indexes and sequence types, as each migration's own SQL
+  leaves them), records that level in migretti without running its SQL and applies
+  the rest. A schema that matches no level is refused before any change, with the
+  closest level and its mismatches named. `mg-status` marks such migrations
+  `untracked`.
+- **The CLI connects where the engine does (#99).** Since 0.26.0 the CLI let a URL's
+  own host, port, user and dbname win over the same query parameter. libpq, and
+  therefore the running engine, does the opposite, so `mg-up` could migrate one
+  database while the engine used another. The CLI now resolves a URL as libpq does.
+  A URL without a user or port also leaves them to libpq (`PGUSER`, `PGPORT`, the
+  operating system user), where the CLI used to put in `postgres` and `5432`. An
+  `mg.yaml` without them still gets `postgres` and `5432`.
+- **`stabilize monitor` reads the database and schema that `mg-up` wrote.** Without
+  `--db-url` it rebuilt the URL from `MG_DATABASE_URL` or `mg.yaml` and dropped every
+  query parameter, `sslmode` and the other TLS settings included, and the schema.
+  With `--db-url ...?schema=` it passed `schema` to libpq, which rejects it.
+- **An explicit `?schema=` beats `MG_SCHEMA`.** The environment variable replaced the
+  URL's own schema, although its documentation said it applied only when the URL named
+  none.
+- **Engine threads run in the caller's context (#101).** The queue processor's poll,
+  recovery and handler threads, retention, the lock heartbeat, the event bus and
+  subscriptions, finalizers and bulkhead tasks now run in a copy of the contextvars
+  context of the code that started them. In 0.33.2 they started with an empty
+  context. The copy includes an OpenTelemetry span and values bound with
+  `bind_context` at `start()`, so start a processor outside a request's span unless its
+  spans should be that request's children. Each handler call and bulkhead task gets a
+  fresh copy, and a value a task sets does not carry over to the next message.
+
+### Added
+
+- **`PoolOptions.check` and `PoolOptions.max_idle` (#100)**, passed to
+  psycopg_pool's `ConnectionPool`. Both are part of the pool key. The psycopg-pool
+  floor is now 3.2.0, the first release with `check`.
+- **`PoolOptions.on_borrow` and `PoolOptions.reset` (#101).** `on_borrow` runs on the
+  connection each time the engine borrows one, before any engine statement, for reads
+  and transactions alike. It must leave the connection outside a transaction, and a
+  borrow it leaves inside one fails with `BorrowHookError`. `reset` runs when the
+  connection is returned. With a session-level tenant setting made in `on_borrow`,
+  cleared in `reset`, and one `QueueProcessor` per tenant started under that tenant's
+  context, one pool serves several tenants under row-level security. A CI test runs
+  that setup on every engine table.
+- **`PostgresEventStore(options=...)`.** The event store took no pool options, so it
+  always used a pool of its own and `on_borrow` never ran for event writes. Pass the
+  workflow store's `PoolOptions` to share its pool.
+
+### Changed
+
+- The red-proof CI job is split into four jobs, each taking a quarter of the test
+  files, to fit inside the pipeline's 3-hour deadline (#97). A new CI job builds the
+  wheel and fails if a tracked file under `src/stabilize` or a migration is missing
+  from it.
+- Source and test files over 500 lines are split (#93), `scripts/release.py`
+  included. Public import paths are unchanged, and `stabilize prompt` prints the same
+  bytes. `MessageContractError`, `PredicatePhase` and `ReadinessResult` are defined in
+  new modules and still import from their old paths. `DockerTask` and the handler
+  classes each gain one mixin base class.
+- The manual red-proofs run as their own CI job and apply their diffs with
+  `git apply`, because the CI image has no `patch`. In 0.33.2 they ran after a
+  red-proof step that never finished and had not run on CI before.
+
 ## [0.33.2] - 2026-10-30
 
 Patch release (#95, reported by casebound-audit on 2026-10-29). `stabilize mg-up` had
