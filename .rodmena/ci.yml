@@ -117,6 +117,17 @@ jobs:
           PATH="$PWD/.old/bin:$PATH" .old/bin/python audit/evaluations/upgrade_inflight.py --phase old
           PATH="$PWD/.venv/bin:$PATH" .venv/bin/python audit/evaluations/upgrade_inflight.py --phase new
 
+  rls:
+    name: "One pool, two tenants under row-level security: verbose output and exit code (#97, #101)"
+    image: containers.rodmena.co.uk/rodmena/ci-python:3.14
+    services: [postgres]
+    timeout_minutes: 15
+    steps:
+      - name: Install
+        run: uv venv .venv && uv pip install -p .venv/bin/python -e '.[dev,observability,cli]'
+      - name: RLS and pool-hook tests, every test named, then pytest's exit code
+        run: PATH="$PWD/.venv/bin:$PATH" STABILIZE_TEST_DSN="$DATABASE_URL" .venv/bin/python -m pytest tests/test_multitenant_rls.py tests/test_pool_hooks.py -v -rA -p no:cacheprovider --timeout 600; rc=$?; echo "pytest exit code $rc"; exit $rc
+
   wheel:
     name: "The built wheel carries every packaged file"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
