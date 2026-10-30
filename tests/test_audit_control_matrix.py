@@ -76,6 +76,10 @@ def _assert_done(wf: Workflow, label: str) -> None:
     assert not stuck, f"C18 {label}: stages left {stuck}"
 
 
+def _ref(wf: Workflow, ref_id: str) -> StageExecution:
+    return next(s for s in wf.stages if s.ref_id == ref_id)
+
+
 def _start(repository: WorkflowStore, queue: Queue, wf: Workflow) -> Workflow:
     repository.store(wf)
     Orchestrator(queue, store=repository).start(wf)
@@ -92,7 +96,7 @@ def test_pause_while_a_stage_runs_and_its_successor_has_not_started(repository: 
             application="c18", name="pause-running", stages=[stage("a", ["poll"]), stage("b", ["ok"], needs={"a"})]
         ),
     )
-    _until(processor, repository, wf.id, lambda w: w.stages[0].status == WorkflowStatus.RUNNING)
+    _until(processor, repository, wf.id, lambda w: _ref(w, "a").status == WorkflowStatus.RUNNING)
     repository.pause(wf.id, paused_by="audit")
     paused = _until(processor, repository, wf.id, lambda w: w.status == WorkflowStatus.PAUSED, seconds=10)
     assert next(s for s in paused.stages if s.ref_id == "b").status == WorkflowStatus.NOT_STARTED
@@ -228,7 +232,7 @@ def test_cancel_of_a_paused_workflow_ends_canceled(repository: WorkflowStore, qu
             application="c18", name="pause-cancel", stages=[stage("a", ["poll"]), stage("b", ["ok"], needs={"a"})]
         ),
     )
-    _until(processor, repository, wf.id, lambda w: w.stages[0].status == WorkflowStatus.RUNNING)
+    _until(processor, repository, wf.id, lambda w: _ref(w, "a").status == WorkflowStatus.RUNNING)
     repository.pause(wf.id, paused_by="audit")
     paused = _until(processor, repository, wf.id, lambda w: w.status == WorkflowStatus.PAUSED, seconds=10)
     Orchestrator(queue, store=repository).cancel(paused, user="audit", reason="stop")
@@ -251,7 +255,7 @@ def test_a_resume_that_lands_before_the_task_is_parked_is_not_lost(
             application="c18", name="resume-race", stages=[stage("a", ["poll"]), stage("b", ["ok"], needs={"a"})]
         ),
     )
-    _until(processor, repository, wf.id, lambda w: w.stages[0].status == WorkflowStatus.RUNNING)
+    _until(processor, repository, wf.id, lambda w: _ref(w, "a").status == WorkflowStatus.RUNNING)
 
     original = PauseTaskHandler.handle
     resumed_first: list[str] = []
