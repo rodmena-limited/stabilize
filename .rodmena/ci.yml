@@ -121,6 +121,8 @@ jobs:
     name: "The built wheel carries every packaged file"
     image: containers.rodmena.co.uk/rodmena/ci-python:3.14
     timeout_minutes: 15
+    artifacts: [dist]
+    artifacts_required: true
     steps:
       - name: Build the sdist and the wheel
         run: uv build --out-dir dist
