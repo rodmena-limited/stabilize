@@ -54,6 +54,26 @@ class TestCheckSyncLease:
 
 class TestProcessorWarnsOnce:
     def test_synchronous_poll_warns_and_only_once(self, caplog: pytest.LogCaptureFixture) -> None:
+        from stabilize.queue.processor.config import QueueProcessorConfig
+        from stabilize.queue.processor.processor import QueueProcessor
+        from stabilize.queue.sqlite import SqliteQueue
+
+        queue = SqliteQueue(connection_string="sqlite:///:memory:", table_name="queue_messages")
+        queue._create_table()
+        queue.lock_duration = timedelta(seconds=60)
+        processor = QueueProcessor(queue, config=QueueProcessorConfig(enable_lock_heartbeat=False))
+
+        with caplog.at_level(logging.WARNING):
+            processor.process_one()
+            processor.process_one()
+            processor.process_one()
+
+        hits = [r for r in caplog.records if "SYNCHRONOUS path" in r.getMessage()]
+        assert len(hits) == 1, f"expected exactly one warning, got {len(hits)}"
+
+    def test_the_heartbeat_renews_the_synchronous_lease_so_a_short_lease_is_not_warned_about(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         from stabilize.queue.processor.processor import QueueProcessor
         from stabilize.queue.sqlite import SqliteQueue
 
@@ -64,11 +84,9 @@ class TestProcessorWarnsOnce:
 
         with caplog.at_level(logging.WARNING):
             processor.process_one()
-            processor.process_one()
-            processor.process_one()
 
         hits = [r for r in caplog.records if "SYNCHRONOUS path" in r.getMessage()]
-        assert len(hits) == 1, f"expected exactly one warning, got {len(hits)}"
+        assert hits == []
 
     def test_adequate_lease_produces_no_warning(self, caplog: pytest.LogCaptureFixture) -> None:
         """Without this, the test above passes by warning unconditionally."""

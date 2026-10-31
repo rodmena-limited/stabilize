@@ -128,7 +128,7 @@ class StartStageStarting(
                 stage_id=message.stage_id,
                 retry_count=retry_count + 1,
             )
-            self.queue.push(new_message, self.retry_delay)
+            self.push_marked(message, "StartStage", (new_message, self.retry_delay))
             return
 
         # WCP-16: Deferred choice - check if a sibling already claimed this group
@@ -228,14 +228,18 @@ class StartStageStarting(
                     stage.mutex_key,
                 )
                 retry_count = getattr(message, "retry_count", 0) or 0
-                self.queue.push(
-                    StartStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=message.stage_id,
-                        retry_count=retry_count + 1,
+                self.push_marked(
+                    message,
+                    "StartStage",
+                    (
+                        StartStage(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=message.stage_id,
+                            retry_count=retry_count + 1,
+                        ),
+                        self.retry_delay,
                     ),
-                    self.retry_delay,
                 )
             else:
                 # Deferred choice already decided - cancel this branch.
@@ -268,10 +272,6 @@ class StartStageStarting(
                 stage.name,
             )
             return
-
-        # WCP-16: Deferred choice - cancel sibling stages in the same group
-        if stage.deferred_choice_group:
-            self._cancel_deferred_choice_siblings(stage, message)
 
         # WCP-9/28/29: Discriminator - mark as fired after claiming
         if stage.join_type == JoinType.DISCRIMINATOR:
@@ -311,6 +311,8 @@ class StartStageStarting(
 
         # Collect messages to push BEFORE starting the transaction
         messages_to_push = self._collect_start_messages(stage, message, planned)
+        if stage.deferred_choice_group:
+            messages_to_push.extend(self._deferred_choice_sibling_messages(stage, message))
 
         # Atomic: store planned stage + push all start messages together
         try:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from stabilize.errors.delivery import DuplicateDeliveryError
 from stabilize.persistence.store import StoreTransaction
 from stabilize.persistence.task_state import Captured, capture, commit_captured, versions
 from stabilize.persistence.tenancy import refuse_foreign_row
@@ -48,13 +49,14 @@ class PostgresTransaction(StoreTransaction):
         # Track stage/task objects and their original versions for rollback
         self._staged_objects: list[tuple[StageExecution | TaskExecution, int]] = []
         self._marked_ids: list[str] = []
+        self._pushed = False
         self._written_tasks: Captured = []
 
     def on_commit(self) -> None:
         """Record the message ids this transaction marked processed, once it has committed."""
         from stabilize.persistence.committed_marks import record_committed
 
-        record_committed(self._marked_ids)
+        record_committed(self._marked_ids, pushed=self._pushed)
         commit_captured(self._written_tasks)
         self._written_tasks = []
 
@@ -126,7 +128,7 @@ class PostgresTransaction(StoreTransaction):
             )
         from datetime import timedelta
 
-        # Use the connection to push, ensuring atomicity
+        self._pushed = True
         self._queue.push(message, delay=timedelta(seconds=delay) if delay else None, connection=self._conn)
 
     def mark_message_processed(
@@ -161,9 +163,9 @@ class PostgresTransaction(StoreTransaction):
                 )
                 owner = cur.fetchone()
                 refuse_foreign_row("processed_messages", message_id, owner["owner"] if owner else None, self._tenant)
-        if inserted:
-            self._marked_ids.append(message_id)
-        return inserted
+                raise DuplicateDeliveryError(message_id)
+        self._marked_ids.append(message_id)
+        return True
 
     def acquire_claim(
         self,

@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING
 
 from stabilize.errors import RecoveryError
 from stabilize.models.status import WorkflowStatus
+from stabilize.persistence.committed_marks import delivery_exempt
 from stabilize.queue.ownership import DEFAULT_TABLE, queue_table_name, workflow_queue_table
 from stabilize.recovery_plan import plan_running_workflow
 
@@ -244,7 +245,8 @@ class WorkflowRecovery:
         from stabilize.queue.messages import StartWaitingWorkflows
 
         try:
-            self.queue.push(StartWaitingWorkflows(pipeline_config_id=pipeline_config_id, purge_queue=False))
+            with delivery_exempt():
+                self.queue.push(StartWaitingWorkflows(pipeline_config_id=pipeline_config_id, purge_queue=False))
         except Exception as e:
             logger.warning("Failed to re-queue StartWaitingWorkflows for %s: %s", pipeline_config_id, e)
             return RecoveryResult(workflow_id=pipeline_config_id, status="failed", message=str(e), failed_pushes=1)
@@ -259,7 +261,8 @@ class WorkflowRecovery:
         if self.queue.has_pending_message_for_execution(workflow.id):
             return RecoveryResult(workflow_id=workflow.id, status="skipped", message="A message is already queued")
         try:
-            self.queue.push(StartWorkflow(execution_type=workflow.type.value, execution_id=workflow.id))
+            with delivery_exempt():
+                self.queue.push(StartWorkflow(execution_type=workflow.type.value, execution_id=workflow.id))
         except Exception as e:
             logger.warning("Failed to re-queue StartWorkflow for %s: %s", workflow.id, e)
             return RecoveryResult(

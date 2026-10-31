@@ -307,6 +307,21 @@ A task that completed while the store was unavailable (for example a statement
 timeout or a pool timeout while saving its result) is not executed again: its
 result is held and saved by the redelivery.
 
+``process_one()`` renews the message lease while the handler runs, with the same
+heartbeat as ``processor.start()``. A handler that outlives ``lock_duration`` therefore
+keeps its message out of other consumers' polls. The short-lease warning is logged
+only when ``enable_lock_heartbeat`` is off or the queue cannot extend a lock.
+
+A handler marks the delivered message processed in the transaction that pushes its
+successors. When a redelivered message reaches a handler whose mark is already
+committed, the mark raises ``DuplicateDeliveryError`` inside that transaction, the
+transaction rolls back, and both drain paths acknowledge the message without pushing
+again. A handler that still pushes on the queue's own connection, or in a transaction
+that does not mark the delivered message, is recorded on
+``processor.delivery_defects`` and logged at ERROR. With ``STABILIZE_STRICT_DELIVERY=1``
+in the environment, ``process_all()`` raises ``DeliveryContractError`` at the end of a
+drain that recorded one.
+
 To drain through transient errors in a script or a test:
 
 .. code-block:: python

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from stabilize.errors import DuplicateDeliveryError
 from stabilize.persistence.store import WorkflowStore
 from stabilize.persistence.transaction import TransactionHelper
 from stabilize.queue import Queue
@@ -16,11 +19,12 @@ def test_atomic_effects_are_rolled_back_for_an_already_processed_source(
     repository: WorkflowStore, queue: Queue
 ) -> None:
     repository.mark_message_processed(message_id="dup-1", handler_type="StartWorkflow", execution_id="w")
-    TransactionHelper(repository, queue).execute_atomic(
-        source_message=_source("dup-1"),
-        messages_to_push=[(StartWorkflow(execution_type="workflow", execution_id="follow-up"), None)],
-        handler_name="Test",
-    )
+    with pytest.raises(DuplicateDeliveryError):
+        TransactionHelper(repository, queue).execute_atomic(
+            source_message=_source("dup-1"),
+            messages_to_push=[(StartWorkflow(execution_type="workflow", execution_id="follow-up"), None)],
+            handler_name="Test",
+        )
     assert queue.size() == 0
 
 

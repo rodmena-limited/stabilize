@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from stabilize.persistence.borrow import EngineBorrower
+from stabilize.persistence.committed_marks import record_bare_push
 from stabilize.persistence.connection import release_pool_once
 from stabilize.persistence.pool_options import PoolOptions, with_schema
 from stabilize.persistence.schema_check import check_postgres_tables
@@ -191,6 +192,7 @@ class PostgresQueue(Queue):
                 with conn.cursor() as cur:
                     cur.execute(sql, params)
                 conn.commit()
+            record_bare_push(message_type)
 
         # Invalidate size cache
         self._size_cache = None

@@ -11,6 +11,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from stabilize.errors import ConcurrencyError
+from stabilize.errors.delivery import DuplicateDeliveryError
 from stabilize.persistence.sqlite.helpers import has_execution_column, has_queue_table_column, insert_stage, upsert_task
 from stabilize.persistence.store import StoreTransaction
 from stabilize.persistence.task_state import Captured, capture, commit_captured
@@ -60,10 +61,15 @@ class AtomicTransaction(StoreTransaction):
         self._queue_table = _queue_table_for(store, queue)
         # Track stage objects and their original versions for rollback
         self._staged_objects: list[tuple[StageExecution | TaskExecution, int]] = []
+        self._marked_ids: list[str] = []
+        self._pushed = False
         self._written_tasks: Captured = []
 
     def on_commit(self) -> None:
-        """Record the task rows this transaction wrote, once it has committed."""
+        """Record the marks and pushes this transaction committed, and the task rows it wrote."""
+        from stabilize.persistence.committed_marks import record_committed
+
+        record_committed(self._marked_ids, pushed=self._pushed)
         commit_captured(self._written_tasks)
         self._written_tasks = []
 
@@ -248,6 +254,7 @@ class AtomicTransaction(StoreTransaction):
                 data[key] = value
         payload = json.dumps(data)
 
+        self._pushed = True
         self._conn.execute(
             f"""
             INSERT INTO {self._queue_table} (
@@ -297,7 +304,9 @@ class AtomicTransaction(StoreTransaction):
                 {"message_id": message_id},
             ).fetchone()
             refuse_foreign_row("processed_messages", message_id, held[0] if held else None, self._tenant)
-        return bool(cursor.rowcount == 1)
+            raise DuplicateDeliveryError(message_id)
+        self._marked_ids.append(message_id)
+        return True
 
     def acquire_claim(
         self,

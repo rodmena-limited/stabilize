@@ -7,9 +7,11 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
+from stabilize.errors.delivery import DeliveryContractError, DuplicateDeliveryError
+from stabilize.persistence.committed_marks import strict_delivery
 from stabilize.queue import Queue
 from stabilize.queue.messages import Message
-from stabilize.queue.processor.lease_guard import check_sync_lease
+from stabilize.queue.processor.lease_guard import check_sync_lease, start_lock_heartbeat
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +20,7 @@ class SynchronousDrainMixin:
     queue: Queue
     config: Any
     _sync_lease_warned: bool
+    delivery_defects: list[Any]
     _processing_lock: threading.Lock
     _last_dlq_check: float
 
@@ -32,6 +35,8 @@ class SynchronousDrainMixin:
         if self._sync_lease_warned:
             return
         self._sync_lease_warned = True
+        if getattr(self.config, "enable_lock_heartbeat", False) and callable(getattr(self.queue, "extend_lock", None)):
+            return
         warning = check_sync_lease(self.queue)
         if warning is not None:
             logger.warning("%s", warning)
@@ -57,16 +62,23 @@ class SynchronousDrainMixin:
         self._warn_once_if_lease_unrenewed()
         message = self.queue.poll_one()
         if message:
+            heartbeat_stop = start_lock_heartbeat(self.queue, self.config, message)
             try:
                 self._handle_message(message)
                 self.queue.ack(message)
                 return True
+            except DuplicateDeliveryError as e:
+                logger.info("%s; acknowledged without a second push", e)
+                self.queue.ack(message)
+                return True
             except Exception as e:
                 logger.error("Error handling message: %s", e, exc_info=True)
-                # Store error context for debugging and auditing
                 message.set_error_context(e)
                 self.queue.reschedule(message, self.config.retry_delay)
                 raise
+            finally:
+                if heartbeat_stop is not None:
+                    heartbeat_stop.set()
         return False
 
     def process_all(self, timeout: float = 60.0) -> int:
@@ -99,6 +111,7 @@ class SynchronousDrainMixin:
 
         try:
             count = 0
+            defects_before = len(self.delivery_defects)
             # Use monotonic time for elapsed time calculations to avoid
             # issues with clock drift, NTP adjustments, or leap seconds
             start = time.monotonic()
@@ -115,7 +128,12 @@ class SynchronousDrainMixin:
                 if self.queue.size() == 0:
                     break
                 time.sleep(0.01)
-
+            if strict_delivery() and len(self.delivery_defects) > defects_before:
+                broken = self.delivery_defects[defects_before:]
+                raise DeliveryContractError(
+                    f"{len(broken)} delivery(ies) committed a push outside the transaction that marked the message: "
+                    + "; ".join(f"{d.message_type} {d.message_id}: {' / '.join(d.reasons)}" for d in broken)
+                )
             return count
         finally:
             self._processing_lock.release()

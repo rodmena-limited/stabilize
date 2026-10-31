@@ -39,6 +39,9 @@ DEADLOCK_BACKOFF = ExponentialDelay(
 )
 
 
+CONTENTION_SQLSTATES = frozenset({"40001", "40P01"})
+
+
 def is_deadlock_error(error: Exception) -> bool:
     """Check if an error is a database deadlock or lock contention error.
 
@@ -59,10 +62,12 @@ def is_deadlock_error(error: Exception) -> bool:
         if "database is locked" in error_msg or "locked" in error_msg:
             return True
 
-    # Check for PostgreSQL deadlock/serialization errors
-    # psycopg2 uses pgcode attribute
-    pgcode = getattr(error, "pgcode", None)
-    if pgcode in ("40001", "40P01"):  # serialization_failure, deadlock_detected
+    from stabilize.persistence.tenancy import sqlstate
+
+    if sqlstate(error) in CONTENTION_SQLSTATES or getattr(error, "pgcode", None) in CONTENTION_SQLSTATES:
+        return True
+    cause = error.__cause__
+    if isinstance(cause, Exception) and cause is not error and sqlstate(cause) in CONTENTION_SQLSTATES:
         return True
 
     # Check error message for common deadlock patterns
@@ -112,10 +117,6 @@ ERROR_HANDLING_RETRY_POLICY = RetryWithBackoffPolicy(
     backoff=ERROR_HANDLING_BACKOFF,
     should_handle=is_deadlock_error,
 )
-
-
-class DuplicateDeliveryError(Exception):
-    """The source message was marked processed by another transaction first."""
 
 
 class TransactionHelper:
@@ -182,12 +183,11 @@ class TransactionHelper:
 
                 if source_message and source_message.message_id:
                     execution_id = getattr(source_message, "execution_id", None)
-                    if not txn.mark_message_processed(
+                    txn.mark_message_processed(
                         message_id=source_message.message_id,
                         handler_type=handler_name,
                         execution_id=execution_id,
-                    ):
-                        raise DuplicateDeliveryError(source_message.message_id)
+                    )
 
                 if during_txn is not None:
                     during_txn()
@@ -197,9 +197,6 @@ class TransactionHelper:
 
         try:
             _execute()
-        except DuplicateDeliveryError as e:
-            logger.info("%s: message %s was already processed by another delivery; rolled back", handler_name, e)
-            return False
         except RetryLimitReached as e:
             logger.error(
                 "Transaction failed after max retries due to lock contention: %s",
@@ -258,21 +255,17 @@ class TransactionHelper:
 
                 if source_message and source_message.message_id:
                     execution_id = getattr(source_message, "execution_id", None)
-                    if not txn.mark_message_processed(
+                    txn.mark_message_processed(
                         message_id=source_message.message_id,
                         handler_type=handler_name,
                         execution_id=execution_id,
-                    ):
-                        raise DuplicateDeliveryError(source_message.message_id)
+                    )
 
                 for msg, delay in messages_to_push:
                     txn.push_message(msg, delay or 0)
 
         try:
             _execute()
-        except DuplicateDeliveryError as e:
-            logger.info("%s: message %s was already processed by another delivery; rolled back", handler_name, e)
-            return False
         except RetryLimitReached as e:
             logger.critical(
                 "CRITICAL: Transaction failed after max retries in error handling path: %s",

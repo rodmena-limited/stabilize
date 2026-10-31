@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from stabilize.dag.readiness import PRUNED, PredicatePhase, evaluate_readiness
 from stabilize.errors import is_transient
+from stabilize.errors.delivery import DuplicateDeliveryError
 from stabilize.handlers.start_stage.starting import StartStageStarting
 from stabilize.models.stage.stage import PLANNING_FAILED
 from stabilize.models.status import ACTIVE_STATUSES, WorkflowStatus
@@ -132,11 +133,13 @@ class StartStageHandler(StartStageStarting):
                         stage.id,
                         readiness.reason,
                     )
-                    self.queue.push(
+                    self.push_marked(
+                        message,
+                        "StartStage",
                         CompleteWorkflow(
                             execution_type=message.execution_type,
                             execution_id=message.execution_id,
-                        )
+                        ),
                     )
                     return
 
@@ -182,6 +185,7 @@ class StartStageHandler(StartStageStarting):
                     # Use atomic transaction and propagate failure downstream
                     with self.repository.transaction(self.queue) as txn:
                         txn.store_stage(stage)
+                        self.mark_in(txn, message, "StartStage")
                         txn.push_message(
                             CompleteStage(
                                 execution_type=message.execution_type,
@@ -206,9 +210,9 @@ class StartStageHandler(StartStageStarting):
                     stage_id=message.stage_id,
                     retry_count=retry_count + 1,
                 )
-                self.queue.push(new_message, self.retry_delay)
+                self.push_marked(message, "StartStage", (new_message, self.retry_delay))
 
-            except (TenancyModeChanged, TenantMismatchError, TenantContextError):
+            except (TenancyModeChanged, TenantMismatchError, TenantContextError, DuplicateDeliveryError):
                 raise
             except Exception as e:
                 if is_transient(e):
@@ -238,6 +242,7 @@ class StartStageHandler(StartStageStarting):
                     # Atomic: store stage + push CompleteStage together
                     with self.repository.transaction(self.queue) as txn:
                         txn.store_stage(fresh_stage)
+                        self.mark_in(txn, message, "StartStage")
                         txn.push_message(
                             CompleteStage(
                                 execution_type=message.execution_type,

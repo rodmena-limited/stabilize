@@ -242,7 +242,7 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
             execution_id=message.execution_id,
             retry_count=retry_count + 1,
         )
-        self.queue.push(new_message, self.retry_delay)
+        self.push_marked(message, "CompleteWorkflow", (new_message, self.retry_delay))
         return None
 
     def _other_branches_incomplete(self, stages: list[StageExecution]) -> bool:

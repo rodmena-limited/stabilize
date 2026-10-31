@@ -91,13 +91,15 @@ class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
             # Check if start time has expired
             if self._is_after_start_time_expiry(execution):
                 logger.warning("Execution %s start time expired, canceling", execution.id)
-                self.queue.push(
+                self.push_marked(
+                    message,
+                    "StartWorkflow",
                     CancelWorkflow(
                         execution_type=message.execution_type,
                         execution_id=message.execution_id,
                         user="system",
                         reason="Could not begin execution before start time expiry",
-                    )
+                    ),
                 )
                 return
 

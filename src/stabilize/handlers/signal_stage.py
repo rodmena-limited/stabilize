@@ -195,12 +195,12 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
                     stage.context["_buffered_signals"] = context_buffered
                     with self.repository.transaction(self.queue) as txn:
                         txn.store_stage(stage)
-                    if message.message_id:
-                        txn.mark_message_processed(
-                            message_id=message.message_id,
-                            handler_type="SignalStage",
-                            execution_id=message.execution_id,
-                        )
+                        if message.message_id:
+                            txn.mark_message_processed(
+                                message_id=message.message_id,
+                                handler_type="SignalStage",
+                                execution_id=message.execution_id,
+                            )
             else:
                 # WCP-23: Transient signal - discard
                 logger.debug(

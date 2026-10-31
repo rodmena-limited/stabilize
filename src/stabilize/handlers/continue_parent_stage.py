@@ -191,7 +191,7 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                 phase=message.phase,
                 retry_count=retry_count + 1,
             )
-            self.queue.push(new_message, self.retry_delay)
+            self.push_marked(message, "ContinueParentStage", (new_message, self.retry_delay))
             return
 
         # All before-stages complete - start parent's first task
@@ -361,7 +361,7 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                 phase=message.phase,
                 retry_count=retry_count + 1,
             )
-            self.queue.push(new_message, self.retry_delay)
+            self.push_marked(message, "ContinueParentStage", (new_message, self.retry_delay))
             return
 
         # All after-stages complete successfully - complete the parent stage

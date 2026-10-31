@@ -11,6 +11,7 @@ from stabilize.models.stage import JoinType, SplitType
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
+    from stabilize.persistence.store.transaction import StoreTransaction
 
 logger = logging.getLogger(__name__)
 
@@ -87,50 +88,22 @@ class CompleteStagesSplitMixin:
         self,
         stage: StageExecution,
         downstream_stages: list[StageExecution],
+        txn: StoreTransaction,
     ) -> None:
-        """Update join tracking context for discriminator and N-of-M joins.
+        """Record *stage* as a completed branch on each discriminator or N-of-M downstream, inside *txn*.
 
-        When a stage completes, check if any of its downstream stages use
-        special join types that need tracking updates.
-
-        Uses retry loop with expected_phase for atomic updates to prevent
-        race conditions when multiple upstreams complete simultaneously.
+        A version conflict raises ConcurrencyError out of the transaction; the caller retries the whole
+        completion with fresh rows.
         """
-        from stabilize.errors import ConcurrencyError
-
         for downstream in downstream_stages:
-            if downstream.join_type == JoinType.DISCRIMINATOR:
-                # Track completed branch for discriminator with retry
-                max_retries = 5
-                for attempt in range(max_retries):
-                    try:
-                        # Re-read downstream to get latest version
-                        fresh_downstream = self.repository.retrieve_stage(downstream.id)
-                        completed = fresh_downstream.context.get("_completed_branches", [])
-                        if stage.ref_id not in completed:
-                            completed.append(stage.ref_id)
-                            fresh_downstream.context["_completed_branches"] = completed
-                            # Use expected_phase for atomic update
-                            self.repository.store_stage(fresh_downstream, expected_phase=fresh_downstream.status.name)
-                        break
-                    except ConcurrencyError:
-                        if attempt == max_retries - 1:
-                            raise
-
-            elif downstream.join_type == JoinType.N_OF_M:
-                # Track completed branch count for N-of-M join with retry
-                max_retries = 5
-                for attempt in range(max_retries):
-                    try:
-                        # Re-read downstream to get latest version
-                        fresh_downstream = self.repository.retrieve_stage(downstream.id)
-                        completed = fresh_downstream.context.get("_completed_branches", [])
-                        if stage.ref_id not in completed:
-                            completed.append(stage.ref_id)
-                            fresh_downstream.context["_completed_branches"] = completed
-                            # Use expected_phase for atomic update
-                            self.repository.store_stage(fresh_downstream, expected_phase=fresh_downstream.status.name)
-                        break
-                    except ConcurrencyError:
-                        if attempt == max_retries - 1:
-                            raise
+            if downstream.join_type not in (JoinType.DISCRIMINATOR, JoinType.N_OF_M):
+                continue
+            fresh_downstream = self.repository.retrieve_stage(downstream.id)
+            if fresh_downstream is None:
+                continue
+            completed = list(fresh_downstream.context.get("_completed_branches", []))
+            if stage.ref_id in completed:
+                continue
+            completed.append(stage.ref_id)
+            fresh_downstream.context["_completed_branches"] = completed
+            txn.store_stage(fresh_downstream, expected_phase=fresh_downstream.status.name)

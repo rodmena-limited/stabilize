@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from stabilize.persistence.committed_marks import delivery_exempt
 from stabilize.queue.messages import SignalStage
 from stabilize.tasks.interface import Task
 from stabilize.tasks.result import TaskResult
@@ -131,17 +132,18 @@ def send_signal(
     if store is not None:
         _assert_stage_in_execution(store, execution_id, stage_id)
 
-    queue.push(
-        SignalStage(
-            execution_type=execution_type,
-            execution_id=execution_id,
-            stage_id=stage_id,
-            signal_name=signal_name,
-            signal_data=signal_data or {},
-            persistent=persistent,
-            user=user,
+    with delivery_exempt():
+        queue.push(
+            SignalStage(
+                execution_type=execution_type,
+                execution_id=execution_id,
+                stage_id=stage_id,
+                signal_name=signal_name,
+                signal_data=signal_data or {},
+                persistent=persistent,
+                user=user,
+            )
         )
-    )
 
 
 def approve(

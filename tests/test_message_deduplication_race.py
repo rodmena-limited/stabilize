@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from stabilize.errors import DuplicateDeliveryError
 from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.task import TaskExecution
@@ -70,7 +71,7 @@ class TestMessageDeduplicationRace:
                     )
                 with lock:
                     results.append(True)
-            except Exception:
+            except DuplicateDeliveryError:
                 with lock:
                     results.append(False)
 
@@ -83,9 +84,7 @@ class TestMessageDeduplicationRace:
         t1.join()
         t2.join()
 
-        # Both should succeed (INSERT OR IGNORE handles duplicates)
-        assert all(results), f"Some threads failed: {results}"
-        assert len(results) == 2
+        assert sorted(results) == [False, True], f"exactly one mark must win: {results}"
 
         if backend == "sqlite":
             test_store.close()
@@ -287,11 +286,12 @@ class TestMessageDeduplicationRace:
 
         message_id = f"stress-test-msg-{time.time()}"
         success_count = 0
+        duplicate_count = 0
         error_count = 0
         lock = threading.Lock()
 
         def mark_processed() -> None:
-            nonlocal success_count, error_count
+            nonlocal success_count, duplicate_count, error_count
             try:
                 with test_store.transaction(test_queue) as txn:
                     txn.mark_message_processed(
@@ -301,6 +301,9 @@ class TestMessageDeduplicationRace:
                     )
                 with lock:
                     success_count += 1
+            except DuplicateDeliveryError:
+                with lock:
+                    duplicate_count += 1
             except Exception:
                 with lock:
                     error_count += 1
@@ -311,9 +314,9 @@ class TestMessageDeduplicationRace:
         for t in threads:
             t.join()
 
-        # All should succeed (no exceptions from duplicate handling)
         assert error_count == 0, f"Got {error_count} errors"
-        assert success_count == 20, f"Only {success_count}/20 succeeded"
+        assert success_count == 1, f"{success_count} marks won; exactly one may"
+        assert duplicate_count == 19, f"{duplicate_count} marks were refused as duplicates; 19 must be"
 
         if backend == "sqlite":
             test_store.close()

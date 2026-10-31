@@ -39,6 +39,7 @@ from stabilize.resilience.config import HandlerConfig, get_handler_config
 if TYPE_CHECKING:
     from stabilize.events.recorder import EventRecorder
     from stabilize.persistence.store import WorkflowStore
+    from stabilize.persistence.store.transaction import StoreTransaction
     from stabilize.queue import Queue
 
 from stabilize.handlers.signal_cleanup import discard_pending_signals
@@ -98,6 +99,29 @@ class StabilizeHandler(EventRecordingMixin, MessageHandler[M], ABC):
         self._event_recorder = event_recorder
 
     # ========== Execution Retrieval ==========
+
+    def mark_in(self, txn: StoreTransaction, message: Message, handler_type: str) -> None:
+        """Mark the delivered *message* processed inside *txn*; a message without an id is not marked."""
+        message_id = getattr(message, "message_id", None)
+        if message_id:
+            txn.mark_message_processed(
+                message_id=message_id,
+                handler_type=handler_type,
+                execution_id=getattr(message, "execution_id", None),
+            )
+
+    def push_marked(
+        self,
+        message: Message,
+        handler_type: str,
+        *pushes: Message | tuple[Message, timedelta | None],
+    ) -> None:
+        """Mark *message* processed and push its successors in one transaction."""
+        with self.repository.transaction(self.queue) as txn:
+            self.mark_in(txn, message, handler_type)
+            for push in pushes:
+                successor, delay = push if isinstance(push, tuple) else (push, None)
+                txn.push_message(successor, delay.total_seconds() if delay else 0)
 
     def with_execution(
         self,

@@ -67,9 +67,9 @@ class StoreTransaction(ABC):
         This ensures that message processing is only marked complete if
         the transaction commits successfully.
 
-        Returns:
-            False if the message was already marked processed by another
-            transaction, i.e. this delivery is a duplicate.
+        Raises:
+            DuplicateDeliveryError: the message was already marked processed, so this
+            delivery is a duplicate and its transaction must roll back.
         """
         pass
 

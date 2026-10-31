@@ -204,6 +204,7 @@ def check_and_move_expired(
                 SELECT id, message_type, attempts
                 FROM {table_name}
                 WHERE attempts >= %(max_attempts)s AND stabilize_tenant = %(tenant)s
+                AND (locked_until IS NULL OR locked_until < NOW())
                 """,
                 {"max_attempts": max_attempts, "tenant": engine.tenant},
             )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from stabilize.errors.delivery import DuplicateDeliveryError
 from stabilize.handlers.run_task import held_results
 from stabilize.handlers.run_task.error import complete_with_error
 from stabilize.persistence.tenancy import TenancyModeChanged, TenantContextError, TenantMismatchError
@@ -26,7 +27,7 @@ def save_or_hold(handler: RunTaskHandler, task_model: TaskExecution, result: Tas
     """
     try:
         handler._process_result_safely(message.stage_id, task_model.id, result, message)
-    except (TenancyModeChanged, TenantMismatchError, TenantContextError):
+    except (TenancyModeChanged, TenantMismatchError, TenantContextError, DuplicateDeliveryError):
         raise
     except Exception as e:
         if held_results.is_store_unavailable(e):

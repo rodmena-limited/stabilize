@@ -5,6 +5,7 @@ Import from ``stabilize.errors`` as before.
 """
 
 from stabilize.errors.base import StabilizeBaseException, StabilizeError
+from stabilize.errors.delivery import DeliveryContractError, DuplicateDeliveryError
 from stabilize.errors.permanent import ConfigurationError, PermanentError, RecoveryError
 from stabilize.errors.task import TaskError, TaskNotFoundError, TaskTimeoutError
 from stabilize.errors.transient import ConcurrencyError, TransientError
@@ -22,6 +23,12 @@ __all__ = [
     "ConcurrencyError",
     "ConfigurationError",
     "DeadLetterError",
+    "DeliveryContractError",
+    "DuplicateDeliveryError",
+    "DeliveryContractError",
+    "DuplicateDeliveryError",
+    "DeliveryContractError",
+    "DuplicateDeliveryError",
     "PermanentError",
     "QueueError",
     "RecoveryError",

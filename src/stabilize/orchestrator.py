@@ -10,6 +10,7 @@ import warnings
 from typing import TYPE_CHECKING
 
 from stabilize.models.status import WorkflowStatus
+from stabilize.persistence.committed_marks import delivery_exempt
 from stabilize.persistence.tenancy import TenantError, require_same_tenant
 from stabilize.queue.messages import (
     CancelWorkflow,
@@ -142,7 +143,8 @@ class Orchestrator:
                 txn.set_config_version(execution.id, execution.config_version)
                 txn.push_message(message)
         else:
-            self.queue.push(message)
+            with delivery_exempt():
+                self.queue.push(message)
 
     def cancel(
         self,
@@ -169,7 +171,8 @@ class Orchestrator:
             with self.store.transaction(self.queue) as txn:
                 txn.push_message(message)
         else:
-            self.queue.push(message)
+            with delivery_exempt():
+                self.queue.push(message)
 
     def restart(
         self,
@@ -193,7 +196,8 @@ class Orchestrator:
             with self.store.transaction(self.queue) as txn:
                 txn.push_message(message)
         else:
-            self.queue.push(message)
+            with delivery_exempt():
+                self.queue.push(message)
 
     def _resume_without_paused_stages(self, execution: Workflow) -> None:
         assert self.store is not None
@@ -279,5 +283,6 @@ class Orchestrator:
                 for msg in messages:
                     txn.push_message(msg)
         else:
-            for msg in messages:
-                self.queue.push(msg)
+            with delivery_exempt():
+                for msg in messages:
+                    self.queue.push(msg)

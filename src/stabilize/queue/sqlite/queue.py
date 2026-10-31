@@ -20,6 +20,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from stabilize.persistence.committed_marks import record_bare_push
 from stabilize.persistence.schema_check import check_sqlite_tables
 from stabilize.persistence.sqlite.tenant_schema import engine_shaped_tables, ensure_tenant_schema, read_mode
 from stabilize.persistence.tenancy import check_mode_admits, validate_tenant
@@ -153,6 +154,7 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         # the caller's transaction controls the commit (atomicity contract).
         if not external_connection:
             conn.commit()
+            record_bare_push(message_type)
 
         logger.debug("Pushed %s (id=%s, deliver_at=%s)", message_type, message_id, deliver_at)
 

@@ -12,6 +12,9 @@ them.
 
 from typing import Any
 
+import pytest
+
+from stabilize.errors import DuplicateDeliveryError
 from stabilize.handlers import CompleteStageHandler
 from stabilize.models.stage import StageExecution, SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
@@ -122,7 +125,8 @@ class TestAfterStageRedelivery:
         repository.store_stage(after_fresh)
         _drain(queue)
 
-        handler.handle(message)  # redelivery (crash before ack)
+        with pytest.raises(DuplicateDeliveryError):
+            handler.handle(message)
 
         result = repository.retrieve(execution.id)
         parent_fresh = next(s for s in result.stages if s.ref_id == "parent")
@@ -217,7 +221,8 @@ class TestOnFailureRedelivery:
         repository.store_stage(rollbacks[0])
         _drain(queue)
 
-        handler.handle(message)
+        with pytest.raises(DuplicateDeliveryError):
+            handler.handle(message)
 
         result = repository.retrieve(execution.id)
         rollbacks = [s for s in result.stages if s.ref_id == "parent_rollback"]

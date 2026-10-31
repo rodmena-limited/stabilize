@@ -1,12 +1,10 @@
 """Detect a synchronous processor running on an unrenewed queue lease.
 
-Lease renewal and the execution path are coupled, and only one of them is
-visible at the call site. ``process_all()`` -> ``process_one()`` calls the
-handler directly: no executor, no threads, and therefore no lock heartbeat,
-which is only started from the asynchronous ``start()`` path. A queue whose
-``lock_duration`` is shorter than a handler makes the message visible again
-mid-flight, and a later poll re-runs it -- silent double execution, with no
-error on either side.
+``process_one()`` runs its handler under the same lock heartbeat as the
+asynchronous ``start()`` path. When the heartbeat is disabled, or the queue
+cannot extend a lock, nothing renews the lease: a queue whose ``lock_duration``
+is shorter than a handler makes the message visible again mid-flight, and a
+later poll re-runs it -- silent double execution, with no error on either side.
 
 ``PostgresQueue(dsn)`` looks complete and is only safe if something is
 renewing. This module makes that condition loud at the first synchronous poll
@@ -51,12 +49,13 @@ def check_sync_lease(
         return None
     return (
         f"{type(queue).__name__} has lock_duration={duration.total_seconds():.0f}s and this "
-        "is the SYNCHRONOUS path (process_all/process_one), which starts no lock "
-        "heartbeat. A handler running longer than the lease makes its message visible "
+        "is the SYNCHRONOUS path (process_all/process_one) with the lock heartbeat off "
+        "(enable_lock_heartbeat=False, or the queue cannot extend a lock), so nothing renews "
+        "the lease. A handler running longer than the lease makes its message visible "
         "to another consumer while it is still running, and a later poll can execute it "
         "AGAIN with no error on either side. Size lock_duration above your worst-case "
         f"single message (e.g. {type(queue).__name__}(dsn, lock_duration=timedelta(minutes=30))), "
-        "or drive the queue with start() so the heartbeat renews it."
+        "or leave enable_lock_heartbeat on so the heartbeat renews it."
     )
 
 

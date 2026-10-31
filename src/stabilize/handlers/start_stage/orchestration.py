@@ -112,16 +112,16 @@ class StartStageOrchestrationMixin:
         )
         return messages
 
-    def _cancel_deferred_choice_siblings(
+    def _deferred_choice_sibling_messages(
         self,
         stage: StageExecution,
         message: StartStage,
-    ) -> None:
-        """Cancel sibling stages in the same deferred choice group (WCP-16).
+    ) -> list[Message]:
+        """The CancelStage messages for the other NOT_STARTED members of this stage's deferred choice group (WCP-16).
 
-        When one branch of a deferred choice is claimed (set to RUNNING),
-        all other branches in the same group are cancelled.
+        The caller pushes them in the transaction that marks the claiming StartStage processed.
         """
+        messages: list[Message] = []
         all_stages = self.repository.retrieve(stage.execution.id).stages
         for s in all_stages:
             if s.id == stage.id:
@@ -133,10 +133,11 @@ class StartStageOrchestrationMixin:
                     stage.deferred_choice_group,
                     stage.name,
                 )
-                self.queue.push(
+                messages.append(
                     CancelStage(
                         execution_type=message.execution_type,
                         execution_id=message.execution_id,
                         stage_id=s.id,
                     )
                 )
+        return messages

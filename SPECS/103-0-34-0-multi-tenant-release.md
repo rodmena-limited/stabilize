@@ -102,7 +102,7 @@ on the current code before the fix is written. No gate until every item is done.
 ### WI-2 items handed to other work items
 - `SubWorkflowTask` taking a `(store, queue)` contextvar bound by RunTask (WI-4, with its child-id redesign); `WorkflowStream` using its workflow's tenant (WI-9 A20 event work); `mg-up --through`, `--ddl-lock-timeout`, the `pg_depend` preflight and `SHOW TimeZone` (WI-9 A15); the PostgreSQL floor (D6, director).
 
-### WI-3 message delivery correctness (rule 7) (in progress)
+### WI-3 message delivery correctness (rule 7) (done)
 - Every handler transaction that pushes a message shall mark its delivered message processed in the same transaction; a mark that inserts no row shall raise `DuplicateDeliveryError` inside the transaction, and the transaction shall roll back.
 - `process_and_ack` and `process_one` shall catch `DuplicateDeliveryError` and ack the redelivered message without an error context, a reschedule or a second mark; the handler `except Exception` blocks in `complete_stage`, `start_stage` and `run_task/saving` shall re-raise `DuplicateDeliveryError` ahead of `is_transient`.
 - Exactly one marking transaction per delivery path: the bare `queue.push` sites in `start_stage/handler.py`, `start_stage/orchestration.py`, `start_workflow.py`, `start_stage/starting.py`, `complete_workflow.py` and `continue_parent_stage.py`, and the pushing transactions without marks in `complete_stage/handler.py`, `start_stage/handler.py` and `complete_stage/split_logic.py`, shall move into the transaction that marks the message.
@@ -112,11 +112,25 @@ on the current code before the fix is written. No gate until every item is done.
 - `check_and_move_expired` shall move only rows whose lease has lapsed (`locked_until IS NULL OR locked_until < now()`), with `FOR UPDATE SKIP LOCKED` on PostgreSQL, on both backends (B16).
 - One `sqlstate(exc)` helper (already in `persistence.tenancy`) shall serve `is_deadlock_error`, which shall keep {40001, 40P01} and stop depending on English error text (B31).
 - A redelivered message whose mark is already committed shall be acked on both backends with `enable_deduplication=False` (pinned).
+- The guard shall go green on a known positive: a handler that pushes on the queue's own connection records one `DeliveryDefect` naming the pushed type, and `process_all` under `STABILIZE_STRICT_DELIVERY=1` raises `DeliveryContractError` after acknowledging the message (`tests/test_delivery_marks.py::test_the_guard_flags_a_handler_that_pushes_outside_its_transaction`).
+- The SQLite dead-letter sweep shall use the queue's `max_attempts`, the same rule as its poll, so a transactionally pushed row (stamped with the message default) is swept once the poll stops delivering it.
+
+Synthesis deviations recorded while building WI-3:
+- The strict flag raises at the end of `process_all`, after every message of the drain was acknowledged, never inside a delivery: a raise after a committed push would reschedule a message whose effects are already committed. `QueueProcessor.delivery_defects` (capped at 200) is the assertion surface; production logs ERROR and counts `stabilize.delivery.defects`.
+- Bare pushes are recorded by `PostgresQueue.push` and `SqliteQueue.push` when no connection is passed. The named non-handler pushers wrap their pushes in `delivery_exempt()`: `Orchestrator`, `WorkflowRecovery`, `hitl.signal_stage`, `SynchronousProcessor.push_and_process`, `NoOpTransaction._flush_messages`.
+- `check_and_move_expired` carries the lease predicate without `FOR UPDATE SKIP LOCKED`: its SELECT is a single autocommit statement, so the row lock would be released before the move; the predicate is what keeps a leased row out, and the poll's `attempts < max_attempts` keeps a swept row from being leased in between.
+- Join tracking (`_completed_branches` on discriminator and N-of-M downstreams) writes inside the completion transaction. The completion moved to `complete_stage/fan_out.py::_complete_and_fan_out` and runs under `retry_on_concurrency_error`, re-reading downstream rows per attempt; the per-downstream five-attempt loop is gone.
+- The deferred-choice sibling `CancelStage` messages join `messages_to_push` of the claiming `StartStage` (`_deferred_choice_sibling_messages`); WI-4 replaces them with `SkipStage(pruned=True)`.
+- `DuplicateDeliveryError` is a `StabilizeError` in `stabilize.errors.delivery`, still importable from `stabilize.persistence.transaction`; `TransactionHelper.execute_atomic` no longer swallows it into `False` but lets it propagate to the processor, which acknowledges.
+- `process_one` runs the lock heartbeat; the short-lease warning (`check_sync_lease`) is logged only when `enable_lock_heartbeat` is off or the queue has no `extend_lock`.
+- Three existing tests encoded the old contract (a duplicate mark returns False, a redelivered message handled directly is silent): `test_complete_stage_redelivery.py` (two redeliveries), `test_duplicate_delivery_claim.py`, `test_message_deduplication_race.py` (concurrent and stress marks). They now assert the raise and that exactly one mark wins; the rollback assertions they carried are unchanged.
+- Rule 5: the processor's submission path (`_submit_message`, `_submit_message_internal`, `_start_lock_heartbeat`) moved to `queue/processor/submission.py::MessageSubmissionMixin` (processor.py 518 → 452 lines); the CompleteStage fan-out moved to `complete_stage/fan_out.py` (handler.py 481 → 379).
+- Red evidence: with the handler tree restored to the pre-WI-3 commit and the new guard in place, `test_the_happy_path_and_the_waiting_paths_mark_inside_their_pushing_transactions` raised `DeliveryContractError` naming four deliveries (StartStage re-queued on a mutex twice, the deferred-choice CancelStage siblings, the CompleteWorkflow re-queue) and `test_complete_workflow_requeues_itself_inside_a_marking_transaction` recorded one defect; the five original tests were red on the unmodified tree for the stated reasons (no guard attribute, no exported error, lease lapse, leased row swept, 40001 unrecognised in German).
 
 ### WI-2 remaining slices (to be specified as each starts)
 Statements on every SQL site (rule 1 explicit column lists), the trigger fence and `mg-tenancy enable|disable|status`, the `TenancyModeChanged` latch, per-instance recorder/deduplicator, namespaced subscription ids and locks, the schema check, indexes, SQLite triggers, runbooks.
 
-### WI-3 … WI-11
+### WI-4 … WI-11
 Specified when each item starts; the plan file holds the design.
 
 ### WI-2 slice 2: rule 1 column lists (done)

@@ -141,12 +141,15 @@ class NoOpTransaction(StoreTransaction):
             if self._queue:
                 from datetime import timedelta
 
-                for message, delay in self._pending_messages:
-                    if delay > 0:
-                        self._queue.push(message, timedelta(seconds=delay))
-                    else:
-                        self._queue.push(message)
-                    messages_flushed += 1
+                from stabilize.persistence.committed_marks import delivery_exempt
+
+                with delivery_exempt():
+                    for message, delay in self._pending_messages:
+                        if delay > 0:
+                            self._queue.push(message, timedelta(seconds=delay))
+                        else:
+                            self._queue.push(message)
+                        messages_flushed += 1
                 self._pending_messages.clear()
 
             # 4. Flush processed marks LAST - only after everything else succeeds

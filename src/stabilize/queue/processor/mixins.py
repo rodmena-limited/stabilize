@@ -9,7 +9,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
-from stabilize.persistence.committed_marks import clear_committed, consume_committed
+from stabilize import metrics
+from stabilize.persistence.committed_marks import (
+    DEFECT_LIMIT,
+    DeliveryDefect,
+    clear_committed,
+    consume_committed,
+    delivery_defects,
+)
 from stabilize.persistence.tenancy import TenancyModeChanged, bind_tenant
 from stabilize.queue.dedup import BloomDeduplicator
 from stabilize.queue.messages import Message, get_message_type_name
@@ -175,6 +182,7 @@ class QueueProcessorMixin:
         clear_committed()
         with bind_tenant(getattr(self._store, "tenant", "") or ""):
             handler.handle(message)
+        self._check_delivery(message, message_id)
 
         # Mark message as processed for deduplication
         if self.config.enable_deduplication and message_id is not None:
@@ -188,6 +196,17 @@ class QueueProcessorMixin:
                     handler_type=get_message_type_name(message),
                     execution_id=execution_id,
                 )
+
+    def _check_delivery(self, message: Message, message_id: str | None) -> None:
+        reasons = delivery_defects(message_id)
+        if not reasons:
+            return
+        kind = get_message_type_name(message)
+        defects: list[DeliveryDefect] = self.delivery_defects  # type: ignore[attr-defined]
+        if len(defects) < DEFECT_LIMIT:
+            defects.append(DeliveryDefect(message_type=kind, message_id=message_id, reasons=tuple(reasons)))
+        metrics.increment("stabilize.delivery.defects", message_type=kind)
+        logger.error("Delivery contract broken for %s %s: %s", kind, message_id, "; ".join(reasons))
 
     def _hydrate_deduplicator(self) -> None:
         """Hydrate the bloom filter from the store's processed_messages.

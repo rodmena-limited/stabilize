@@ -33,6 +33,7 @@ class SqliteDLQMixin:
     """
 
     table_name: str
+    max_attempts: int
     _pending: dict[int, dict[str, Any]]
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -219,9 +220,10 @@ class SqliteDLQMixin:
             f"""
             SELECT id, message_type, attempts
             FROM {self.table_name}
-            WHERE attempts >= max_attempts AND stabilize_tenant = :tenant
+            WHERE attempts >= :max_attempts AND stabilize_tenant = :tenant
+            AND (locked_until IS NULL OR julianday(locked_until) < julianday(:now))
             """,
-            {"tenant": self.tenant},
+            {"max_attempts": self.max_attempts, "tenant": self.tenant, "now": datetime.now(UTC).isoformat()},
         )
         rows = result.fetchall()
 

@@ -135,9 +135,53 @@ host's own migretti history, now upgrade with no change to the command.
   the DDL to run.
 - **Upgrade runbooks** in the persistence guide for a single-tenant upgrade, a fresh
   install with tenants, and a host that owns its DDL.
+- **`DuplicateDeliveryError` and `DeliveryContractError`** import from `stabilize.errors`.
+  `DuplicateDeliveryError` used to be a bare `Exception` in `stabilize.persistence.transaction`
+  and still imports from there.
+  A handler called directly with a message whose mark is already committed now raises it
+  instead of returning quietly, and `TransactionHelper.execute_atomic` lets it propagate
+  instead of returning `False`. The processor acknowledges such a redelivery.
 
 ### Fixed
 
+- **A handler's push and its processed mark now commit together (B01, B05).** Before,
+  the processor marked a message processed after the handler had committed its pushes.
+  A crash in between redelivered the message, and the redelivery pushed the downstream
+  work a second time. A handler transaction that pushes now marks the delivered message
+  in the same transaction. Nine re-queue paths pushed on the queue's own connection:
+  `StartWorkflow` on start-time expiry, `StartStage` while waiting on an upstream or a
+  mutex, `ContinueParentStage` and `CompleteWorkflow` while children run, and the
+  deferred-choice sibling cancellations. They now push inside the marking transaction.
+  Six transactions pushed without a mark (the `CompleteStage` failure paths, `StartStage`
+  retry exhaustion and planning failure) and now mark. `SignalStage` marked its message
+  after its transaction had closed, on a returned connection. The mark is now inside that
+  transaction. A mark that inserts no row raises `DuplicateDeliveryError` inside the
+  transaction, which rolls back, and the processor acknowledges the redelivery without
+  pushing again. The processor records a delivery that still commits a push outside its
+  marking transaction on `QueueProcessor.delivery_defects`, logs it at ERROR and counts
+  `stabilize.delivery.defects`. With `STABILIZE_STRICT_DELIVERY=1`, `process_all` raises
+  `DeliveryContractError` at the end of a drain that recorded one.
+- **`process_one` renews the message lease while its handler runs (B15).** The
+  synchronous drain started no lock heartbeat. A handler longer than `lock_duration`
+  therefore let another consumer take the message mid-flight and run it again.
+  `process_one` now runs the same heartbeat as `start()`. The short-lease warning is
+  logged only when `enable_lock_heartbeat` is off or the queue cannot extend a lock.
+- **The dead-letter sweep leaves a leased message alone (B16).** `check_and_move_expired`
+  moved a message on its last attempt while a handler was still running it, and a
+  replay ran it again. The sweep now skips rows whose `locked_until` is in the future,
+  on both backends. On SQLite the sweep read the row's own `max_attempts` column. A
+  transactional push set that column to the message default of 10 while the poll used
+  the queue's value. A queue with `max_attempts=1` neither polled nor swept such a row.
+  The sweep now uses the queue's value too.
+- **Deadlocks and serialization failures are recognised by SQLSTATE (B31).**
+  `is_deadlock_error` read psycopg2's `pgcode` and otherwise matched English message
+  text. A server with a non-English `lc_messages` therefore retried neither 40001 nor
+  40P01. It now reads `.sqlstate` on the error and on its cause.
+- **Join tracking commits with the stage it belongs to.** The discriminator and N-of-M
+  `_completed_branches` update ran in its own autocommit write before the completion
+  transaction. A crash between the two left a branch counted that never completed. The
+  update now runs inside the completion transaction. A version conflict retries the
+  whole completion with fresh rows.
 - **A target schema named after the connecting role is refused (B65).** With role
   `stabilize` and `?schema=stabilize`, the default `search_path` of `"$user", public`
   makes the new schema shadow `public`. A host's own `mg verify` then reads stabilize's
@@ -209,6 +253,9 @@ host's own migretti history, now upgrade with no change to the command.
 
 ### Changed
 
+- `QueueProcessor`'s submission path and the `CompleteStage` fan-out live in their own
+  modules (`queue/processor/submission.py`, `handlers/complete_stage/fan_out.py`) to
+  keep both files under the 500-line cap. Import paths are unchanged.
 - The red-proof CI job is split into four jobs, each taking a quarter of the test
   files, to fit inside the pipeline's 3-hour deadline (#97). A new CI job builds the
   wheel and fails if a tracked file under `src/stabilize` or a migration is missing

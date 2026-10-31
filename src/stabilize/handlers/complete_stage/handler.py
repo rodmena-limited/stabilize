@@ -14,8 +14,9 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from stabilize.dag.readiness import PRUNED_FROM
 from stabilize.errors import is_transient
+from stabilize.errors.delivery import DuplicateDeliveryError
+from stabilize.handlers.complete_stage.fan_out import CompleteStageFanOutMixin
 from stabilize.handlers.complete_stage.support import CompleteStageSupport
 from stabilize.models.stage.enums import SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
@@ -39,7 +40,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class CompleteStageHandler(CompleteStageSupport):
+class CompleteStageHandler(CompleteStageFanOutMixin, CompleteStageSupport):
     """
     Handler for CompleteStage messages.
 
@@ -248,6 +249,7 @@ class CompleteStageHandler(CompleteStageSupport):
                     with self.repository.transaction(self.queue) as txn:
                         txn.store_stage(stage)
                         self._record_completion_event(stage, status)
+                        self.mark_in(txn, message, "CompleteStage")
                         if stage.synthetic_stage_owner == SyntheticStageOwner.STAGE_BEFORE:
                             txn.push_message(
                                 ContinueParentStage(
@@ -284,6 +286,7 @@ class CompleteStageHandler(CompleteStageSupport):
                         with self.repository.transaction(self.queue) as txn:
                             txn.store_stage(stage)
                             self._record_completion_event(stage, status)
+                            self.mark_in(txn, message, "CompleteStage")
                             txn.push_message(
                                 CancelStage(
                                     execution_type=message.execution_type,
@@ -307,117 +310,12 @@ class CompleteStageHandler(CompleteStageSupport):
                                     )
                                 )
                         return
-                    # Get downstream stages and parent info BEFORE transaction
-                    execution = stage.execution
-                    downstream_stages = self.repository.get_downstream_stages(execution.id, stage.ref_id)
-                    phase = stage.synthetic_stage_owner
-
-                    # Apply split logic to determine which downstreams to activate
-                    activated_downstreams, skipped_downstreams = self._apply_split_logic(stage, downstream_stages)
-
-                    # Handle discriminator/N-of-M context updates on upstream completion
-                    self._update_join_tracking(stage, downstream_stages)
-
-                    # Atomic: store stage + push all downstream/parent messages together
-                    with self.repository.transaction(self.queue) as txn:
-                        txn.store_stage(stage)
-                        self._record_completion_event(stage, status)
-
-                        # Message deduplication
-                        if message.message_id:
-                            txn.mark_message_processed(
-                                message_id=message.message_id,
-                                handler_type="CompleteStage",
-                                execution_id=message.execution_id,
-                            )
-
-                        # WCP-8: a multi-merge stage fires once per upstream.
-                        # Re-arming happens HERE, at completion, not when the
-                        # next token arrives: the token typically arrives while
-                        # the stage is still RUNNING, and resetting a live
-                        # execution tears its state. RestartStage refuses a
-                        # non-terminal stage for the same reason.
-                        if self._rearm_multi_merge(stage, execution, txn):
-                            return
-
-                        logger.debug(
-                            "CompleteStage decision for %s: down=%d (act=%d, skip=%d), phase=%s, parent=%s",
-                            stage.name,
-                            len(downstream_stages),
-                            len(activated_downstreams),
-                            len(skipped_downstreams),
-                            phase,
-                            stage.parent_stage_id,
-                        )
-                        if activated_downstreams:
-                            # Start activated downstream stages
-                            for downstream in activated_downstreams:
-                                txn.push_message(
-                                    StartStage(
-                                        execution_type=execution.type.value,
-                                        execution_id=execution.id,
-                                        stage_id=downstream.id,
-                                    )
-                                )
-                            # Mark the edge into each non-activated child dead,
-                            # then start it like any other. A child with another
-                            # live parent still carries a token, so the decision
-                            # belongs at the child's own readiness evaluation
-                            # where all of its upstreams are visible -- not here,
-                            # where only this edge is.
-                            for downstream in skipped_downstreams:
-                                dead_edges = set(downstream.context.get(PRUNED_FROM) or ())
-                                dead_edges.add(stage.ref_id)
-                                downstream.context[PRUNED_FROM] = sorted(dead_edges)
-                                txn.store_stage(downstream)
-                                txn.push_message(
-                                    StartStage(
-                                        execution_type=execution.type.value,
-                                        execution_id=execution.id,
-                                        stage_id=downstream.id,
-                                    )
-                                )
-                        elif downstream_stages and not skipped_downstreams:
-                            # All downstreams came from split logic but none activated
-                            # (shouldn't normally happen for AND-split)
-                            for downstream in downstream_stages:
-                                txn.push_message(
-                                    StartStage(
-                                        execution_type=execution.type.value,
-                                        execution_id=execution.id,
-                                        stage_id=downstream.id,
-                                    )
-                                )
-                        elif not downstream_stages and phase is not None:
-                            # Synthetic stage - notify parent
-                            parent_id = stage.parent_stage_id
-                            logger.info(
-                                "Pushing ContinueParentStage for parent %s from child %s",
-                                parent_id,
-                                stage.name,
-                            )
-                            if parent_id:
-                                txn.push_message(
-                                    ContinueParentStage(
-                                        execution_type=execution.type.value,
-                                        execution_id=execution.id,
-                                        stage_id=parent_id,
-                                        phase=phase,
-                                    )
-                                )
-                        elif not downstream_stages:
-                            # Terminal stage - complete workflow
-                            txn.push_message(
-                                CompleteWorkflow(
-                                    execution_type=execution.type.value,
-                                    execution_id=execution.id,
-                                )
-                            )
+                    self._complete_and_fan_out(stage, status, message)
                 else:
-                    # Failure - atomic: store stage + cancel + complete
                     with self.repository.transaction(self.queue) as txn:
                         txn.store_stage(stage)
                         self._record_completion_event(stage, status)
+                        self.mark_in(txn, message, "CompleteStage")
                         txn.push_message(
                             CancelStage(
                                 execution_type=message.execution_type,
@@ -442,7 +340,7 @@ class CompleteStageHandler(CompleteStageSupport):
                                 )
                             )
 
-            except (TenancyModeChanged, TenantMismatchError, TenantContextError):
+            except (TenancyModeChanged, TenantMismatchError, TenantContextError, DuplicateDeliveryError):
                 raise
             except Exception as e:
                 if is_transient(e):
@@ -461,9 +359,9 @@ class CompleteStageHandler(CompleteStageSupport):
                 stage.end_time = self.current_time_millis()
                 settled["stage"] = stage
 
-                # Atomic: store stage + cancel + complete workflow
                 with self.repository.transaction(self.queue) as txn:
                     txn.store_stage(stage)
+                    self.mark_in(txn, message, "CompleteStage")
                     txn.push_message(
                         CancelStage(
                             execution_type=message.execution_type,

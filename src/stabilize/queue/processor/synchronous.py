@@ -67,5 +67,14 @@ class SynchronousQueueProcessor(QueueProcessor):
         Args:
             message: The message to push and process
         """
-        self.queue.push(message)
+        from stabilize.persistence.committed_marks import delivery_exempt
+
+        with delivery_exempt():
+            from stabilize.persistence.committed_marks import delivery_exempt
+
+        with delivery_exempt():
+            from stabilize.persistence.committed_marks import delivery_exempt
+
+        with delivery_exempt():
+            self.queue.push(message)
         self.process_all(timeout=5.0)
