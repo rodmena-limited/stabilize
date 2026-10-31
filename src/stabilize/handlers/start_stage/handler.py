@@ -34,8 +34,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-
-
 class StartStageHandler(StartStageStarting):
     """
     Handler for StartStage messages.

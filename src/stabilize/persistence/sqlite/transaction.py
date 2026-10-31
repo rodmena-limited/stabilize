@@ -385,7 +385,6 @@ class AtomicTransaction(StoreTransaction):
         return [str(r[0]) for r in rows]
 
 
-
 def _queue_table_for(store: Any, queue: Any) -> str:
     if queue is None:
         return "queue_messages"

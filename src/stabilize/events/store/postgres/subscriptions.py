@@ -8,6 +8,9 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EventType, parse_event_type
+from stabilize.persistence.columns import select_list
+
+_SUBSCRIPTIONS = select_list("event_subscriptions", "postgres")
 
 if TYPE_CHECKING:
     from psycopg import Connection
@@ -63,7 +66,7 @@ class PostgresSubscriptionsMixin:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT * FROM event_subscriptions WHERE id = %(id)s",
+                    f"SELECT {_SUBSCRIPTIONS} FROM event_subscriptions WHERE id = %(id)s",
                     {"id": subscription_id},
                 )
 

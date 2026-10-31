@@ -124,4 +124,3 @@ def promote_waiting(handler: Any, config_id: str, purge: bool, message: Any) -> 
 
 def _by_status(repository: Any, config_id: str, status: WorkflowStatus) -> Any:
     return repository.retrieve_by_pipeline_config_id(config_id, WorkflowCriteria(statuses={status}, page_size=None))
-

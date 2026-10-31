@@ -15,6 +15,7 @@ from typing import Any
 
 from stabilize.models.workflow import Workflow
 from stabilize.persistence.borrow import EngineBorrower
+from stabilize.persistence.columns import select_list
 from stabilize.persistence.connection import release_pool_once
 from stabilize.persistence.pool_options import (
     DEFAULT_HEALTH_TIMEOUT_SECONDS,
@@ -62,6 +63,10 @@ from stabilize.persistence.store.ids import check_ids
 from stabilize.persistence.store.owned_rows import WORKFLOW_OWNED_ROWS
 from stabilize.persistence.task_state import capture, commit_captured, restore_versions, versions
 from stabilize.persistence.tenancy import ModeReader, postgres_mode, require_same_tenant, validate_tenant
+
+_PIPELINE = select_list("pipeline_executions", "postgres")
+_STAGE = select_list("stage_executions", "postgres")
+_TASK = select_list("task_executions", "postgres")
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +158,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT * FROM pipeline_executions WHERE id = %(id)s",
+                    f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = %(id)s",
                     {"id": execution_id},
                 )
                 row = cur.fetchone()
@@ -163,7 +168,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
                 execution = row_to_execution(row)
 
                 cur.execute(
-                    "SELECT * FROM stage_executions WHERE execution_id = %(execution_id)s",
+                    f"SELECT {_STAGE} FROM stage_executions WHERE execution_id = %(execution_id)s",
                     {"execution_id": execution_id},
                 )
 
@@ -186,7 +191,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT * FROM pipeline_executions WHERE id = %(id)s",
+                    f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = %(id)s",
                     {"id": execution_id},
                 )
                 row = cur.fetchone()
@@ -342,7 +347,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT * FROM stage_executions WHERE id = %(id)s",
+                    f"SELECT {_STAGE} FROM stage_executions WHERE id = %(id)s",
                     {"id": stage_id},
                 )
                 stage_row = cur.fetchone()
@@ -352,7 +357,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
                 stage = row_to_stage(stage_row)
 
                 cur.execute(
-                    "SELECT * FROM pipeline_executions WHERE id = %(id)s",
+                    f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = %(id)s",
                     {"id": stage_row["execution_id"]},
                 )
                 exec_row = cur.fetchone()
@@ -362,8 +367,8 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
 
                     requisites = list(stage.requisite_stage_ref_ids)
                     cur.execute(
-                        """
-                        SELECT * FROM stage_executions
+                        f"""
+                        SELECT {_STAGE} FROM stage_executions
                         WHERE execution_id = %(execution_id)s
                         AND (ref_id = ANY(%(requisites)s) OR parent_stage_id = %(stage_id)s)
                         """,
@@ -379,7 +384,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
 
                 # ORDER BY id ensures consistent task sequencing (ULID encodes creation time)
                 cur.execute(
-                    "SELECT * FROM task_executions WHERE stage_id = %(stage_id)s ORDER BY id ASC",
+                    f"SELECT {_TASK} FROM task_executions WHERE stage_id = %(stage_id)s ORDER BY id ASC",
                     {"stage_id": stage.id},
                 )
                 for task_row in cur.fetchall():

@@ -225,9 +225,7 @@ class TestDLQAtomicity:
             store.close()
             test_queue.close()
 
-    def test_dlq_operations_under_load(
-        self, file_repository: WorkflowStore, file_queue: Queue, backend: str
-    ) -> None:
+    def test_dlq_operations_under_load(self, file_repository: WorkflowStore, file_queue: Queue, backend: str) -> None:
         """
         Stress test DLQ operations with concurrent message processing failures.
 

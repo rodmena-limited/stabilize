@@ -72,9 +72,9 @@ _BLOCKED_NETWORKS = [
 _ALLOWED_SCHEMES = {"http", "https"}
 
 
-def _normalize_address(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> (
-    ipaddress.IPv4Address | ipaddress.IPv6Address
-):
+def _normalize_address(
+    addr: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
     """Collapse IPv4-mapped and 6to4 IPv6 forms to the IPv4 address they denote.
 
     ``::ffff:127.0.0.1`` is loopback, but matches no IPv4 CIDR and is not
@@ -130,15 +130,11 @@ def _validate_url_safety(url: str) -> None:
             raise ValueError(f"SSRF blocked: host '{hostname}' resolved to no addresses")
         for addr in addrs:
             if _is_blocked(addr):
-                raise ValueError(
-                    f"SSRF blocked: URL '{redact_userinfo(url)}' resolves to blocked address {addr}"
-                )
+                raise ValueError(f"SSRF blocked: URL '{redact_userinfo(url)}' resolves to blocked address {addr}")
         return
 
     if _is_blocked(addr):
-        raise ValueError(
-            f"SSRF blocked: URL '{redact_userinfo(url)}' targets blocked address {addr}"
-        )
+        raise ValueError(f"SSRF blocked: URL '{redact_userinfo(url)}' targets blocked address {addr}")
 
 
 class _SafeRedirectHandler(HTTPRedirectHandler):

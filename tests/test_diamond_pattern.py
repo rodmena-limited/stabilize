@@ -333,9 +333,7 @@ class TestOutputMerging:
             winners.append(proc.stdout.strip())
 
         assert all(w in {"from_b", "from_c"} for w in winners), winners
-        assert len(set(winners)) == 1, (
-            f"merge winner varies with PYTHONHASHSEED: {Counter(winners)}"
-        )
+        assert len(set(winners)) == 1, f"merge winner varies with PYTHONHASHSEED: {Counter(winners)}"
 
     def test_list_outputs_concatenated(self, file_repository: WorkflowStore, file_queue: Queue, backend: str) -> None:
         """List outputs from parallel branches should be concatenated."""

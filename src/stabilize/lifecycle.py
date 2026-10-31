@@ -334,9 +334,7 @@ class LifecycleManager:
                     elapsed = time.monotonic() - start_time
                     remaining = max(0.0, self.shutdown_timeout - elapsed)
                     manager.shutdown(wait=remaining > 0, timeout=remaining)
-                    logger.debug(
-                        "Shutdown TaskBulkheadManager (budget %.2fs)", remaining
-                    )
+                    logger.debug("Shutdown TaskBulkheadManager (budget %.2fs)", remaining)
             except Exception as e:
                 logger.warning("Error shutting down bulkhead manager: %s", e)
 

@@ -120,7 +120,7 @@ def _refuse_role_shadow(conn: Any, schema: str | None) -> None:
     if schema == role and '"$user"' in path:
         raise TakeoverRefusedError(
             f"the target schema {schema} is named after the connecting role {role}, whose search_path "
-            f"({path}) lists \"$user\" first; every unqualified name, including other projects' "
+            f'({path}) lists "$user" first; every unqualified name, including other projects\' '
             "_migrations, would then resolve into stabilize's schema. Choose another schema name, "
             "or connect as a role with a different name"
         )
@@ -316,9 +316,7 @@ def _print_status(run: _Run, state: MigrettiState, untracked: set[str]) -> None:
     print(f"Applied {applied} of {len(rows)}")
 
 
-def mg_status(
-    db_url: str | None = None, history_schema: str | None = None, config_path: Path | None = None
-) -> None:
+def mg_status(db_url: str | None = None, history_schema: str | None = None, config_path: Path | None = None) -> None:
     """Report migration state from migretti, without creating or altering anything."""
     psycopg = import_psycopg()
     params, schema, history = _target(db_url, history_schema, config_path)

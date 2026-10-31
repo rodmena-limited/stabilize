@@ -25,8 +25,7 @@ class TestUnifiedHierarchy:
             EngineVerificationError("v"),
         ):
             assert isinstance(exc, stabilize.StabilizeError), (
-                f"`except stabilize.StabilizeError` misses engine-raised "
-                f"{type(exc).__name__}"
+                f"`except stabilize.StabilizeError` misses engine-raised {type(exc).__name__}"
             )
 
     def test_engine_verification_error_caught_by_public_verification_error(self) -> None:

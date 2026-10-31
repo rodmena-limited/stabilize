@@ -236,8 +236,7 @@ class WorkflowRecovery:
         if hasattr(self.store, "get_all_pending_workflows"):
             return iter(getattr(self.store, "get_all_pending_workflows")(criteria))
         logger.warning(
-            "Store doesn't support get_all_pending_workflows, "
-            "recovery may be incomplete without application filter"
+            "Store doesn't support get_all_pending_workflows, recovery may be incomplete without application filter"
         )
         return iter(())
 
@@ -324,6 +323,7 @@ class WorkflowRecovery:
             stages_requeued=stages_requeued,
             failed_pushes=failed_pushes,
         )
+
 
 def recover_on_startup(
     store: WorkflowStore,

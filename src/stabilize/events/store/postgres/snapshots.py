@@ -9,6 +9,9 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EntityType
+from stabilize.persistence.columns import select_list
+
+_SNAPSHOTS = select_list("snapshots", "postgres")
 
 if TYPE_CHECKING:
     from psycopg import Connection
@@ -70,8 +73,8 @@ class PostgresSnapshotsMixin:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
-                    SELECT * FROM snapshots
+                    f"""
+                    SELECT {_SNAPSHOTS} FROM snapshots
                     WHERE entity_type = %(entity_type)s AND entity_id = %(entity_id)s
                     ORDER BY version DESC
                     LIMIT 1

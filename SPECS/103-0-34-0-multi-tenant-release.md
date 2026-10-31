@@ -35,10 +35,11 @@ Statements on every SQL site (rule 1 explicit column lists), the trigger fence a
 ### WI-3 … WI-11
 Specified when each item starts; the plan file holds the design.
 
-### Rule 1 column lists (slice 2, in progress)
-- `stabilize.persistence.columns` shall hold one column tuple per engine table, ending in `stabilize_tenant`; `columns(table, backend)` shall equal the catalog of that table on that backend (set equality; PostgreSQL `events` adds `commit_xid`, SQLite `queue_messages` adds `version`).
-- Every engine SELECT shall name its columns from that module; no `SELECT *`, `RETURNING *` or `alias.*` shall remain on an engine table (`tests/test_engine_columns.py::test_no_engine_statement_selects_star`).
-- Each row converter shall read only listed columns; the columns a converter does not read shall be named in the test (not an open allowlist).
+### WI-2 slice 2: rule 1 column lists (done)
+- `stabilize.persistence.columns` shall hold one column tuple per engine table, ending in `stabilize_tenant`; `columns(table, backend)` shall equal the catalog of that table on that backend (set equality; PostgreSQL `events` adds `commit_xid`, SQLite `queue_messages` adds `version`), checked live on both backends.
+- Every engine SELECT shall name its columns from that module; no `SELECT *`, `RETURNING *` or `alias.*` shall remain on an engine table (`tests/test_engine_columns.py::test_no_engine_statement_selects_star`; 52 sites converted in 17 files, the monitor included).
+- The PostgreSQL row converters shall index every column they read strictly (`row["col"]`), so a row missing a listed column raises `KeyError` naming it; the columns a converter does not read are named in the test: `pipeline_executions` {created_at, stabilize_tenant}, `stage_executions` {execution_id, stabilize_tenant}, `task_executions` {stage_id, stabilize_tenant}. The tenant column leaves those sets when `Workflow.tenant` lands.
+- The PostgreSQL event converter shall build its row by name from the column list, never by position.
 
 ## TECHNICAL PROBLEMS
 1. Row ownership under one shared schema: a tenant key every engine row carries and every statement filters on.

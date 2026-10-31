@@ -108,9 +108,7 @@ class TestWorkflowRecovery:
         assert results[0].stages_requeued >= 1
         assert queue.size() >= 1
 
-    def test_recovers_not_started_ready_stage(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_recovers_not_started_ready_stage(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         wf = _make_workflow("ns")
         repository.store(wf)  # NOT_STARTED, no start_time
 
@@ -121,9 +119,7 @@ class TestWorkflowRecovery:
         assert results[0].status == "recovered"
         assert queue.size() >= 1
 
-    def test_completed_workflow_not_recovered(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_completed_workflow_not_recovered(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         wf = _make_workflow("done")
         wf.status = WorkflowStatus.SUCCEEDED
         wf.start_time = _now_ms()
@@ -150,9 +146,7 @@ class TestWorkflowRecovery:
         recovery.recover_pending_workflows(application=APP)
         assert queue.size() == size_after_first
 
-    def test_old_workflow_skipped_by_age_cutoff(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_old_workflow_skipped_by_age_cutoff(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         # The age cutoff is enforced on the cross-application recovery path
         # (get_all_pending_workflows), which is what the no-application sweeper
         # uses. (The application-filtered path does not currently apply it.)
@@ -200,9 +194,7 @@ class TestProcessorRecoverySweeper:
             finally:
                 processor.stop()
 
-    def test_recover_on_start_disabled_by_default(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_recover_on_start_disabled_by_default(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         processor = QueueProcessor(queue, store=repository)
         with patch.object(processor, "run_recovery") as spy:
             processor.start()

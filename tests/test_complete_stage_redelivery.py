@@ -83,8 +83,7 @@ class TestAfterStageRedelivery:
         handler.handle(message)
 
         assert repository.is_message_processed("cs-after-1"), (
-            "after-stages branch committed StartStage pushes without marking "
-            "the source message processed"
+            "after-stages branch committed StartStage pushes without marking the source message processed"
         )
 
     def test_redelivery_while_after_stage_runs_does_not_cancel_workflow(
@@ -127,9 +126,7 @@ class TestAfterStageRedelivery:
 
         result = repository.retrieve(execution.id)
         parent_fresh = next(s for s in result.stages if s.ref_id == "parent")
-        assert parent_fresh.status == WorkflowStatus.RUNNING, (
-            f"parent wrongly transitioned to {parent_fresh.status}"
-        )
+        assert parent_fresh.status == WorkflowStatus.RUNNING, f"parent wrongly transitioned to {parent_fresh.status}"
         bad = [m for m in _drain(queue) if isinstance(m, (CancelStage, CompleteWorkflow))]
         assert bad == [], f"redelivery pushed premature terminal messages: {bad}"
 
@@ -209,8 +206,7 @@ class TestOnFailureRedelivery:
         handler.handle(message)
 
         assert repository.is_message_processed("cs-fail-1"), (
-            "on-failure branch committed StartStage pushes without marking "
-            "the source message processed"
+            "on-failure branch committed StartStage pushes without marking the source message processed"
         )
         fresh = repository.retrieve(execution.id)
         rollbacks = [s for s in fresh.stages if s.ref_id == "parent_rollback"]
@@ -227,6 +223,4 @@ class TestOnFailureRedelivery:
         rollbacks = [s for s in result.stages if s.ref_id == "parent_rollback"]
         assert len(rollbacks) == 1, "redelivery duplicated on-failure stages"
         bad = [m for m in _drain(queue) if isinstance(m, (CancelStage, CompleteWorkflow))]
-        assert bad == [], (
-            f"redelivery completed the workflow while rollback was running: {bad}"
-        )
+        assert bad == [], f"redelivery completed the workflow while rollback was running: {bad}"

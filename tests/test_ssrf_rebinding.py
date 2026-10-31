@@ -52,9 +52,7 @@ class TestConnectTimeGuard:
         _status, ctx = _execute(f"http://127.0.0.1:{private_server}/x")
         assert "SSRF blocked" in str(ctx.get("error"))
 
-    def test_known_positive_allow_private_still_reaches_the_server(
-        self, private_server: int
-    ) -> None:
+    def test_known_positive_allow_private_still_reaches_the_server(self, private_server: int) -> None:
         stage = StageExecution(
             ref_id="s",
             name="s",
@@ -89,9 +87,7 @@ class TestConnectTimeGuard:
         )
         detail = str(ctx.get("error"))
         assert "INTERNAL SECRET" not in detail
-        assert "connected to blocked address" in detail, (
-            f"expected the connect-time guard to refuse, got: {detail}"
-        )
+        assert "connected to blocked address" in detail, f"expected the connect-time guard to refuse, got: {detail}"
 
     def test_refusal_returns_a_result_rather_than_raising(self, private_server: int) -> None:
         """A blocked request must not escape execute() as an exception."""

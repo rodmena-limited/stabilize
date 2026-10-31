@@ -52,10 +52,7 @@ class TestBaselineStamping:
         """No regression: all core tables exist after create_tables."""
         conn = _raw_conn()
         create_tables(conn)
-        names = {
-            r[0]
-            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        }
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         for expected in (
             "pipeline_executions",
             "stage_executions",
@@ -88,8 +85,7 @@ class TestExistingDatabaseUpgrade:
 
         # Simulate existing customer data.
         conn.execute(
-            "INSERT INTO pipeline_executions(id, type, application, status) "
-            "VALUES ('p1', 'PIPELINE', 'app', 'RUNNING')"
+            "INSERT INTO pipeline_executions(id, type, application, status) VALUES ('p1', 'PIPELINE', 'app', 'RUNNING')"
         )
         conn.commit()
 
@@ -109,27 +105,21 @@ class TestExistingDatabaseUpgrade:
     def test_pending_forward_migration_applies_to_existing_db(self) -> None:
         conn = _raw_conn()
         _install_baseline_only(conn)
-        migrations = (
-            Migration(2, "add_audit_table", ("CREATE TABLE audit_demo (id TEXT PRIMARY KEY)",)),
-        )
+        migrations = (Migration(2, "add_audit_table", ("CREATE TABLE audit_demo (id TEXT PRIMARY KEY)",)),)
         version = apply_migrations(conn, migrations=migrations)
         assert version == 2
         # baseline + v2 both recorded
         versions = {r[0] for r in conn.execute("SELECT version FROM schema_migrations").fetchall()}
         assert versions == {BASELINE_VERSION, 2}
         # new table exists
-        assert conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='audit_demo'"
-        ).fetchone()
+        assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='audit_demo'").fetchone()
 
 
 class TestForwardMigrations:
     def test_forward_migration_applies_and_records(self) -> None:
         conn = _raw_conn()
         create_tables(conn)
-        migrations = (
-            Migration(NEXT, "add_col", ("ALTER TABLE task_executions ADD COLUMN demo_col TEXT",)),
-        )
+        migrations = (Migration(NEXT, "add_col", ("ALTER TABLE task_executions ADD COLUMN demo_col TEXT",)),)
         version = apply_migrations(conn, migrations=migrations)
         assert version == NEXT
         cols = {r[1] for r in conn.execute("PRAGMA table_info(task_executions)").fetchall()}
@@ -138,16 +128,12 @@ class TestForwardMigrations:
     def test_forward_migration_is_idempotent(self) -> None:
         conn = _raw_conn()
         create_tables(conn)
-        migrations = (
-            Migration(NEXT, "add_table", ("CREATE TABLE demo2 (id TEXT PRIMARY KEY)",)),
-        )
+        migrations = (Migration(NEXT, "add_table", ("CREATE TABLE demo2 (id TEXT PRIMARY KEY)",)),)
         apply_migrations(conn, migrations=migrations)
         # Second run must NOT re-run the (non-idempotent) CREATE TABLE.
         version = apply_migrations(conn, migrations=migrations)
         assert version == NEXT
-        count = conn.execute(
-            "SELECT COUNT(*) FROM schema_migrations WHERE version = ?", (NEXT,)
-        ).fetchone()[0]
+        count = conn.execute("SELECT COUNT(*) FROM schema_migrations WHERE version = ?", (NEXT,)).fetchone()[0]
         assert count == 1
 
     def test_migrations_applied_in_order(self) -> None:

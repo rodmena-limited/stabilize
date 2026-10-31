@@ -9,7 +9,10 @@ from typing import Any
 
 from ulid import ULID
 
+from stabilize.persistence.columns import select_list
 from stabilize.queue.message_ids import row_id
+
+_DLQ = select_list("queue_messages_dlq", "postgres")
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +97,7 @@ def list_dlq(
             if message_type:
                 cur.execute(
                     f"""
-                    SELECT * FROM {table_name}_dlq
+                    SELECT {_DLQ} FROM {table_name}_dlq
                     WHERE message_type = %(message_type)s
                     ORDER BY moved_at DESC
                     LIMIT %(limit)s
@@ -104,7 +107,7 @@ def list_dlq(
             else:
                 cur.execute(
                     f"""
-                    SELECT * FROM {table_name}_dlq
+                    SELECT {_DLQ} FROM {table_name}_dlq
                     ORDER BY moved_at DESC
                     LIMIT %(limit)s
                     """,

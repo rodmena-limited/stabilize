@@ -136,9 +136,9 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
                 store_backed = self.repository.supports_signal_storage()
                 context_buffered = stage.context.get("_buffered_signals", [])
                 if store_backed:
-                    depth = self.repository.pending_signal_count(
-                        stage.execution.id, stage.ref_id
-                    ) + len(context_buffered)
+                    depth = self.repository.pending_signal_count(stage.execution.id, stage.ref_id) + len(
+                        context_buffered
+                    )
                 else:
                     depth = len(context_buffered)
 
@@ -170,8 +170,7 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
                         # and returning would drop it with no error, which is
                         # worse than the crash this guard replaced.
                         logger.warning(
-                            "Signal store accepted no row for '%s' on stage %s; "
-                            "buffering in stage context instead",
+                            "Signal store accepted no row for '%s' on stage %s; buffering in stage context instead",
                             message.signal_name,
                             stage.name,
                         )

@@ -32,8 +32,7 @@ def signal_status_filter(
         unknown = [s for s in statuses if s not in known]
         if unknown:
             raise UnknownStatusError(
-                f"unknown status {', '.join(sorted(unknown))}; "
-                f"expected one of {', '.join(sorted(known))}"
+                f"unknown status {', '.join(sorted(unknown))}; expected one of {', '.join(sorted(known))}"
             )
         return list(statuses)
     if only_complete:

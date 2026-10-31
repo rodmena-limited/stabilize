@@ -63,7 +63,7 @@ def row_to_execution(row: dict[str, Any]) -> Workflow:
         row["paused"] if isinstance(row["paused"], dict) else json.loads(row["paused"]) if row["paused"] else None
     )
     # Handle context - may be dict (JSONB auto-parsed), string, or None
-    raw_context = row.get("context")
+    raw_context = row["context"]
     if raw_context is None:
         context_data: dict[str, Any] = {}
     elif isinstance(raw_context, dict):
@@ -100,8 +100,8 @@ def row_to_execution(row: dict[str, Any]) -> Workflow:
         max_concurrent_executions=row["max_concurrent_executions"] or 0,
         keep_waiting_pipelines=row["keep_waiting_pipelines"] or False,
         origin=row["origin"] or "unknown",
-        queue_table=row["queue_table"] if "queue_table" in row.keys() else None,
-        config_version=row["config_version"] if "config_version" in row.keys() else None,
+        queue_table=row["queue_table"],
+        config_version=row["config_version"],
     )
 
 
@@ -117,14 +117,13 @@ def row_to_stage(row: dict[str, Any]) -> StageExecution:
     if row["synthetic_stage_owner"]:
         synthetic_owner = SyntheticStageOwner(row["synthetic_stage_owner"])
 
-    # Parse new control-flow fields with safe defaults for older schemas
-    join_type_str = row.get("join_type", "AND")
+    join_type_str = row["join_type"]
     join_type = JoinType(join_type_str) if join_type_str else JoinType.AND
 
-    split_type_str = row.get("split_type", "AND")
+    split_type_str = row["split_type"]
     split_type = SplitType(split_type_str) if split_type_str else SplitType.AND
 
-    split_conditions_raw = row.get("split_conditions", {})
+    split_conditions_raw = row["split_conditions"]
     if isinstance(split_conditions_raw, str):
         split_conditions = json.loads(split_conditions_raw or "{}")
     elif isinstance(split_conditions_raw, dict):
@@ -132,7 +131,7 @@ def row_to_stage(row: dict[str, Any]) -> StageExecution:
     else:
         split_conditions = {}
 
-    mi_config_raw = row.get("mi_config")
+    mi_config_raw = row["mi_config"]
     mi_config = None
     if mi_config_raw:
         if isinstance(mi_config_raw, str):
@@ -159,17 +158,17 @@ def row_to_stage(row: dict[str, Any]) -> StageExecution:
         end_time=row["end_time"],
         start_time_expiry=row["start_time_expiry"],
         scheduled_time=row["scheduled_time"],
-        version=row.get("version", 0) or 0,
+        version=row["version"] or 0,
         join_type=join_type,
-        join_threshold=row.get("join_threshold", 0) or 0,
+        join_threshold=row["join_threshold"] or 0,
         split_type=split_type,
         split_conditions=split_conditions,
         mi_config=mi_config,
-        deferred_choice_group=row.get("deferred_choice_group"),
-        milestone_ref_id=row.get("milestone_ref_id"),
-        milestone_status=row.get("milestone_status"),
-        mutex_key=row.get("mutex_key"),
-        cancel_region=row.get("cancel_region"),
+        deferred_choice_group=row["deferred_choice_group"],
+        milestone_ref_id=row["milestone_ref_id"],
+        milestone_status=row["milestone_status"],
+        mutex_key=row["mutex_key"],
+        cancel_region=row["cancel_region"],
     )
 
 
@@ -200,7 +199,7 @@ def row_to_task(row: dict[str, Any]) -> TaskExecution:
         loop_start=row["loop_start"] or False,
         loop_end=row["loop_end"] or False,
         task_exception_details=exception_details,
-        version=row.get("version", 0) or 0,
+        version=row["version"] or 0,
     )
     mark_persisted(task)
     return task

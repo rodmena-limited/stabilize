@@ -10,6 +10,7 @@ import json
 import sqlite3
 from typing import TYPE_CHECKING
 
+from stabilize.persistence.columns import select_list
 from stabilize.persistence.sqlite.converters import (
     execution_to_dict,
     paused_to_dict,
@@ -21,6 +22,10 @@ from stabilize.persistence.sqlite.helpers import has_execution_column, has_queue
 from stabilize.persistence.store import WorkflowNotFoundError
 from stabilize.persistence.store.ids import check_ids
 from stabilize.persistence.store.owned_rows import WORKFLOW_OWNED_ROWS
+
+_PIPELINE = select_list("pipeline_executions", "sqlite")
+_STAGE = select_list("stage_executions", "sqlite")
+_TASK = select_list("task_executions", "sqlite")
 
 if TYPE_CHECKING:
     from stabilize.models.workflow import Workflow
@@ -87,7 +92,7 @@ class SqliteWorkflowCrudMixin:
 
         # Get execution
         result = conn.execute(
-            "SELECT * FROM pipeline_executions WHERE id = :id",
+            f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = :id",
             {"id": execution_id},
         )
         row = result.fetchone()
@@ -98,8 +103,8 @@ class SqliteWorkflowCrudMixin:
 
         # Get stages
         result = conn.execute(
-            """
-            SELECT * FROM stage_executions
+            f"""
+            SELECT {_STAGE} FROM stage_executions
             WHERE execution_id = :execution_id
             """,
             {"execution_id": execution_id},
@@ -112,8 +117,8 @@ class SqliteWorkflowCrudMixin:
             # Get tasks for stage (ORDER BY id ensures consistent task sequencing)
             # Note: id is a ULID that encodes creation time, preserving insertion order
             task_result = conn.execute(
-                """
-                SELECT * FROM task_executions
+                f"""
+                SELECT {_TASK} FROM task_executions
                 WHERE stage_id = :stage_id
                 ORDER BY id ASC
                 """,
@@ -133,7 +138,7 @@ class SqliteWorkflowCrudMixin:
         """Retrieve execution metadata without stages."""
         conn = self._get_connection()
         result = conn.execute(
-            "SELECT * FROM pipeline_executions WHERE id = :id",
+            f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = :id",
             {"id": execution_id},
         )
         row = result.fetchone()

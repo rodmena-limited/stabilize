@@ -8,9 +8,14 @@ from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from stabilize.dag.merge import merge_ancestor_outputs, topological_order
+from stabilize.persistence.columns import select_list
 from stabilize.persistence.sqlite.converters import row_to_stage, row_to_task
 from stabilize.persistence.store import WorkflowCriteria
 from stabilize.persistence.store.criteria import time_window_sql
+
+_STAGE = select_list("stage_executions", "sqlite")
+_TASK = select_list("task_executions", "sqlite")
+_STAGE_QUALIFIED = select_list("stage_executions", "sqlite", alias="stage_executions")
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -36,7 +41,7 @@ def load_tasks_for_stages(
 
     result = conn.execute(
         f"""
-        SELECT * FROM task_executions
+        SELECT {_TASK} FROM task_executions
         WHERE stage_id IN ({placeholders})
         ORDER BY id ASC
         """,
@@ -81,7 +86,7 @@ def get_upstream_stages(
 
     result = conn.execute(
         f"""
-        SELECT * FROM stage_executions
+        SELECT {_STAGE} FROM stage_executions
         WHERE execution_id = :execution_id
         AND ref_id IN ({placeholders})
         """,
@@ -106,8 +111,8 @@ def get_downstream_stages(
 ) -> list[StageExecution]:
     """Get downstream stages with tasks loaded."""
     # Use json_each for JSON array membership test (available in Python 3.11+ sqlite)
-    query = """
-        SELECT stage_executions.* FROM stage_executions, json_each(stage_executions.requisite_stage_ref_ids)
+    query = f"""
+        SELECT {_STAGE_QUALIFIED} FROM stage_executions, json_each(stage_executions.requisite_stage_ref_ids)
         WHERE execution_id = :execution_id
         AND json_each.value = :ref_id
     """
@@ -131,8 +136,8 @@ def get_synthetic_stages(
 ) -> list[StageExecution]:
     """Get synthetic stages with tasks loaded."""
     result = conn.execute(
-        """
-        SELECT * FROM stage_executions
+        f"""
+        SELECT {_STAGE} FROM stage_executions
         WHERE execution_id = :execution_id
         AND parent_stage_id = :parent_id
         """,

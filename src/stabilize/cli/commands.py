@@ -183,16 +183,12 @@ def prune_signals(
     store = create_repository(db_url, create_tables=False)
     try:
         if dry_run:
-            count = store.count_buffered_signal_stages(
-                only_complete=not include_active, statuses=statuses
-            )
+            count = store.count_buffered_signal_stages(only_complete=not include_active, statuses=statuses)
             print(f"{count} stage row(s) in {scope} carry a _buffered_signals buffer")
             print("Re-run without --dry-run to strip them")
             return
 
-        rows = store.cleanup_buffered_signals(
-            only_complete=not include_active, statuses=statuses
-        )
+        rows = store.cleanup_buffered_signals(only_complete=not include_active, statuses=statuses)
         print(f"Stripped _buffered_signals from {rows} stage row(s) in {scope}")
     except UnknownStatusError as e:
         print(f"Error: {e}")

@@ -96,8 +96,7 @@ def _degrade_or_raise(reason: str, error: BaseException | None) -> CircuitBreake
     """
     if _strict_storage_required():
         raise CircuitStorageUnavailableError(
-            f"PostgreSQL circuit breaker storage is unavailable ({reason}) and "
-            "STABILIZE_CIRCUIT_STORAGE_STRICT is set"
+            f"PostgreSQL circuit breaker storage is unavailable ({reason}) and STABILIZE_CIRCUIT_STORAGE_STRICT is set"
         ) from error
     logger.error(
         "PostgreSQL circuit breaker storage unavailable (%s). Falling back to IN-MEMORY "

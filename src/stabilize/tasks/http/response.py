@@ -59,9 +59,7 @@ def process_response(
         content_length = 0  # malformed header must not crash response handling
 
     # Get final URL (after redirects)
-    final_url = redact_userinfo(
-        response_obj.geturl() if hasattr(response_obj, "geturl") else url
-    )
+    final_url = redact_userinfo(response_obj.geturl() if hasattr(response_obj, "geturl") else url)
 
     # Download to file or read body
     download_to = context.get("download_to")

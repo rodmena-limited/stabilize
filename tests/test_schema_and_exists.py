@@ -25,9 +25,7 @@ class _Store:
             raise self._error
         return object()
 
-    exists = __import__(
-        "stabilize.persistence.store.interface", fromlist=["WorkflowStore"]
-    ).WorkflowStore.exists
+    exists = __import__("stabilize.persistence.store.interface", fromlist=["WorkflowStore"]).WorkflowStore.exists
 
 
 class TestExistsDistinguishesAbsenceFromBreakage:
@@ -40,7 +38,7 @@ class TestExistsDistinguishesAbsenceFromBreakage:
     @pytest.mark.parametrize(
         "error",
         [
-            RuntimeError("relation \"pipeline_executions\" does not exist"),
+            RuntimeError('relation "pipeline_executions" does not exist'),
             OSError("connection refused"),
             PermissionError("permission denied for table pipeline_executions"),
         ],
@@ -98,9 +96,7 @@ class TestMgSchemaOverride:
         monkeypatch.setenv("MG_SCHEMA", "orchestration")
         assert apply_schema_override({})["schema"] == "orchestration"
 
-    def test_override_is_absent_when_env_is_unset(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_override_is_absent_when_env_is_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from stabilize.cli.config import apply_schema_override
 
         monkeypatch.delenv("MG_SCHEMA", raising=False)

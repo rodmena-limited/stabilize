@@ -45,17 +45,13 @@ class TestDedupSurvivesBloomLoss:
         """A message marked processed before a crash must not re-execute after
         restart, even though the fresh (empty) bloom has never seen it."""
         store, queue = sqlite_env
-        store.mark_message_processed(
-            "msg-restart-1", handler_type="StartWorkflow", execution_id="e1"
-        )
+        store.mark_message_processed("msg-restart-1", handler_type="StartWorkflow", execution_id="e1")
 
         # Simulate process restart: brand-new global bloom filter.
         reset_deduplicator()
 
         processor, calls = _processor_with_counting_handler(store, queue)
-        msg = StartWorkflow(
-            execution_type="PIPELINE", execution_id="e1", message_id="msg-restart-1"
-        )
+        msg = StartWorkflow(execution_type="PIPELINE", execution_id="e1", message_id="msg-restart-1")
         processor._handle_message(msg)
 
         assert calls == [], "already-processed message re-executed after restart"
@@ -65,9 +61,7 @@ class TestDedupSurvivesBloomLoss:
         be deduplicated by the durable store."""
         store, queue = sqlite_env
         processor, calls = _processor_with_counting_handler(store, queue)
-        msg = StartWorkflow(
-            execution_type="PIPELINE", execution_id="e1", message_id="msg-rotate-1"
-        )
+        msg = StartWorkflow(execution_type="PIPELINE", execution_id="e1", message_id="msg-rotate-1")
 
         processor._handle_message(msg)
         assert len(calls) == 1, "first delivery should process"
@@ -127,16 +121,12 @@ class TestBloomAuthority:
         store.is_message_processed = counting_is_processed  # type: ignore[method-assign]
 
         # Processed pre-restart: bloom positive -> DB confirms -> skipped.
-        processor._handle_message(
-            StartWorkflow(execution_type="PIPELINE", execution_id="e1", message_id="msg-old-1")
-        )
+        processor._handle_message(StartWorkflow(execution_type="PIPELINE", execution_id="e1", message_id="msg-old-1"))
         assert calls == []
         assert "msg-old-1" in db_lookups
 
         # Fresh message: authoritative bloom negative -> no DB lookup, processed.
         db_lookups.clear()
-        processor._handle_message(
-            StartWorkflow(execution_type="PIPELINE", execution_id="e1", message_id="msg-new-1")
-        )
+        processor._handle_message(StartWorkflow(execution_type="PIPELINE", execution_id="e1", message_id="msg-new-1"))
         assert len(calls) == 1
         assert db_lookups == []

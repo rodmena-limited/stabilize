@@ -85,9 +85,7 @@ class LLMTask(Task):
             return TaskResult.terminal(error=f"LLM call failed: {e}")
 
         output_key = stage.context.get("output_key", "completion")
-        return TaskResult.success(
-            outputs={output_key: response.content, "llm_raw": response.raw}
-        )
+        return TaskResult.success(outputs={output_key: response.content, "llm_raw": response.raw})
 
 
 class AgentLoopTask(LLMTask):
@@ -156,9 +154,7 @@ class AgentLoopTask(LLMTask):
                     )
 
                 # Record the assistant turn (with its tool calls) then run them.
-                messages.append(
-                    ChatMessage(role="assistant", content=response.content, tool_calls=response.tool_calls)
-                )
+                messages.append(ChatMessage(role="assistant", content=response.content, tool_calls=response.tool_calls))
                 for call in response.tool_calls:
                     call_id = call.get("id", "")
                     fn = call.get("function", call)
@@ -169,9 +165,7 @@ class AgentLoopTask(LLMTask):
                     except Exception as tool_error:
                         result_text = f"ERROR: {tool_error}"
                     invocations.append({"tool": name, "result": result_text})
-                    messages.append(
-                        ChatMessage(role="tool", content=result_text, tool_call_id=call_id, name=name)
-                    )
+                    messages.append(ChatMessage(role="tool", content=result_text, tool_call_id=call_id, name=name))
         except Exception as e:
             return TaskResult.terminal(error=f"Agent loop failed: {e}")
 

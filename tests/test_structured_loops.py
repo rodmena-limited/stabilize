@@ -172,9 +172,7 @@ class Bump(Task):
     """Advances the outer counter and re-arms the inner one."""
 
     def execute(self, stage: StageExecution) -> TaskResult:
-        return TaskResult.success(
-            outputs={"o": int(stage.context.get("o", 0) or 0) + 1, "i": 0}
-        )
+        return TaskResult.success(outputs={"o": int(stage.context.get("o", 0) or 0) + 1, "i": 0})
 
 
 @pytest.mark.parametrize(("outer_n", "inner_n"), [(3, 2), (2, 3), (1, 4)])
@@ -191,18 +189,14 @@ def test_nested_loops_run_the_inner_body_on_every_outer_pass(
         # The inner bound is deliberately tight. A loop-back that kept counting
         # from its own stale copy across outer passes would reach it early and
         # cut the last pass short; a generous bound would hide that entirely.
-        inner = LoopBuilder.while_loop(
-            f"i < {inner_n}", [_body()], "IN", inner_n + 1, {"i": 0}
-        )
+        inner = LoopBuilder.while_loop(f"i < {inner_n}", [_body()], "IN", inner_n + 1, {"i": 0})
         bump = StageExecution(
             ref_id="bump",
             type="bump",
             name="bump",
             tasks=[TaskExecution.create("bump", "bump", stage_start=True, stage_end=True)],
         )
-        stages = LoopBuilder.while_loop(
-            f"o < {outer_n}", [*inner, bump], "OUT", outer_n + 1, {"o": 0, "i": 0}
-        )
+        stages = LoopBuilder.while_loop(f"o < {outer_n}", [*inner, bump], "OUT", outer_n + 1, {"o": 0, "i": 0})
         workflow = Workflow.create(application="loops", name="nested", stages=stages)
         repository.store(workflow)
         runner.start(workflow)

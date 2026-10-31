@@ -8,7 +8,10 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from stabilize.persistence.columns import select_list
 from stabilize.queue.message_ids import row_id
+
+_DLQ = select_list("queue_messages_dlq", "sqlite")
 
 if TYPE_CHECKING:
     pass
@@ -122,7 +125,7 @@ class SqliteDLQMixin:
         """
         conn = self._get_connection()
 
-        query = f"SELECT * FROM {self.table_name}_dlq"
+        query = f"SELECT {_DLQ} FROM {self.table_name}_dlq"
         params: dict[str, Any] = {"limit": limit}
 
         if message_type:
@@ -149,7 +152,7 @@ class SqliteDLQMixin:
         conn = self._get_connection()
 
         cursor = conn.execute(
-            f"DELETE FROM {self.table_name}_dlq WHERE id = :id RETURNING *",
+            f"DELETE FROM {self.table_name}_dlq WHERE id = :id RETURNING {_DLQ}",
             {"id": dlq_id},
         )
         row = cursor.fetchone()

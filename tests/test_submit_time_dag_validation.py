@@ -44,9 +44,7 @@ class TestStructuralDefectsAreRefusedAtSubmit:
 
     def test_two_cycle_names_its_members(self) -> None:
         with pytest.raises(CircularDependencyError) as excinfo:
-            Workflow.create(
-                application="a", name="n", stages=[_stage("1", {"2"}), _stage("2", {"1"})]
-            )
+            Workflow.create(application="a", name="n", stages=[_stage("1", {"2"}), _stage("2", {"1"})])
         assert "1" in str(excinfo.value) and "2" in str(excinfo.value)
 
     def test_three_cycle_is_caught(self) -> None:
@@ -75,9 +73,7 @@ class TestUnreachableJoin:
 
     def test_error_names_the_stage_and_both_numbers(self) -> None:
         with pytest.raises(InvalidStageGraphError) as excinfo:
-            validate_stage_graph(
-                [_stage("1"), _stage("2"), _stage("gate", {"1", "2"}, JoinType.N_OF_M, 5)]
-            )
+            validate_stage_graph([_stage("1"), _stage("2"), _stage("gate", {"1", "2"}, JoinType.N_OF_M, 5)])
         message = str(excinfo.value)
         assert "gate" in message and "5" in message and "2" in message
 
@@ -106,9 +102,7 @@ class TestUnreachableJoin:
 
 class TestValidGraphsStillPass:
     def test_linear_chain(self) -> None:
-        assert Workflow.create(
-            application="a", name="n", stages=[_stage("1"), _stage("2", {"1"})]
-        )
+        assert Workflow.create(application="a", name="n", stages=[_stage("1"), _stage("2", {"1"})])
 
     def test_diamond(self) -> None:
         assert Workflow.create(

@@ -90,8 +90,6 @@ class SqliteEventStore(
         """
         existing = {row[1] for row in conn.execute("PRAGMA table_info(event_subscriptions)")}
         if "last_commit_cursor" not in existing:
-            conn.execute(
-                "ALTER TABLE event_subscriptions ADD COLUMN last_commit_cursor TEXT DEFAULT '0'"
-            )
+            conn.execute("ALTER TABLE event_subscriptions ADD COLUMN last_commit_cursor TEXT DEFAULT '0'")
             conn.commit()
         conn.commit()

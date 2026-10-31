@@ -84,11 +84,7 @@ def _loop_variables(stage: StageExecution) -> dict[str, Any]:
     never reach it through the normal ancestor merge. The jump has to carry
     them. Internal bookkeeping (leading underscore) is excluded.
     """
-    return {
-        key: value
-        for key, value in stage.context.items()
-        if not key.startswith("_")
-    }
+    return {key: value for key, value in stage.context.items() if not key.startswith("_")}
 
 
 class LoopConditionTask(Task):
@@ -110,26 +106,19 @@ class LoopConditionTask(Task):
         iteration = int(context.get(LOOP_ITERATION, 0) or 0) if token else 0
 
         if not expression:
-            return TaskResult.terminal(
-                error=f"loop '{stage.ref_id}': no {LOOP_CONDITION} in stage context"
-            )
+            return TaskResult.terminal(error=f"loop '{stage.ref_id}': no {LOOP_CONDITION} in stage context")
 
         evaluation_context = _evaluation_context(stage)
         missing = _identifiers(expression) - set(evaluation_context)
         if missing:
             return TaskResult.terminal(
-                error=(
-                    f"loop '{stage.ref_id}': undefined identifier(s) "
-                    f"{sorted(missing)} in condition {expression!r}"
-                )
+                error=(f"loop '{stage.ref_id}': undefined identifier(s) {sorted(missing)} in condition {expression!r}")
             )
 
         try:
             keep_going = bool(evaluate_expression(expression, evaluation_context))
         except ExpressionError as exc:
-            return TaskResult.terminal(
-                error=f"loop '{stage.ref_id}': condition {expression!r} failed: {exc}"
-            )
+            return TaskResult.terminal(error=f"loop '{stage.ref_id}': condition {expression!r} failed: {exc}")
 
         exhausted = iteration >= maximum > 0
 
@@ -223,9 +212,8 @@ class LoopEntryTask(Task):
             },
         )
 
+
 class LoopBackTask(Task):
-
-
     """Closes a ``while`` loop: jumps back to the condition, or exits cleanly."""
 
     def execute(self, stage: StageExecution) -> TaskResult:

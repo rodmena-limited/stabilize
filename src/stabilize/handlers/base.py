@@ -191,8 +191,7 @@ class StabilizeHandler(EventRecordingMixin, MessageHandler[M], ABC):
             return True
 
         logger.warning(
-            "Refusing %s for stage %s: message claims workflow %s but the "
-            "stage belongs to %s",
+            "Refusing %s for stage %s: message claims workflow %s but the stage belongs to %s",
             get_message_type_name(message),
             message.stage_id,
             message.execution_id,

@@ -187,6 +187,13 @@ history in migretti without running any migration SQL again.
 
 ### Changed
 
+- **Every engine SELECT names its columns.** One column list per engine table
+  (`stabilize.persistence.columns`) is shared by the statements and the row converters
+  on both backends, and a test holds it equal to the live catalog. Two consequences for
+  hosts: a column you add to an engine table no longer appears in the rows the engine
+  reads, and a 0.33 process kept running across `mg-up` no longer fails its next read
+  with `0A000` because a prepared `SELECT *` changed shape. The converters now index
+  strictly, so a row missing a listed column raises `KeyError` instead of defaulting.
 - The migretti floor is now 0.10.0 in the `postgres`, `c`, `all` and `dev` extras.
 - The test suite builds its PostgreSQL schema with `stabilize mg-up`. Because it used to
   run `mg apply` directly, no test exercised the command customers run.

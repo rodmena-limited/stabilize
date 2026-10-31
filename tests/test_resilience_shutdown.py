@@ -39,9 +39,7 @@ class TestBulkheadShutdownSemantics:
             return "done"
 
         worker = threading.Thread(
-            target=lambda: manager.execute_with_timeout(
-                "shell", stuck_task, timeout=60.0
-            ),
+            target=lambda: manager.execute_with_timeout("shell", stuck_task, timeout=60.0),
             daemon=True,
         )
         worker.start()
@@ -182,9 +180,7 @@ class TestExecuteWithResilienceDuringShutdown:
         def healthy_call() -> str:
             return "ok"
 
-        assert healthy_call() == "ok", (
-            "shutdown refusals were recorded as circuit failures"
-        )
+        assert healthy_call() == "ok", "shutdown refusals were recorded as circuit failures"
 
     def test_dispatch_after_shutdown_raises_transient_error(self) -> None:
         """Work submitted to a shut-down manager is TransientError (retry),

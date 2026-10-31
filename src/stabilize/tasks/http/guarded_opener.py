@@ -46,9 +46,7 @@ def _enforce(sock: socket.socket | None, host: str, is_blocked: Callable[[Any], 
     try:
         parsed = ipaddress.ip_address(address)
     except ValueError as exc:
-        raise BlockedPeerError(
-            f"SSRF blocked: peer address {address!r} for {host!r} is not an IP address"
-        ) from exc
+        raise BlockedPeerError(f"SSRF blocked: peer address {address!r} for {host!r} is not an IP address") from exc
     if is_blocked(parsed):
         raise BlockedPeerError(
             f"SSRF blocked: {host!r} connected to blocked address {address} "

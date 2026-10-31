@@ -16,6 +16,14 @@ from stabilize.monitor.models import (
     WorkflowView,
     format_duration,
 )
+from stabilize.persistence.columns import select_list
+
+_PG_PIPELINE = select_list("pipeline_executions", "postgres")
+_PG_STAGE = select_list("stage_executions", "postgres")
+_PG_TASK = select_list("task_executions", "postgres")
+_SQLITE_PIPELINE = select_list("pipeline_executions", "sqlite")
+_SQLITE_STAGE = select_list("stage_executions", "sqlite")
+_SQLITE_TASK = select_list("task_executions", "sqlite")
 
 if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
@@ -31,6 +39,7 @@ def _count(row: Any) -> int:
         return int(row["n"])
     except (KeyError, TypeError, IndexError):
         return int(row[0])
+
 
 # Re-export for backward compatibility
 __all__ = [
@@ -118,8 +127,8 @@ class MonitorDataFetcher:
                     # 2. Fetch Stages
                     # ---------------
                     cur.execute(
-                        """
-                        SELECT * FROM stage_executions
+                        f"""
+                        SELECT {_PG_STAGE} FROM stage_executions
                         WHERE execution_id = ANY(%(ids)s)
                         ORDER BY start_time ASC
                         """,
@@ -143,8 +152,8 @@ class MonitorDataFetcher:
                     # 3. Fetch Tasks
                     # --------------
                     cur.execute(
-                        """
-                        SELECT * FROM task_executions
+                        f"""
+                        SELECT {_PG_TASK} FROM task_executions
                         WHERE stage_id = ANY(%(ids)s)
                         ORDER BY start_time ASC
                         """,
@@ -192,7 +201,7 @@ class MonitorDataFetcher:
             placeholders = ",".join("?" * len(workflow_ids))
             cursor.execute(
                 f"""
-                SELECT * FROM stage_executions
+                SELECT {_SQLITE_STAGE} FROM stage_executions
                 WHERE execution_id IN ({placeholders})
                 ORDER BY start_time ASC
                 """,
@@ -218,7 +227,7 @@ class MonitorDataFetcher:
             placeholders = ",".join("?" * len(stage_ids))
             cursor.execute(
                 f"""
-                SELECT * FROM task_executions
+                SELECT {_SQLITE_TASK} FROM task_executions
                 WHERE stage_id IN ({placeholders})
                 ORDER BY start_time ASC
                 """,
@@ -259,7 +268,7 @@ class MonitorDataFetcher:
             pg_params["limit"] = limit
 
             query = f"""
-                SELECT * FROM pipeline_executions
+                SELECT {_PG_PIPELINE} FROM pipeline_executions
                 {where}
                 ORDER BY
                     CASE WHEN status = 'RUNNING' THEN 0 ELSE 1 END,
@@ -282,7 +291,7 @@ class MonitorDataFetcher:
             sqlite_params.append(limit)
 
             query = f"""
-                SELECT * FROM pipeline_executions
+                SELECT {_SQLITE_PIPELINE} FROM pipeline_executions
                 {where}
                 ORDER BY
                     CASE WHEN status = 'RUNNING' THEN 0 ELSE 1 END,
@@ -398,9 +407,7 @@ class MonitorDataFetcher:
                 pool_getter = getattr(self.queue, "_get_pool", None)
                 pool = pool_getter() if pool_getter is not None else getattr(self.queue, "_pool")
                 table = getattr(self.queue, "table_name", "queue_messages")
-                stuck_threshold_dt = datetime.fromtimestamp(
-                    int(time.time()) - self.stuck_threshold_seconds
-                )
+                stuck_threshold_dt = datetime.fromtimestamp(int(time.time()) - self.stuck_threshold_seconds)
                 with pool.connection() as conn:
                     with conn.cursor() as cur:
                         # Alias the count so it works under the pool's dict_row
@@ -411,8 +418,7 @@ class MonitorDataFetcher:
                         )
                         pending = _count(cur.fetchone())
                         cur.execute(
-                            f"SELECT COUNT(*) AS n FROM {table} "
-                            "WHERE locked_until IS NOT NULL AND locked_until > NOW()"
+                            f"SELECT COUNT(*) AS n FROM {table} WHERE locked_until IS NOT NULL AND locked_until > NOW()"
                         )
                         processing = _count(cur.fetchone())
                         cur.execute(

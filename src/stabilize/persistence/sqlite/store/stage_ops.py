@@ -11,6 +11,7 @@ import sqlite3
 from typing import TYPE_CHECKING
 
 from stabilize.errors import ConcurrencyError
+from stabilize.persistence.columns import select_list
 from stabilize.persistence.sqlite.converters import (
     row_to_execution,
     row_to_stage,
@@ -18,6 +19,10 @@ from stabilize.persistence.sqlite.converters import (
 )
 from stabilize.persistence.sqlite.helpers import insert_stage, upsert_task
 from stabilize.persistence.task_state import capture, commit_captured, restore_versions, versions
+
+_PIPELINE = select_list("pipeline_executions", "sqlite")
+_STAGE = select_list("stage_executions", "sqlite")
+_TASK = select_list("task_executions", "sqlite")
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -162,7 +167,7 @@ class SqliteStageOpsMixin:
 
         # Get stage
         result = conn.execute(
-            "SELECT * FROM stage_executions WHERE id = :id",
+            f"SELECT {_STAGE} FROM stage_executions WHERE id = :id",
             {"id": stage_id},
         )
         stage_row = result.fetchone()
@@ -173,7 +178,7 @@ class SqliteStageOpsMixin:
 
         # Get execution summary for context
         exec_result = conn.execute(
-            "SELECT * FROM pipeline_executions WHERE id = :id",
+            f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = :id",
             {"id": stage_row["execution_id"]},
         )
         exec_row = exec_result.fetchone()
@@ -203,8 +208,8 @@ class SqliteStageOpsMixin:
         # Get tasks (ORDER BY id ensures consistent task sequencing)
         # Note: id is a ULID that encodes creation time, preserving insertion order
         task_result = conn.execute(
-            """
-            SELECT * FROM task_executions
+            f"""
+            SELECT {_TASK} FROM task_executions
             WHERE stage_id = :stage_id
             ORDER BY id ASC
             """,

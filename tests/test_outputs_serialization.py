@@ -19,9 +19,7 @@ from stabilize.queue import Queue
 
 
 def _task() -> TaskExecution:
-    return TaskExecution.create(
-        name="t", implementing_class="noop", stage_start=True, stage_end=True
-    )
+    return TaskExecution.create(name="t", implementing_class="noop", stage_start=True, stage_end=True)
 
 
 class TestNonPrimitiveOutputs:

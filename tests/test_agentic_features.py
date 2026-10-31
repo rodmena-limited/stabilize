@@ -75,9 +75,7 @@ class TestApprovalTask:
         from stabilize.hitl import ApprovalTask, approve, reject
         from tests.conftest import setup_stabilize
 
-        processor, runner, _ = setup_stabilize(
-            repository, queue, extra_tasks={"approval": ApprovalTask}
-        )
+        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"approval": ApprovalTask})
         ctx = {"approval_reject_continues": False}
         ctx.update(extra_ctx or {})
         stage = StageExecution(
@@ -85,11 +83,7 @@ class TestApprovalTask:
             type="approval",
             name="Approval Gate",
             context=ctx,
-            tasks=[
-                TaskExecution.create(
-                    name="wait", implementing_class="approval", stage_start=True, stage_end=True
-                )
-            ],
+            tasks=[TaskExecution.create(name="wait", implementing_class="approval", stage_start=True, stage_end=True)],
         )
         execution = Workflow.create(application="t", name="approval flow", stages=[stage])
         repository.store(execution)
@@ -108,18 +102,14 @@ class TestApprovalTask:
         processor.process_all(timeout=10.0)
         return repository.retrieve(execution.id)
 
-    def test_approval_flow_succeeds_after_approve(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_approval_flow_succeeds_after_approve(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         result = self._run(repository, queue, "approve")
         gate = next(s for s in result.stages if s.ref_id == "gate")
         assert gate.status == WorkflowStatus.SUCCEEDED
         assert gate.outputs.get("approved") is True
         assert gate.outputs["approval"]["user"] == "alice"
 
-    def test_approval_flow_fails_after_reject(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_approval_flow_fails_after_reject(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         result = self._run(repository, queue, "reject")
         gate = next(s for s in result.stages if s.ref_id == "gate")
         assert gate.status.is_failure or gate.status == WorkflowStatus.TERMINAL
@@ -137,9 +127,7 @@ class TestReducers:
             {"candidate": "b", "score": 5},
             {"candidate": "c", "score": 2},
         ]
-        result = apply_output_reducers(
-            {"candidate": "collect", "score": "sum"}, branches
-        )
+        result = apply_output_reducers({"candidate": "collect", "score": "sum"}, branches)
         assert result["candidate"] == ["a", "b", "c"]
         assert result["score"] == 10
 
@@ -174,9 +162,7 @@ class TestReducers:
                 # 'result' has been reduced into a list by the engine.
                 return TaskResult.success(outputs={"gathered": stage.context.get("result")})
 
-        processor, runner, _ = setup_stabilize(
-            repository, queue, extra_tasks={"emit": EmitTask, "gather": GatherTask}
-        )
+        processor, runner, _ = setup_stabilize(repository, queue, extra_tasks={"emit": EmitTask, "gather": GatherTask})
 
         def emit_stage(ref: str, value: str) -> StageExecution:
             return StageExecution(
@@ -198,9 +184,7 @@ class TestReducers:
             output_reducers={"result": "collect"},
             tasks=[TaskExecution.create(name="g", implementing_class="gather", stage_start=True, stage_end=True)],
         )
-        execution = Workflow.create(
-            application="t", name="reduce flow", stages=[branch_a, branch_b, join]
-        )
+        execution = Workflow.create(application="t", name="reduce flow", stages=[branch_a, branch_b, join])
         repository.store(execution)
         runner.start(execution)
         processor.process_all(timeout=15.0)
@@ -209,9 +193,7 @@ class TestReducers:
         assert result.status == WorkflowStatus.SUCCEEDED, f"status={result.status}"
         join_stage = next(s for s in result.stages if s.ref_id == "join")
         gathered = join_stage.outputs.get("gathered")
-        assert sorted(gathered) == ["alpha", "beta"], (
-            f"reducer did not gather both branches: {gathered}"
-        )
+        assert sorted(gathered) == ["alpha", "beta"], f"reducer did not gather both branches: {gathered}"
 
 
 # ============ B4: LLM toolkit ============
@@ -258,9 +240,7 @@ class TestLLMToolkit:
             def chat(self, messages, tools=None, temperature=None, **opts):
                 return ChatResponse(content="hello world", raw={"ok": True})
 
-        stage = StageExecution(
-            ref_id="s", type="llm", name="LLM", context={"prompt": "hi"}, tasks=[]
-        )
+        stage = StageExecution(ref_id="s", type="llm", name="LLM", context={"prompt": "hi"}, tasks=[])
         result = LLMTask(client=FakeClient()).execute(stage)
         assert result.status == WorkflowStatus.SUCCEEDED
         assert result.outputs["completion"] == "hello world"

@@ -95,8 +95,8 @@ def row_to_execution(row: sqlite3.Row) -> Workflow:
         max_concurrent_executions=row["max_concurrent_executions"] or 0,
         keep_waiting_pipelines=bool(row["keep_waiting_pipelines"]),
         origin=row["origin"] or "unknown",
-        queue_table=row["queue_table"] if "queue_table" in row.keys() else None,
-        config_version=row["config_version"] if "config_version" in row.keys() else None,
+        queue_table=row["queue_table"],
+        config_version=row["config_version"],
     )
 
 

@@ -341,9 +341,7 @@ class TestSqliteConfigIntegration:
         SingletonMeta.reset(ConnectionManager)
         reset_sqlite_config()
 
-    def test_wal_mode_applied_to_file_connection(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_wal_mode_applied_to_file_connection(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Opt-in WAL journal mode should take effect on a file-based DB."""
         from stabilize.persistence.connection import (
             ConnectionManager,

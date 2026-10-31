@@ -79,8 +79,7 @@ def test_deselected_branch_does_not_execute_two_deep(engine) -> None:
         engine,
         "two-deep",
         [
-            _stage("root", split_type=SplitType.OR,
-                   split_conditions={"live": "True", "dead": "False"}),
+            _stage("root", split_type=SplitType.OR, split_conditions={"live": "True", "dead": "False"}),
             _stage("live", {"root"}),
             _stage("live2", {"live"}),
             _stage("dead", {"root"}),
@@ -100,8 +99,7 @@ def test_selected_branch_still_runs_fully(engine) -> None:
         engine,
         "two-deep",
         [
-            _stage("root", split_type=SplitType.OR,
-                   split_conditions={"live": "True", "dead": "False"}),
+            _stage("root", split_type=SplitType.OR, split_conditions={"live": "True", "dead": "False"}),
             _stage("live", {"root"}),
             _stage("live2", {"live"}),
             _stage("dead", {"root"}),
@@ -119,8 +117,7 @@ def test_join_with_no_live_branch_is_pruned(engine) -> None:
         engine,
         "all-pruned",
         [
-            _stage("root", split_type=SplitType.OR,
-                   split_conditions={"live": "True", "b": "False", "c": "False"}),
+            _stage("root", split_type=SplitType.OR, split_conditions={"live": "True", "b": "False", "c": "False"}),
             _stage("live", {"root"}),
             _stage("b", {"root"}),
             _stage("c", {"root"}),
@@ -140,8 +137,7 @@ def test_join_with_one_live_branch_still_runs_once(engine) -> None:
         engine,
         "diamond",
         [
-            _stage("root", split_type=SplitType.OR,
-                   split_conditions={"left": "True", "right": "False"}),
+            _stage("root", split_type=SplitType.OR, split_conditions={"left": "True", "right": "False"}),
             _stage("left", {"root"}),
             _stage("right", {"root"}),
             _stage("join", {"left", "right"}),

@@ -66,9 +66,7 @@ class TestSchemaConfig:
         with pytest.raises(SystemExit):
             validate_schema_name(bad)
 
-    def test_mg_up_refuses_invalid_schema_before_connecting(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_mg_up_refuses_invalid_schema_before_connecting(self, capsys: pytest.CaptureFixture[str]) -> None:
         if not HAS_POSTGRES:
             pytest.skip("psycopg not installed")
         from stabilize.cli.commands import mg_up

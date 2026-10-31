@@ -51,7 +51,7 @@ POISON = [
     ("bad-enum", "CompleteTask", {"execution_id": "e1", "stage_id": "s", "task_id": "t", "status": "NOPE"}, "NOPE"),
     ("contract", "StartWorkflow", {"execution_id": 123}, "field contract"),
     ("not-an-object", "StartWorkflow", [1, 2], "not an object"),
-    ("json-scalar", "StartWorkflow", "\"just a string\"", "not an object"),
+    ("json-scalar", "StartWorkflow", '"just a string"', "not an object"),
 ]
 
 

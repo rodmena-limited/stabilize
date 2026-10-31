@@ -86,8 +86,7 @@ class TestReplayNoSpuriousGapWarnings:
             replayer.rebuild_workflow_state("wf-a")
         gap_warnings = [r for r in caplog.records if "gap" in r.getMessage().lower()]
         assert gap_warnings == [], (
-            f"spurious gap warnings on a complete per-workflow log: "
-            f"{[r.getMessage() for r in gap_warnings]}"
+            f"spurious gap warnings on a complete per-workflow log: {[r.getMessage() for r in gap_warnings]}"
         )
 
 
@@ -114,8 +113,6 @@ class TestAsyncBusOrdering:
             bus.publish(_stage_event(EventType.STAGE_STARTED, sequence=2, entity_id="second"))
 
             assert done.wait(5.0), "async deliveries never completed"
-            assert received == ["first", "second"], (
-                f"ASYNC delivery reordered events for one subscriber: {received}"
-            )
+            assert received == ["first", "second"], f"ASYNC delivery reordered events for one subscriber: {received}"
         finally:
             reset_event_bus()

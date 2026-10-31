@@ -69,9 +69,7 @@ class TestRedactDbUrl:
 
 
 class TestParseDbUrlDoesNotPrintTheSecret:
-    def test_unparseable_url_exits_without_echoing_the_password(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_unparseable_url_exits_without_echoing_the_password(self, capsys: pytest.CaptureFixture[str]) -> None:
         with pytest.raises(SystemExit):
             parse_db_url(f"postgresql+psycopg://someuser:{SECRET}@host/db")
         captured = capsys.readouterr()
@@ -160,9 +158,7 @@ class TestBuildDbUrl:
         ["p@ss", "pw with space", "sl/ash", "co:lon", "q?mark", "ha#sh", "per%cent"],
     )
     def test_every_metacharacter_survives_a_round_trip(self, password: str) -> None:
-        url = build_db_url(
-            {"user": "u", "password": password, "host": "h", "port": 5432, "dbname": "realdb"}
-        )
+        url = build_db_url({"user": "u", "password": password, "host": "h", "port": 5432, "dbname": "realdb"})
         assert parse_db_url(url)["password"] == password
 
     def test_absent_password_does_not_emit_an_empty_userinfo_password(self) -> None:

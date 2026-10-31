@@ -53,18 +53,14 @@ class TestPoolOptionsPassthrough:
         manager.get_postgres_pool(DSN)
         assert len(_FakePool.instances) == 1
 
-    def test_default_pool_sets_no_statement_or_lock_timeout(
-        self, manager: ConnectionManager
-    ) -> None:
+    def test_default_pool_sets_no_statement_or_lock_timeout(self, manager: ConnectionManager) -> None:
         """The documented default: server settings are inherited."""
         manager.get_postgres_pool(DSN)
         kwargs = _FakePool.instances[0].kwargs["kwargs"]
         assert "options" not in kwargs
 
     def test_connect_kwargs_reach_the_driver(self, manager: ConnectionManager) -> None:
-        options = PoolOptions(
-            connect_kwargs={"options": "-c statement_timeout=8000 -c lock_timeout=4000"}
-        )
+        options = PoolOptions(connect_kwargs={"options": "-c statement_timeout=8000 -c lock_timeout=4000"})
         manager.get_postgres_pool(DSN, options=options)
         kwargs = _FakePool.instances[0].kwargs["kwargs"]
         assert kwargs["options"] == "-c statement_timeout=8000 -c lock_timeout=4000"
@@ -86,9 +82,7 @@ class TestPoolOptionsPassthrough:
         assert _FakePool.instances[0].kwargs["min_size"] == 2
         assert _FakePool.instances[0].kwargs["max_size"] == 4
 
-    def test_different_options_do_not_silently_share_a_pool(
-        self, manager: ConnectionManager
-    ) -> None:
+    def test_different_options_do_not_silently_share_a_pool(self, manager: ConnectionManager) -> None:
         a = manager.get_postgres_pool(DSN, options=PoolOptions(acquire_timeout=1.0))
         b = manager.get_postgres_pool(DSN, options=PoolOptions(acquire_timeout=9.0))
         assert a is not b
@@ -111,9 +105,7 @@ class TestPoolHolderLifetime:
         manager.close_postgres_pool(DSN)
         assert not store_pool.closed, "closing one holder closed the shared pool"
 
-    def test_pool_closes_when_the_last_holder_releases(
-        self, manager: ConnectionManager
-    ) -> None:
+    def test_pool_closes_when_the_last_holder_releases(self, manager: ConnectionManager) -> None:
         """Both directions: it must actually close, or nothing is ever reclaimed."""
         pool = manager.get_postgres_pool(DSN)
         manager.get_postgres_pool(DSN)
@@ -122,9 +114,7 @@ class TestPoolHolderLifetime:
         manager.close_postgres_pool(DSN)
         assert pool.closed
 
-    def test_reacquire_after_full_release_builds_a_new_pool(
-        self, manager: ConnectionManager
-    ) -> None:
+    def test_reacquire_after_full_release_builds_a_new_pool(self, manager: ConnectionManager) -> None:
         first = manager.get_postgres_pool(DSN)
         manager.close_postgres_pool(DSN)
         second = manager.get_postgres_pool(DSN)

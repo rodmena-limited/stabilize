@@ -28,9 +28,7 @@ class TestProcessExecutorLargeResult:
         stage = StageExecution(ref_id="s", type="big", name="Big", tasks=[])
         result = ProcessIsolatedTaskExecutor(timeout_seconds=30).execute(BigOutputTask(), stage)
 
-        assert result.status.name == "SUCCEEDED", (
-            "large task result deadlocked the join and was misreported"
-        )
+        assert result.status.name == "SUCCEEDED", "large task result deadlocked the join and was misreported"
         assert len(result.outputs["blob"]) == 2_000_000
 
 

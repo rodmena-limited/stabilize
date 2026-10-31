@@ -122,8 +122,7 @@ class TestHTTPNonIdempotentRetryOptOut:
             },
         )
         assert calls == 1, (
-            "POST was retried despite retry_non_idempotent=False — duplicate "
-            "side effects on the remote service"
+            "POST was retried despite retry_non_idempotent=False — duplicate side effects on the remote service"
         )
 
     def test_get_still_retries_with_opt_out(self, monkeypatch: Any) -> None:

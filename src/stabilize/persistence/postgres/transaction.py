@@ -244,8 +244,7 @@ class PostgresTransaction(StoreTransaction):
     def count_running(self, pipeline_config_id: str) -> int:
         with self._conn.cursor() as cur:
             cur.execute(
-                "SELECT COUNT(*) AS n FROM pipeline_executions "
-                "WHERE pipeline_config_id = %(c)s AND status = 'RUNNING'",
+                "SELECT COUNT(*) AS n FROM pipeline_executions WHERE pipeline_config_id = %(c)s AND status = 'RUNNING'",
                 {"c": pipeline_config_id},
             )
             row = cur.fetchone()
@@ -263,9 +262,7 @@ class PostgresTransaction(StoreTransaction):
 
     def workflow_status(self, workflow_id: str) -> tuple[str | None, bool]:
         with self._conn.cursor() as cur:
-            cur.execute(
-                "SELECT status, is_canceled FROM pipeline_executions WHERE id = %(id)s", {"id": workflow_id}
-            )
+            cur.execute("SELECT status, is_canceled FROM pipeline_executions WHERE id = %(id)s", {"id": workflow_id})
             row = cur.fetchone()
         if row is None:
             return None, False

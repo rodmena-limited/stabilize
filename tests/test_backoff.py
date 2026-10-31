@@ -113,12 +113,7 @@ class TestExponentialBackoff:
         stage, task_model, message = _retry_fixture()
         registry = TaskRegistry()
         backoff = self._engine_delay(jitter=0.0)
-        periods = [
-            get_backoff_period(
-                stage, task_model, message, n, registry, backoff, lambda: 0
-            )
-            for n in range(1, 6)
-        ]
+        periods = [get_backoff_period(stage, task_model, message, n, registry, backoff, lambda: 0) for n in range(1, 6)]
         assert periods == sorted(periods)
         assert periods[0] < periods[-1]
 
@@ -130,9 +125,7 @@ class TestExponentialBackoff:
             def get_timeout(self) -> timedelta:
                 return timedelta(seconds=60)
 
-            def get_backoff_period(
-                self, stage: StageExecution, duration: timedelta
-            ) -> timedelta:
+            def get_backoff_period(self, stage: StageExecution, duration: timedelta) -> timedelta:
                 return timedelta(seconds=42)
 
         registry = TaskRegistry()

@@ -48,9 +48,7 @@ class TestSsrfMustBlock:
 class TestSsrfMustAllow:
     """Without these the block tests above pass vacuously."""
 
-    @pytest.mark.parametrize(
-        "url", ["https://example.com/x", "http://example.com/x", "http://93.184.216.34/x"]
-    )
+    @pytest.mark.parametrize("url", ["https://example.com/x", "http://example.com/x", "http://93.184.216.34/x"])
     def test_public_destinations_are_permitted(self, url: str) -> None:
         _validate_url_safety(url)
 
@@ -87,8 +85,6 @@ class TestRedactDbUrlHostlessForms:
     def test_dsn_missing_its_host_still_redacts(self, url: str) -> None:
         assert SECRET not in redact_db_url(url)
 
-    @pytest.mark.parametrize(
-        "url", ["postgresql://host:5432/db", "postgresql://host:5432", "sqlite:///tmp/a.db"]
-    )
+    @pytest.mark.parametrize("url", ["postgresql://host:5432/db", "postgresql://host:5432", "sqlite:///tmp/a.db"])
     def test_ports_and_paths_are_preserved(self, url: str) -> None:
         assert redact_db_url(url) == url

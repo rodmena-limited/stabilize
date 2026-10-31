@@ -53,9 +53,7 @@ class TestCheckSyncLease:
 
 
 class TestProcessorWarnsOnce:
-    def test_synchronous_poll_warns_and_only_once(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_synchronous_poll_warns_and_only_once(self, caplog: pytest.LogCaptureFixture) -> None:
         from stabilize.queue.processor.processor import QueueProcessor
         from stabilize.queue.sqlite import SqliteQueue
 
@@ -72,9 +70,7 @@ class TestProcessorWarnsOnce:
         hits = [r for r in caplog.records if "SYNCHRONOUS path" in r.getMessage()]
         assert len(hits) == 1, f"expected exactly one warning, got {len(hits)}"
 
-    def test_adequate_lease_produces_no_warning(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_adequate_lease_produces_no_warning(self, caplog: pytest.LogCaptureFixture) -> None:
         """Without this, the test above passes by warning unconditionally."""
         from stabilize.queue.processor.processor import QueueProcessor
         from stabilize.queue.sqlite import SqliteQueue

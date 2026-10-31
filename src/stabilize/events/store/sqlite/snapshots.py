@@ -12,6 +12,9 @@ import sqlite3
 from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EntityType
+from stabilize.persistence.columns import select_list
+
+_SNAPSHOTS = select_list("snapshots", "sqlite")
 
 if TYPE_CHECKING:
     pass
@@ -65,8 +68,8 @@ class SqliteSnapshotsMixin:
         conn = self._get_connection()
 
         cursor = conn.execute(
-            """
-            SELECT * FROM snapshots
+            f"""
+            SELECT {_SNAPSHOTS} FROM snapshots
             WHERE entity_type = ? AND entity_id = ?
             ORDER BY version DESC
             LIMIT 1

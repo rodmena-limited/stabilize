@@ -11,6 +11,7 @@ import sqlite3
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
+from stabilize.persistence.columns import select_list
 from stabilize.persistence.sqlite.converters import row_to_execution
 from stabilize.persistence.sqlite.operations import (
     cancel_execution,
@@ -31,6 +32,8 @@ from stabilize.persistence.sqlite.queries import (
 )
 from stabilize.persistence.store import WorkflowCriteria
 from stabilize.persistence.store.criteria import time_window_sql
+
+_PIPELINE = select_list("pipeline_executions", "sqlite")
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -110,8 +113,8 @@ class SqliteQueriesMixin:
         """
         conn = self._get_connection()
         result = conn.execute(
-            """
-            SELECT * FROM pipeline_executions
+            f"""
+            SELECT {_PIPELINE} FROM pipeline_executions
             WHERE application = :application
             ORDER BY created_at DESC
             LIMIT :limit

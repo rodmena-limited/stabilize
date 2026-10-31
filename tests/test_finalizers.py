@@ -251,9 +251,7 @@ class TestHungFinalizerTimeout:
         elapsed = time.monotonic() - start
 
         try:
-            assert elapsed < 2.0, (
-                f"execute() blocked {elapsed:.1f}s on a hung finalizer despite a 0.2s timeout"
-            )
+            assert elapsed < 2.0, f"execute() blocked {elapsed:.1f}s on a hung finalizer despite a 0.2s timeout"
             assert len(results) == 1
             assert results[0].success is False
             assert "Timeout" in (results[0].error or "")
@@ -284,9 +282,7 @@ class TestFinalizersRunOnStageTerminalStates:
         from stabilize.models.task import TaskExecution
         from stabilize.models.workflow import Workflow
 
-        task = TaskExecution.create(
-            name="t", implementing_class="noop", stage_start=True, stage_end=True
-        )
+        task = TaskExecution.create(name="t", implementing_class="noop", stage_start=True, stage_end=True)
         task.status = task_status
         stage = StageExecution(ref_id="s", name="S", tasks=[task])
         stage.status = WorkflowStatus.RUNNING
@@ -314,9 +310,7 @@ class TestFinalizersRunOnStageTerminalStates:
                 message_id="fin-1",
             )
         )
-        assert ran == ["release"], (
-            "finalizer not executed when the stage completed successfully"
-        )
+        assert ran == ["release"], "finalizer not executed when the stage completed successfully"
         reset_finalizer_registry()
 
     def test_finalizers_run_when_stage_is_canceled(self, tmp_path) -> None:

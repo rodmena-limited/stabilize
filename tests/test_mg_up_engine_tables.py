@@ -113,9 +113,7 @@ def test_a_dml_only_runtime_role_can_lease_tasks_after_mg_up(db: str, dml_only_r
             first = TaskLeaseManager(store, owner="worker-a")
             second = TaskLeaseManager(store, owner="worker-b")
         except Exception as exc:
-            pytest.fail(
-                f"task leasing could not start for a DML-only role after mg-up: {type(exc).__name__}: {exc}"
-            )
+            pytest.fail(f"task leasing could not start for a DML-only role after mg-up: {type(exc).__name__}: {exc}")
         assert first.acquire("task-95") is True
         assert second.acquire("task-95") is False, "a second owner took a lease that was still held"
     finally:

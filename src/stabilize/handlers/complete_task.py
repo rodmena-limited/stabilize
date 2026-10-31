@@ -48,11 +48,7 @@ def continues_in_stage(message: CompleteTask) -> bool:
 
 def accepts_start_task_skip(task: TaskExecution, message: CompleteTask) -> bool:
     """A CompleteTask(SKIPPED) for a task StartTask skipped: SKIPPED with no end_time yet."""
-    return (
-        message.status == WorkflowStatus.SKIPPED
-        and task.status == WorkflowStatus.SKIPPED
-        and task.end_time is None
-    )
+    return message.status == WorkflowStatus.SKIPPED and task.status == WorkflowStatus.SKIPPED and task.end_time is None
 
 
 class CompleteTaskHandler(StabilizeHandler[CompleteTask]):

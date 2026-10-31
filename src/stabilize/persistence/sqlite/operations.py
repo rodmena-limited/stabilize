@@ -104,9 +104,11 @@ def cancel_execution(
             canceled_by = :canceled_by,
             cancellation_reason = :reason
         WHERE id = :id AND status NOT IN ({complete})
-        """.format(complete=", ".join(
-            f"'{s.name}'" for s in WorkflowStatus if s.is_complete and s is not WorkflowStatus.CANCELED
-        )),
+        """.format(
+            complete=", ".join(
+                f"'{s.name}'" for s in WorkflowStatus if s.is_complete and s is not WorkflowStatus.CANCELED
+            )
+        ),
         {
             "id": execution_id,
             "canceled_by": canceled_by,

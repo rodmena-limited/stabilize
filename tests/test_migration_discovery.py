@@ -19,8 +19,7 @@ def _root_sql_names() -> set[str]:
 def test_the_repository_actually_carries_migrations() -> None:
     names = _root_sql_names()
     assert names, (
-        f"no .sql under {ROOT_MIGRATIONS}; every other assertion here would pass "
-        "vacuously against an empty directory"
+        f"no .sql under {ROOT_MIGRATIONS}; every other assertion here would pass vacuously against an empty directory"
     )
 
 

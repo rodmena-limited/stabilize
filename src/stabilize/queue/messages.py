@@ -472,8 +472,7 @@ def _validated(message_class: type[Message], data: dict[str, Any], type_name: st
         return cast(Message, adapter.validate_python(data))
     except ValidationError as exc:
         problems = "; ".join(
-            f"{'.'.join(str(p) for p in err['loc']) or '<message>'}: {err['msg']}"
-            for err in exc.errors()[:4]
+            f"{'.'.join(str(p) for p in err['loc']) or '<message>'}: {err['msg']}" for err in exc.errors()[:4]
         )
         raise MessageContractError(f"{type_name} failed its field contract: {problems}") from None
 

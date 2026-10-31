@@ -19,9 +19,7 @@ def _task(name: str) -> TaskExecution:
 
 def _workflow() -> tuple[Workflow, StageExecution, StageExecution]:
     upstream = StageExecution(ref_id="up", type="noop", name="Up", tasks=[_task("u")])
-    parent = StageExecution(
-        ref_id="main", type="noop", name="Main", requisite_stage_ref_ids={"up"}, tasks=[_task("m")]
-    )
+    parent = StageExecution(ref_id="main", type="noop", name="Main", requisite_stage_ref_ids={"up"}, tasks=[_task("m")])
     workflow = Workflow.create(application="single-conn", name="w", stages=[upstream, parent])
     before = StageExecution(
         ref_id="main-before",
@@ -38,9 +36,7 @@ def _workflow() -> tuple[Workflow, StageExecution, StageExecution]:
 def test_retrieve_stage_completes_on_a_one_connection_pool(postgres_url: str) -> None:
     from stabilize.persistence.postgres import PostgresWorkflowStore
 
-    store = PostgresWorkflowStore(
-        postgres_url, options=PoolOptions(min_size=1, max_size=1, acquire_timeout=3.0)
-    )
+    store = PostgresWorkflowStore(postgres_url, options=PoolOptions(min_size=1, max_size=1, acquire_timeout=3.0))
     try:
         workflow, parent, before = _workflow()
         store.store(workflow)
@@ -63,9 +59,7 @@ def test_retrieve_stage_completes_on_a_one_connection_pool(postgres_url: str) ->
 def test_a_stage_with_no_upstream_and_no_synthetic_children_loads_alone(postgres_url: str) -> None:
     from stabilize.persistence.postgres import PostgresWorkflowStore
 
-    store = PostgresWorkflowStore(
-        postgres_url, options=PoolOptions(min_size=1, max_size=1, acquire_timeout=3.0)
-    )
+    store = PostgresWorkflowStore(postgres_url, options=PoolOptions(min_size=1, max_size=1, acquire_timeout=3.0))
     try:
         workflow, _, _ = _workflow()
         store.store(workflow)

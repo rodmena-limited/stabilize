@@ -25,9 +25,7 @@ KNOWN_LEGACY_CHECKSUMS: dict[str, frozenset[str]] = {
     "01KWHFBW2B5VZJENEA3D8Z2YPW_add_stage_claims.sql": frozenset({"76d71bf48d1a9f143eac17b0cdef8aef"}),
     "01KYTB6S57X765P3BJYY58H79Z_add_queue_task_id_index.sql": frozenset({"45a9b7343ca368d18c4997a1dcf99af2"}),
     "01M482Z7ZP5AXJ8PJCGB5XZTCZ_widen_queue_ids_to_bigint.sql": frozenset({"8a2da87dd48395d6747082a152d5fedc"}),
-    "01M483DVR3DS980FHS8N754CWH_queue_bigint_ids_and_timestamptz.sql": frozenset(
-        {"1d1ceafde27bfe3418ea762fdf004ed2"}
-    ),
+    "01M483DVR3DS980FHS8N754CWH_queue_bigint_ids_and_timestamptz.sql": frozenset({"1d1ceafde27bfe3418ea762fdf004ed2"}),
     "01M4PAJCF82KCKYT5X4GMZH2XG_workflow_queue_table_and_stage_index.sql": frozenset(
         {"fe9b451a184b47de24b2dc5e8c944c73"}
     ),

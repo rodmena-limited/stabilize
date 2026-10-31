@@ -45,9 +45,7 @@ def _keys_referenced_in_source() -> dict[str, set[str]]:
         text = path.read_text(encoding="utf-8")
         for pattern in (_SUBSCRIPT_WRITE, _GET_READ, _CONSTANT_DEF):
             for match in pattern.finditer(text):
-                found.setdefault(match.group(1), set()).add(
-                    str(path.relative_to(SRC_ROOT.parent.parent))
-                )
+                found.setdefault(match.group(1), set()).add(str(path.relative_to(SRC_ROOT.parent.parent)))
     return found
 
 

@@ -24,9 +24,7 @@ from stabilize.queue.messages import JumpToStage, StartStage
 
 
 def _task(status: WorkflowStatus) -> TaskExecution:
-    task = TaskExecution.create(
-        name="t", implementing_class="noop", stage_start=True, stage_end=True
-    )
+    task = TaskExecution.create(name="t", implementing_class="noop", stage_start=True, stage_end=True)
     task.status = status
     return task
 
@@ -49,9 +47,7 @@ def _forward_jump_workflow(
         requisite_stage_ref_ids={"middle"},
         tasks=[_task(WorkflowStatus.NOT_STARTED)],
     )
-    execution = Workflow.create(
-        application="test", name="jump atomicity", stages=[source, middle, target]
-    )
+    execution = Workflow.create(application="test", name="jump atomicity", stages=[source, middle, target])
     execution.status = WorkflowStatus.RUNNING
     repository.store(execution)
     return execution, source, middle, target
@@ -161,9 +157,7 @@ class TestJumpAtomicity:
             tasks=[_task(WorkflowStatus.RUNNING)],
         )
         source.status = WorkflowStatus.RUNNING
-        execution = Workflow.create(
-            application="test", name="backward jump", stages=[target, source]
-        )
+        execution = Workflow.create(application="test", name="backward jump", stages=[target, source])
         execution.status = WorkflowStatus.RUNNING
         repository.store(execution)
 

@@ -96,9 +96,7 @@ def _blast(queue: Queue, wf: Workflow, stage: StageExecution, n: int) -> None:
 
 
 class TestCompleteStageRefusesSignals:
-    def test_completed_stage_buffers_nothing(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_completed_stage_buffers_nothing(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         processor, runner = _setup(repository, queue, "noop", NoopTask)
         wf = _workflow("terminal-refusal", "noop")
         repository.store(wf)
@@ -128,9 +126,7 @@ class TestBufferCap:
 
         registry = TaskRegistry()
         registry.register("suspend", SuspendTask)
-        processor = QueueProcessor(
-            queue, store=repository, task_registry=registry, handler_config=config
-        )
+        processor = QueueProcessor(queue, store=repository, task_registry=registry, handler_config=config)
         runner = Orchestrator(queue)
 
         wf = _workflow("cap", "suspend")
@@ -181,9 +177,7 @@ class TestBufferReclamation:
         processor.process_all(timeout=30.0)
 
         stage = repository.retrieve(wf.id).stage_by_ref_id("only")
-        stage.context["_buffered_signals"] = [
-            {"signal_name": "ci.resume", "signal_data": {}} for _ in range(500)
-        ]
+        stage.context["_buffered_signals"] = [{"signal_name": "ci.resume", "signal_data": {}} for _ in range(500)]
         repository.store_stage(stage)
 
         seeded = repository.retrieve(wf.id).stage_by_ref_id("only")
@@ -197,9 +191,7 @@ class TestBufferReclamation:
         for key, value in SIBLING_CONTEXT.items():
             assert after.context[key] == value
 
-    def test_cleanup_spares_live_stages_by_default(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_cleanup_spares_live_stages_by_default(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         processor, runner = _setup(repository, queue, "suspend", SuspendTask)
         wf = _workflow("spare-live", "suspend")
         repository.store(wf)
@@ -267,12 +259,7 @@ class TestStatusScoping:
 class TestRefusalEmissionRate:
     def test_first_refusal_emits_then_decade_boundaries(self) -> None:
         tracker = RefusalTracker()
-        emitted = [
-            count
-            for _ in range(100000)
-            for count, emit in [tracker.record("exec-1", "stage-a")]
-            if emit
-        ]
+        emitted = [count for _ in range(100000) for count, emit in [tracker.record("exec-1", "stage-a")] if emit]
         assert emitted == [1, 10, 100, 1000, 10000, 100000]
 
     def test_ci_incident_volume_costs_six_lines(self) -> None:

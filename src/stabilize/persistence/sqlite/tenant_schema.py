@@ -71,7 +71,7 @@ def ensure_tenant_schema(conn: sqlite3.Connection) -> list[str]:
     try:
         changed = tables_missing_tenant(conn)
         for name in changed:
-            conn.execute(f'ALTER TABLE "{name}" ADD COLUMN {TENANT_COLUMN} TEXT NOT NULL DEFAULT \'\'')
+            conn.execute(f"ALTER TABLE \"{name}\" ADD COLUMN {TENANT_COLUMN} TEXT NOT NULL DEFAULT ''")
         conn.execute(_MODE_TABLE_DDL)
         conn.execute(f"INSERT OR IGNORE INTO {MODE_TABLE} (id, mode) VALUES (1, ?)", (MODE_SINGLE,))
         conn.commit()

@@ -46,9 +46,7 @@ class TestCertifiedInvariants:
             processor = QueueProcessor(queue, store=store)
             calls: list[Any] = []
             processor.register_handler_func(StartWorkflow, lambda m: calls.append(m))
-            processor._handle_message(
-                StartWorkflow(execution_type="PIPELINE", execution_id="e1", message_id="m1")
-            )
+            processor._handle_message(StartWorkflow(execution_type="PIPELINE", execution_id="e1", message_id="m1"))
             assert calls == []  # already-processed message not re-executed
         finally:
             reset_deduplicator()

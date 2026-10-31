@@ -18,6 +18,9 @@ from stabilize.events.base import (
     parse_event_type,
 )
 from stabilize.events.store.interface import EventQuery
+from stabilize.persistence.columns import columns, select_list
+
+_EVENTS = select_list("events", "postgres")
 
 if TYPE_CHECKING:
     from psycopg import Connection
@@ -94,7 +97,7 @@ class PostgresEventsMixin:
 
     def get_events(self, query: EventQuery) -> Iterator[Event]:
         """Query events matching criteria."""
-        sql_parts = ["SELECT * FROM events WHERE 1=1"]
+        sql_parts = [f"SELECT {_EVENTS} FROM events WHERE 1=1"]
         params: dict[str, Any] = {}
 
         if query.entity_type is not None:
@@ -157,8 +160,8 @@ class PostgresEventsMixin:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
-                    SELECT * FROM events
+                    f"""
+                    SELECT {_EVENTS} FROM events
                     WHERE entity_type = %(entity_type)s
                       AND entity_id = %(entity_id)s
                       AND version > %(from_version)s
@@ -181,8 +184,8 @@ class PostgresEventsMixin:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
-                    SELECT * FROM events
+                    f"""
+                    SELECT {_EVENTS} FROM events
                     WHERE workflow_id = %(workflow_id)s
                       AND sequence > %(from_sequence)s
                     ORDER BY sequence ASC
@@ -211,8 +214,8 @@ class PostgresEventsMixin:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
-                    SELECT * FROM events
+                    f"""
+                    SELECT {_EVENTS} FROM events
                     WHERE sequence > %(sequence)s
                     ORDER BY sequence ASC
                     LIMIT %(limit)s
@@ -246,8 +249,8 @@ class PostgresEventsMixin:
                 watermark = str(row["wm"] if isinstance(row, dict) else row[0])
 
                 cur.execute(
-                    """
-                    SELECT * FROM events
+                    f"""
+                    SELECT {_EVENTS} FROM events
                     WHERE coalesce(commit_xid, '0'::xid8) >= %(cursor)s::xid8
                       AND coalesce(commit_xid, '0'::xid8) < %(watermark)s::xid8
                     ORDER BY coalesce(commit_xid, '0'::xid8) ASC, sequence ASC
@@ -264,7 +267,7 @@ class PostgresEventsMixin:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT * FROM events WHERE event_id = %(event_id)s",
+                    f"SELECT {_EVENTS} FROM events WHERE event_id = %(event_id)s",
                     {"event_id": event_id},
                 )
                 row = cur.fetchone()
@@ -315,27 +318,7 @@ class PostgresEventsMixin:
 
     def _row_to_event(self, row: Any) -> Event:
         """Convert a database row to an Event."""
-        # Handle both dict and tuple rows
-        if isinstance(row, dict):
-            data = row
-        else:
-            # Assume tuple with column order matching schema
-            data = {
-                "sequence": row[0],
-                "event_id": row[1],
-                "event_type": row[2],
-                "timestamp": row[3],
-                "entity_type": row[4],
-                "entity_id": row[5],
-                "workflow_id": row[6],
-                "version": row[7],
-                "data": row[8],
-                "correlation_id": row[9],
-                "causation_id": row[10],
-                "actor": row[11],
-                "source_handler": row[12],
-                "schema_version": row[13] if len(row) > 13 else 1,
-            }
+        data = row if isinstance(row, dict) else dict(zip(columns("events", "postgres"), row, strict=True))
 
         # Parse timestamp
         timestamp = data["timestamp"]

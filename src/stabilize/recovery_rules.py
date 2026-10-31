@@ -34,6 +34,7 @@ def has_started(stage: StageExecution) -> bool:
 
     return False
 
+
 def can_start(stage: StageExecution, workflow: Workflow) -> bool:
     """Check if a stage's dependencies are met and it can start.
 

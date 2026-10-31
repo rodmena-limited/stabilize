@@ -21,6 +21,9 @@ from stabilize.events.base import (
     parse_event_type,
 )
 from stabilize.events.store.interface import EventQuery
+from stabilize.persistence.columns import select_list
+
+_EVENTS = select_list("events", "sqlite")
 
 if TYPE_CHECKING:
     pass
@@ -93,7 +96,7 @@ class SqliteEventStoreMixin:
         """Query events matching criteria."""
         conn = self._get_connection()
 
-        sql_parts = ["SELECT * FROM events WHERE 1=1"]
+        sql_parts = [f"SELECT {_EVENTS} FROM events WHERE 1=1"]
         params: list[Any] = []
 
         if query.entity_type is not None:
@@ -154,8 +157,8 @@ class SqliteEventStoreMixin:
         conn = self._get_connection()
 
         cursor = conn.execute(
-            """
-            SELECT * FROM events
+            f"""
+            SELECT {_EVENTS} FROM events
             WHERE entity_type = ? AND entity_id = ? AND version > ?
             ORDER BY sequence ASC
             """,
@@ -173,8 +176,8 @@ class SqliteEventStoreMixin:
         conn = self._get_connection()
 
         cursor = conn.execute(
-            """
-            SELECT * FROM events
+            f"""
+            SELECT {_EVENTS} FROM events
             WHERE workflow_id = ? AND sequence > ?
             ORDER BY sequence ASC
             """,
@@ -200,8 +203,8 @@ class SqliteEventStoreMixin:
         conn = self._get_connection()
 
         cursor = conn.execute(
-            """
-            SELECT * FROM events
+            f"""
+            SELECT {_EVENTS} FROM events
             WHERE sequence > ?
             ORDER BY sequence ASC
             LIMIT ?
@@ -240,7 +243,7 @@ class SqliteEventStoreMixin:
         conn = self._get_connection()
 
         cursor = conn.execute(
-            "SELECT * FROM events WHERE event_id = ?",
+            f"SELECT {_EVENTS} FROM events WHERE event_id = ?",
             (event_id,),
         )
 
@@ -305,11 +308,7 @@ class SqliteEventStoreMixin:
         except (json.JSONDecodeError, TypeError):
             data = {}
 
-        schema_ver = 1
-        try:
-            schema_ver = row["schema_version"] or 1
-        except (IndexError, KeyError):
-            pass
+        schema_ver = row["schema_version"] or 1
 
         parsed_type = parse_event_type(row["event_type"])
         if parsed_type is EventType.UNKNOWN:

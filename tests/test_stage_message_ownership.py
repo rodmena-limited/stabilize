@@ -50,21 +50,29 @@ def _gate_then_tail(name: str) -> Workflow:
     workflow open, so skipping it does not drive the workflow to completion.
     """
     gate = StageExecution(
-        ref_id="gate", type="approval", name="Gate",
+        ref_id="gate",
+        type="approval",
+        name="Gate",
         tasks=[
             TaskExecution.create(
-                name="wait", implementing_class="approval",
-                stage_start=True, stage_end=True,
+                name="wait",
+                implementing_class="approval",
+                stage_start=True,
+                stage_end=True,
             )
         ],
     )
     tail = StageExecution(
-        ref_id="tail", type="approval", name="Tail",
+        ref_id="tail",
+        type="approval",
+        name="Tail",
         requisite_stage_ref_ids={"gate"},
         tasks=[
             TaskExecution.create(
-                name="wait2", implementing_class="approval",
-                stage_start=True, stage_end=True,
+                name="wait2",
+                implementing_class="approval",
+                stage_start=True,
+                stage_end=True,
             )
         ],
     )
@@ -152,9 +160,7 @@ def test_skip_stage_across_workflows_is_refused(engine) -> None:
     target = _stage_by_ref(store, a.id, "tail")
     assert target.status == WorkflowStatus.NOT_STARTED
 
-    queue.push(
-        SkipStage(execution_type="PIPELINE", execution_id=b.id, stage_id=target.id)
-    )
+    queue.push(SkipStage(execution_type="PIPELINE", execution_id=b.id, stage_id=target.id))
     processor.process_all(timeout=30.0)
 
     assert _stage_by_ref(store, a.id, "tail").status == WorkflowStatus.NOT_STARTED
@@ -171,9 +177,7 @@ def test_skip_stage_within_its_own_workflow_still_works(engine) -> None:
     target = _stage_by_ref(store, a.id, "tail")
     assert target.status == WorkflowStatus.NOT_STARTED
 
-    queue.push(
-        SkipStage(execution_type="PIPELINE", execution_id=a.id, stage_id=target.id)
-    )
+    queue.push(SkipStage(execution_type="PIPELINE", execution_id=a.id, stage_id=target.id))
     processor.process_all(timeout=3.0)
 
     assert _stage_by_ref(store, a.id, "tail").status == WorkflowStatus.SKIPPED

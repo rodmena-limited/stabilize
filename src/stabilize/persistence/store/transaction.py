@@ -131,4 +131,3 @@ class StoreTransaction(ABC):
 def workflow_control_key(workflow_id: str) -> str:
     """The lock key that serializes pausing and resuming one workflow."""
     return f"workflow-control:{workflow_id}"
-

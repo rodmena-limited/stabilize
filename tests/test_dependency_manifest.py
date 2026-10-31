@@ -81,9 +81,7 @@ def _runtime_requirements() -> set[str]:
 
 def _optional_requirements() -> dict[str, set[str]]:
     groups = _manifest().get("optional-dependencies", {})
-    return {
-        group: {_requirement_name(req) for req in reqs} for group, reqs in groups.items()
-    }
+    return {group: {_requirement_name(req) for req in reqs} for group, reqs in groups.items()}
 
 
 def _distributions_for(module: str) -> set[str]:
@@ -123,14 +121,11 @@ def test_no_runtime_dependency_is_unimported(imported_modules: dict[str, set[str
     for module in imported_modules:
         provided_by_imports |= _distributions_for(module)
 
-    unimported = sorted(
-        _runtime_requirements() - provided_by_imports - set(DECLARED_PENDING_USE)
-    )
+    unimported = sorted(_runtime_requirements() - provided_by_imports - set(DECLARED_PENDING_USE))
 
     assert not unimported, (
         "declared in [project].dependencies but imported by no module under "
-        "src/stabilize/, so every consumer installs it for nothing: "
-        + ", ".join(unimported)
+        "src/stabilize/, so every consumer installs it for nothing: " + ", ".join(unimported)
     )
 
 
@@ -177,8 +172,5 @@ def test_the_check_can_see_a_known_positive() -> None:
         "the AST scan found no resilient_circuit import, so it cannot be trusted "
         "to report the absence of any other import"
     )
-    assert any(
-        importer.endswith("persistence/transaction.py")
-        for importer in modules["resilient_circuit"]
-    )
+    assert any(importer.endswith("persistence/transaction.py") for importer in modules["resilient_circuit"])
     assert _distributions_for("resilient_circuit") == {"resilient-circuit"}

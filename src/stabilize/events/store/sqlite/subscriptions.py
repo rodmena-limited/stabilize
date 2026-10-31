@@ -11,6 +11,9 @@ import sqlite3
 from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EventType, parse_event_type
+from stabilize.persistence.columns import select_list
+
+_SUBSCRIPTIONS = select_list("event_subscriptions", "sqlite")
 
 if TYPE_CHECKING:
     pass
@@ -23,6 +26,7 @@ def _row_value(row: Any, column: str, default: str = "0") -> str:
     except (IndexError, KeyError):
         return default
     return default if value is None else str(value)
+
 
 class SqliteSubscriptionsMixin:
     """Mixin providing subscription CRUD operations."""
@@ -66,7 +70,7 @@ class SqliteSubscriptionsMixin:
         conn = self._get_connection()
 
         cursor = conn.execute(
-            "SELECT * FROM event_subscriptions WHERE id = ?",
+            f"SELECT {_SUBSCRIPTIONS} FROM event_subscriptions WHERE id = ?",
             (subscription_id,),
         )
 
@@ -76,9 +80,7 @@ class SqliteSubscriptionsMixin:
 
         try:
             event_types = (
-                [parse_event_type(et) for et in json.loads(row["event_types"])]
-                if row["event_types"]
-                else None
+                [parse_event_type(et) for et in json.loads(row["event_types"])] if row["event_types"] else None
             )
         except (json.JSONDecodeError, TypeError):
             event_types = None

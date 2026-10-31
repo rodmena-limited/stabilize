@@ -10,7 +10,6 @@ fast-path checks pass for both siblings (as they do when both reads happen
 before either write) and require the claim transaction itself to serialize.
 """
 
-
 import pytest
 
 from stabilize.handlers import StartStageHandler
@@ -24,9 +23,7 @@ from stabilize.queue.messages import CancelStage, StartStage
 
 
 def _task() -> TaskExecution:
-    return TaskExecution.create(
-        name="t", implementing_class="noop", stage_start=True, stage_end=True
-    )
+    return TaskExecution.create(name="t", implementing_class="noop", stage_start=True, stage_end=True)
 
 
 def _start(handler: StartStageHandler, execution: Workflow, stage: StageExecution, mid: str) -> None:
@@ -63,9 +60,7 @@ class TestMutexRace:
 
         fresh = repository.retrieve(execution.id)
         running = [s.ref_id for s in fresh.stages if s.status == WorkflowStatus.RUNNING]
-        assert len(running) == 1, (
-            f"mutex 'shared_db' held by {running} simultaneously — WCP-39 violated"
-        )
+        assert len(running) == 1, f"mutex 'shared_db' held by {running} simultaneously — WCP-39 violated"
 
     def test_mutex_transfers_after_owner_completes(
         self,
@@ -95,9 +90,7 @@ class TestMutexRace:
 
         fresh = repository.retrieve(execution.id)
         b_fresh = next(s for s in fresh.stages if s.ref_id == "b")
-        assert b_fresh.status == WorkflowStatus.RUNNING, (
-            "mutex was not released/transferred after the owner completed"
-        )
+        assert b_fresh.status == WorkflowStatus.RUNNING, "mutex was not released/transferred after the owner completed"
 
 
 class TestDeferredChoiceRace:
@@ -114,9 +107,7 @@ class TestDeferredChoiceRace:
         execution.status = WorkflowStatus.RUNNING
         repository.store(execution)
 
-        monkeypatch.setattr(
-            StartStageHandler, "_is_deferred_choice_claimed", lambda self, s: False
-        )
+        monkeypatch.setattr(StartStageHandler, "_is_deferred_choice_claimed", lambda self, s: False)
 
         handler = StartStageHandler(queue, repository)
         _start(handler, execution, stage_a, "ss-choice-a")
@@ -124,9 +115,7 @@ class TestDeferredChoiceRace:
 
         fresh = repository.retrieve(execution.id)
         running = [s.ref_id for s in fresh.stages if s.status == WorkflowStatus.RUNNING]
-        assert len(running) == 1, (
-            f"deferred choice group 'response' started {running} — WCP-16 violated"
-        )
+        assert len(running) == 1, f"deferred choice group 'response' started {running} — WCP-16 violated"
 
         # The loser must be cancelled (immediately or via a queued CancelStage).
         loser_ref = "b" if running == ["a"] else "a"
@@ -159,9 +148,7 @@ class TestDeferredChoiceRace:
         execution.status = WorkflowStatus.RUNNING
         repository.store(execution)
 
-        monkeypatch.setattr(
-            StartStageHandler, "_is_deferred_choice_claimed", lambda self, s: False
-        )
+        monkeypatch.setattr(StartStageHandler, "_is_deferred_choice_claimed", lambda self, s: False)
         handler = StartStageHandler(queue, repository)
 
         _start(handler, execution, stage_a, "ss-final-a")
@@ -175,6 +162,4 @@ class TestDeferredChoiceRace:
 
         fresh = repository.retrieve(execution.id)
         b_fresh = next(s for s in fresh.stages if s.ref_id == "b")
-        assert b_fresh.status != WorkflowStatus.RUNNING, (
-            "deferred-choice loser started after the winner completed"
-        )
+        assert b_fresh.status != WorkflowStatus.RUNNING, "deferred-choice loser started after the winner completed"

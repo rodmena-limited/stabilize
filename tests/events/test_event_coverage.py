@@ -169,11 +169,7 @@ def test_task_retry_is_recorded(engine) -> None:
     runner.start(wf)
     processor.process_all(timeout=30.0)
 
-    retries = [
-        e
-        for e in event_store.get_events_for_workflow(wf.id)
-        if e.event_type is EventType.TASK_RETRIED
-    ]
+    retries = [e for e in event_store.get_events_for_workflow(wf.id) if e.event_type is EventType.TASK_RETRIED]
     assert len(retries) >= 1
 
 

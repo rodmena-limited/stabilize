@@ -164,4 +164,3 @@ class CompleteStageSupport(
                         stage_id=stage.parent_stage_id,
                     )
                 )
-

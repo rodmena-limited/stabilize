@@ -43,9 +43,7 @@ def _stage(command: str) -> StageExecution:
 
 
 class TestSSHCommandQuoting:
-    def test_command_with_arguments_is_passed_verbatim(
-        self, captured_ssh: list[list[str]]
-    ) -> None:
+    def test_command_with_arguments_is_passed_verbatim(self, captured_ssh: list[list[str]]) -> None:
         result = SSHTask().execute(_stage("systemctl status nginx"))
         assert result.status.name == "SUCCEEDED"
 

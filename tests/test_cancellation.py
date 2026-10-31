@@ -138,15 +138,11 @@ class _CooperativeTask(Task):
 class TestExecutionPathBinding:
     """The real RunTask execution path binds a token (no-op for normal tasks)."""
 
-    def test_token_bound_during_normal_execution(
-        self, repository: WorkflowStore, queue: Queue, backend: str
-    ) -> None:
+    def test_token_bound_during_normal_execution(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         from tests.conftest import setup_stabilize
 
         _CooperativeTask.saw_token = False
-        processor, orchestrator, _ = setup_stabilize(
-            repository, queue, extra_tasks={"coop": _CooperativeTask}
-        )
+        processor, orchestrator, _ = setup_stabilize(repository, queue, extra_tasks={"coop": _CooperativeTask})
 
         workflow = Workflow.create(
             application="cancel-app",

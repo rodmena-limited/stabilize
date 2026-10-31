@@ -7,12 +7,16 @@ from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any, cast
 
 from stabilize.dag.merge import merge_ancestor_outputs, topological_order
+from stabilize.persistence.columns import select_list
 from stabilize.persistence.postgres.converters import (
     row_to_stage,
     row_to_task,
 )
 from stabilize.persistence.store import WorkflowCriteria
 from stabilize.persistence.store.criteria import time_window_sql
+
+_STAGE = select_list("stage_executions", "postgres")
+_TASK = select_list("task_executions", "postgres")
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -29,8 +33,8 @@ def load_tasks_for_stages(cur: Any, stages: list[StageExecution]) -> None:
 
     # ORDER BY id ensures consistent task sequencing (ULID encodes creation time)
     cur.execute(
-        """
-        SELECT * FROM task_executions
+        f"""
+        SELECT {_TASK} FROM task_executions
         WHERE stage_id = ANY(%(stage_ids)s)
         ORDER BY id ASC
         """,
@@ -66,8 +70,8 @@ def get_upstream_stages(pool: Any, execution_id: str, stage_ref_id: str) -> list
 
             # Now fetch those stages
             cur.execute(
-                """
-                SELECT * FROM stage_executions
+                f"""
+                SELECT {_STAGE} FROM stage_executions
                 WHERE execution_id = %(execution_id)s
                 AND ref_id = ANY(%(requisites)s)
                 """,
@@ -91,8 +95,8 @@ def get_downstream_stages(pool: Any, execution_id: str, stage_ref_id: str) -> li
         with conn.cursor() as cur:
             # Find stages that have stage_ref_id in their requisites
             cur.execute(
-                """
-                SELECT * FROM stage_executions
+                f"""
+                SELECT {_STAGE} FROM stage_executions
                 WHERE execution_id = %(execution_id)s
                 AND %(ref_id)s = ANY(requisite_stage_ref_ids)
                 """,
@@ -115,8 +119,8 @@ def get_synthetic_stages(pool: Any, execution_id: str, parent_stage_id: str) -> 
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                SELECT * FROM stage_executions
+                f"""
+                SELECT {_STAGE} FROM stage_executions
                 WHERE execution_id = %(execution_id)s
                 AND parent_stage_id = %(parent_id)s
                 """,

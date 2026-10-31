@@ -42,9 +42,7 @@ def es_env(tmp_path: Any):
 
 
 def _task(status: WorkflowStatus) -> TaskExecution:
-    task = TaskExecution.create(
-        name="t", implementing_class="noop", stage_start=True, stage_end=True
-    )
+    task = TaskExecution.create(name="t", implementing_class="noop", stage_start=True, stage_end=True)
     task.status = status
     return task
 
@@ -61,9 +59,7 @@ class TestDeferredBusPublish:
 
         with store.transaction(queue):
             recorder.record_stage_completed(stage, source_handler="test")
-            assert seen == [], (
-                "event published to the bus before the state transaction committed"
-            )
+            assert seen == [], "event published to the bus before the state transaction committed"
         assert len(seen) == 1, "deferred event was not published after commit"
 
     def test_rollback_drops_event_and_publish(self, es_env: Any) -> None:
@@ -81,18 +77,12 @@ class TestDeferredBusPublish:
                 raise RuntimeError("injected rollback")
 
         assert seen == [], "event published although its transaction rolled back"
-        stored = list(
-            event_store.get_events(EventQuery(event_types={EventType.STAGE_COMPLETED}))
-        )
-        assert stored == [], (
-            "phantom STAGE_COMPLETED persisted although the state transaction rolled back"
-        )
+        stored = list(event_store.get_events(EventQuery(event_types={EventType.STAGE_COMPLETED})))
+        assert stored == [], "phantom STAGE_COMPLETED persisted although the state transaction rolled back"
 
 
 class TestCompleteStageNoPhantomEvents:
-    def test_failed_completion_txn_leaves_no_phantom_event(
-        self, es_env: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_failed_completion_txn_leaves_no_phantom_event(self, es_env: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         """If CompleteStage's state transaction fails, no STAGE_COMPLETED
         event may survive in the event store."""
         store, queue, event_store, recorder = es_env
@@ -133,10 +123,7 @@ class TestCompleteStageNoPhantomEvents:
             "stage state committed although the completion transaction failed"
         )
 
-        stored = list(
-            event_store.get_events(EventQuery(event_types={EventType.STAGE_COMPLETED}))
-        )
+        stored = list(event_store.get_events(EventQuery(event_types={EventType.STAGE_COMPLETED})))
         assert stored == [], (
-            "phantom STAGE_COMPLETED event recorded although the stage-completion "
-            "transaction never committed"
+            "phantom STAGE_COMPLETED event recorded although the stage-completion transaction never committed"
         )
