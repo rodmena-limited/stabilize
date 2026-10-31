@@ -116,6 +116,13 @@ host's own migretti history, now upgrade with no change to the command.
 - **`stabilize mg-queue-table NAME`** creates `NAME` and `NAME_dlq` with the shape of the
   built-in queue tables and, in tenancy mode, the fence, the CHECK and no default on the
   tenant column. Running it twice changes nothing the second time.
+- **Tenant flags on the maintenance commands.** `prune-processed`, `purge-workflows` and
+  `prune-signals` take `--tenant NAME` or `--all-tenants`. In tenancy mode one of them is
+  required. `--all-tenants` runs the command once per tenant that has rows.
+  `create_repository()`, `create_queue()` and the other factories take `tenant=`.
+- **`Orchestrator.get_instance()` is deprecated** and refused with `TenantError` while
+  the orchestrator's store carries a tenant. A process-global orchestrator cannot serve
+  several tenants. Pass it to the task explicitly.
 
 ### Fixed
 

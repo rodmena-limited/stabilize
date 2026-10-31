@@ -86,12 +86,18 @@ on the current code before the fix is written. No gate until every item is done.
 - Under a non-empty tenant the event store shall store durable subscription ids as `"<tenant>" + chr(31) + "<name>"` and shall accept and return names only; names longer than 100 characters or containing control characters shall be refused with `ValueError`; `list_subscriptions()` shall return the tenant's names; a name saved by one tenant shall not be visible to another.
 - `stabilize mg-queue-table NAME` shall create `NAME` and `NAME_dlq` in the target schema with the shape of `queue_messages` and `queue_messages_dlq` (columns, defaults, indexes) and, in tenancy mode, the fence trigger, the CHECK and no default on `stabilize_tenant`; it shall refuse a name that is not a plain identifier and shall be idempotent.
 
-### WI-2 slice 6c: tenant flags on the maintenance CLI, factories, the orchestrator singleton, runbook (in progress)
+### WI-2 slice 6c: tenant flags on the maintenance CLI, factories, the orchestrator singleton, runbook (done)
 - `create_repository`, `create_queue` and `create_event_store` in `stabilize.persistence.factory` shall accept `tenant=` and pass it through.
 - `stabilize prune-processed`, `purge-workflows` and `prune-signals` shall accept `--tenant NAME` and `--all-tenants`, resolved by the same rule as the monitor: in tenancy mode one of them is required, in single-tenant mode the default is `''`; `--all-tenants` runs the command once per tenant found in `pipeline_executions` (and for `prune-processed`, in `processed_messages`).
 - While the store carries a tenant, `Orchestrator.get_instance()` shall raise `TenantError` (a process-global orchestrator cannot serve several tenants); in single-tenant mode it shall keep returning the last instance and emit a `DeprecationWarning`.
 - `PostgresEventStore.setup_ddl()` shall produce the same columns, types and nullability for `events`, `snapshots` and `event_subscriptions` as `mg-up` does; a test applies both to fresh databases and compares the catalogs.
 - The persistence guide's "One pool for several tenants" section shall describe tenancy mode with `tenant=`, `tenant_setting=` and the fence in place of the session-level `on_borrow` recipe, keeping the recipe only as the single-tenant RLS variant.
+
+### WI-2 slice 6d: application_name, INVALID indexes, event-store DDL path, upgrade runbooks (in progress)
+- Unless the DSN or `PoolOptions.connect_kwargs` sets `application_name`, every engine pool shall connect with `application_name = stabilize/<version> <hostname>` (one name per pool); a host's own value is kept.
+- `mg-up` shall refuse, before `mg apply`, when any index on an engine table is INVALID (`pg_index.indisvalid = false`), naming the index and `REINDEX INDEX <name>`; the engine shall log a warning at first use for an INVALID engine index and carry on.
+- `PostgresEventStore(create_tables=True)` shall create only absent tables; a present table in the wrong shape is refused by the first-use schema check with its DDL, never altered.
+- The persistence guide shall carry an upgrade runbook per host shape: fresh install with tenancy (Casebound), single-tenant upgrade from 0.30-0.33 (Provenance, Trace), own-DDL host (ci-conductor), each with the grants, the stop-processes rule and the `stabilize_tenancy` grant.
 
 ### WI-2 remaining slices (to be specified as each starts)
 Statements on every SQL site (rule 1 explicit column lists), the trigger fence and `mg-tenancy enable|disable|status`, the `TenancyModeChanged` latch, per-instance recorder/deduplicator, namespaced subscription ids and locks, the schema check, indexes, SQLite triggers, runbooks.

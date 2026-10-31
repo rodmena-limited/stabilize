@@ -167,6 +167,8 @@ def main() -> None:
         "prune-signals",
         help="Strip unconsumable WCP-24 persistent-signal buffers from stage contexts",
     )
+    prune_parser.add_argument("--tenant", help="Work on one tenant (required in tenancy mode unless --all-tenants)")
+    prune_parser.add_argument("--all-tenants", action="store_true", help="Work on every tenant that has rows")
     prune_parser.add_argument(
         "--db-url",
         help="Database URL (postgres://... or sqlite:///...)",
@@ -194,6 +196,8 @@ def main() -> None:
     processed_parser = subparsers.add_parser(
         "prune-processed", help="Delete old processed-message records in batches", description=PRUNE_PROCESSED_HELP
     )
+    processed_parser.add_argument("--tenant", help="Work on one tenant (required in tenancy mode unless --all-tenants)")
+    processed_parser.add_argument("--all-tenants", action="store_true", help="Work on every tenant that has rows")
     processed_parser.add_argument("--db-url", help="Database URL (postgres://... or sqlite:///...)")
     processed_parser.add_argument("--older-than-hours", type=float, default=168.0, help="Age cutoff (default 168)")
     processed_parser.add_argument("--batch-size", type=int, default=10_000, help="Rows per transaction (default 10000)")
@@ -217,6 +221,8 @@ def main() -> None:
             "Workflows that are not complete are never selected; event-store rows are kept."
         ),
     )
+    purge_parser.add_argument("--tenant", help="Work on one tenant (required in tenancy mode unless --all-tenants)")
+    purge_parser.add_argument("--all-tenants", action="store_true", help="Work on every tenant that has rows")
     purge_parser.add_argument("--db-url", help="Database URL (postgres://... or sqlite:///...)")
     purge_parser.add_argument("--completed-before-days", type=float, required=True)
     purge_parser.add_argument("--application", default=None, help="Only this application")
@@ -276,7 +282,14 @@ def main() -> None:
             all_tenants=args.all_tenants,
         )
     elif args.command == "prune-signals":
-        prune_signals(args.db_url, args.include_active, args.dry_run, args.statuses)
+        prune_signals(
+            args.db_url,
+            args.include_active,
+            args.dry_run,
+            args.statuses,
+            tenant=args.tenant,
+            all_tenants=args.all_tenants,
+        )
     elif args.command == "prune-processed":
         prune_processed(
             args.db_url,
@@ -285,6 +298,8 @@ def main() -> None:
             args.max_rows,
             args.queue_table or ["queue_messages"],
             args.queue_db_url,
+            tenant=args.tenant,
+            all_tenants=args.all_tenants,
         )
     elif args.command == "purge-workflows":
         purge_workflows(
@@ -294,6 +309,8 @@ def main() -> None:
             args.queue_table,
             args.batch_size,
             args.dry_run,
+            tenant=args.tenant,
+            all_tenants=args.all_tenants,
         )
     else:
         parser.print_help()

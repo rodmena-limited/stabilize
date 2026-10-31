@@ -40,6 +40,7 @@ def detect_backend(connection_string: str) -> str:
 def create_repository(
     connection_string: str,
     create_tables: bool = False,
+    tenant: str = "",
 ) -> WorkflowStore:
     """
     Create an execution repository based on the connection string.
@@ -82,11 +83,11 @@ def create_repository(
     if backend == "sqlite":
         from stabilize.persistence.sqlite import SqliteWorkflowStore
 
-        return SqliteWorkflowStore(connection_string, create_tables)
+        return SqliteWorkflowStore(connection_string, create_tables, tenant=tenant)
     else:
         from stabilize.persistence.postgres import PostgresWorkflowStore
 
-        return PostgresWorkflowStore(connection_string)
+        return PostgresWorkflowStore(connection_string, tenant=tenant)
 
 
 def create_queue(
@@ -94,6 +95,7 @@ def create_queue(
     table_name: str = "queue_messages",
     lock_duration: timedelta | None = None,
     max_attempts: int = 10,
+    tenant: str = "",
 ) -> Queue:
     """
     Create a message queue based on the connection string.
@@ -128,6 +130,7 @@ def create_queue(
             table_name=table_name,
             lock_duration=lock_duration,
             max_attempts=max_attempts,
+            tenant=tenant,
         )
     else:
         from stabilize.queue import PostgresQueue
@@ -137,4 +140,5 @@ def create_queue(
             table_name=table_name,
             lock_duration=lock_duration,
             max_attempts=max_attempts,
+            tenant=tenant,
         )

@@ -55,8 +55,8 @@ def monitor_target(config: dict[str, Any]) -> tuple[str, str | None]:
     return build_db_url(config), validate_schema_name(schema) if schema else None
 
 
-def resolve_monitor_tenant(mode: str, tenant: str | None, all_tenants: bool) -> str | None:
-    """The tenant the monitor filters on: None means every tenant; '' is the single-tenant install."""
+def resolve_cli_tenant(mode: str, tenant: str | None, all_tenants: bool) -> str | None:
+    """The tenant a command works on: None means every tenant; '' is the single-tenant install."""
     if tenant is not None and all_tenants:
         print("Error: --tenant and --all-tenants exclude each other")
         sys.exit(1)
@@ -66,11 +66,61 @@ def resolve_monitor_tenant(mode: str, tenant: str | None, all_tenants: bool) -> 
         return validate_tenant(tenant)
     if mode == MODE_TENANCY:
         print(
-            "Error: this schema is in tenancy mode; pass --tenant NAME to watch one tenant "
+            "Error: this schema is in tenancy mode; pass --tenant NAME to work on one tenant "
             "or --all-tenants for every one"
         )
         sys.exit(1)
     return ""
+
+
+resolve_monitor_tenant = resolve_cli_tenant
+
+
+def schema_mode(db_url: str) -> str:
+    """The tenancy mode of the database a maintenance command targets, read before any part is built."""
+    if db_url.startswith("sqlite"):
+        import sqlite3
+
+        from stabilize.persistence.connection import get_connection_manager
+        from stabilize.persistence.sqlite.tenant_schema import ensure_tenant_schema, read_mode
+
+        path = get_connection_manager()._parse_sqlite_path(db_url)
+        conn = sqlite3.connect(path)
+        try:
+            ensure_tenant_schema(conn)
+            return read_mode(conn)
+        finally:
+            conn.close()
+    from stabilize.persistence.tenancy import postgres_mode
+
+    psycopg = import_psycopg()
+    with psycopg.connect(db_url) as conn:
+        return str(postgres_mode(conn))
+
+
+def tenants_in(db_url: str) -> list[str]:
+    """Every tenant with a row in pipeline_executions or processed_messages."""
+    if db_url.startswith("sqlite"):
+        import sqlite3
+
+        from stabilize.persistence.connection import get_connection_manager
+
+        conn = sqlite3.connect(get_connection_manager()._parse_sqlite_path(db_url))
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT stabilize_tenant FROM pipeline_executions "
+                "UNION SELECT DISTINCT stabilize_tenant FROM processed_messages"
+            ).fetchall()
+        finally:
+            conn.close()
+        return sorted(str(r[0]) for r in rows)
+    psycopg = import_psycopg()
+    with psycopg.connect(db_url) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT stabilize_tenant FROM pipeline_executions "
+            "UNION SELECT DISTINCT stabilize_tenant FROM processed_messages"
+        ).fetchall()
+    return sorted(str(r[0]) for r in rows)
 
 
 def _schema_mode(store: Any) -> str:
@@ -196,11 +246,10 @@ def prune_signals(
     include_active: bool = False,
     dry_run: bool = False,
     statuses: list[str] | None = None,
+    tenant: str | None = None,
+    all_tenants: bool = False,
 ) -> None:
     """Remove unconsumable WCP-24 persistent-signal buffers from stage contexts."""
-    from stabilize.persistence.factory import create_repository
-    from stabilize.persistence.signal_scope import UnknownStatusError
-
     if db_url is None:
         print("Error: --db-url is required")
         print("Use sqlite:///path or postgres://...")
@@ -213,7 +262,22 @@ def prune_signals(
     else:
         scope = "completed stages"
 
-    store = create_repository(db_url, create_tables=False)
+    watched = resolve_cli_tenant(schema_mode(db_url), tenant, all_tenants)
+    targets = tenants_in(db_url) if watched is None else [watched]
+    if not targets:
+        print("No tenant has rows; nothing to do")
+        return
+    for one in targets:
+        _prune_signals_for(db_url, one, include_active, dry_run, statuses, scope)
+
+
+def _prune_signals_for(
+    db_url: str, tenant: str, include_active: bool, dry_run: bool, statuses: list[str] | None, scope: str
+) -> None:
+    from stabilize.persistence.factory import create_repository
+    from stabilize.persistence.signal_scope import UnknownStatusError
+
+    store = create_repository(db_url, create_tables=False, tenant=tenant)
     try:
         if dry_run:
             count = store.count_buffered_signal_stages(only_complete=not include_active, statuses=statuses)

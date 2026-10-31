@@ -34,17 +34,39 @@ def prune_processed(
     max_rows: int | None,
     queue_tables: list[str] | None = None,
     queue_db_url: str | None = None,
+    tenant: str | None = None,
+    all_tenants: bool = False,
+) -> None:
+    from stabilize.cli.commands import resolve_cli_tenant, schema_mode, tenants_in
+
+    url = _require(db_url)
+    watched = resolve_cli_tenant(schema_mode(url), tenant, all_tenants)
+    targets = tenants_in(url) if watched is None else [watched]
+    if not targets:
+        print("No tenant has rows; nothing to do")
+        return
+    for one in targets:
+        _prune_processed_for(url, one, older_than_hours, batch_size, max_rows, queue_tables, queue_db_url)
+
+
+def _prune_processed_for(
+    url: str,
+    tenant: str,
+    older_than_hours: float,
+    batch_size: int,
+    max_rows: int | None,
+    queue_tables: list[str] | None,
+    queue_db_url: str | None,
 ) -> None:
     from stabilize.persistence.factory import create_queue, create_repository
 
-    url = _require(db_url)
-    store = create_repository(url, create_tables=False)
+    store = create_repository(url, create_tables=False, tenant=tenant)
     started = time.monotonic()
     removed = 0
     tables = queue_tables or ["queue_messages"]
     try:
         for table in tables:
-            queue = create_queue(queue_db_url or url, table_name=table)
+            queue = create_queue(queue_db_url or url, table_name=table, tenant=tenant)
             try:
                 left = None if max_rows is None else max_rows - removed
                 if left is not None and left <= 0:
@@ -64,9 +86,10 @@ def prune_processed(
         close = getattr(store, "close", None)
         if callable(close):
             close()
+    label = f" for tenant {tenant!r}" if tenant else ""
     print(
         f"Removed {removed} processed-message record(s) older than {older_than_hours} h "
-        f"for queue table(s) {', '.join(tables)}, in batches of {batch_size} "
+        f"for queue table(s) {', '.join(tables)}{label}, in batches of {batch_size} "
         f"({time.monotonic() - started:.1f} s)"
     )
 
@@ -78,13 +101,35 @@ def purge_workflows(
     queue_table: str,
     batch_size: int,
     dry_run: bool,
+    tenant: str | None = None,
+    all_tenants: bool = False,
+) -> None:
+    from stabilize.cli.commands import resolve_cli_tenant, schema_mode, tenants_in
+
+    url = _require(db_url)
+    watched = resolve_cli_tenant(schema_mode(url), tenant, all_tenants)
+    targets = tenants_in(url) if watched is None else [watched]
+    if not targets:
+        print("No tenant has rows; nothing to do")
+        return
+    for one in targets:
+        _purge_workflows_for(url, one, completed_before_days, application, queue_table, batch_size, dry_run)
+
+
+def _purge_workflows_for(
+    url: str,
+    tenant: str,
+    completed_before_days: float,
+    application: str | None,
+    queue_table: str,
+    batch_size: int,
+    dry_run: bool,
 ) -> None:
     from stabilize.maintenance import purge_completed_workflows
     from stabilize.persistence.factory import create_queue, create_repository
 
-    url = _require(db_url)
     cutoff_ms = int((time.time() - completed_before_days * 86400) * 1000)
-    store = create_repository(url, create_tables=False)
+    store = create_repository(url, create_tables=False, tenant=tenant)
     queue = None
     try:
         if dry_run:
@@ -92,7 +137,7 @@ def purge_workflows(
             print(f"{count} completed workflow(s) ended more than {completed_before_days} day(s) ago")
             print("Re-run without --dry-run to delete them")
             return
-        queue = create_queue(url, table_name=queue_table)
+        queue = create_queue(url, table_name=queue_table, tenant=tenant)
         deleted = purge_completed_workflows(store, queue, cutoff_ms, batch_size=batch_size, application=application)
         print(f"Purged {deleted} completed workflow(s) ended more than {completed_before_days} day(s) ago")
     finally:

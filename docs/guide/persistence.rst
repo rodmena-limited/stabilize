@@ -209,48 +209,35 @@ transaction fails with ``stabilize.persistence.borrow_hook.BorrowHookError``, an
 the connection goes back to the pool. An exception raised in ``on_borrow`` reaches
 the caller.
 
-One pool for several tenants under row-level security
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Several tenants on one database
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The queue processor's threads, the event bus, finalizers and bulkhead tasks run in
-a copy of the ``contextvars`` context of the code that started them. A tenant set
-in a ``ContextVar`` before ``QueueProcessor.start()`` is therefore visible to
-``on_borrow`` on every connection that processor uses:
+From 0.34.0 the engine keeps tenants apart itself. Put the schema in tenancy mode (see
+`Tenancy mode`_ below), then build one set of parts per tenant and one processor per
+tenant process:
 
 .. code-block:: python
 
-    from contextvars import ContextVar
+    options = PoolOptions(tenant_setting="app.current_tenant")
+    store = PostgresWorkflowStore(dsn, tenant="acme", options=options)
+    queue = PostgresQueue(dsn, tenant="acme", options=options)
+    events = PostgresEventStore(dsn, tenant="acme", options=options)
+    processor = QueueProcessor(queue, store=store, ...)
+    processor.start()
 
-    TENANT: ContextVar[str] = ContextVar("tenant")
+Every row the engine writes carries ``stabilize_tenant = 'acme'``, every statement it
+runs filters on that value, and the fence refuses a write from any connection that does
+not carry the tenant. The parts for different tenants may share one pool. On each
+transaction the engine sets ``stabilize.tenant``. With ``tenant_setting`` it sets your own
+setting too, and a policy of yours written against ``current_setting('app.current_tenant',
+true)`` keeps working. ``tests/test_tenant_isolation.py`` runs two tenants through every
+public operation of the store, queue and event store on both backends and checks that
+neither sees the other's rows.
 
-    def set_tenant(conn):
-        conn.execute("SELECT set_config('app.tenant_id', %s, false)", (TENANT.get(),))
-        conn.commit()
-
-    def clear_tenant(conn):
-        conn.execute("SELECT set_config('app.tenant_id', '', false)")
-        conn.commit()
-
-    options = PoolOptions(on_borrow=set_tenant, reset=clear_tenant)
-
-    for tenant in ("acme", "globex"):
-        token = TENANT.set(tenant)
-        try:
-            store = PostgresWorkflowStore(dsn, options=options)
-            queue = PostgresQueue(dsn, options=options)
-            processor = QueueProcessor(queue, store=store, ...)
-            processor.start()
-        finally:
-            TENANT.reset(token)
-
-With event sourcing on, give ``PostgresEventStore`` the same options
-(``PostgresEventStore(dsn, options=options)``) so event writes go through the same
-pool and hooks. All the stores and queues above share one pool. Row-level security policies that
-compare a ``tenant_id`` column with ``current_setting('app.tenant_id', true)`` then
-keep each tenant's workflows apart. The setting is session-level, so it holds for
-the whole borrow, and ``reset`` clears it when the connection is returned.
-``tests/test_multitenant_rls.py`` runs this setup with policies on every engine
-table and checks that neither tenant can read the other's workflows.
+The 0.33 recipe, a session-level ``on_borrow`` hook that sets a host setting from a
+``ContextVar`` before ``QueueProcessor.start()``, still works for a single-tenant install
+that keeps its own ``tenant_id`` column and policies. It no longer isolates tenants on
+its own in 0.34: use tenancy mode for that.
 
 An idle ``QueueProcessor`` polls once per ``poll_frequency_ms`` and every poll is one
 transaction. Measured on PostgreSQL 16 for one idle processor:
@@ -264,6 +251,44 @@ transaction. Measured on PostgreSQL 16 for one idle processor:
 
 Raise ``poll_frequency_ms`` where pickup latency allows; the same cost applies per
 processor instance.
+
+Upgrading to 0.34
+-----------------
+
+Stop every engine process first. A 0.33 process kept running across ``mg-up`` fails
+its next read, because the shape of the rows it prepared changed under it. Start the
+processes again only after ``mg-up`` prints OK.
+
+**A single-tenant install coming from 0.30 to 0.33** (Provenance, Trace):
+
+.. code-block:: bash
+
+    stabilize mg-up --db-url "$DSN"
+    stabilize mg-check-grants --role "$RUNTIME_ROLE" --db-url "$DSN"
+
+``mg-up`` adds the tenant column and the mode record and keeps the schema in single-tenant
+mode. Grant the runtime role ``SELECT ON stabilize_tenancy``. Nothing in the workflow
+code changes. A row-level security setup of your own keeps working, and
+``PoolOptions(tenant_setting=...)`` is available when you want the engine to set your
+setting on each transaction.
+
+**A fresh install with tenants** (Casebound):
+
+.. code-block:: bash
+
+    stabilize mg-up --db-url "$DSN"
+    stabilize mg-tenancy enable --db-url "$DSN"
+    stabilize mg-check-grants --role "$RUNTIME_ROLE" --db-url "$DSN"
+
+Then your own migrations, with the policy from `The fence`_ if you keep policies, and
+one process per tenant built with ``tenant="..."``. ``mg-tenancy enable`` works only
+while every engine table is empty. Run it before the first workflow.
+
+**A host that owns its DDL** (ci-conductor). Take the migration files from the package
+with ``stabilize.cli.migrations.get_migration_files()``, or ``PostgresEventStore.setup_ddl()``
+for the event tables alone. Apply them with your own tool and run ``mg-check-grants``.
+When a table differs from what the engine expects, the first-use schema check names
+the DDL to run.
 
 Tenancy mode
 ------------

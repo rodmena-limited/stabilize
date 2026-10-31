@@ -6,10 +6,11 @@ This module provides the main entry point for running pipelines.
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
 from stabilize.models.status import WorkflowStatus
-from stabilize.persistence.tenancy import require_same_tenant
+from stabilize.persistence.tenancy import TenantError, require_same_tenant
 from stabilize.queue.messages import (
     CancelWorkflow,
     CompleteWorkflow,
@@ -69,7 +70,20 @@ class Orchestrator:
         Returns:
             The current Orchestrator instance, or None if not created yet.
         """
-        return cls._instance
+        instance = cls._instance
+        bound = getattr(instance.store, "tenant", None) if instance is not None else None
+        if bound:
+            raise TenantError(
+                "Orchestrator.get_instance() is a process-global and cannot serve a tenant-scoped store; "
+                "pass the orchestrator explicitly"
+            )
+        warnings.warn(
+            "Orchestrator.get_instance() is deprecated in 0.34 and refused in tenancy mode; "
+            "pass the orchestrator to the task explicitly",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return instance
 
     def get_execution(self, execution_id: str) -> Workflow | None:
         """Retrieve a workflow execution by ID.
