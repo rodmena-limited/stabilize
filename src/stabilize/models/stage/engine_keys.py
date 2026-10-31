@@ -86,7 +86,11 @@ SIGNAL_KEYS = frozenset(
 TASK_LIFECYCLE_KEYS = frozenset(
     {
         "_gate_checked",
+        "_paused_at",
+        "_paused_ms",
         "_task_completion",
+        "_timer_armed_at",
+        "_timer_due_at",
     }
 )
 

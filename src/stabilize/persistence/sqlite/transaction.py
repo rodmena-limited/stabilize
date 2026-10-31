@@ -117,6 +117,7 @@ class AtomicTransaction(StoreTransaction):
                         outputs = :outputs,
                         start_time = :start_time,
                         end_time = :end_time,
+                        scheduled_time = :scheduled_time,
                         version = version + 1
                     WHERE id = :id AND version = :version AND status = :expected_phase AND stabilize_tenant = :tenant
                     """,
@@ -128,6 +129,7 @@ class AtomicTransaction(StoreTransaction):
                         "outputs": json.dumps(stage.outputs, default=str),
                         "start_time": stage.start_time,
                         "end_time": stage.end_time,
+                        "scheduled_time": stage.scheduled_time,
                         "version": stage.version,
                         "expected_phase": expected_phase,
                     },
@@ -141,6 +143,7 @@ class AtomicTransaction(StoreTransaction):
                         outputs = :outputs,
                         start_time = :start_time,
                         end_time = :end_time,
+                        scheduled_time = :scheduled_time,
                         version = version + 1
                     WHERE id = :id AND version = :version AND stabilize_tenant = :tenant
                     """,
@@ -152,6 +155,7 @@ class AtomicTransaction(StoreTransaction):
                         "outputs": json.dumps(stage.outputs, default=str),
                         "start_time": stage.start_time,
                         "end_time": stage.end_time,
+                        "scheduled_time": stage.scheduled_time,
                         "version": stage.version,
                     },
                 )

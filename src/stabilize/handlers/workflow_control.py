@@ -274,6 +274,10 @@ class ResumeStageHandler(StabilizeHandler[ResumeStage], _ControlHandler):
                 execution = self.repository.retrieve(message.execution_id)
 
             self.set_stage_status(stage, WorkflowStatus.RUNNING)
+            paused_at = stage.context.pop("_paused_at", None)
+            if isinstance(paused_at, int):
+                already = int(stage.context.get("_paused_ms") or 0)
+                stage.context["_paused_ms"] = already + max(0, self.current_time_millis() - paused_at)
             paused_tasks = [t for t in stage.tasks if t.status == WorkflowStatus.PAUSED]
             if len(paused_tasks) > 1:
                 logger.warning(
@@ -396,6 +400,7 @@ class PauseTaskHandler(StabilizeHandler[PauseTask], _ControlHandler):
                         return
                 self.set_task_status(task, WorkflowStatus.PAUSED)
                 self.set_stage_status(stage, WorkflowStatus.PAUSED)
+                stage.context["_paused_at"] = self.current_time_millis()
                 txn.store_stage(stage)
                 if message.message_id:
                     txn.mark_message_processed(

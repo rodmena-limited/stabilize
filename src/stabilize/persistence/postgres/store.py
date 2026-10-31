@@ -327,6 +327,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
                 outputs = %(outputs)s::jsonb,
                 start_time = %(start_time)s,
                 end_time = %(end_time)s,
+                scheduled_time = %(scheduled_time)s,
                 version = version + 1
             WHERE id = %(id)s AND version = %(version)s AND stabilize_tenant = %(tenant)s"""
             + phase_clause
@@ -341,6 +342,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
                 "outputs": json.dumps(stage.outputs, default=str),
                 "start_time": stage.start_time,
                 "end_time": stage.end_time,
+                "scheduled_time": stage.scheduled_time,
                 "version": stage.version,
                 "expected_phase": expected_phase,
             },

@@ -140,7 +140,9 @@ def _refuse_preset_guc(conn: Any) -> None:
         "SELECT coalesce(d.datname, '<all databases>'), coalesce(r.rolname, '<all roles>'), s.cfg "
         "FROM pg_db_role_setting rs CROSS JOIN LATERAL unnest(rs.setconfig) AS s(cfg) "
         "LEFT JOIN pg_database d ON d.oid = rs.setdatabase LEFT JOIN pg_roles r ON r.oid = rs.setrole "
-        "WHERE s.cfg LIKE %s",
+        "WHERE (rs.setdatabase = 0 "
+        "OR rs.setdatabase = (SELECT oid FROM pg_database WHERE datname = current_database())) "
+        "AND s.cfg LIKE %s",
         ("stabilize.tenant=%",),
     ).fetchall()
     current = conn.execute("SELECT coalesce(current_setting('stabilize.tenant', true), '')").fetchone()[0]

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from stabilize.tasks.interface import NoOpTask, WaitTask
+from stabilize.tasks.interface import NoOpTask, TimerTask, WaitTask
 from stabilize.tasks.loop import LoopBackTask, LoopConditionTask, LoopEntryTask
 
 if TYPE_CHECKING:
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 BUILTIN_TASKS: dict[str, type[Task]] = {
     "NoOpTask": NoOpTask,
     "WaitTask": WaitTask,
+    "TimerTask": TimerTask,
     "LoopConditionTask": LoopConditionTask,
     "LoopBackTask": LoopBackTask,
     "LoopEntryTask": LoopEntryTask,
@@ -30,4 +31,5 @@ BUILTIN_TASKS: dict[str, type[Task]] = {
 BUILTIN_ALIASES: dict[str, str] = {
     "noop": "NoOpTask",
     "wait": "WaitTask",
+    "timer": "TimerTask",
 }

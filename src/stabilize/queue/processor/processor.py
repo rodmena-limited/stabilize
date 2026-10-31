@@ -25,7 +25,7 @@ from stabilize.queue import Queue
 from stabilize.queue.dedup import BloomDeduplicator
 from stabilize.queue.messages import Message
 from stabilize.queue.processor.config import QueueProcessorConfig
-from stabilize.queue.processor.drain import SynchronousDrainMixin
+from stabilize.queue.processor.drain import DrainResult, SynchronousDrainMixin
 from stabilize.queue.processor.handler_base import MessageHandler
 from stabilize.queue.processor.mixins import QueueProcessorMixin
 from stabilize.queue.processor.retention import start_retention_thread
@@ -127,6 +127,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
         self._in_flight_lock = threading.Lock()
         self._last_dlq_check = 0.0
         self.delivery_defects: list[DeliveryDefect] = []
+        self.last_drain = DrainResult()
 
         # Auto-register default handlers when both store and task_registry are provided
         if store is not None and task_registry is not None:

@@ -379,6 +379,20 @@ class PostgresQueue(Queue):
         self._last_size_check = now
         return count
 
+    def next_ready_in(self) -> float | None:
+        with self._borrow() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT EXTRACT(EPOCH FROM (MIN(deliver_at) - NOW())) AS wait FROM {self.table_name} "
+                    "WHERE stabilize_tenant = %(tenant)s AND (locked_until IS NULL OR locked_until < NOW()) "
+                    "AND attempts < %(max_attempts)s",
+                    {"tenant": self.tenant, "max_attempts": self.max_attempts},
+                )
+                row = cur.fetchone()
+            conn.commit()
+        wait = row["wait"] if row else None
+        return None if wait is None else max(0.0, float(wait))
+
     def clear(self) -> None:
         """Clear all messages from the queue."""
         with self._borrow() as conn:

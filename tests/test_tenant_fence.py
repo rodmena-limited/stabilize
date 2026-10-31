@@ -308,3 +308,17 @@ def test_enable_refuses_force_rls_and_a_preset_setting(fresh_db: str) -> None:
     finally:
         with psycopg.connect(fresh_db, autocommit=True) as conn:
             conn.execute(f'ALTER DATABASE "{dbname}" RESET stabilize.tenant')
+
+
+def test_enable_ignores_a_tenant_setting_on_another_database(fresh_db: str, postgres_container: Any) -> None:
+    with scratch_database(postgres_container, "mgother") as other:
+        other_name = urlsplit(other).path.lstrip("/")
+        with psycopg.connect(other, autocommit=True) as conn:
+            conn.execute(f"ALTER DATABASE \"{other_name}\" SET stabilize.tenant = 'elsewhere'")
+        try:
+            enabled = stabilize("mg-tenancy", "enable", "--db-url", fresh_db)
+            assert enabled.returncode == 0, output(enabled)
+            assert _fence_state(fresh_db)["triggers"], "enable did not install the fence"
+        finally:
+            with psycopg.connect(other, autocommit=True) as conn:
+                conn.execute(f'ALTER DATABASE "{other_name}" RESET stabilize.tenant')

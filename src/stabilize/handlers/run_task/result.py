@@ -56,6 +56,7 @@ def process_result(
     if result.status == WorkflowStatus.REDIRECT and not result.target_stage_ref_id:
         result = replace(result, status=WorkflowStatus.TERMINAL)
         stage.context["error"] = "REDIRECT result without target_stage_ref_id"
+    stage.scheduled_time = result.scheduled_time if result.status == WorkflowStatus.RUNNING else None
 
     # Handle based on status - use atomic transactions
     if result.status == WorkflowStatus.RUNNING:

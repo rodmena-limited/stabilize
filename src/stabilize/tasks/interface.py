@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from datetime import timedelta
-from typing import TYPE_CHECKING
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
 from stabilize.tasks.result import TaskResult
 
@@ -42,6 +42,8 @@ class Task(ABC):
                     outputs={"deploymentId": deployment_id}
                 )
     """
+
+    reset_context_keys: tuple[str, ...] = ()
 
     @abstractmethod
     def execute(self, stage: StageExecution) -> TaskResult:
@@ -348,39 +350,136 @@ class NoOpTask(Task):
         return TaskResult.success()
 
 
-class WaitTask(RetryableTask):
-    """
-    A task that waits for a specified duration.
+TIMER_ARMED_AT = "_timer_armed_at"
+TIMER_DUE_AT = "_timer_due_at"
 
-    Reads 'waitTime' from stage context (in seconds).
+
+def _now_ms() -> int:
+    import time
+
+    return int(time.time() * 1000)
+
+
+def parse_until(value: object) -> int:
+    """The epoch millisecond an ``until`` value names: ISO 8601 with an offset, or epoch seconds."""
+    if isinstance(value, bool) or value is None:
+        raise ValueError(f"until must be an ISO 8601 time with an offset or epoch seconds, not {value!r}")
+    if isinstance(value, (int, float)):
+        return int(float(value) * 1000)
+    if isinstance(value, str):
+        text = value.strip()
+        try:
+            return int(float(text) * 1000)
+        except ValueError:
+            pass
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError as e:
+            raise ValueError(f"until {value!r} is not an ISO 8601 time: {e}") from e
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError(f"until {value!r} carries no UTC offset")
+        return int(parsed.timestamp() * 1000)
+    raise ValueError(f"until must be an ISO 8601 time with an offset or epoch seconds, not {value!r}")
+
+
+class TimerTask(RetryableTask):
     """
+    A durable timer: fires at an absolute time and re-arms on an early delivery.
+
+    Reads exactly one of ``until`` (ISO 8601 with an offset, or epoch seconds) and
+    ``duration_seconds`` (counted from the first execution) from the stage context.
+    The first execution writes ``_timer_armed_at`` and ``_timer_due_at`` (epoch ms) and
+    asks to run again at the due time; every later execution before the due time asks
+    again; the one at or after it succeeds.
+    """
+
+    reset_context_keys: tuple[str, ...] = (TIMER_ARMED_AT, TIMER_DUE_AT)
+    grace = timedelta(minutes=5)
+    unarmed_timeout = timedelta(hours=1)
 
     def get_timeout(self) -> timedelta:
-        """Wait tasks have a long timeout."""
-        return timedelta(hours=24)
+        return self.unarmed_timeout
 
-    def get_backoff_period(
-        self,
-        stage: StageExecution,
-        duration: timedelta,
-    ) -> timedelta:
-        """Check every second."""
+    def get_dynamic_timeout(self, stage: StageExecution) -> timedelta:
+        due = stage.context.get(TIMER_DUE_AT)
+        armed = stage.context.get(TIMER_ARMED_AT)
+        if isinstance(due, int) and isinstance(armed, int):
+            return timedelta(milliseconds=max(0, due - armed)) + self.grace
+        return self.get_timeout()
+
+    def get_backoff_period(self, stage: StageExecution, duration: timedelta) -> timedelta:
+        due = stage.context.get(TIMER_DUE_AT)
+        if isinstance(due, int):
+            return timedelta(milliseconds=max(0, due - _now_ms()))
         return timedelta(seconds=1)
 
+    def due_at(self, stage: StageExecution, now_ms: int) -> int:
+        """The epoch millisecond this timer fires at; raises ValueError when the context is not a timer."""
+        until = stage.context.get("until")
+        duration = stage.context.get("duration_seconds")
+        if (until is None) == (duration is None):
+            raise ValueError("TimerTask needs exactly one of 'until' and 'duration_seconds' in the stage context")
+        if until is not None:
+            return parse_until(until)
+        try:
+            seconds = float(duration)  # type: ignore[arg-type]
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"duration_seconds {duration!r} is not a number") from e
+        if not seconds > 0:
+            raise ValueError(f"duration_seconds must be greater than zero, not {duration!r}")
+        return now_ms + int(seconds * 1000)
+
+    def armed_context(self, stage: StageExecution, now_ms: int, due_ms: int) -> dict[str, Any]:
+        return {}
+
+    def fired(self, stage: StageExecution, now_ms: int, due_ms: int) -> TaskResult:
+        return TaskResult.success()
+
     def execute(self, stage: StageExecution) -> TaskResult:
-        """Wait for the specified time."""
-        import time
+        now = _now_ms()
+        due = stage.context.get(TIMER_DUE_AT)
+        if not isinstance(due, int):
+            try:
+                due = self.due_at(stage, now)
+            except ValueError as e:
+                return TaskResult.terminal(str(e), context={"exception": {"details": {"error": str(e)}}})
+            context = {TIMER_ARMED_AT: now, TIMER_DUE_AT: due}
+            context.update(self.armed_context(stage, now, due))
+            return TaskResult.running(context=context, scheduled_time=due)
+        if now >= due:
+            return self.fired(stage, now, due)
+        return TaskResult.running(scheduled_time=due)
 
+
+class WaitTask(TimerTask):
+    """
+    Waits ``waitTime`` seconds from its first execution.
+
+    Keeps ``waitStartTime`` (epoch seconds) in the stage context and reports
+    ``waitedSeconds`` in the outputs, as it always has; the due time is
+    ``waitStartTime + waitTime`` and the task runs twice, to arm and to fire.
+    """
+
+    reset_context_keys: tuple[str, ...] = (TIMER_ARMED_AT, TIMER_DUE_AT, "waitStartTime")
+
+    def _start_seconds(self, stage: StageExecution, now_ms: int) -> int:
+        start = stage.context.get("waitStartTime")
+        if isinstance(start, (int, float)) and not isinstance(start, bool):
+            return int(start)
+        return now_ms // 1000
+
+    def due_at(self, stage: StageExecution, now_ms: int) -> int:
         wait_time = stage.context.get("waitTime", 0)
-        start_time = stage.context.get("waitStartTime")
-        current_time = int(time.time())
+        try:
+            seconds = float(wait_time)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"waitTime {wait_time!r} is not a number") from e
+        if seconds < 0:
+            raise ValueError(f"waitTime must not be negative, not {wait_time!r}")
+        return self._start_seconds(stage, now_ms) * 1000 + int(seconds * 1000)
 
-        if start_time is None:
-            # First execution - record start time
-            return TaskResult.running(context={"waitStartTime": current_time})
+    def armed_context(self, stage: StageExecution, now_ms: int, due_ms: int) -> dict[str, Any]:
+        return {"waitStartTime": self._start_seconds(stage, now_ms)}
 
-        elapsed = current_time - start_time
-        if elapsed >= wait_time:
-            return TaskResult.success(outputs={"waitedSeconds": elapsed})
-
-        return TaskResult.running()
+    def fired(self, stage: StageExecution, now_ms: int, due_ms: int) -> TaskResult:
+        return TaskResult.success(outputs={"waitedSeconds": now_ms // 1000 - self._start_seconds(stage, now_ms)})

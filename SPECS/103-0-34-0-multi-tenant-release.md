@@ -130,7 +130,38 @@ Synthesis deviations recorded while building WI-3:
 ### WI-2 remaining slices (to be specified as each starts)
 Statements on every SQL site (rule 1 explicit column lists), the trigger fence and `mg-tenancy enable|disable|status`, the `TenancyModeChanged` latch, per-instance recorder/deduplicator, namespaced subscription ids and locks, the schema check, indexes, SQLite triggers, runbooks.
 
-### WI-4 … WI-11
+### WI-4 slice 4a: durable timers and the drain (done)
+- `TimerTask` (a `RetryableTask`) shall read exactly one of `until` (ISO 8601 with offset, or epoch seconds) and `duration_seconds` (> 0) from the stage context; any other combination shall complete the task TERMINAL with the reason in `stage.context["exception"]`.
+- On its first execution `TimerTask` shall write `_timer_armed_at` and `_timer_due_at` (epoch ms) to the stage context and return `TaskResult.running(scheduled_time=due)`; while the due time is ahead it shall return RUNNING with `scheduled_time=due` and a backoff of `due - now`; once `now >= due` it shall succeed. The due time is absolute: a pause does not move it.
+- `TimerTask.get_dynamic_timeout(stage)` shall be `(due - armed_at) + grace` (grace 5 minutes), so a timer of any length is not cut by a fixed cap; the RunTask lifetime check shall exclude paused time (`_paused_ms`) for every `RetryableTask`.
+- `PauseTask` shall record `_paused_at` and `ResumeStage` shall add the paused interval to `_paused_ms` and clear `_paused_at`.
+- `WaitTask` shall be built on `TimerTask`: `waitTime` seconds, `waitStartTime` (epoch seconds) kept in the context, due = `waitStartTime + waitTime`, `waitedSeconds` in the outputs; it shall execute exactly twice for a wait that is not interrupted (arm, fire).
+- `Task.reset_context_keys` shall name the context keys a reset clears (`TimerTask`: `_timer_armed_at`, `_timer_due_at`; `WaitTask` adds `waitStartTime`); the reset paths wire it in slice 4b.
+- `TaskResult` shall carry `scheduled_time: int | None`; `merge_outputs` and `TaskResultBuilder.build` shall preserve every field (`target_stage_ref_id`, `scheduled_time`).
+- `process_result` shall copy `result.scheduled_time` into `stage.scheduled_time` for a RUNNING result and clear it otherwise; both backends' stage UPDATE statements shall write `scheduled_time`.
+- `Queue.next_ready_in()` shall return the seconds until the earliest message this tenant can poll (0 when one is ready; leased rows and rows at `attempts >= max_attempts` excluded) or None when there is none; `process_all` shall return when it is None or beyond the remaining budget, otherwise sleep `min(next_ready_in, remaining, 1 s)` and poll again. One message an hour away shall make `process_all(timeout=5)` return within 500 ms.
+- `process_all(raise_on_error=True)` shall keep today's behaviour; with `raise_on_error=False` it shall log the handler error, reschedule the message and carry on; `processor.last_drain` shall report processed count, error count and the reason the drain stopped.
+
+Synthesis notes recorded while building 4a:
+- `TimerTask` exposes three hooks for subclasses (`due_at`, `armed_context`, `fired`) and `WaitTask` is a ten-line subclass; `waitStartTime` stays in epoch seconds as 0.33 wrote it, so a wait in flight across the upgrade continues from its own start.
+- A `TimerTask` whose context is not a timer (neither or both of `until`/`duration_seconds`, an unparseable `until`, a naive datetime, a non-positive duration) completes TERMINAL from the first execution with the reason in `stage.context["exception"]`; it does not raise, so the failure is a task result and not a retry.
+- `Queue.next_ready_in()` has a size-based default on the interface (`0.0` when `size() > 0`, else None) so a third-party queue keeps the pre-0.34 drain behaviour; both engine queues implement it with one aggregate query carrying the poll predicate.
+- `process_result` clears `stage.scheduled_time` on every non-RUNNING result, so the column reads "the task is waiting until" and nothing else.
+- Paused time (`_paused_ms`) is subtracted in the RunTask handler for the retryable lifetime and for `stageTimeoutMs`, for every task class; `_paused_at` is written by `PauseTask` only when the task is parked (not when the workflow has already resumed and the task is re-dispatched).
+- `DrainResult.reason` values: `empty`, `timeout`, `next_ready_beyond_budget`, `error` (only with `raise_on_error=True`), `not_run` before the first drain.
+- B67 (found by the 4a full suite under xdist): `mg-tenancy enable`'s preset-GUC preflight scanned `pg_db_role_setting` for every database on the cluster; a `stabilize.tenant` setting on an unrelated database made it refuse. The query now keeps `setdatabase = 0` (role-wide) and the current database's oid only; pinned by `tests/test_tenant_fence.py::test_enable_ignores_a_tenant_setting_on_another_database`.
+
+### WI-4 slice 4b: the generation fence and complete resets (planned, tests first)
+- `task_executions` shall carry `generation INTEGER NOT NULL DEFAULT 0` on both backends (PostgreSQL migration `*_task_generation.sql`, SQLite migration 7, baseline schema, column catalog, converters, inserts); `TaskExecution.generation` shall round-trip through every store path.
+- `TaskLevel` messages shall carry `generation: int | None` (None reads as 0, never as a wildcard); every engine push of `StartTask`, `RunTask`, `CompleteTask` and `PauseTask` shall stamp the task's current generation, recovery's rebuilt messages included.
+- Every reset path (`reset_stage_for_retry` for jumps and `RestartStage`, the multi-merge re-arm) shall increment the generation of each task it resets, clear each task's `reset_context_keys`, `scheduled_time`, `_on_failure_planned`, `exception`, the signal keys and the pause keys, delete the queued messages that target the reset stage or its tasks (the in-flight message excepted) inside the resetting transaction, and release the stage's `stage_claims` rows there too.
+- `RunTask` shall ignore a delivery whose generation differs from the task's (mark processed, push nothing); a result whose task generation changed while it ran shall be dropped at save time, in `process_result`, `save_or_hold` and the error-path transactions, so a stale chain never overwrites the replacement task's result.
+- `RunTaskHandler._executing_tasks` shall be keyed by `(task_id, generation)`; a newer-generation delivery that arrives while an older one executes shall be re-queued through a marking transaction, never dropped and never run concurrently.
+- `CompleteTask` shall treat a generation mismatch as stale, as it treats `task_start_time` today.
+- `RestartStage` shall reset the stage's before/after synthetic children (generation bumped) and delete its on-failure children through `txn.remove_stage`, so a stage that failed once is not TERMINAL again on every retry (B24).
+- Pinned: a backward jump leaves no RunTask of the previous generation deliverable and the stale chain's result is dropped (B09, B10); a loop re-entering a deferred choice finds no claim from the previous round (B11); a multi-merge re-arm clears its tasks' timer keys (B25).
+
+### WI-4 slices 4c–4d, WI-5 … WI-11
 Specified when each item starts; the plan file holds the design.
 
 ### WI-2 slice 2: rule 1 column lists (done)

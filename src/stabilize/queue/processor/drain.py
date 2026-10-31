@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from stabilize.errors.delivery import DeliveryContractError, DuplicateDeliveryError
@@ -16,11 +17,21 @@ from stabilize.queue.processor.lease_guard import check_sync_lease, start_lock_h
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class DrainResult:
+    """What the last ``process_all`` did and why it stopped."""
+
+    processed: int = 0
+    errors: int = 0
+    reason: str = "not_run"
+
+
 class SynchronousDrainMixin:
     queue: Queue
     config: Any
     _sync_lease_warned: bool
     delivery_defects: list[Any]
+    last_drain: DrainResult
     _processing_lock: threading.Lock
     _last_dlq_check: float
 
@@ -81,20 +92,22 @@ class SynchronousDrainMixin:
                     heartbeat_stop.set()
         return False
 
-    def process_all(self, timeout: float = 60.0) -> int:
+    def process_all(self, timeout: float = 60.0, raise_on_error: bool = True) -> int:
         """
-        Process all messages synchronously until queue is empty.
+        Process messages synchronously until none is pending or ready within the budget.
 
         Thread-safe: uses a processing lock to prevent concurrent calls.
         Also performs periodic DLQ cleanup for expired messages.
 
-        A handler exception stops the drain: it propagates from
-        ``process_one`` after the message is rescheduled by
-        ``config.retry_delay``. To drain through such errors, catch the
-        exception and call ``process_all`` again after that delay.
+        When nothing is ready the drain asks the queue when the next message is due
+        and sleeps until then (at most 1 s at a time); when that is beyond the
+        remaining budget it returns. A handler exception is rescheduled by
+        ``config.retry_delay`` and re-raised, or, with ``raise_on_error=False``,
+        counted on ``last_drain`` while the drain carries on.
 
         Args:
-            timeout: Maximum time to wait for processing
+            timeout: Maximum time to spend draining
+            raise_on_error: Re-raise the first handler exception (the default)
 
         Returns:
             Number of messages processed
@@ -102,38 +115,52 @@ class SynchronousDrainMixin:
         Raises:
             Exception: the first handler exception, after its message was rescheduled.
         """
-        # Use processing lock to prevent concurrent calls
-        # Non-blocking acquire - if another thread is processing, return immediately
         acquired = self._processing_lock.acquire(blocking=False)
         if not acquired:
             logger.debug("Another thread is processing, skipping")
             return 0
 
         try:
-            count = 0
+            result = DrainResult()
+            self.last_drain = result
             defects_before = len(self.delivery_defects)
-            # Use monotonic time for elapsed time calculations to avoid
-            # issues with clock drift, NTP adjustments, or leap seconds
             start = time.monotonic()
 
-            # Periodic DLQ check (every 30 seconds)
             if time.monotonic() - self._last_dlq_check > 30.0:
                 self._check_dlq()
                 self._last_dlq_check = time.monotonic()
 
-            while time.monotonic() - start < timeout:
-                if self.process_one():
-                    count += 1
-                    continue
-                if self.queue.size() == 0:
+            while True:
+                remaining = timeout - (time.monotonic() - start)
+                if remaining <= 0:
+                    result.reason = "timeout"
                     break
-                time.sleep(0.01)
+                try:
+                    processed = self.process_one()
+                except Exception:
+                    result.errors += 1
+                    if raise_on_error:
+                        result.reason = "error"
+                        raise
+                    continue
+                if processed:
+                    result.processed += 1
+                    continue
+                wait = self.queue.next_ready_in()
+                if wait is None:
+                    result.reason = "empty"
+                    break
+                remaining = timeout - (time.monotonic() - start)
+                if wait > remaining:
+                    result.reason = "next_ready_beyond_budget"
+                    break
+                time.sleep(min(max(wait, 0.01), max(remaining, 0.01), 1.0))
             if strict_delivery() and len(self.delivery_defects) > defects_before:
                 broken = self.delivery_defects[defects_before:]
                 raise DeliveryContractError(
                     f"{len(broken)} delivery(ies) committed a push outside the transaction that marked the message: "
                     + "; ".join(f"{d.message_type} {d.message_id}: {' / '.join(d.reasons)}" for d in broken)
                 )
-            return count
+            return result.processed
         finally:
             self._processing_lock.release()

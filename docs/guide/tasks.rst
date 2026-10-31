@@ -115,6 +115,31 @@ A ``TransientError`` raised by ``execute()`` is retried with backoff up to ``max
         def execute(self, stage: StageExecution) -> TaskResult:
             return TaskResult.success() if deployed(stage) else TaskResult.running()
 
+Timers
+~~~~~~
+
+``TimerTask`` waits until an absolute time. The stage context names either ``until``
+(an ISO 8601 time with a UTC offset, or epoch seconds) or ``duration_seconds``, counted
+from the task's first execution. The first execution records ``_timer_armed_at`` and
+``_timer_due_at`` in the stage context and asks the engine to run it again at the due
+time. The execution at or after the due time succeeds. A delivery before the due time,
+after a crash or a redelivery, asks again for the due time. A pause does not move the
+due time, and the task's lifetime is the timer's length plus five minutes.
+
+.. code-block:: python
+
+    StageExecution(ref_id="cooling_off", type="timer", name="Cooling off",
+                   context={"duration_seconds": 3600})
+    StageExecution(ref_id="go_live", type="timer", name="Go live",
+                   context={"until": "2026-11-19T09:00:00+00:00"})
+
+``WaitTask`` is built on ``TimerTask``. It reads ``waitTime`` in seconds, keeps
+``waitStartTime`` in the context and reports ``waitedSeconds`` in the outputs.
+
+A ``RUNNING`` result from any ``RetryableTask`` may carry ``scheduled_time`` (an epoch
+millisecond). The engine stores it on ``stage.scheduled_time`` while the task waits and
+clears it when the task completes.
+
 Task Cleanup
 ~~~~~~~~~~~~
 

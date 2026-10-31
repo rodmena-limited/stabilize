@@ -299,9 +299,18 @@ Errors During Synchronous Draining
 ``QueueProcessor.process_one()`` and ``process_all()`` handle messages on the
 calling thread. When a handler raises, the message is rescheduled by
 ``config.retry_delay`` (15 s by default) and the exception is **re-raised to the
-caller**; ``process_all()`` stops at that point. The message is delivered again by
-a later call once the delay has passed. ``processor.start()`` runs the same
-handling in the background and logs the error instead of raising it.
+caller**; ``process_all()`` stops at that point. With ``raise_on_error=False`` the
+drain logs the error and carries on, and ``processor.last_drain`` reports the
+number of messages processed, the number of handler errors and why the drain
+stopped. The message is delivered again by a later call once the delay has
+passed. ``processor.start()`` runs the same handling in the background and logs
+the error instead of raising it.
+
+When nothing is ready, ``process_all()`` asks the queue when the next message is
+due (``Queue.next_ready_in()``) and sleeps until then, at most one second at a
+time. When the next message is due after the remaining budget the drain returns,
+so a cron that drains every minute spends milliseconds on a queue holding one
+timer due tomorrow.
 
 A task that completed while the store was unavailable (for example a statement
 timeout or a pool timeout while saving its result) is not executed again: its

@@ -231,8 +231,9 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
 
             # Stage-level elapsed time check
             stage_timeout_ms = stage.context.get("stageTimeoutMs")
+            paused_ms = int(stage.context.get("_paused_ms") or 0)
             if stage_timeout_ms is not None and stage.start_time:
-                stage_elapsed_ms = self.current_time_millis() - stage.start_time
+                stage_elapsed_ms = self.current_time_millis() - stage.start_time - paused_ms
                 if stage_elapsed_ms > stage_timeout_ms:
                     logger.info(
                         "Stage %s exceeded stage timeout (%dms > %dms)",
@@ -253,7 +254,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
 
             # Total-lifecycle timeout for RetryableTask (execute_with_timeout only caps single calls)
             if isinstance(task, RetryableTask) and task_model.start_time:
-                elapsed_ms = self.current_time_millis() - task_model.start_time
+                elapsed_ms = self.current_time_millis() - task_model.start_time - paused_ms
                 allowed_ms = task.get_dynamic_timeout(stage).total_seconds() * 1000
                 if elapsed_ms > allowed_ms:
                     logger.info(

@@ -125,6 +125,10 @@ class Queue(ABC):
         """Get the number of messages in the queue."""
         pass
 
+    def next_ready_in(self) -> float | None:
+        """Seconds until the earliest message this consumer can poll; 0 when one is ready, None when none is pending."""
+        return 0.0 if self.size() > 0 else None
+
     @abstractmethod
     def clear(self) -> None:
         """Clear all messages from the queue."""

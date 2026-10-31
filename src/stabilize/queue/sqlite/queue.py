@@ -365,6 +365,19 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         row = result.fetchone()
         return row[0] if row else 0
 
+    def next_ready_in(self) -> float | None:
+        conn = self._get_connection()
+        now = datetime.now(UTC).isoformat()
+        row = conn.execute(
+            f"SELECT (MIN(julianday(deliver_at)) - julianday(:now)) * 86400.0 FROM {self.table_name} "
+            "WHERE stabilize_tenant = :tenant AND (locked_until IS NULL OR julianday(locked_until) < julianday(:now)) "
+            "AND attempts < :max_attempts",
+            {"now": now, "tenant": self.tenant, "max_attempts": self.max_attempts},
+        ).fetchone()
+        if not row or row[0] is None:
+            return None
+        return max(0.0, float(row[0]))
+
     def clear(self) -> None:
         """Clear all messages from the queue."""
         conn = self._get_connection()

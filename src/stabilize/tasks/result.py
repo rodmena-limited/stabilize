@@ -7,7 +7,7 @@ of executing a task, including status, context updates, and outputs.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from stabilize.models.status import WorkflowStatus
@@ -26,12 +26,14 @@ class TaskResult:
         context: Data scoped to the current stage (merged into stage.context)
         outputs: Data available to downstream stages (merged into stage.outputs)
         target_stage_ref_id: For jump_to results, the ref_id of the stage to jump to
+        scheduled_time: For RUNNING results, the epoch millisecond the task asks to run again at
     """
 
     status: WorkflowStatus
     context: dict[str, Any] = field(default_factory=dict)
     outputs: dict[str, Any] = field(default_factory=dict)
     target_stage_ref_id: str | None = field(default=None)
+    scheduled_time: int | None = field(default=None)
 
     # ========== Factory Methods ==========
 
@@ -61,6 +63,7 @@ class TaskResult:
     def running(
         cls,
         context: dict[str, Any] | None = None,
+        scheduled_time: int | None = None,
     ) -> TaskResult:
         """
         Create a running result (task will be re-executed).
@@ -77,6 +80,7 @@ class TaskResult:
         return cls(
             status=WorkflowStatus.RUNNING,
             context=context or {},
+            scheduled_time=scheduled_time,
         )
 
     @classmethod
@@ -301,11 +305,7 @@ class TaskResult:
         merged_outputs = dict(self.outputs)
         merged_outputs.update(other.outputs)
 
-        return TaskResult(
-            status=self.status,
-            context=merged_context,
-            outputs=merged_outputs,
-        )
+        return replace(self, context=merged_context, outputs=merged_outputs)
 
 
 class TaskResultBuilder:
@@ -319,6 +319,8 @@ class TaskResultBuilder:
         self._status = status
         self._context: dict[str, Any] = {}
         self._outputs: dict[str, Any] = {}
+        self._target_stage_ref_id: str | None = None
+        self._scheduled_time: int | None = None
 
     def context(self, context: dict[str, Any]) -> TaskResultBuilder:
         """Set the context."""
@@ -340,10 +342,20 @@ class TaskResultBuilder:
         self._outputs[key] = value
         return self
 
+    def target_stage_ref_id(self, ref_id: str | None) -> TaskResultBuilder:
+        self._target_stage_ref_id = ref_id
+        return self
+
+    def scheduled_time(self, when: int | None) -> TaskResultBuilder:
+        self._scheduled_time = when
+        return self
+
     def build(self) -> TaskResult:
         """Build the TaskResult."""
         return TaskResult(
             status=self._status,
             context=self._context,
             outputs=self._outputs,
+            target_stage_ref_id=self._target_stage_ref_id,
+            scheduled_time=self._scheduled_time,
         )

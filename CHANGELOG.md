@@ -135,6 +135,30 @@ host's own migretti history, now upgrade with no change to the command.
   the DDL to run.
 - **Upgrade runbooks** in the persistence guide for a single-tenant upgrade, a fresh
   install with tenants, and a host that owns its DDL.
+- **`TimerTask`**, a durable timer. The stage context names either `until` (ISO 8601 with
+  an offset, or epoch seconds) or `duration_seconds`. The first execution records
+  `_timer_armed_at` and `_timer_due_at` and asks to run again at the due time; the
+  execution at or after the due time succeeds. The due time is absolute: a pause does not
+  move it. The task's lifetime is the timer's length plus five minutes. Registered as
+  `TimerTask` and `timer`. `WaitTask` is built on it and keeps `waitTime`,
+  `waitStartTime` and `waitedSeconds`.
+- **`TaskResult.scheduled_time`** lets a RUNNING result name the epoch millisecond it
+  wants to run again at. `process_result` copies it into `stage.scheduled_time`, and
+  both backends' stage updates write that column. `TaskResult.running()` and the builder
+  take it.
+- **`Queue.next_ready_in()`** returns the seconds until the earliest message the consumer
+  can poll, 0 when one is ready, and None when nothing is pending. Leased rows and rows
+  at `max_attempts` are left out. Custom queues inherit a size-based default.
+- **`process_all(raise_on_error=False)`** logs a handler error, reschedules the message
+  and carries on. `processor.last_drain` reports how many messages the last drain
+  processed, how many handler errors it met, and why it stopped (`empty`, `timeout`,
+  `next_ready_beyond_budget`, `error`).
+- **Paused time is not task lifetime.** `PauseTask` records `_paused_at`, `ResumeStage`
+  adds the interval to `_paused_ms`, and the RunTask lifetime and stage-timeout checks
+  subtract it for every `RetryableTask`.
+- **`Task.reset_context_keys`** names the context keys a reset clears for that task
+  (`TimerTask`: its two timer keys; `WaitTask` adds `waitStartTime`). The reset paths
+  use it in the next slice.
 - **`DuplicateDeliveryError` and `DeliveryContractError`** import from `stabilize.errors`.
   `DuplicateDeliveryError` used to be a bare `Exception` in `stabilize.persistence.transaction`
   and still imports from there.
@@ -144,6 +168,19 @@ host's own migretti history, now upgrade with no change to the command.
 
 ### Fixed
 
+- **A synchronous drain no longer spins while a delayed message waits (B14).**
+  `process_all` kept polling for its whole timeout while a row existed, because `size()`
+  counts delayed rows too. A one-minute cron with one pending timer burned 60 s and
+  thousands of polls per run. The drain now asks `next_ready_in()` and sleeps until the
+  next message is due, at most 1 s at a time, and returns when that is beyond the
+  remaining budget. One message an hour away returns `process_all(timeout=5)` at once.
+- **`WaitTask` fires at its due time (B22).** It used to poll every second and was cut
+  off at 24 hours. It now executes twice for an uninterrupted wait, and its lifetime
+  follows `waitTime`.
+- **`stage.scheduled_time` is written after insert (B36).** The stage update statements
+  on both backends left the column at its insert value.
+- **`TaskResult.merge_outputs` and `TaskResultBuilder.build` keep every field (B28).**
+  Both dropped `target_stage_ref_id`. A merged jump therefore became TERMINAL.
 - **A handler's push and its processed mark now commit together (B01, B05).** Before,
   the processor marked a message processed after the handler had committed its pushes.
   A crash in between redelivered the message, and the redelivery pushed the downstream
@@ -182,6 +219,11 @@ host's own migretti history, now upgrade with no change to the command.
   transaction. A crash between the two left a branch counted that never completed. The
   update now runs inside the completion transaction. A version conflict retries the
   whole completion with fresh rows.
+- **`mg-tenancy enable` no longer refuses because of another database's setting (B67).**
+  Its preflight read every `stabilize.tenant` entry in `pg_db_role_setting`, including
+  entries for other databases on the same cluster, which do not apply to this database's
+  connections. It now considers role-wide entries and entries for the current database
+  only. Found on 2026-10-31 when two test databases shared a cluster.
 - **A target schema named after the connecting role is refused (B65).** With role
   `stabilize` and `?schema=stabilize`, the default `search_path` of `"$user", public`
   makes the new schema shadow `public`. A host's own `mg verify` then reads stabilize's
