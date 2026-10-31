@@ -53,6 +53,7 @@ from stabilize.persistence.postgres.queries import (
     retrieve_by_pipeline_config_id as _retrieve_by_pipeline_config_id,
 )
 from stabilize.persistence.postgres.signals import PostgresSignalMixin
+from stabilize.persistence.schema_check import check_postgres_tables
 from stabilize.persistence.store import (
     StoreTransaction,
     WorkflowCriteria,
@@ -63,6 +64,7 @@ from stabilize.persistence.store.ids import check_ids
 from stabilize.persistence.store.owned_rows import WORKFLOW_OWNED_ROWS
 from stabilize.persistence.task_state import capture, commit_captured, restore_versions, versions
 from stabilize.persistence.tenancy import (
+    EngineSchemaError,
     ModeReader,
     armed,
     postgres_mode,
@@ -74,6 +76,15 @@ from stabilize.persistence.tenancy import (
 _PIPELINE = select_list("pipeline_executions", "postgres")
 _STAGE = select_list("stage_executions", "postgres")
 _TASK = select_list("task_executions", "postgres")
+STORE_TABLES = [
+    "pipeline_executions",
+    "stage_executions",
+    "task_executions",
+    "processed_messages",
+    "stage_claims",
+    "workflow_signals",
+    "task_leases",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -119,20 +130,34 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         self._pool = self._manager.get_postgres_pool(connection_string, options=resolved_options)
         self._tenant_setting = resolved_options.tenant_setting if resolved_options is not None else None
         self._mode = ModeReader(postgres_mode)
+        self._schema_state: BaseException | bool = False
         self._engine = EngineBorrower(self._borrow, self.tenant)
 
     @contextmanager
     def _borrow(self) -> Iterator[Any]:
         """Every engine borrow: the pool's connection, admitted against the schema's tenancy mode."""
         with self._pool.connection() as conn, armed(conn, self.tenant, self._tenant_setting, self._mode):
+            self._check_schema_once(conn)
             yield conn
+
+    def _check_schema_once(self, conn: Any) -> None:
+        if self._schema_state is True:
+            return
+        if self._schema_state is not False:
+            raise self._schema_state
+        try:
+            check_postgres_tables(conn, self.schema, STORE_TABLES, lambda: self._mode.last or "single")
+        except EngineSchemaError as exc:
+            self._schema_state = exc
+            raise
+        self._schema_state = True
 
     def close(self) -> None:
         release_pool_once(self, self._manager, self._pool)
 
     def store(self, execution: Workflow) -> None:
         """Store a complete execution."""
-        check_ids(execution)
+        check_ids(execution, self.tenant)
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(

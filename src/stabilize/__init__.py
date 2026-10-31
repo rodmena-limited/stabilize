@@ -123,6 +123,7 @@ from stabilize.orchestrator import Orchestrator
 from stabilize.persistence.postgres import PostgresWorkflowStore
 from stabilize.persistence.sqlite import SqliteWorkflowStore
 from stabilize.persistence.store import WorkflowStore
+from stabilize.persistence.tenancy import current_tenant
 from stabilize.queue import PostgresQueue, Queue
 from stabilize.queue.processor import QueueProcessor
 from stabilize.queue.sqlite import SqliteQueue
@@ -197,6 +198,7 @@ from stabilize.verification import (
 )
 
 __all__ = [
+    "current_tenant",
     # Core models
     "WorkflowStatus",
     "Workflow",

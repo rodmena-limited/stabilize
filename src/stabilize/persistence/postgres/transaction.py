@@ -250,10 +250,16 @@ class PostgresTransaction(StoreTransaction):
     def lock_admission(self, key: str) -> None:
         with self._conn.cursor() as cur:
             cur.execute("SET LOCAL lock_timeout = '30s'")
-            cur.execute(
-                "SELECT pg_advisory_xact_lock(%(class_id)s, hashtext(%(key)s))",
-                {"class_id": ADMISSION_LOCK_CLASS, "key": key},
-            )
+            if self._tenant:
+                cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(%(key)s, 0))",
+                    {"key": f"admission\x1f{self._tenant}\x1f{key}"},
+                )
+            else:
+                cur.execute(
+                    "SELECT pg_advisory_xact_lock(%(class_id)s, hashtext(%(key)s))",
+                    {"class_id": ADMISSION_LOCK_CLASS, "key": key},
+                )
 
     def count_running(self, pipeline_config_id: str) -> int:
         with self._conn.cursor() as cur:

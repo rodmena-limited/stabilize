@@ -187,7 +187,7 @@ SAMPLE_ROWS: dict[str, dict[str, Any]] = {
 }
 
 NOT_READ_BY_CONVERTER: dict[str, set[str]] = {
-    "pipeline_executions": {"created_at", "stabilize_tenant"},
+    "pipeline_executions": {"created_at"},
     "stage_executions": {"execution_id", "stabilize_tenant"},
     "task_executions": {"stage_id", "stabilize_tenant"},
 }

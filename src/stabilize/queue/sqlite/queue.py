@@ -20,6 +20,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from stabilize.persistence.schema_check import check_sqlite_tables
 from stabilize.persistence.sqlite.tenant_schema import engine_shaped_tables, ensure_tenant_schema, read_mode
 from stabilize.persistence.tenancy import check_mode_admits, validate_tenant
 from stabilize.queue.decode import MessageDecodeError, decode_message
@@ -87,6 +88,7 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         if engine_shaped_tables(conn):
             ensure_tenant_schema(conn)
             check_mode_admits(read_mode(conn), self.tenant)
+            check_sqlite_tables(conn, [self.table_name, f"{self.table_name}_dlq"], read_mode(conn))
         self._manager.bind_sqlite_tenant(connection_string, self.tenant)
 
     def _get_connection(self) -> sqlite3.Connection:

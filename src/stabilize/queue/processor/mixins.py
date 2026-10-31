@@ -10,7 +10,7 @@ import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from stabilize.persistence.committed_marks import clear_committed, consume_committed
-from stabilize.persistence.tenancy import TenancyModeChanged
+from stabilize.persistence.tenancy import TenancyModeChanged, bind_tenant
 from stabilize.queue.dedup import get_deduplicator
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.processor.handler_base import MessageHandler
@@ -171,7 +171,8 @@ class QueueProcessorMixin:
         logger.debug("Handling %s (execution=%s)", get_message_type_name(message), execution_id or "N/A")
 
         clear_committed()
-        handler.handle(message)
+        with bind_tenant(getattr(self._store, "tenant", "") or ""):
+            handler.handle(message)
 
         # Mark message as processed for deduplication
         if self.config.enable_deduplication and message_id is not None:

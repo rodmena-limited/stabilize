@@ -18,6 +18,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
+from stabilize.persistence.schema_check import check_sqlite_tables
 from stabilize.persistence.sqlite.operations import (
     cleanup_old_processed_messages as _cleanup_old_processed_messages,
 )
@@ -94,6 +95,7 @@ class SqliteWorkflowStore(
         if _has_engine_tables(conn):
             ensure_tenant_schema(conn)
             check_mode_admits(read_mode(conn), self.tenant)
+            check_sqlite_tables(conn, engine_shaped_tables(conn), read_mode(conn))
         self._manager.bind_sqlite_tenant(connection_string, self.tenant)
 
     def _get_connection(self) -> sqlite3.Connection:

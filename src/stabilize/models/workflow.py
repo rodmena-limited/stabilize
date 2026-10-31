@@ -144,6 +144,7 @@ class Workflow:
     origin: str = "unknown"
     config_version: str | None = None
     queue_table: str | None = None  # Fingerprint of config used at workflow start
+    tenant: str = ""
 
     def __post_init__(self) -> None:
         """Set execution reference on all stages after construction."""

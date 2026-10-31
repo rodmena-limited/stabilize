@@ -336,6 +336,12 @@ setting to the tenant on each transaction as well, for policies written against 
 ``enable`` refuses a schema with ``FORCE ROW LEVEL SECURITY`` on an engine table and a
 database or role that already sets ``stabilize.tenant``.
 
+On its first statement each store, queue and event store checks the shape of the
+tables it uses and refuses with ``EngineSchemaError`` when a column, the fence or the
+tenant default is wrong. The message is the DDL to run as the owner. ``mg-up`` keeps the
+shape right. The check catches a schema changed by hand and a process started against
+the wrong database.
+
 A processor whose statements the fence refuses records the error as its ``fault``,
 stops polling and leaves the message it was handling for a process built for the new
 mode. It does not start again. Watch ``processor.fault`` and restart the service after

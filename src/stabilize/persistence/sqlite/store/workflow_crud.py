@@ -46,7 +46,7 @@ class SqliteWorkflowCrudMixin:
         Note: This will raise an error if the execution ID already exists.
         Use exists() to check first if needed.
         """
-        check_ids(execution)
+        check_ids(execution, self.tenant)
         conn = self._get_connection()
         try:
             self._insert_execution(conn, execution)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
+from stabilize.persistence.tenancy import bind_tenant
 from stabilize.resilience.executor import execute_with_resilience
 from stabilize.tasks.registry import TaskNotFoundError
 
@@ -106,7 +107,8 @@ def execute_with_timeout(
 
         reset_handle = bind_current_token(get_token(message.task_id))
         try:
-            return task.execute(s)
+            with bind_tenant(s.execution.tenant if s.execution is not None else ""):
+                return task.execute(s)
         finally:
             reset_current_token(reset_handle)
 

@@ -17,7 +17,9 @@ def _queue(repository: WorkflowStore, table: str) -> Any:
 
         with psycopg.connect(url, autocommit=True) as conn:
             conn.execute(f"DROP TABLE IF EXISTS {table}")
+            conn.execute(f"DROP TABLE IF EXISTS {table}_dlq")
             conn.execute(f"CREATE TABLE {table} (LIKE queue_messages INCLUDING ALL)")
+            conn.execute(f"CREATE TABLE {table}_dlq (LIKE queue_messages_dlq INCLUDING ALL)")
     q = create_queue(url, table_name=table, lock_duration=timedelta(minutes=5))
     create = getattr(q, "_create_table", None)
     if callable(create):

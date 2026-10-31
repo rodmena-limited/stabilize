@@ -80,6 +80,29 @@ host's own migretti history, now upgrade with no change to the command.
   `TenantError` (`:memory:` is exempt). A connection the engine did not open, the
   `sqlite3` shell included, cannot write to a tenancy-mode file except to drop the
   triggers.
+- **A first-use schema check.** On its first statement a PostgreSQL store, queue or
+  event store reads the catalog of the tables it uses and refuses with
+  `EngineSchemaError` when the tenant column is missing, nullable, not `text`, or has a
+  default that does not match the mode, when a listed column is missing, or when the
+  fence trigger or CHECK is missing in tenancy mode. The message is the DDL to run. The
+  SQLite parts make the same check when constructed, and put a missing fence trigger back
+  themselves, because the engine owns SQLite DDL. A part whose check failed refuses every
+  later statement with the same error.
+- **Tenant indexes.** `mg-up` adds `(stabilize_tenant, deliver_at, locked_until,
+  attempts)` and `(stabilize_tenant, attempts)` on the queue, `(stabilize_tenant,
+  pipeline_config_id, status)` and `(stabilize_tenant, status)` on workflows,
+  `(stabilize_tenant, status, id)` on stages, `(stabilize_tenant, sequence)` and a
+  commit-order index on events, and an expression index on the queue payload's
+  `pipeline_config_id`.
+- **Tenants no longer share admission locks.** Under a tenant the per-config admission
+  lock is keyed on `hashtextextended('admission' || tenant || key)`. Two tenants with
+  the same `pipeline_config_id` therefore do not wait on each other. The `''` tenant
+  keeps the two-integer key, which still excludes a 0.33 process from a 0.34 one.
+- **`Workflow.tenant`**, set from the row by both stores. Under a tenant every workflow,
+  stage and task id must be a 26-character ULID. `store()` refuses other ids with
+  `ValueError`, which keeps caller-chosen ids from colliding across tenants.
+- **`stabilize.current_tenant()`** returns the tenant of the store whose handler or task
+  is running on the current thread, and `''` outside one.
 
 ### Fixed
 

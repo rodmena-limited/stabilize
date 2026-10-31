@@ -102,6 +102,7 @@ def row_to_execution(row: dict[str, Any]) -> Workflow:
         origin=row["origin"] or "unknown",
         queue_table=row["queue_table"],
         config_version=row["config_version"],
+        tenant=row["stabilize_tenant"] or "",
     )
 
 

@@ -7,6 +7,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from stabilize.errors.base import StabilizeError
@@ -47,6 +48,27 @@ class TenancyModeChanged(StabilizeError):  # noqa: N818
 
 class TenantPermissionError(StabilizeError):
     """The connection claimed every tenant without being a member of the table owner."""
+
+
+class EngineSchemaError(StabilizeError):
+    """An engine table is not in the shape this stabilize needs; the message names the DDL to run."""
+
+
+_current_tenant: ContextVar[str] = ContextVar("stabilize_current_tenant", default="")
+
+
+def current_tenant() -> str:
+    """The tenant of the store whose handler, task, hook or finalizer runs on this thread; '' outside one."""
+    return _current_tenant.get()
+
+
+@contextmanager
+def bind_tenant(tenant: str) -> Iterator[None]:
+    token = _current_tenant.set(tenant)
+    try:
+        yield
+    finally:
+        _current_tenant.reset(token)
 
 
 def sqlstate(exc: BaseException) -> str | None:

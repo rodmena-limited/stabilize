@@ -22,6 +22,7 @@ from stabilize.events.store.sqlite.schema import (
 from stabilize.events.store.sqlite.snapshots import SqliteSnapshotsMixin
 from stabilize.events.store.sqlite.subscriptions import SqliteSubscriptionsMixin
 from stabilize.persistence.connection import get_connection_manager
+from stabilize.persistence.schema_check import check_sqlite_tables
 from stabilize.persistence.sqlite.tenant_schema import engine_shaped_tables, ensure_tenant_schema, read_mode
 from stabilize.persistence.tenancy import check_mode_admits, validate_tenant
 
@@ -68,6 +69,7 @@ class SqliteEventStore(
         if engine_shaped_tables(conn):
             ensure_tenant_schema(conn)
             check_mode_admits(read_mode(conn), self.tenant)
+            check_sqlite_tables(conn, ["events", "snapshots", "event_subscriptions"], read_mode(conn))
         self._manager.bind_sqlite_tenant(connection_string, self.tenant)
 
     def _get_connection(self) -> sqlite3.Connection:
