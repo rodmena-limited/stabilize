@@ -85,7 +85,8 @@ def test_tables_created_in_tenancy_mode_carry_the_fence_and_disable_removes_it(t
 
     disabled = stabilize("mg-tenancy", "disable", "--db-url", url)
     assert disabled.returncode == 0, output(disabled)
-    assert _triggers(path) == {}, _triggers(path)
+    remaining = {t for names in _triggers(path).values() for t in names if t.startswith("stabilize_fence_")}
+    assert remaining == set(), remaining
 
 
 def test_a_connection_without_the_function_cannot_write_and_the_fence_refuses_bad_tenants(

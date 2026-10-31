@@ -26,6 +26,7 @@ def _stranded(repository: WorkflowStore, hours_ago: float) -> Workflow:
     wf = Workflow.create(application="rec-window", name="stranded", stages=[stage("s", ["ok"])])
     wf.status = WorkflowStatus.RUNNING
     wf.start_time = int(time.time() * 1000) - int(hours_ago * 3600 * 1000)
+    wf.created_at_ms = wf.start_time
     repository.store(wf)
     return wf
 
@@ -33,7 +34,9 @@ def _stranded(repository: WorkflowStore, hours_ago: float) -> Workflow:
 def test_workflow_started_before_the_window_is_skipped(repository: WorkflowStore, queue: Queue) -> None:
     wf = _stranded(repository, 30)
     results = WorkflowRecovery(repository, queue, max_recovery_age_hours=24).recover_pending_workflows()
-    assert wf.id not in {r.workflow_id for r in results}, "C30 a workflow started 30 h ago was recovered at 24 h"
+    assert {r.status for r in results if r.workflow_id == wf.id} == {"stale"}, (
+        "C30 a workflow started 30 h ago was recovered at 24 h"
+    )
     assert queue.size() == 0
     assert repository.retrieve(wf.id).status == WorkflowStatus.RUNNING
 

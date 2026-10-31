@@ -80,6 +80,7 @@ class StageExecution(StageNavigationMixin):
     start_time_expiry: int | None = None
     scheduled_time: int | None = None
     version: int = 0
+    stabilize_updated_at: int | None = None
 
     # Finalizer support: cleanup on failure and registered finalizer names
     cleanup_on_failure: bool = False

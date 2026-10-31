@@ -64,6 +64,7 @@ class TaskExecution:
     task_exception_details: dict[str, Any] = field(default_factory=dict)
     version: int = 0
     generation: int = 0
+    stabilize_updated_at: int | None = None
 
     # Back-reference to parent stage (set after construction)
     # Can be weakref (default) or strong ref (for standalone tasks)

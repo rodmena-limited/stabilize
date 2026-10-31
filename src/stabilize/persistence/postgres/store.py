@@ -162,6 +162,28 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
                 insert_execution(cur, execution, self.tenant)
             conn.commit()
 
+    def recovery_candidate_ids(self, queue_table: str | None, after_id: str | None, limit: int) -> list[str]:
+        """Ids of this tenant's live workflows on *queue_table*, keyset-paged by id; the default table owns NULL."""
+        own_default = (queue_table or "queue_messages") == "queue_messages"
+        with self._borrow() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id FROM pipeline_executions WHERE stabilize_tenant = %(tenant)s "
+                    "AND status = ANY(%(statuses)s) AND (queue_table = %(queue_table)s "
+                    "OR (%(own_default)s AND queue_table IS NULL)) "
+                    "AND (%(after_id)s::text IS NULL OR id > %(after_id)s) ORDER BY id LIMIT %(limit)s",
+                    {
+                        "tenant": self.tenant,
+                        "statuses": ["RUNNING", "NOT_STARTED", "BUFFERED"],
+                        "queue_table": queue_table or "queue_messages",
+                        "own_default": own_default,
+                        "after_id": after_id,
+                        "limit": int(limit),
+                    },
+                )
+                rows = cur.fetchall()
+        return [str(r["id"]) for r in rows]
+
     def retrieve(self, execution_id: str) -> Workflow:
         """Retrieve an execution by ID."""
         with self._borrow() as conn:

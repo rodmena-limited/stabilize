@@ -47,6 +47,9 @@ _CREATE_FUNCTION_RE = re.compile(
 _CREATE_TRIGGER_RE = re.compile(
     r"^CREATE TRIGGER ([a-z_][a-z0-9_]*) (BEFORE|AFTER) .*? ON ([a-z_][a-z0-9_]*) ", re.IGNORECASE | re.DOTALL
 )
+_BACKFILL_UPDATE_RE = re.compile(
+    r"^UPDATE ([a-z_][a-z0-9_]*) SET ([a-z_][a-z0-9_]*) = .* WHERE \2 IS NULL( AND .*)?$", re.IGNORECASE | re.DOTALL
+)
 _SEED_INSERT_RE = re.compile(
     r"^INSERT INTO ([a-z_][a-z0-9_]*) .* ON CONFLICT \(.*\) DO NOTHING$", re.IGNORECASE | re.DOTALL
 )
@@ -205,6 +208,10 @@ def _model_statement(statement: str, model: MigrationModel, min_server: int = 0)
         return
     seed = _SEED_INSERT_RE.match(statement)
     if seed and min_server == 0:
+        model.rerun_on_adoption.append(statement)
+        return
+    backfill = _BACKFILL_UPDATE_RE.match(statement)
+    if backfill and min_server == 0:
         model.rerun_on_adoption.append(statement)
         return
     model.unmodelled.append(statement)

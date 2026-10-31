@@ -27,6 +27,8 @@ PIPELINE_EXECUTIONS: tuple[str, ...] = (
     "created_at",
     "queue_table",
     "config_version",
+    "created_at_ms",
+    "stabilize_updated_at",
     TENANT_COLUMN,
 )
 
@@ -47,6 +49,7 @@ STAGE_EXECUTIONS: tuple[str, ...] = (
     "start_time_expiry",
     "scheduled_time",
     "version",
+    "stabilize_updated_at",
     "join_type",
     "join_threshold",
     "split_type",
@@ -75,6 +78,7 @@ TASK_EXECUTIONS: tuple[str, ...] = (
     "task_exception_details",
     "version",
     "generation",
+    "stabilize_updated_at",
     TENANT_COLUMN,
 )
 

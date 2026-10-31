@@ -103,4 +103,8 @@ class QueueProcessorConfig:
             poll_frequency_ms=config.poll_frequency_ms,
             max_workers=config.max_workers,
             retry_delay=timedelta(seconds=config.handler_retry_delay_seconds),
+            recover_on_start=config.recover_on_start,
+            recovery_interval_seconds=config.recovery_interval_seconds,
+            recovery_application=config.recovery_application,
+            recovery_max_age_hours=config.recovery_max_age_hours,
         )

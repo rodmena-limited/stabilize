@@ -26,7 +26,7 @@ def insert_execution(cur: Any, execution: Workflow, tenant: str) -> None:
             start_time_expiry, trigger, is_canceled, canceled_by,
             cancellation_reason, paused, pipeline_config_id,
             is_limit_concurrent, max_concurrent_executions,
-            keep_waiting_pipelines, origin, queue_table, config_version, stabilize_tenant
+            keep_waiting_pipelines, origin, queue_table, config_version, created_at_ms, stabilize_tenant
         ) VALUES (
             %(id)s, %(type)s, %(application)s, %(name)s, %(status)s,
             %(context)s::jsonb, %(start_time)s, %(end_time)s, %(start_time_expiry)s,
@@ -34,7 +34,7 @@ def insert_execution(cur: Any, execution: Workflow, tenant: str) -> None:
             %(cancellation_reason)s, %(paused)s::jsonb, %(pipeline_config_id)s,
             %(is_limit_concurrent)s, %(max_concurrent_executions)s,
             %(keep_waiting_pipelines)s, %(origin)s, %(queue_table)s, %(config_version)s,
-            %(tenant)s
+            %(created_at_ms)s, %(tenant)s
         )
         """,
         {**execution_to_dict(execution), "tenant": tenant},

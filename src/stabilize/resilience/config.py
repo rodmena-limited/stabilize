@@ -135,6 +135,10 @@ class HandlerConfig:
     poll_frequency_ms: int = 50
     max_workers: int = 10
     default_page_size: int = 100
+    recover_on_start: bool = False
+    recovery_interval_seconds: float = 0.0
+    recovery_application: str | None = None
+    recovery_max_age_hours: float = 24.0
 
     @classmethod
     def from_env(cls) -> HandlerConfig:
@@ -168,6 +172,10 @@ class HandlerConfig:
             task_backoff_max_delay_ms=int(os.getenv("STABILIZE_TASK_BACKOFF_MAX_MS", "60000")),
             # Handler retry delay
             handler_retry_delay_seconds=float(os.getenv("STABILIZE_HANDLER_RETRY_DELAY_S", "15")),
+            recover_on_start=os.getenv("STABILIZE_RECOVER_ON_START", "false").strip().lower() in ("1", "true", "yes"),
+            recovery_interval_seconds=float(os.getenv("STABILIZE_RECOVERY_INTERVAL_SECONDS", "0")),
+            recovery_application=os.getenv("STABILIZE_RECOVERY_APPLICATION") or None,
+            recovery_max_age_hours=float(os.getenv("STABILIZE_RECOVERY_MAX_AGE_HOURS", "24")),
             # Processor settings
             poll_frequency_ms=int(os.getenv("STABILIZE_PROCESSOR_POLL_MS", "50")),
             max_workers=int(os.getenv("STABILIZE_PROCESSOR_MAX_WORKERS", "10")),

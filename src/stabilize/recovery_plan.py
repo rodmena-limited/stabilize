@@ -28,7 +28,11 @@ def plan_running_workflow(workflow: Workflow, queue: Queue) -> list[Message]:
     for stage in workflow.stages:
         if stage.status == WorkflowStatus.RUNNING:
             messages.extend(_plan_running_stage(workflow, stage, queue))
-        elif stage.status == WorkflowStatus.NOT_STARTED and (has_started(stage) or can_start(stage, workflow)):
+        elif (
+            stage.status == WorkflowStatus.NOT_STARTED
+            and (has_started(stage) or can_start(stage, workflow))
+            and not queue.has_pending_message_for_stage(stage.id)
+        ):
             messages.append(StartStage(execution_type=workflow.type.value, execution_id=workflow.id, stage_id=stage.id))
     if not messages and _needs_completion(workflow) and not queue.has_pending_message_for_execution(workflow.id):
         messages.append(CompleteWorkflow(execution_type=workflow.type.value, execution_id=workflow.id))
@@ -90,6 +94,8 @@ def _plan_running_stage(workflow: Workflow, stage: StageExecution, queue: Queue)
         if queue.has_pending_message_for_stage(stage.id) or any(s.status in ACTIVE for s in stage.after_stages()):
             return []
         return [CompleteStage(execution_type=kind, execution_id=workflow.id, stage_id=stage.id)]
+    if queue.has_pending_message_for_stage(stage.id):
+        return []
     return [StartStage(execution_type=kind, execution_id=workflow.id, stage_id=stage.id)]
 
 

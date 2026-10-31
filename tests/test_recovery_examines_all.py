@@ -34,6 +34,7 @@ def _seed(repository: WorkflowStore, app: str, n: int) -> tuple[set[str], str]:
     old = _wf(app)
     old.status = WorkflowStatus.RUNNING
     old.start_time = int(time.time() * 1000) - 48 * 3600 * 1000
+    old.created_at_ms = old.start_time
     repository.store(old)
     return ids, old.id
 
@@ -43,7 +44,7 @@ def test_recovery_examines_beyond_batch_size(repository: WorkflowStore, queue: Q
     results = WorkflowRecovery(repository, queue, batch_size=5).recover_pending_workflows()
     recovered = {r.workflow_id for r in results if r.status == "recovered"}
     assert ids <= recovered
-    assert old_id not in {r.workflow_id for r in results}
+    assert {r.status for r in results if r.workflow_id == old_id} == {"stale"}
 
 
 def test_application_recovery_respects_window(repository: WorkflowStore, queue: Queue) -> None:
@@ -51,7 +52,7 @@ def test_application_recovery_respects_window(repository: WorkflowStore, queue: 
     results = WorkflowRecovery(repository, queue, batch_size=5).recover_pending_workflows(application="rec-app")
     recovered = {r.workflow_id for r in results if r.status == "recovered"}
     assert ids <= recovered
-    assert old_id not in {r.workflow_id for r in results}
+    assert {r.status for r in results if r.workflow_id == old_id} == {"stale"}
 
 
 def test_retrieve_by_application_honours_start_time_window(repository: WorkflowStore) -> None:

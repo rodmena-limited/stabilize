@@ -17,6 +17,12 @@ from stabilize.models.workflow import (
 from stabilize.persistence.task_state import mark_persisted
 
 
+def _now_ms() -> int:
+    import time
+
+    return int(time.time() * 1000)
+
+
 def execution_to_dict(execution: Workflow) -> dict[str, Any]:
     """Convert execution to dictionary for storage."""
     return {
@@ -40,6 +46,7 @@ def execution_to_dict(execution: Workflow) -> dict[str, Any]:
         "keep_waiting_pipelines": execution.keep_waiting_pipelines,
         "queue_table": execution.queue_table,
         "config_version": execution.config_version,
+        "created_at_ms": execution.created_at_ms if execution.created_at_ms is not None else _now_ms(),
         "origin": execution.origin,
     }
 
@@ -102,6 +109,8 @@ def row_to_execution(row: dict[str, Any]) -> Workflow:
         origin=row["origin"] or "unknown",
         queue_table=row["queue_table"],
         config_version=row["config_version"],
+        created_at_ms=row["created_at_ms"],
+        stabilize_updated_at=row["stabilize_updated_at"],
         tenant=row["stabilize_tenant"] or "",
     )
 
@@ -159,6 +168,7 @@ def row_to_stage(row: dict[str, Any]) -> StageExecution:
         end_time=row["end_time"],
         start_time_expiry=row["start_time_expiry"],
         scheduled_time=row["scheduled_time"],
+        stabilize_updated_at=row["stabilize_updated_at"],
         version=row["version"] or 0,
         join_type=join_type,
         join_threshold=row["join_threshold"] or 0,
@@ -201,6 +211,7 @@ def row_to_task(row: dict[str, Any]) -> TaskExecution:
         loop_end=row["loop_end"] or False,
         task_exception_details=exception_details,
         generation=row["generation"],
+        stabilize_updated_at=row["stabilize_updated_at"],
         version=row["version"] or 0,
     )
     mark_persisted(task)

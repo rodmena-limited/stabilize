@@ -137,6 +137,8 @@ SAMPLE_ROWS: dict[str, dict[str, Any]] = {
         "created_at": None,
         "queue_table": None,
         "config_version": None,
+        "created_at_ms": None,
+        "stabilize_updated_at": None,
         "stabilize_tenant": "",
     },
     "stage_executions": {
@@ -156,6 +158,7 @@ SAMPLE_ROWS: dict[str, dict[str, Any]] = {
         "start_time_expiry": None,
         "scheduled_time": None,
         "version": 0,
+        "stabilize_updated_at": None,
         "join_type": "AND",
         "join_threshold": 0,
         "split_type": "AND",
@@ -183,6 +186,7 @@ SAMPLE_ROWS: dict[str, dict[str, Any]] = {
         "task_exception_details": None,
         "version": 0,
         "generation": 0,
+        "stabilize_updated_at": None,
         "stabilize_tenant": "",
     },
 }

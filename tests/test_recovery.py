@@ -153,6 +153,7 @@ class TestWorkflowRecovery:
         old = _make_workflow("old")
         old.status = WorkflowStatus.RUNNING
         old.start_time = _now_ms() - int(100 * 3600 * 1000)  # 100h ago
+        old.created_at_ms = old.start_time
         repository.store(old)
 
         recent = _store_running_with_running_task(repository)  # started "now"
@@ -161,8 +162,8 @@ class TestWorkflowRecovery:
         results = recovery.recover_pending_workflows()  # no app filter -> honors cutoff
         ids = {r.workflow_id for r in results}
 
-        assert old.id not in ids  # too old
-        assert recent.id in ids  # within window
+        assert {r.status for r in results if r.workflow_id == old.id} == {"stale"}
+        assert recent.id in ids
 
     def test_recover_on_startup_helper(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
         _store_running_with_running_task(repository)

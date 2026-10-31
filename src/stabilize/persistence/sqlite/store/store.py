@@ -306,6 +306,18 @@ class SqliteWorkflowStore(
 
         return len(get_pending_signals(self._get_connection(), execution_id, stage_ref_id, tenant=self.tenant))
 
+    def pending_signal_latest_ms(self, execution_id: str) -> int | None:
+        """The creation time (epoch ms) of the newest unconsumed signal of a workflow, or None."""
+        if not self.supports_signal_storage():
+            return None
+        conn = self._get_connection()
+        row = conn.execute(
+            "SELECT CAST(strftime('%s', max(created_at)) AS INTEGER) * 1000 FROM workflow_signals "
+            "WHERE execution_id = :execution_id AND consumed = 0 AND stabilize_tenant = :tenant",
+            {"execution_id": execution_id, "tenant": self.tenant},
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
     def discard_signals(self, execution_id: str, stage_ref_id: str) -> int:
         conn = self._get_connection()
         cur = conn.execute(

@@ -143,6 +143,8 @@ class Workflow:
     keep_waiting_pipelines: bool = False
     origin: str = "unknown"
     config_version: str | None = None
+    created_at_ms: int | None = None
+    stabilize_updated_at: int | None = None
     queue_table: str | None = None  # Fingerprint of config used at workflow start
     tenant: str = ""
 

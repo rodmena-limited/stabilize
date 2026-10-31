@@ -21,6 +21,12 @@ if TYPE_CHECKING:
     pass
 
 
+def _now_ms() -> int:
+    import time
+
+    return int(time.time() * 1000)
+
+
 def execution_to_dict(execution: Workflow) -> dict[str, Any]:
     """Convert execution to dictionary for storage."""
     return {
@@ -44,6 +50,7 @@ def execution_to_dict(execution: Workflow) -> dict[str, Any]:
         "keep_waiting_pipelines": 1 if execution.keep_waiting_pipelines else 0,
         "queue_table": execution.queue_table,
         "config_version": execution.config_version,
+        "created_at_ms": execution.created_at_ms if execution.created_at_ms is not None else _now_ms(),
         "origin": execution.origin,
     }
 
@@ -97,6 +104,8 @@ def row_to_execution(row: sqlite3.Row) -> Workflow:
         origin=row["origin"] or "unknown",
         queue_table=row["queue_table"],
         config_version=row["config_version"],
+        created_at_ms=row["created_at_ms"],
+        stabilize_updated_at=row["stabilize_updated_at"],
         tenant=row["stabilize_tenant"] or "",
     )
 
@@ -152,6 +161,7 @@ def row_to_stage(row: sqlite3.Row) -> StageExecution:
         end_time=row["end_time"],
         start_time_expiry=row["start_time_expiry"],
         scheduled_time=row["scheduled_time"],
+        stabilize_updated_at=row["stabilize_updated_at"],
         version=row["version"],
         join_type=join_type,
         join_threshold=_safe_get("join_threshold", 0) or 0,
@@ -189,6 +199,7 @@ def row_to_task(row: sqlite3.Row) -> TaskExecution:
         loop_end=bool(row["loop_end"]),
         task_exception_details=exception_details,
         generation=row["generation"],
+        stabilize_updated_at=row["stabilize_updated_at"],
         version=version,
     )
     mark_persisted(task)

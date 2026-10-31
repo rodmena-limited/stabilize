@@ -13,6 +13,8 @@ from stabilize.persistence.tenancy import MODE_TENANCY, TENANT_CHECK, TENANT_COL
 logger = logging.getLogger(__name__)
 
 FENCE_TRIGGER = "stabilize_tenant_fence"
+ACTIVITY_TRIGGER = "stabilize_activity"
+ACTIVITY_TABLES = ("pipeline_executions", "stage_executions", "task_executions")
 
 
 def _shape_for(table: str) -> str:
@@ -107,6 +109,11 @@ def check_postgres_tables(conn: Any, schema: str | None, tables: list[str], mode
             continue
         problems.extend(_problems_for_columns(table, present[table], "postgres", current))
         if current == MODE_TENANCY:
+            if table in ACTIVITY_TABLES and ACTIVITY_TRIGGER not in triggers.get(table, set()):
+                problems.append(
+                    f"trigger {ACTIVITY_TRIGGER} is missing on {table}; apply the recovery_activity migration "
+                    "(stabilize mg-up) or create it from that file's DDL"
+                )
             if FENCE_TRIGGER not in triggers.get(table, set()):
                 problems.append(
                     f"trigger {FENCE_TRIGGER} is missing on {table}; run stabilize mg-tenancy disable then enable "

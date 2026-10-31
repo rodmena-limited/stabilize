@@ -73,13 +73,13 @@ class SqliteWorkflowCrudMixin:
                 start_time_expiry, trigger, is_canceled, canceled_by,
                 cancellation_reason, paused, pipeline_config_id,
                 is_limit_concurrent, max_concurrent_executions,
-                keep_waiting_pipelines, origin, stabilize_tenant{columns}
+                keep_waiting_pipelines, origin, created_at_ms, stabilize_tenant{columns}
             ) VALUES (
                 :id, :type, :application, :name, :status, :context, :start_time, :end_time,
                 :start_time_expiry, :trigger, :is_canceled, :canceled_by,
                 :cancellation_reason, :paused, :pipeline_config_id,
                 :is_limit_concurrent, :max_concurrent_executions,
-                :keep_waiting_pipelines, :origin, :tenant{values}
+                :keep_waiting_pipelines, :origin, :created_at_ms, :tenant{values}
             )
             """,
             {**execution_to_dict(execution), "tenant": self.tenant},
@@ -87,6 +87,25 @@ class SqliteWorkflowCrudMixin:
 
         for stage in execution.stages:
             insert_stage(conn, stage, execution.id, self.tenant)
+
+    def recovery_candidate_ids(self, queue_table: str | None, after_id: str | None, limit: int) -> list[str]:
+        """Ids of this tenant's live workflows on *queue_table*, keyset-paged by id; the default table owns NULL."""
+        own_default = 1 if (queue_table or "queue_messages") == "queue_messages" else 0
+        conn = self._get_connection()
+        rows = conn.execute(
+            "SELECT id FROM pipeline_executions WHERE stabilize_tenant = :tenant "
+            "AND status IN ('RUNNING', 'NOT_STARTED', 'BUFFERED') "
+            "AND (queue_table = :queue_table OR (:own_default = 1 AND queue_table IS NULL)) "
+            "AND (:after_id IS NULL OR id > :after_id) ORDER BY id LIMIT :limit",
+            {
+                "tenant": self.tenant,
+                "queue_table": queue_table or "queue_messages",
+                "own_default": own_default,
+                "after_id": after_id,
+                "limit": int(limit),
+            },
+        ).fetchall()
+        return [str(r[0]) for r in rows]
 
     def retrieve(self, execution_id: str) -> Workflow:
         """Retrieve an execution by ID."""

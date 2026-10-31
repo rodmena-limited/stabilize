@@ -193,6 +193,28 @@ class PostgresSignalMixin:
             return 0
         return int(row["n"] if isinstance(row, dict) else row[0])
 
+    def pending_signal_latest_ms(self, execution_id: str) -> int | None:
+        """The creation time (epoch ms) of the newest unconsumed signal of a workflow, or None."""
+        if not self.supports_signal_storage():
+            return None
+        try:
+            with self._borrow() as conn:  # type: ignore[attr-defined]
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"SELECT (EXTRACT(EPOCH FROM max(created_at)) * 1000)::bigint AS ms FROM {SIGNAL_TABLE} "
+                        "WHERE execution_id = %s AND consumed = FALSE AND stabilize_tenant = %s",
+                        (execution_id, self.tenant),
+                    )
+                    row = cur.fetchone()
+                conn.rollback()
+        except ENGINE_REFUSALS:
+            raise
+        except Exception as exc:
+            self._signal_storage_unusable(exc)
+            return None
+        value = (row["ms"] if isinstance(row, dict) else row[0]) if row else None
+        return int(value) if value is not None else None
+
     def discard_signals(self, execution_id: str, stage_ref_id: str) -> int:
         if not self.supports_signal_storage():
             return 0

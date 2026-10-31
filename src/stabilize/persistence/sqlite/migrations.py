@@ -56,6 +56,32 @@ class Migration:
 # Forward-only migrations applied *after* the baseline (version 1).
 # Append new migrations here with strictly increasing version numbers, e.g.:
 #     Migration(2, "add_foo_column", ("ALTER TABLE stage_executions ADD COLUMN foo TEXT",))
+ACTIVITY_WATCHED: dict[str, tuple[str, ...]] = {
+    "pipeline_executions": (
+        "status",
+        "start_time",
+        "end_time",
+        "is_canceled",
+        "canceled_by",
+        "cancellation_reason",
+        "paused",
+    ),
+    "stage_executions": ("status", "context", "outputs", "start_time", "end_time", "scheduled_time", "version"),
+    "task_executions": ("status", "start_time", "end_time", "task_exception_details", "version"),
+}
+
+
+def activity_triggers() -> tuple[str, ...]:
+    """The AFTER UPDATE triggers that stamp stabilize_updated_at when a state column changes."""
+    return tuple(
+        f"CREATE TRIGGER IF NOT EXISTS stabilize_activity_{table} AFTER UPDATE OF {', '.join(columns)} ON {table} "
+        "WHEN NEW.stabilize_updated_at IS OLD.stabilize_updated_at "
+        f"BEGIN UPDATE {table} SET stabilize_updated_at = CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) "
+        "WHERE id = NEW.id; END"
+        for table, columns in ACTIVITY_WATCHED.items()
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         2,
@@ -137,6 +163,19 @@ MIGRATIONS: tuple[Migration, ...] = (
         7,
         "add_task_generation",
         ("ALTER TABLE task_executions ADD COLUMN generation INTEGER NOT NULL DEFAULT 0",),
+    ),
+    Migration(
+        8,
+        "add_recovery_activity",
+        (
+            "ALTER TABLE pipeline_executions ADD COLUMN stabilize_updated_at INTEGER",
+            "ALTER TABLE stage_executions ADD COLUMN stabilize_updated_at INTEGER",
+            "ALTER TABLE task_executions ADD COLUMN stabilize_updated_at INTEGER",
+            "ALTER TABLE pipeline_executions ADD COLUMN created_at_ms INTEGER",
+            "UPDATE pipeline_executions SET created_at_ms = CAST(strftime('%s', created_at) AS INTEGER) * 1000 "
+            "WHERE created_at_ms IS NULL AND created_at IS NOT NULL",
+            *activity_triggers(),
+        ),
     ),
 )
 

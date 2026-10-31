@@ -31,8 +31,8 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 from stabilize.errors import RecoveryError
 from stabilize.models.status import WorkflowStatus
@@ -57,6 +57,27 @@ class RecoveryResult:
     message: str
     stages_requeued: int = 0
     failed_pushes: int = 0
+
+
+@dataclass
+class RecoverySummary:
+    """What the last recovery sweep did, by outcome."""
+
+    results: list[RecoveryResult] = field(default_factory=list)
+    recovered: int = 0
+    partial: int = 0
+    skipped: int = 0
+    stale: int = 0
+    failed: int = 0
+    error: str | None = None
+
+    @classmethod
+    def of(cls, results: list[RecoveryResult]) -> RecoverySummary:
+        summary = cls(results=list(results))
+        for result in results:
+            if result.status in ("recovered", "partial", "skipped", "stale", "failed"):
+                setattr(summary, result.status, getattr(summary, result.status) + 1)
+        return summary
 
 
 class WorkflowRecovery:
@@ -97,6 +118,8 @@ class WorkflowRecovery:
         self.queue = queue
         self.max_recovery_age_hours = max_recovery_age_hours
         self.batch_size = batch_size
+        self.page_size = 500
+        self._cutoff_ms = 0
 
     def recover_pending_workflows(
         self,
@@ -120,6 +143,7 @@ class WorkflowRecovery:
         current_time_ms = int(time.time() * 1000)
         max_age_ms = int(self.max_recovery_age_hours * 3600 * 1000)
         cutoff_time = current_time_ms - max_age_ms
+        self._cutoff_ms = cutoff_time
 
         logger.info(
             "Starting workflow recovery (max_age=%s hours, application=%s)",
@@ -198,13 +222,15 @@ class WorkflowRecovery:
         recovered = sum(1 for r in results if r.status == "recovered")
         partial = sum(1 for r in results if r.status == "partial")
         skipped = sum(1 for r in results if r.status == "skipped")
+        stale = sum(1 for r in results if r.status == "stale")
         failed = sum(1 for r in results if r.status == "failed")
 
         logger.info(
-            "Recovery complete: %d recovered, %d partial, %d skipped, %d failed",
+            "Recovery complete: %d recovered, %d partial, %d skipped, %d stale, %d failed",
             recovered,
             partial,
             skipped,
+            stale,
             failed,
         )
 
@@ -226,10 +252,13 @@ class WorkflowRecovery:
         """
         from stabilize.persistence.store import WorkflowCriteria
 
+        candidates = getattr(self.store, "recovery_candidate_ids", None)
+        if callable(candidates):
+            return self._paged_candidates(candidates, application)
+        logger.warning("Store has no recovery_candidate_ids; recovery scans every pending workflow")
         criteria = WorkflowCriteria(
             statuses={WorkflowStatus.RUNNING, WorkflowStatus.NOT_STARTED, WorkflowStatus.BUFFERED},
             page_size=None,
-            start_time_after=cutoff_time,
         )
 
         if application:
@@ -240,6 +269,37 @@ class WorkflowRecovery:
             "Store doesn't support get_all_pending_workflows, recovery may be incomplete without application filter"
         )
         return iter(())
+
+    def _paged_candidates(self, candidates: Any, application: str | None) -> Iterator[Workflow]:
+        own_table = queue_table_name(self.queue)
+        after_id: str | None = None
+        while True:
+            ids = candidates(own_table, after_id, self.page_size)
+            if not ids:
+                return
+            for workflow_id in ids:
+                try:
+                    workflow = self.store.retrieve(workflow_id)
+                except Exception as e:
+                    logger.warning("Recovery could not load workflow %s: %s", workflow_id, e)
+                    continue
+                if application is not None and workflow.application != application:
+                    continue
+                yield workflow
+            after_id = ids[-1]
+
+    def _stale(self, workflow: Workflow) -> RecoveryResult | None:
+        from stabilize.recovery_age import workflow_activity_ms
+
+        activity = workflow_activity_ms(workflow, self.store)
+        if activity is not None and activity < self._cutoff_ms:
+            age_hours = (int(time.time() * 1000) - activity) / 3_600_000
+            return RecoveryResult(
+                workflow_id=workflow.id,
+                status="stale",
+                message=f"No activity for {age_hours:.1f} hours (window {self.max_recovery_age_hours} hours)",
+            )
+        return None
 
     def _wake_waiting(self, pipeline_config_id: str) -> RecoveryResult:
         from stabilize.queue.messages import StartWaitingWorkflows
@@ -291,6 +351,9 @@ class WorkflowRecovery:
             )
 
         full_workflow = self.store.retrieve(workflow.id)
+        stale = self._stale(full_workflow)
+        if stale is not None:
+            return stale
         if full_workflow.status == WorkflowStatus.NOT_STARTED:
             return self._recover_not_started(full_workflow)
 

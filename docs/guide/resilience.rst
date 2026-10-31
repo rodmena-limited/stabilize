@@ -378,10 +378,14 @@ Recovery automatically:
 
 .. note::
 
-   The ``max_recovery_age_hours`` cutoff is applied on the cross-application
-   path (no ``application`` filter, backed by ``get_all_pending_workflows`` —
-   available on both SQLite and PostgreSQL). The application-filtered path does
-   not currently apply the age cutoff.
+   ``max_recovery_age_hours`` is measured from the workflow's latest activity, with or
+   without an ``application`` filter. The activity is the newest of the
+   ``stabilize_updated_at`` stamps on the workflow, its stages and its tasks (set by a
+   trigger when a state column changes), the start and end times, the stages'
+   ``scheduled_time``, ``created_at_ms``, and the newest unconsumed signal. A workflow
+   with no activity inside the window is reported ``stale`` and left as it is. Rows
+   written before 0.34.0 carry no stamp. A workflow that was already old at the upgrade
+   therefore stays unrecovered until something writes to it.
 
 Automatic recovery (opt-in)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

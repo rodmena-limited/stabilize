@@ -156,6 +156,19 @@ host's own migretti history, now upgrade with no change to the command.
 - **Paused time is not task lifetime.** `PauseTask` records `_paused_at`, `ResumeStage`
   adds the interval to `_paused_ms`, and the RunTask lifetime and stage-timeout checks
   subtract it for every `RetryableTask`.
+- **`StoreTransaction.try_lock_recovery(key)`**, `buffered_ids(config, queue_table=)`,
+  `Queue.has_pending_message_for_config()` and `Queue.dead_letter_moved_at_ms()`;
+  `RecoveryResult.status` gains `locked`, `dead_lettered` and `dead_letter_stale`.
+- **`stabilize_updated_at`** on the three execution tables and **`created_at_ms`** on
+  `pipeline_executions`, added by migration `01M68FGEZVQR6KPAMW6P5N8B0E_recovery_activity.sql`
+  on PostgreSQL and SQLite migration 8, with the trigger function
+  `stabilize_touch_updated_at()`. The models expose both. A host that owns its DDL applies
+  the migration file before its 0.34.0 processors start.
+- **`STABILIZE_RECOVER_ON_START`, `STABILIZE_RECOVERY_INTERVAL_SECONDS`,
+  `STABILIZE_RECOVERY_MAX_AGE_HOURS` and `STABILIZE_RECOVERY_APPLICATION`** reach
+  `HandlerConfig` and `QueueProcessorConfig.from_handler_config`. `run_recovery(strict=True)`
+  raises `RecoveryError` instead of logging it, and `processor.last_recovery` reports the
+  sweep's counts per outcome, `stale` included.
 - **`stabilize.models.stage.definition`**: `stage_to_definition()` and `stage_from_definition()`
   convert a stage to and from the JSON shape a sub-workflow configuration carries in a
   stage context. `SubWorkflowTask` accepts those dictionaries or `StageExecution` objects.
@@ -187,6 +200,37 @@ host's own migretti history, now upgrade with no change to the command.
 
 ### Fixed
 
+- **Two overlapping recovery sweeps re-queue a lost task once (B17).** Each workflow's
+  recovery now runs inside one store transaction that first takes a per-workflow lock
+  (an advisory transaction lock on PostgreSQL, `BEGIN IMMEDIATE` on SQLite) and re-runs
+  the pending-message checks under it. A sweep that finds the lock taken reports
+  `locked`.
+- **Buffered configs are woken once, and only when a slot is free (B20).** A sweep pushed
+  `StartWaitingWorkflows` for every buffered config it saw, whether or not a run could
+  start and whether or not a wake-up was already queued. It now checks the queue and the
+  running count under a per-config lock and never ages a buffered run out.
+- **A buffered workflow is promoted onto its own queue table (B18).** `buffered_ids` is
+  scoped to the caller's queue table and `start_running` keeps a `queue_table` already set.
+  A processor without the workflow's tasks therefore no longer picks it up and fails it.
+- **Recovery respects the dead-letter queue.** A lost message whose dead-letter row was
+  moved at or after the workflow's latest activity is reported `dead_lettered` and left
+  there for an operator. A row older than new activity is reported `dead_letter_stale` and
+  the message is re-pushed.
+- **Recovery ages a workflow by its activity, not by its start (B21).** A run started 30
+  hours ago whose task row changed five minutes ago was never recovered, because the only
+  clock was `start_time`. `pipeline_executions`, `stage_executions` and `task_executions`
+  now carry `stabilize_updated_at`, stamped by a trigger whenever a state column changes.
+  A workflow's age is the newest of those stamps, its start and end times, its stages'
+  `scheduled_time`, its `created_at_ms` and the newest unconsumed signal. A workflow with
+  no activity inside `recovery_max_age_hours` is reported `stale` and left alone. Rows
+  written before 0.34 have no stamp, so a 48-hour-old RUNNING workflow stays unrecovered
+  after the upgrade.
+- **Recovery pushes no `StartStage` that is already queued (B19).** A mutex-blocked stage
+  gained a retry chain on every sweep. The sweep now checks the queue first.
+- **Recovery candidates come from a paged, scoped query.** Each sweep used to load every
+  pending workflow in one unbounded query. Both stores now page live workflows of the
+  sweep's tenant and queue table by id (`recovery_candidate_ids`). A store without it
+  falls back to the full scan with a warning.
 - **`SubWorkflowTask` runs on the processor's own store and queue (B23).** It used the
   process-global `Orchestrator.get_instance()`, whichever orchestrator was built last, and
   stored the child in one call and started it in another, so a crash in between left a

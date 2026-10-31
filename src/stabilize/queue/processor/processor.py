@@ -30,6 +30,7 @@ from stabilize.queue.processor.handler_base import MessageHandler
 from stabilize.queue.processor.mixins import QueueProcessorMixin
 from stabilize.queue.processor.retention import start_retention_thread
 from stabilize.queue.processor.submission import MessageSubmissionMixin
+from stabilize.recovery import RecoverySummary
 from stabilize.resilience.config import HandlerConfig
 from stabilize.threads import in_context
 
@@ -128,6 +129,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
         self._last_dlq_check = 0.0
         self.delivery_defects: list[DeliveryDefect] = []
         self.last_drain = DrainResult()
+        self.last_recovery = RecoverySummary()
 
         # Auto-register default handlers when both store and task_registry are provided
         if store is not None and task_registry is not None:
@@ -325,7 +327,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
         """Check if stop has been requested but not yet completed."""
         return self._stopping and self._running
 
-    def run_recovery(self) -> list[Any]:
+    def run_recovery(self, strict: bool = False) -> list[Any]:
         """Run a single workflow-recovery sweep.
 
         Re-queues workflows that were interrupted by a crash/restart, using the
@@ -341,21 +343,30 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
             logger.warning("Recovery requested but no store configured; skipping.")
             return []
 
-        from stabilize.recovery import WorkflowRecovery
+        from stabilize.recovery import RecoverySummary, WorkflowRecovery
 
         try:
             recovery = WorkflowRecovery(
-                store=self._store,
-                queue=self.queue,
+                self._store,
+                self.queue,
                 max_recovery_age_hours=self.config.recovery_max_age_hours,
             )
-            return recovery.recover_pending_workflows(application=self.config.recovery_application)
+            results = recovery.recover_pending_workflows(application=self.config.recovery_application)
         except TenancyModeChanged as e:
             self._latch(e)
             raise
         except Exception as e:
+            self.last_recovery = RecoverySummary(error=str(e))
+            if strict:
+                from stabilize.errors import RecoveryError
+
+                if isinstance(e, RecoveryError):
+                    raise
+                raise RecoveryError(f"Workflow recovery sweep failed: {e}", cause=e) from e
             logger.error("Workflow recovery sweep failed: %s", e, exc_info=True)
             return []
+        self.last_recovery = RecoverySummary.of(results)
+        return results
 
     def _recovery_loop(self) -> None:
         """Background loop running periodic recovery sweeps until stopped."""
