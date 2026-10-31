@@ -7,7 +7,9 @@ import http.client
 import socket
 import urllib.error
 
+from stabilize.errors.chain import next_link
 from stabilize.errors.permanent import PermanentError
+from stabilize.errors.sqlstates import is_transient_sqlstate, sqlstate
 from stabilize.errors.transient import TransientError
 
 _TRANSIENT_STDLIB_TYPES = (
@@ -31,129 +33,77 @@ _TRANSIENT_ERRNO_VALUES = frozenset(
 )
 
 
-def is_transient(error: Exception) -> bool:
-    """Check if an error is transient and should be retried.
+_PERMANENT_NAME_PATTERNS = ("validation", "authentication", "authorization", "forbidden", "notfound", "invalid")
 
-    Checks the error itself and its cause chain (__cause__) for transient errors.
-    This handles cases where libraries wrap errors (e.g., BulkheadError wrapping
-    a TransientError).
+_TRANSIENT_NAME_PATTERNS = ("timeout", "connection", "temporary", "unavailable", "retry", "throttl", "ratelimit")
 
-    IMPORTANT: Permanent classification takes precedence over transient when both
-    match via class-name heuristics.  For example, ``ConnectionValidationError``
-    contains both "connection" (transient pattern) and "validation" (permanent
-    pattern).  Without the guard, such an error would be silently retried forever.
 
-    Args:
-        error: The exception to check
-
-    Returns:
-        True if the error is transient and should be retried
-    """
+def _classify(error: BaseException) -> bool | None:
+    """True transient, False permanent, None undecided for this one exception."""
     if isinstance(error, TransientError):
         return True
-
-    # Permanent type-check takes strict precedence over transient heuristics
     if isinstance(error, PermanentError):
         return False
-
     if isinstance(error, _TRANSIENT_STDLIB_TYPES):
         return True
-
     if isinstance(error, OSError) and error.errno in _TRANSIENT_ERRNO_VALUES:
         return True
-
-    error_name = type(error).__name__.lower()
-
-    # Check permanent patterns FIRST — if the class name matches a permanent
-    # pattern, it must NOT be classified as transient regardless of whether a
-    # transient pattern also matches.
-    permanent_name_patterns = (
-        "validation",
-        "authentication",
-        "authorization",
-        "forbidden",
-        "notfound",
-        "invalid",
-    )
-    if any(pattern in error_name for pattern in permanent_name_patterns):
-        return False
-
-    transient_patterns = [
-        "timeout",
-        "connection",
-        "temporary",
-        "unavailable",
-        "retry",
-        "throttl",
-        "ratelimit",
-    ]
-    if any(pattern in error_name for pattern in transient_patterns):
+    if is_transient_sqlstate(sqlstate(error)):
         return True
+    name = type(error).__name__.lower()
+    if any(pattern in name for pattern in _PERMANENT_NAME_PATTERNS):
+        return False
+    if any(pattern in name for pattern in _TRANSIENT_NAME_PATTERNS):
+        return True
+    return None
 
-    # Check the cause chain for wrapped transient errors
-    cause = getattr(error, "__cause__", None)
-    if cause is not None and cause is not error:
-        return is_transient(cause)
 
-    return False
+_PERMANENT_TYPES = (ValueError, TypeError, AttributeError, KeyError, IndexError)
+
+
+def _decide(error: Exception) -> bool | None:
+    """The first decision along the cause chain; None when nothing in it is classified.
+
+    An implicit ``__context__`` is followed only past an exception that is not permanent
+    by type: a ValueError raised while handling a transient failure is a bug, not a retry.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        verdict = _classify(current)
+        if verdict is not None:
+            return verdict
+        following, implicit = next_link(current)
+        if implicit and isinstance(current, _PERMANENT_TYPES):
+            return False
+        current = following
+    return None
+
+
+def is_transient(error: Exception) -> bool:
+    """Whether a failure should be retried.
+
+    The exception and its causes are examined outermost first: ``__cause__``,
+    then ``StabilizeError.cause``, then ``__context__`` unless suppressed. The first
+    classified exception decides, so a permanent outer error is never retried for a
+    transient cause. An explicit ``TransientError`` or ``PermanentError`` wins over
+    the type and name rules; PostgreSQL SQLSTATEs for contention, lock timeouts and
+    connection refusals count as transient (``STABILIZE_RETRY_ON_SHUTDOWN=1`` adds
+    server shutdown and query cancellation).
+    """
+    return _decide(error) is True
 
 
 def is_permanent(error: Exception) -> bool:
-    """Check if an error is permanent and should not be retried.
-
-    Checks the error itself and its cause chain (__cause__) for permanent errors.
-    This handles cases where libraries wrap errors.
-
-    Args:
-        error: The exception to check
-
-    Returns:
-        True if the error is permanent and should not be retried
-    """
+    """Whether a failure must not be retried; the mirror of ``is_transient``."""
     if isinstance(error, PermanentError):
         return True
-
-    # Explicit TransientError must never be classified as permanent
     if isinstance(error, TransientError):
         return False
-
-    if isinstance(error, (ValueError, TypeError, AttributeError, KeyError, IndexError)):
+    if isinstance(error, _PERMANENT_TYPES):
         return True
-
-    error_name = type(error).__name__.lower()
-
-    # Permanent patterns checked FIRST — mirrors is_transient() where permanent
-    # also wins.  Ambiguous names like ConnectionValidationError must be
-    # classified as permanent (same precedence in both functions).
-    permanent_patterns = (
-        "validation",
-        "authentication",
-        "authorization",
-        "forbidden",
-        "notfound",
-        "invalid",
-    )
-    if any(pattern in error_name for pattern in permanent_patterns):
-        return True
-
-    transient_name_patterns = (
-        "timeout",
-        "connection",
-        "temporary",
-        "unavailable",
-        "retry",
-        "throttl",
-        "ratelimit",
-    )
-    if any(pattern in error_name for pattern in transient_name_patterns):
-        return False
-
-    # Check the cause chain for wrapped permanent errors
-    cause = getattr(error, "__cause__", None)
-    if cause is not None and cause is not error:
-        return is_permanent(cause)
-
-    return False
+    return _decide(error) is False
 
 
 def truncate_error(message: str, max_bytes: int = 102_400) -> str:

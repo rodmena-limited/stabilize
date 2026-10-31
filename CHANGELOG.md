@@ -178,6 +178,11 @@ host's own migretti history, now upgrade with no change to the command.
   `supported_criteria()` names the honoured fields. Each returned stage carries its tasks
   and a summary of its workflow. A status page on PostgreSQL is served by
   `idx_stages_tenant_status_id`.
+- **`stabilize.errors.is_store_unavailable`**, the one predicate for "the store, not the
+  data, failed": connection loss, pool exhaustion, SQLSTATE classes 08 and 58, 53300,
+  57P01 to 57P03, 25006, 08007, 40003 and 0A000, `OperationalError`, `InterfaceError`
+  and pool timeouts by class, `ConcurrencyError`. `STABILIZE_RETRY_ON_SHUTDOWN=1` makes
+  57P01, 57P02 and 57014 transient for tasks.
 - **`stabilize_updated_at`** on the three execution tables and **`created_at_ms`** on
   `pipeline_executions`, added by migration `01M68FGEZVQR6KPAMW6P5N8B0E_recovery_activity.sql`
   on PostgreSQL and SQLite migration 8, with the trigger function
@@ -254,6 +259,17 @@ host's own migretti history, now upgrade with no change to the command.
   A transaction's `store_stage` of a stage in a complete status drops that stage's pending
   rows, and the jump, restart and multi-merge re-arm paths call `discard_signals` inside
   theirs.
+- **A database failover no longer ends healthy workflows (B02).** `StartStage` and
+  `CompleteStage` classified their own store errors with the task rules, under which
+  `OperationalError` was permanent: one lost connection recorded a planning failure and
+  moved the stage to TERMINAL. Both handlers now re-raise a store-unavailable error and
+  the message is redelivered.
+- **Contention and connection SQLSTATEs are retried (B30).** 40001, 40P01, 55P03, 53300,
+  57P03, 08001 and 08004 are transient for tasks. The class-name rules from 0.33 are
+  unchanged. `is_transient`, `is_permanent` and `error_chain` walk `__cause__`,
+  `StabilizeError.cause` and an unsuppressed `__context__`, each exception once, so a
+  wrapped transient error is seen and a cyclic chain ends. `retry_after` on a transient
+  error is honoured as a floor on the retry delay.
 - **Recovery ages a workflow by its activity, not by its start (B21).** A run started 30
   hours ago whose task row changed five minutes ago was never recovered, because the only
   clock was `start_time`. `pipeline_executions`, `stage_executions` and `task_executions`

@@ -265,7 +265,23 @@ Synthesis notes recorded while building WI-6:
 - `retrieve_stages`/`count_stages` are non-abstract on `WorkflowStore` so a third-party store keeps constructing; they raise `NotImplementedError` naming the class, and `supported_criteria()` is empty there.
 - `PostgresWorkflowStore` and `SqliteWorkflowStore` take the methods from mixins (`persistence/postgres/stage_query.py`, `persistence/sqlite/store/stage_query.py`); `postgres/store.py` sits at 544 lines and is listed for a split (rule 5) before anything else lands in it.
 
-### WI-7 … WI-11
+### WI-7 slice 7a: error classification (done)
+- If a store call inside `StartStageHandler` or `CompleteStageHandler` fails with a store-unavailable error (connection loss, pool exhaustion, SQLSTATE classes 08 and 58, 53300, 57P01-57P03, 25006, 08007, 40003, 0A000, `OperationalError`/`InterfaceError`/pool timeouts by class, `ConcurrencyError`), then the handler shall re-raise it so the message is redelivered, and shall not record a planning failure or move the stage to TERMINAL (B02); `stabilize.errors.is_store_unavailable` shall be the one predicate, shared with the held-result path.
+- `is_transient` shall classify PostgreSQL SQLSTATEs 40001, 40P01, 55P03, 53300, 57P03, 08001 and 08004 as transient in addition to the 0.33 type and name rules; 57P01, 57P02 and 57014 only when `STABILIZE_RETRY_ON_SHUTDOWN` is set; an unknown SQLSTATE shall be neither transient nor permanent (B30).
+- `is_transient`, `is_permanent` and `error_chain` shall walk `__cause__`, then `StabilizeError.cause`, then `__context__` only when there is no cause and the context was not suppressed, visiting each exception once; the outermost classified exception shall decide, so a permanent outer error is never retried for a transient cause (B30).
+- When a task raises a transient error carrying `retry_after`, the retry shall be due no earlier than that many seconds after the failure, whatever the task or attempt backoff says (B30).
+- `is_deadlock_error` shall take its SQLSTATE from the same extraction as the classification rules (B31).
+
+Synthesis notes recorded while building 7a:
+- The walk lives in `errors/chain.py` (`walk_causes`, `next_link`); the SQLSTATE sets in `errors/sqlstates.py`; the store-outage predicate in `errors/store_errors.py`. `is_transient`/`is_permanent` classify each exception in chain order with one rule table (`_classify`) and stop at the first verdict. An implicit `__context__` is followed only past an exception that is not permanent by type (`ValueError`, `TypeError`, `AttributeError`, `KeyError`, `IndexError`): the first green run caught a `ValueError` raised while handling a `TransientError` being retried through its context.
+- An explicit `raise X from TransientError` is still walked whatever X is, as 0.33 did; only the implicit link carries the "outer not permanent" guard.
+- `retry_after` floors the retry delay in `_handle_transient_retry` (`retry_after_floor` takes the largest hint along the chain). The planned "max of task backoff, attempt backoff and retry_after" was not applied to `get_backoff_period` itself: that function also paces RUNNING polls, and a max with the attempt backoff would slow every poll of a `RetryableTask` below its own period.
+- The `context_update` lookup on retry walks the same chain instead of one `__cause__` hop.
+- `STABILIZE_RETRY_ON_SHUTDOWN` is read per call, so a running processor follows the environment it was started with and tests can flip it.
+- Breaker counting, decided: the task circuit breaker counts task exceptions whatever their class; a store-outage redelivery never reaches the task and never counts (documented in error_handling.rst).
+- Two runs of this slice failed only on PostgreSQL and only in processor-driven tests (1 of 95 under `-n 2`, 28 of 2,863 in a full suite) while other PostgreSQL test runs were executing on the same capped container; every failed test passed alone (the 28 in 73 s). The runs were not overlapped again. Rule for this work: one PostgreSQL test run at a time on the gate container.
+
+### WI-7 slice 7b … WI-11
 Specified when each item starts; the plan file holds the design.
 
 ### WI-2 slice 2: rule 1 column lists (done)

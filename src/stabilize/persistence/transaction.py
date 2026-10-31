@@ -62,7 +62,7 @@ def is_deadlock_error(error: Exception) -> bool:
         if "database is locked" in error_msg or "locked" in error_msg:
             return True
 
-    from stabilize.persistence.tenancy import sqlstate
+    from stabilize.errors.sqlstates import sqlstate
 
     if sqlstate(error) in CONTENTION_SQLSTATES or getattr(error, "pgcode", None) in CONTENTION_SQLSTATES:
         return True

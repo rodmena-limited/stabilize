@@ -14,7 +14,7 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from stabilize.errors import is_transient
+from stabilize.errors import is_store_unavailable, is_transient
 from stabilize.errors.delivery import DuplicateDeliveryError
 from stabilize.handlers.complete_stage.deferred import CompleteStageDeferredMixin
 from stabilize.handlers.complete_stage.fan_out import CompleteStageFanOutMixin
@@ -290,7 +290,7 @@ class CompleteStageHandler(CompleteStageDeferredMixin, CompleteStageFanOutMixin,
             except (TenancyModeChanged, TenantMismatchError, TenantContextError, DuplicateDeliveryError):
                 raise
             except Exception as e:
-                if is_transient(e):
+                if is_transient(e) or is_store_unavailable(e):
                     raise
 
                 logger.error(

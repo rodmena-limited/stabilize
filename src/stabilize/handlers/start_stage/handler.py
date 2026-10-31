@@ -13,7 +13,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.dag.readiness import PRUNED, PredicatePhase, evaluate_readiness
-from stabilize.errors import is_transient
+from stabilize.errors import is_store_unavailable, is_transient
 from stabilize.errors.delivery import DuplicateDeliveryError
 from stabilize.handlers.start_stage.starting import StartStageStarting
 from stabilize.models.stage.stage import PLANNING_FAILED
@@ -215,7 +215,7 @@ class StartStageHandler(StartStageStarting):
             except (TenancyModeChanged, TenantMismatchError, TenantContextError, DuplicateDeliveryError):
                 raise
             except Exception as e:
-                if is_transient(e):
+                if is_transient(e) or is_store_unavailable(e):
                     raise
 
                 logger.error(

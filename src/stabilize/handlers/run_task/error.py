@@ -195,6 +195,18 @@ def handle_exception(
     )
 
 
+def retry_after_floor(exception: BaseException) -> timedelta:
+    """The longest retry_after carried by the exception or its causes; zero when none says."""
+    from stabilize.errors.chain import walk_causes
+
+    hints = [
+        float(getattr(exc, "retry_after"))
+        for exc in walk_causes(exception)
+        if isinstance(getattr(exc, "retry_after", None), (int, float))
+    ]
+    return timedelta(seconds=max(hints)) if hints else timedelta(0)
+
+
 def _handle_transient_retry(
     stage: StageExecution,
     task_model: TaskExecution,
@@ -209,7 +221,7 @@ def _handle_transient_retry(
 ) -> None:
     """Handle transient error with retry."""
     next_attempt = current_attempts + 1
-    delay = get_backoff_fn(stage, task_model, message, next_attempt + 1)
+    delay = max(get_backoff_fn(stage, task_model, message, next_attempt + 1), retry_after_floor(exception))
 
     retry_message = replace(message, message_id=None, retry_count=next_attempt)
 
@@ -228,9 +240,12 @@ def _handle_transient_retry(
     # Check for context_update from TransientError (stateful retries)
     # Note: bulkman wraps exceptions in BulkheadError, so we need to
     # check __cause__ chain to find the original TransientError
-    context_update = getattr(exception, "context_update", None)
-    if context_update is None and exception.__cause__ is not None:
-        context_update = getattr(exception.__cause__, "context_update", None)
+    from stabilize.errors.chain import walk_causes
+
+    context_update = next(
+        (getattr(exc, "context_update") for exc in walk_causes(exception) if getattr(exc, "context_update", None)),
+        None,
+    )
 
     if context_update:
         logger.debug(

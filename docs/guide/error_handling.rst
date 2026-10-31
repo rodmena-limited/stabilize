@@ -74,6 +74,50 @@ Check error type programmatically:
             # Move to DLQ, alert operator
             pass
 
+What counts as transient
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+``is_transient`` looks at the exception and then at what caused it: ``__cause__``,
+then a ``StabilizeError``'s ``cause``, then ``__context__`` when the raise did not
+suppress it. Each exception is visited once, so a cycle ends the walk. The first
+exception the rules can classify decides. A ``ValueError`` raised while handling a
+``TransientError`` is therefore permanent.
+
+The rules are applied in this order to each exception:
+
+1. An explicit ``TransientError`` or ``PermanentError`` decides.
+2. The standard library's connection and timeout errors, and the matching ``errno``
+   values, are transient.
+3. The PostgreSQL SQLSTATEs 40001, 40P01, 55P03, 53300, 57P03, 08001 and 08004 are
+   transient. With ``STABILIZE_RETRY_ON_SHUTDOWN=1``, 57P01, 57P02 and 57014 (server
+   shutdown and query cancellation) are transient too.
+4. The class-name patterns from 0.33 apply last. ``validation``, ``authentication``,
+   ``notfound`` and ``invalid`` in the class name mean permanent. ``timeout``,
+   ``connection``, ``unavailable``, ``retry`` and ``throttl`` mean transient. Permanent
+   wins when both match.
+
+An error no rule names is neither transient nor permanent. The task path treats it as
+permanent.
+
+``retry_after`` on a transient error is a floor. The retry is due no earlier than that
+many seconds after the failure, whatever the task's own backoff or the attempt backoff
+would have chosen.
+
+Store outages inside the engine
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The engine's own store calls fail differently from a task. When ``StartStage`` or
+``CompleteStage`` cannot reach the database (connection loss, pool exhaustion, a server
+shutting down or recovering, a cached plan invalidated by a migration), the handler
+re-raises and the message is redelivered. Nothing is written about the stage. Before
+0.34 the same failure was recorded as a planning error and the stage ended ``TERMINAL``.
+``stabilize.errors.is_store_unavailable`` is the predicate, shared with the path that
+holds a finished task's result for the redelivery.
+
+The circuit breaker counts task exceptions, transient and permanent alike, because each
+one is a call the task made and lost. A redelivery caused by a store outage is not a
+task call and never counts.
+
 Queue Messages That Cannot Be Decoded
 -------------------------------------
 

@@ -103,16 +103,14 @@ def error_chain(error: Exception) -> list[Exception]:
                     # chain = [ValueError("root"), RuntimeError("middle"), TypeError("leaf")]
     """
     chain: list[Exception] = []
+    seen: set[int] = set()
     current: Exception | None = error
 
-    # Build chain from leaf to root
-    while current is not None:
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
         chain.append(current)
         cause = getattr(current, "__cause__", None)
-        if cause is current:
-            # Prevent infinite loops on self-referential causes
-            break
-        current = cause
+        current = cause if isinstance(cause, Exception) else None
 
     # Reverse to get root-to-leaf order
     chain.reverse()
