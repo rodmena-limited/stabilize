@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from stabilize.models.workflow import Workflow
 
 
-def load_tasks_for_stages(cur: Any, stages: list[StageExecution]) -> None:
+def load_tasks_for_stages(cur: Any, stages: list[StageExecution], tenant: str) -> None:
     """Load tasks for a list of stages in a single query."""
     if not stages:
         return
@@ -35,10 +35,10 @@ def load_tasks_for_stages(cur: Any, stages: list[StageExecution]) -> None:
     cur.execute(
         f"""
         SELECT {_TASK} FROM task_executions
-        WHERE stage_id = ANY(%(stage_ids)s)
+        WHERE stage_id = ANY(%(stage_ids)s) AND stabilize_tenant = %(tenant)s
         ORDER BY id ASC
         """,
-        {"stage_ids": stage_ids},
+        {"stage_ids": stage_ids, "tenant": tenant},
     )
 
     for row in cur.fetchall():
@@ -50,17 +50,17 @@ def load_tasks_for_stages(cur: Any, stages: list[StageExecution]) -> None:
             stage_ref.tasks.append(task)
 
 
-def get_upstream_stages(pool: Any, execution_id: str, stage_ref_id: str) -> list[StageExecution]:
+def get_upstream_stages(engine: Any, execution_id: str, stage_ref_id: str) -> list[StageExecution]:
     """Get upstream stages with tasks loaded."""
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             # First find the requisite ref ids of the target stage
             cur.execute(
                 """
                 SELECT requisite_stage_ref_ids FROM stage_executions
-                WHERE execution_id = %(execution_id)s AND ref_id = %(ref_id)s
+                WHERE execution_id = %(execution_id)s AND ref_id = %(ref_id)s AND stabilize_tenant = %(tenant)s
                 """,
-                {"execution_id": execution_id, "ref_id": stage_ref_id},
+                {"execution_id": execution_id, "ref_id": stage_ref_id, "tenant": engine.tenant},
             )
             row = cur.fetchone()
             if not row or not row["requisite_stage_ref_ids"]:
@@ -73,9 +73,9 @@ def get_upstream_stages(pool: Any, execution_id: str, stage_ref_id: str) -> list
                 f"""
                 SELECT {_STAGE} FROM stage_executions
                 WHERE execution_id = %(execution_id)s
-                AND ref_id = ANY(%(requisites)s)
+                AND ref_id = ANY(%(requisites)s) AND stabilize_tenant = %(tenant)s
                 """,
-                {"execution_id": execution_id, "requisites": requisites},
+                {"execution_id": execution_id, "requisites": requisites, "tenant": engine.tenant},
             )
 
             stages = []
@@ -84,23 +84,23 @@ def get_upstream_stages(pool: Any, execution_id: str, stage_ref_id: str) -> list
                 stages.append(stage)
 
             # Load tasks for all stages
-            load_tasks_for_stages(cur, stages)
+            load_tasks_for_stages(cur, stages, engine.tenant)
 
             return stages
 
 
-def get_downstream_stages(pool: Any, execution_id: str, stage_ref_id: str) -> list[StageExecution]:
+def get_downstream_stages(engine: Any, execution_id: str, stage_ref_id: str) -> list[StageExecution]:
     """Get downstream stages with tasks loaded."""
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             # Find stages that have stage_ref_id in their requisites
             cur.execute(
                 f"""
                 SELECT {_STAGE} FROM stage_executions
                 WHERE execution_id = %(execution_id)s
-                AND %(ref_id)s = ANY(requisite_stage_ref_ids)
+                AND %(ref_id)s = ANY(requisite_stage_ref_ids) AND stabilize_tenant = %(tenant)s
                 """,
-                {"execution_id": execution_id, "ref_id": stage_ref_id},
+                {"execution_id": execution_id, "ref_id": stage_ref_id, "tenant": engine.tenant},
             )
 
             stages = []
@@ -109,22 +109,22 @@ def get_downstream_stages(pool: Any, execution_id: str, stage_ref_id: str) -> li
                 stages.append(stage)
 
             # Load tasks for all stages
-            load_tasks_for_stages(cur, stages)
+            load_tasks_for_stages(cur, stages, engine.tenant)
 
             return stages
 
 
-def get_synthetic_stages(pool: Any, execution_id: str, parent_stage_id: str) -> list[StageExecution]:
+def get_synthetic_stages(engine: Any, execution_id: str, parent_stage_id: str) -> list[StageExecution]:
     """Get synthetic stages with tasks loaded."""
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
                 SELECT {_STAGE} FROM stage_executions
                 WHERE execution_id = %(execution_id)s
-                AND parent_stage_id = %(parent_id)s
+                AND parent_stage_id = %(parent_id)s AND stabilize_tenant = %(tenant)s
                 """,
-                {"execution_id": execution_id, "parent_id": parent_stage_id},
+                {"execution_id": execution_id, "parent_id": parent_stage_id, "tenant": engine.tenant},
             )
 
             stages = []
@@ -133,23 +133,23 @@ def get_synthetic_stages(pool: Any, execution_id: str, parent_stage_id: str) -> 
                 stages.append(stage)
 
             # Load tasks for all stages
-            load_tasks_for_stages(cur, stages)
+            load_tasks_for_stages(cur, stages, engine.tenant)
 
             return stages
 
 
-def get_merged_ancestor_outputs(pool: Any, execution_id: str, stage_ref_id: str) -> dict[str, Any]:
+def get_merged_ancestor_outputs(engine: Any, execution_id: str, stage_ref_id: str) -> dict[str, Any]:
     """Get merged outputs from all ancestor stages."""
     # Fetch lightweight graph (ref_id, requisites, outputs)
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT ref_id, requisite_stage_ref_ids, outputs
                 FROM stage_executions
-                WHERE execution_id = %(execution_id)s
+                WHERE execution_id = %(execution_id)s AND stabilize_tenant = %(tenant)s
                 """,
-                {"execution_id": execution_id},
+                {"execution_id": execution_id, "tenant": engine.tenant},
             )
             rows = cur.fetchall()
 
@@ -197,7 +197,7 @@ def get_merged_ancestor_outputs(pool: Any, execution_id: str, stage_ref_id: str)
 
 
 def retrieve_by_pipeline_config_id(
-    pool: Any,
+    engine: Any,
     pipeline_config_id: str,
     criteria: WorkflowCriteria | None,
     retrieve_fn: Callable[[str], Workflow],
@@ -205,9 +205,9 @@ def retrieve_by_pipeline_config_id(
     """Retrieve executions by pipeline config ID."""
     query = """
         SELECT id FROM pipeline_executions
-        WHERE pipeline_config_id = %(config_id)s
+        WHERE pipeline_config_id = %(config_id)s AND stabilize_tenant = %(tenant)s
     """
-    params: dict[str, Any] = {"config_id": pipeline_config_id}
+    params: dict[str, Any] = {"config_id": pipeline_config_id, "tenant": engine.tenant}
 
     if criteria:
         if criteria.statuses:
@@ -221,7 +221,7 @@ def retrieve_by_pipeline_config_id(
     if criteria and criteria.page_size:
         query += f" LIMIT {int(criteria.page_size)}"
 
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(query, params)
             ids = [cast(dict[str, Any], row)["id"] for row in cur.fetchall()]
@@ -230,7 +230,7 @@ def retrieve_by_pipeline_config_id(
 
 
 def get_all_pending_workflows(
-    pool: Any,
+    engine: Any,
     criteria: WorkflowCriteria | None,
     retrieve_fn: Callable[[str], Workflow],
 ) -> Iterator[Workflow]:
@@ -239,8 +239,8 @@ def get_all_pending_workflows(
     Mirrors the SQLite implementation so crash recovery can find workflows
     without an application filter on either backend.
     """
-    query = "SELECT id FROM pipeline_executions WHERE TRUE"
-    params: dict[str, Any] = {}
+    query = "SELECT id FROM pipeline_executions WHERE stabilize_tenant = %(tenant)s"
+    params: dict[str, Any] = {"tenant": engine.tenant}
 
     if criteria and criteria.statuses:
         status_names = [s.name for s in criteria.statuses]
@@ -253,7 +253,7 @@ def get_all_pending_workflows(
     if criteria and criteria.page_size:
         query += f" LIMIT {int(criteria.page_size)}"
 
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(query, params)
             ids = [cast(dict[str, Any], row)["id"] for row in cur.fetchall()]
@@ -262,7 +262,7 @@ def get_all_pending_workflows(
 
 
 def retrieve_by_application(
-    pool: Any,
+    engine: Any,
     application: str,
     criteria: WorkflowCriteria | None,
     retrieve_fn: Callable[[str], Workflow],
@@ -270,9 +270,9 @@ def retrieve_by_application(
     """Retrieve executions by application."""
     query = """
         SELECT id FROM pipeline_executions
-        WHERE application = %(application)s
+        WHERE application = %(application)s AND stabilize_tenant = %(tenant)s
     """
-    params: dict[str, Any] = {"application": application}
+    params: dict[str, Any] = {"application": application, "tenant": engine.tenant}
 
     if criteria:
         if criteria.statuses:
@@ -286,7 +286,7 @@ def retrieve_by_application(
     if criteria and criteria.page_size:
         query += f" LIMIT {int(criteria.page_size)}"
 
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(query, params)
             ids = [cast(dict[str, Any], row)["id"] for row in cur.fetchall()]

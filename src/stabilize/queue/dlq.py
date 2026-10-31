@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def move_to_dlq(
-    pool: Any,
+    engine: Any,
     table_name: str,
     pending: dict[int, dict[str, Any]],
     message_id: int | str,
@@ -38,25 +38,25 @@ def move_to_dlq(
     """
     msg_id = row_id(message_id)
 
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
                 WITH moved AS (
                     DELETE FROM {table_name}
-                    WHERE id = %(id)s
-                    RETURNING id, message_id, message_type, payload, attempts, created_at
+                    WHERE id = %(id)s AND stabilize_tenant = %(tenant)s
+                    RETURNING id, message_id, message_type, payload, attempts, created_at, stabilize_tenant
                 )
                 INSERT INTO {table_name}_dlq (
                     original_id, message_id, message_type, payload,
-                    attempts, error, last_error_at, created_at
+                    attempts, error, last_error_at, created_at, stabilize_tenant
                 )
                 SELECT id, message_id, message_type, payload,
-                       attempts, %(error)s, NOW(), created_at
+                       attempts, %(error)s, NOW(), created_at, stabilize_tenant
                 FROM moved
                 RETURNING message_type, attempts
                 """,
-                {"id": msg_id, "error": error or "Max attempts exceeded"},
+                {"id": msg_id, "error": error or "Max attempts exceeded", "tenant": engine.tenant},
             )
             row = cur.fetchone()
         conn.commit()
@@ -76,7 +76,7 @@ def move_to_dlq(
 
 
 def list_dlq(
-    pool: Any,
+    engine: Any,
     table_name: str,
     limit: int = 100,
     message_type: str | None = None,
@@ -92,32 +92,33 @@ def list_dlq(
     Returns:
         List of DLQ message dictionaries
     """
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             if message_type:
                 cur.execute(
                     f"""
                     SELECT {_DLQ} FROM {table_name}_dlq
-                    WHERE message_type = %(message_type)s
+                    WHERE message_type = %(message_type)s AND stabilize_tenant = %(tenant)s
                     ORDER BY moved_at DESC
                     LIMIT %(limit)s
                     """,
-                    {"message_type": message_type, "limit": limit},
+                    {"message_type": message_type, "limit": limit, "tenant": engine.tenant},
                 )
             else:
                 cur.execute(
                     f"""
                     SELECT {_DLQ} FROM {table_name}_dlq
+                    WHERE stabilize_tenant = %(tenant)s
                     ORDER BY moved_at DESC
                     LIMIT %(limit)s
                     """,
-                    {"limit": limit},
+                    {"limit": limit, "tenant": engine.tenant},
                 )
             rows = cur.fetchall()
             return [dict(row) for row in rows]
 
 
-def replay_dlq(pool: Any, table_name: str, dlq_id: int) -> bool:
+def replay_dlq(engine: Any, table_name: str, dlq_id: int) -> bool:
     """Replay a message from the DLQ back to the main queue.
 
     Args:
@@ -128,23 +129,23 @@ def replay_dlq(pool: Any, table_name: str, dlq_id: int) -> bool:
     Returns:
         True if replayed successfully, False if not found
     """
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
                 WITH taken AS (
                     DELETE FROM {table_name}_dlq
-                    WHERE id = %(id)s
-                    RETURNING message_type, payload
+                    WHERE id = %(id)s AND stabilize_tenant = %(tenant)s
+                    RETURNING message_type, payload, stabilize_tenant
                 )
                 INSERT INTO {table_name} (
-                    message_id, message_type, payload, deliver_at, attempts
+                    message_id, message_type, payload, deliver_at, attempts, stabilize_tenant
                 )
-                SELECT %(message_id)s, message_type, payload, NOW(), 0
+                SELECT %(message_id)s, message_type, payload, NOW(), 0, stabilize_tenant
                 FROM taken
                 RETURNING message_type
                 """,
-                {"id": dlq_id, "message_id": str(ULID())},
+                {"id": dlq_id, "message_id": str(ULID()), "tenant": engine.tenant},
             )
             row = cur.fetchone()
         conn.commit()
@@ -157,32 +158,35 @@ def replay_dlq(pool: Any, table_name: str, dlq_id: int) -> bool:
     return True
 
 
-def dlq_size(pool: Any, table_name: str) -> int:
+def dlq_size(engine: Any, table_name: str) -> int:
     """Get the number of messages in the Dead Letter Queue."""
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"SELECT COUNT(*) as cnt FROM {table_name}_dlq")
+            cur.execute(
+                f"SELECT COUNT(*) as cnt FROM {table_name}_dlq WHERE stabilize_tenant = %(tenant)s",
+                {"tenant": engine.tenant},
+            )
             row = cur.fetchone()
             return row["cnt"] if row else 0
 
 
-def clear_dlq(pool: Any, table_name: str) -> int:
+def clear_dlq(engine: Any, table_name: str) -> int:
     """Clear all messages from the Dead Letter Queue.
 
     Returns:
         Number of messages cleared
     """
-    count = dlq_size(pool, table_name)
-    with pool.connection() as conn:
+    count = dlq_size(engine, table_name)
+    with engine.connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"DELETE FROM {table_name}_dlq")
+            cur.execute(f"DELETE FROM {table_name}_dlq WHERE stabilize_tenant = %(tenant)s", {"tenant": engine.tenant})
         conn.commit()
     logger.info("Cleared %d messages from DLQ", count)
     return count
 
 
 def check_and_move_expired(
-    pool: Any,
+    engine: Any,
     table_name: str,
     pending: dict[int, dict[str, Any]],
     max_attempts: int,
@@ -192,23 +196,23 @@ def check_and_move_expired(
     Returns:
         Number of messages moved to DLQ
     """
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             # Find messages that have exceeded max_attempts
             cur.execute(
                 f"""
                 SELECT id, message_type, attempts
                 FROM {table_name}
-                WHERE attempts >= %(max_attempts)s
+                WHERE attempts >= %(max_attempts)s AND stabilize_tenant = %(tenant)s
                 """,
-                {"max_attempts": max_attempts},
+                {"max_attempts": max_attempts, "tenant": engine.tenant},
             )
             rows = cur.fetchall()
 
     moved_count = 0
     for row in rows:
         move_to_dlq(
-            pool,
+            engine,
             table_name,
             pending,
             row["id"],

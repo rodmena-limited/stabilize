@@ -16,11 +16,11 @@ host's own migretti history, now upgrade with no change to the command.
   engine-shaped table including custom queue tables and their `_dlq` siblings.
 - **A tenancy-mode record, `stabilize_tenancy`.** One row, seeded `single` by `mg-up`.
   The store and queue read it on the first connection they borrow and again at most
-  every 5 s; the event store reads it when constructed. Engine work is refused when the
+  every 5 s. The event store reads it when constructed. Engine work is refused when the
   table is absent, has no row, has row-level security enabled, or cannot be read by the
   role. The refusal names the remedy in each case. Constructing a store or queue still
-  borrows no connection, so `on_borrow` hooks run only under real work. **Grant the
-  runtime role `SELECT ON stabilize_tenancy`**; `mg-check-grants` now reports that grant
+  borrows no connection, which keeps `on_borrow` hooks out of start-up. **Grant the
+  runtime role `SELECT ON stabilize_tenancy`.** `mg-check-grants` now reports that grant
   and treats the table as required. Policies never go on this table.
 - **`tenant=` on `PostgresWorkflowStore`, `PostgresQueue`, `PostgresEventStore`,
   `SqliteWorkflowStore`, `SqliteQueue` and `SqliteEventStore`.** A tenant is 1 to 64
@@ -31,12 +31,27 @@ host's own migretti history, now upgrade with no change to the command.
 - **`PoolOptions.tenant_setting` and `PoolOptions.audit_key`.** Both are part of the
   pool key. `tenant_setting` must be a custom GUC such as `app.current_tenant`, never
   in the `stabilize.` class.
-- **`PostgresEventStore` honours `schema=` the way the store does**: its pool options go
-  through `with_schema`, so event writes land in the target schema under the same pool
-  hooks. `create_tables=True` creates the mode table and the tenant column too, and
-  `setup_ddl()` prints the same DDL.
+- **`PostgresEventStore` honours `schema=`.** Its pool options go through
+  `with_schema`, and event writes land in the target schema under the same pool hooks
+  as the store's. `create_tables=True` creates the mode table and the tenant column
+  too, and `setup_ddl()` prints the same DDL.
 - **`stabilize_is_table_owner(regclass)`**, created by `mg-up`: STABLE, SECURITY
   INVOKER, for host policies that let the table owner act across tenants.
+- **`stabilize mg-tenancy enable | disable | status`.** Switches a schema, or a SQLite
+  file, between single-tenant and tenancy mode. A switch needs every shipped migration
+  applied and zero rows in every engine table, including custom queue tables found by
+  shape or named with `--queue-table`. The command takes mg-up's lock and changes
+  nothing when a precondition fails. Stop every engine process before running it. In
+  tenancy mode the engine refuses parts built without a tenant.
+- **Every engine statement carries the tenant.** Inserts stamp `stabilize_tenant`.
+  Every read, update and delete filters on it, on both backends, including subqueries,
+  the queue poll, the dead-letter moves, signals, claims, leases, processed-message
+  marks, events, snapshots and subscriptions. In tenancy mode a store, queue or event
+  store built for one tenant observes none of another tenant's rows through any public
+  operation. An upsert that collides with a row the caller cannot see, or that another
+  tenant owns, raises `TenantMismatchError`.
+- **`stabilize monitor --tenant NAME` and `--all-tenants`.** In tenancy mode one of them
+  is required. In single-tenant mode the monitor shows the install's own rows.
 
 ### Fixed
 
@@ -45,6 +60,12 @@ host's own migretti history, now upgrade with no change to the command.
   makes the new schema shadow `public`. A host's own `mg verify` then reads stabilize's
   history table and fails on every id. `mg-up` refuses that combination before any
   change. Found by the live test of the tenant migration on 2026-10-31.
+- **Processed-message retention could delete past `max_rows` (B66).** On PostgreSQL the
+  batch statement selected its victims in an `IN (SELECT ... LIMIT n)` subquery that the
+  planner re-ran for every candidate row. With equal `processed_at` values a `LIMIT 2`
+  batch removed every stale row. The batch is now a materialized CTE with a
+  deterministic order, so one call deletes at most `max_rows` rows and one statement at
+  most `batch_size`.
 
 - **stabilize's history can live apart from a host's schema (#99).** migretti keeps one
   history table per schema, so 0.33.2 refused a schema that held a host project's

@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 def load_tasks_for_stages(
     conn: sqlite3.Connection,
     stages: list[StageExecution],
+    tenant: str,
 ) -> None:
     """Load tasks for a list of stages."""
     if not stages:
@@ -35,14 +36,14 @@ def load_tasks_for_stages(
 
     # Build query for stage_ids
     placeholders = ", ".join(f":sid_{i}" for i in range(len(stage_ids)))
-    params = {}
+    params: dict[str, Any] = {"tenant": tenant}
     for i, sid in enumerate(stage_ids):
         params[f"sid_{i}"] = sid
 
     result = conn.execute(
         f"""
         SELECT {_TASK} FROM task_executions
-        WHERE stage_id IN ({placeholders})
+        WHERE stage_id IN ({placeholders}) AND stabilize_tenant = :tenant
         ORDER BY id ASC
         """,
         params,
@@ -60,15 +61,16 @@ def get_upstream_stages(
     conn: sqlite3.Connection,
     execution_id: str,
     stage_ref_id: str,
+    tenant: str,
 ) -> list[StageExecution]:
     """Get upstream stages with tasks loaded."""
     # First find the requisite ref ids of the target stage
     result = conn.execute(
         """
         SELECT requisite_stage_ref_ids FROM stage_executions
-        WHERE execution_id = :execution_id AND ref_id = :ref_id
+        WHERE execution_id = :execution_id AND ref_id = :ref_id AND stabilize_tenant = :tenant
         """,
-        {"execution_id": execution_id, "ref_id": stage_ref_id},
+        {"execution_id": execution_id, "ref_id": stage_ref_id, "tenant": tenant},
     )
     row = result.fetchone()
     if not row or not row["requisite_stage_ref_ids"]:
@@ -80,7 +82,7 @@ def get_upstream_stages(
 
     # Build query for ref_ids
     placeholders = ", ".join(f":ref_{i}" for i in range(len(requisites)))
-    params: dict[str, Any] = {"execution_id": execution_id}
+    params: dict[str, Any] = {"execution_id": execution_id, "tenant": tenant}
     for i, ref in enumerate(requisites):
         params[f"ref_{i}"] = ref
 
@@ -88,7 +90,7 @@ def get_upstream_stages(
         f"""
         SELECT {_STAGE} FROM stage_executions
         WHERE execution_id = :execution_id
-        AND ref_id IN ({placeholders})
+        AND ref_id IN ({placeholders}) AND stabilize_tenant = :tenant
         """,
         params,
     )
@@ -99,7 +101,7 @@ def get_upstream_stages(
         stages.append(stage)
 
     # Load tasks for all stages
-    load_tasks_for_stages(conn, stages)
+    load_tasks_for_stages(conn, stages, tenant)
 
     return stages
 
@@ -108,6 +110,7 @@ def get_downstream_stages(
     conn: sqlite3.Connection,
     execution_id: str,
     stage_ref_id: str,
+    tenant: str,
 ) -> list[StageExecution]:
     """Get downstream stages with tasks loaded."""
     # Use json_each for JSON array membership test (available in Python 3.11+ sqlite)
@@ -115,8 +118,9 @@ def get_downstream_stages(
         SELECT {_STAGE_QUALIFIED} FROM stage_executions, json_each(stage_executions.requisite_stage_ref_ids)
         WHERE execution_id = :execution_id
         AND json_each.value = :ref_id
+        AND stage_executions.stabilize_tenant = :tenant
     """
-    result = conn.execute(query, {"execution_id": execution_id, "ref_id": stage_ref_id})
+    result = conn.execute(query, {"execution_id": execution_id, "ref_id": stage_ref_id, "tenant": tenant})
 
     stages = []
     for stage_row in result.fetchall():
@@ -124,7 +128,7 @@ def get_downstream_stages(
         stages.append(stage)
 
     # Load tasks for all stages
-    load_tasks_for_stages(conn, stages)
+    load_tasks_for_stages(conn, stages, tenant)
 
     return stages
 
@@ -133,15 +137,16 @@ def get_synthetic_stages(
     conn: sqlite3.Connection,
     execution_id: str,
     parent_stage_id: str,
+    tenant: str,
 ) -> list[StageExecution]:
     """Get synthetic stages with tasks loaded."""
     result = conn.execute(
         f"""
         SELECT {_STAGE} FROM stage_executions
         WHERE execution_id = :execution_id
-        AND parent_stage_id = :parent_id
+        AND parent_stage_id = :parent_id AND stabilize_tenant = :tenant
         """,
-        {"execution_id": execution_id, "parent_id": parent_stage_id},
+        {"execution_id": execution_id, "parent_id": parent_stage_id, "tenant": tenant},
     )
 
     stages = []
@@ -150,7 +155,7 @@ def get_synthetic_stages(
         stages.append(stage)
 
     # Load tasks for all stages
-    load_tasks_for_stages(conn, stages)
+    load_tasks_for_stages(conn, stages, tenant)
 
     return stages
 
@@ -159,6 +164,7 @@ def get_merged_ancestor_outputs(
     conn: sqlite3.Connection,
     execution_id: str,
     stage_ref_id: str,
+    tenant: str,
 ) -> dict[str, Any]:
     """Get merged outputs from all ancestor stages."""
     # Fetch lightweight graph (ref_id, requisites, outputs)
@@ -166,9 +172,9 @@ def get_merged_ancestor_outputs(
         """
         SELECT ref_id, requisite_stage_ref_ids, outputs
         FROM stage_executions
-        WHERE execution_id = :execution_id
+        WHERE execution_id = :execution_id AND stabilize_tenant = :tenant
         """,
-        {"execution_id": execution_id},
+        {"execution_id": execution_id, "tenant": tenant},
     )
     rows = result.fetchall()
 
@@ -219,13 +225,14 @@ def retrieve_by_pipeline_config_id(
     pipeline_config_id: str,
     criteria: WorkflowCriteria | None,
     retrieve_fn: Callable[[str], Workflow],
+    tenant: str,
 ) -> Iterator[Workflow]:
     """Retrieve executions by pipeline config ID."""
     query = """
         SELECT id FROM pipeline_executions
-        WHERE pipeline_config_id = :config_id
+        WHERE pipeline_config_id = :config_id AND stabilize_tenant = :tenant
     """
-    params: dict[str, Any] = {"config_id": pipeline_config_id}
+    params: dict[str, Any] = {"config_id": pipeline_config_id, "tenant": tenant}
 
     if criteria and criteria.statuses:
         status_names = [s.name for s in criteria.statuses]
@@ -250,13 +257,14 @@ def retrieve_by_application(
     application: str,
     criteria: WorkflowCriteria | None,
     retrieve_fn: Callable[[str], Workflow],
+    tenant: str,
 ) -> Iterator[Workflow]:
     """Retrieve executions by application."""
     query = """
         SELECT id FROM pipeline_executions
-        WHERE application = :application
+        WHERE application = :application AND stabilize_tenant = :tenant
     """
-    params: dict[str, Any] = {"application": application}
+    params: dict[str, Any] = {"application": application, "tenant": tenant}
 
     if criteria and criteria.statuses:
         status_names = [s.name for s in criteria.statuses]

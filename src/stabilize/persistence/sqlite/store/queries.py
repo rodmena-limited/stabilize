@@ -43,6 +43,8 @@ if TYPE_CHECKING:
 class SqliteQueriesMixin:
     """Mixin providing query and filtering operations."""
 
+    tenant: str
+
     if TYPE_CHECKING:
 
         def _get_connection(self) -> sqlite3.Connection: ...
@@ -55,7 +57,7 @@ class SqliteQueriesMixin:
         stage_ref_id: str,
     ) -> list[StageExecution]:
         """Get upstream stages with tasks loaded."""
-        return _get_upstream_stages(self._get_connection(), execution_id, stage_ref_id)
+        return _get_upstream_stages(self._get_connection(), execution_id, stage_ref_id, self.tenant)
 
     def get_downstream_stages(
         self,
@@ -63,7 +65,7 @@ class SqliteQueriesMixin:
         stage_ref_id: str,
     ) -> list[StageExecution]:
         """Get downstream stages with tasks loaded."""
-        return _get_downstream_stages(self._get_connection(), execution_id, stage_ref_id)
+        return _get_downstream_stages(self._get_connection(), execution_id, stage_ref_id, self.tenant)
 
     def get_synthetic_stages(
         self,
@@ -71,7 +73,7 @@ class SqliteQueriesMixin:
         parent_stage_id: str,
     ) -> list[StageExecution]:
         """Get synthetic stages with tasks loaded."""
-        return _get_synthetic_stages(self._get_connection(), execution_id, parent_stage_id)
+        return _get_synthetic_stages(self._get_connection(), execution_id, parent_stage_id, self.tenant)
 
     def get_merged_ancestor_outputs(
         self,
@@ -79,7 +81,7 @@ class SqliteQueriesMixin:
         stage_ref_id: str,
     ) -> dict[str, Any]:
         """Get merged outputs from all ancestor stages."""
-        return _get_merged_ancestor_outputs(self._get_connection(), execution_id, stage_ref_id)
+        return _get_merged_ancestor_outputs(self._get_connection(), execution_id, stage_ref_id, self.tenant)
 
     def retrieve_by_pipeline_config_id(
         self,
@@ -87,7 +89,9 @@ class SqliteQueriesMixin:
         criteria: WorkflowCriteria | None = None,
     ) -> Iterator[Workflow]:
         """Retrieve executions by pipeline config ID."""
-        return _retrieve_by_pipeline_config_id(self._get_connection(), pipeline_config_id, criteria, self.retrieve)
+        return _retrieve_by_pipeline_config_id(
+            self._get_connection(), pipeline_config_id, criteria, self.retrieve, self.tenant
+        )
 
     def retrieve_by_application(
         self,
@@ -95,7 +99,7 @@ class SqliteQueriesMixin:
         criteria: WorkflowCriteria | None = None,
     ) -> Iterator[Workflow]:
         """Retrieve executions by application."""
-        return _retrieve_by_application(self._get_connection(), application, criteria, self.retrieve)
+        return _retrieve_by_application(self._get_connection(), application, criteria, self.retrieve, self.tenant)
 
     def list_workflows(
         self,
@@ -115,11 +119,11 @@ class SqliteQueriesMixin:
         result = conn.execute(
             f"""
             SELECT {_PIPELINE} FROM pipeline_executions
-            WHERE application = :application
+            WHERE application = :application AND stabilize_tenant = :tenant
             ORDER BY created_at DESC
             LIMIT :limit
             """,
-            {"application": application, "limit": limit},
+            {"application": application, "limit": limit, "tenant": self.tenant},
         )
 
         workflows = []
@@ -143,8 +147,8 @@ class SqliteQueriesMixin:
             Workflow objects matching the criteria
         """
         conn = self._get_connection()
-        query = "SELECT id FROM pipeline_executions WHERE 1=1"
-        params: dict[str, Any] = {}
+        query = "SELECT id FROM pipeline_executions WHERE stabilize_tenant = :tenant"
+        params: dict[str, Any] = {"tenant": self.tenant}
 
         if criteria and criteria.statuses:
             status_names = [s.name for s in criteria.statuses]
@@ -165,11 +169,11 @@ class SqliteQueriesMixin:
 
     def pause(self, execution_id: str, paused_by: str) -> None:
         """Pause an execution."""
-        pause_execution(self._get_connection(), execution_id, paused_by)
+        pause_execution(self._get_connection(), execution_id, paused_by, self.tenant)
 
     def resume(self, execution_id: str) -> None:
         """Resume a paused execution."""
-        resume_execution(self._get_connection(), execution_id)
+        resume_execution(self._get_connection(), execution_id, self.tenant)
 
     def cancel(
         self,
@@ -178,4 +182,4 @@ class SqliteQueriesMixin:
         reason: str,
     ) -> None:
         """Cancel an execution."""
-        cancel_execution(self._get_connection(), execution_id, canceled_by, reason)
+        cancel_execution(self._get_connection(), execution_id, canceled_by, reason, self.tenant)

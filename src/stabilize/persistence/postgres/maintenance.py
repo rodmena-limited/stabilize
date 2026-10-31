@@ -36,6 +36,7 @@ class PostgresMaintenanceMixin:
 
     _pool: Any
     _engine: Any
+    tenant: str
 
     def is_message_processed(self, message_id: str) -> bool:
         """Check if a message has already been processed."""
@@ -96,9 +97,14 @@ class PostgresMaintenanceMixin:
     def completed_workflow_ids(self, completed_before_ms: int, limit: int, application: str | None = None) -> list[str]:
         sql = (
             "SELECT id FROM pipeline_executions WHERE status = ANY(%(statuses)s) "
-            "AND end_time IS NOT NULL AND end_time < %(cutoff)s"
+            "AND end_time IS NOT NULL AND end_time < %(cutoff)s AND stabilize_tenant = %(tenant)s"
         )
-        params: dict[str, Any] = {"statuses": list(PURGEABLE), "cutoff": completed_before_ms, "limit": limit}
+        params: dict[str, Any] = {
+            "statuses": list(PURGEABLE),
+            "cutoff": completed_before_ms,
+            "limit": limit,
+            "tenant": self.tenant,
+        }
         if application is not None:
             sql += " AND application = %(app)s"
             params["app"] = application

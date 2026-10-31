@@ -14,6 +14,7 @@ from stabilize.errors import ConcurrencyError
 from stabilize.persistence.sqlite.helpers import has_execution_column, has_queue_table_column, insert_stage, upsert_task
 from stabilize.persistence.store import StoreTransaction
 from stabilize.persistence.task_state import Captured, capture, commit_captured
+from stabilize.persistence.tenancy import refuse_foreign_row
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -55,6 +56,7 @@ class AtomicTransaction(StoreTransaction):
         """
         self._conn = conn
         self._store = store
+        self._tenant = store.tenant
         self._queue_table = _queue_table_for(store, queue)
         # Track stage objects and their original versions for rollback
         self._staged_objects: list[tuple[StageExecution | TaskExecution, int]] = []
@@ -90,10 +92,13 @@ class AtomicTransaction(StoreTransaction):
         """
         # Check if stage exists
         result = self._conn.execute(
-            "SELECT id FROM stage_executions WHERE id = :id",
+            "SELECT stabilize_tenant FROM stage_executions WHERE id = :id",
             {"id": stage.id},
         )
-        exists = result.fetchone() is not None
+        held = result.fetchone()
+        if held is not None:
+            refuse_foreign_row("stage_executions", stage.id, held[0], self._tenant)
+        exists = held is not None
 
         if exists:
             # Update with optimistic locking
@@ -107,10 +112,11 @@ class AtomicTransaction(StoreTransaction):
                         start_time = :start_time,
                         end_time = :end_time,
                         version = version + 1
-                    WHERE id = :id AND version = :version AND status = :expected_phase
+                    WHERE id = :id AND version = :version AND status = :expected_phase AND stabilize_tenant = :tenant
                     """,
                     {
                         "id": stage.id,
+                        "tenant": self._tenant,
                         "status": stage.status.name,
                         "context": json.dumps(stage.context, default=str),
                         "outputs": json.dumps(stage.outputs, default=str),
@@ -130,10 +136,11 @@ class AtomicTransaction(StoreTransaction):
                         start_time = :start_time,
                         end_time = :end_time,
                         version = version + 1
-                    WHERE id = :id AND version = :version
+                    WHERE id = :id AND version = :version AND stabilize_tenant = :tenant
                     """,
                     {
                         "id": stage.id,
+                        "tenant": self._tenant,
                         "status": stage.status.name,
                         "context": json.dumps(stage.context, default=str),
                         "outputs": json.dumps(stage.outputs, default=str),
@@ -161,17 +168,17 @@ class AtomicTransaction(StoreTransaction):
             for task in stage.tasks:
                 # Track original version for rollback
                 self._staged_objects.append((task, task.version))
-                upsert_task(self._conn, task, stage.id, only_changed=True)
+                upsert_task(self._conn, task, stage.id, self._tenant, only_changed=True)
         else:
-            insert_stage(self._conn, stage, stage.execution.id)
+            insert_stage(self._conn, stage, stage.execution.id, self._tenant)
         self._written_tasks.extend(capture(stage.tasks))
 
     def set_config_version(self, workflow_id: str, config_version: str) -> None:
         if not has_execution_column(self._conn, "config_version"):
             return
         self._conn.execute(
-            "UPDATE pipeline_executions SET config_version = :v WHERE id = :id",
-            {"v": config_version, "id": workflow_id},
+            "UPDATE pipeline_executions SET config_version = :v WHERE id = :id AND stabilize_tenant = :tenant",
+            {"v": config_version, "id": workflow_id, "tenant": self._tenant},
         )
 
     def update_workflow_status(self, workflow: Workflow) -> None:
@@ -190,10 +197,11 @@ class AtomicTransaction(StoreTransaction):
                 status = :status,
                 start_time = :start_time,
                 end_time = :end_time{_QUEUE_TABLE_SET if has_queue_table_column(self._conn) else ""}
-            WHERE id = :id
+            WHERE id = :id AND stabilize_tenant = :tenant
             """,
             {
                 "id": workflow.id,
+                "tenant": self._tenant,
                 "status": workflow.status.name,
                 "start_time": workflow.start_time,
                 "end_time": workflow.end_time,
@@ -244,10 +252,10 @@ class AtomicTransaction(StoreTransaction):
             f"""
             INSERT INTO {self._queue_table} (
                 message_id, message_type, payload, deliver_at,
-                attempts, max_attempts, version
+                attempts, max_attempts, version, stabilize_tenant
             ) VALUES (
                 :message_id, :message_type, :payload, :deliver_at,
-                0, :max_attempts, 0
+                0, :max_attempts, 0, :tenant
             )
             """,
             {
@@ -256,6 +264,7 @@ class AtomicTransaction(StoreTransaction):
                 "payload": payload,
                 "deliver_at": deliver_at.isoformat(),
                 "max_attempts": getattr(message, "max_attempts", 10),
+                "tenant": self._tenant,
             },
         )
 
@@ -269,9 +278,9 @@ class AtomicTransaction(StoreTransaction):
         cursor = self._conn.execute(
             """
             INSERT OR IGNORE INTO processed_messages (
-                message_id, processed_at, handler_type, execution_id
+                message_id, processed_at, handler_type, execution_id, stabilize_tenant
             ) VALUES (
-                :message_id, :processed_at, :handler_type, :execution_id
+                :message_id, :processed_at, :handler_type, :execution_id, :tenant
             )
             """,
             {
@@ -279,8 +288,15 @@ class AtomicTransaction(StoreTransaction):
                 "processed_at": datetime.now(UTC).isoformat(),
                 "handler_type": handler_type,
                 "execution_id": execution_id,
+                "tenant": self._tenant,
             },
         )
+        if cursor.rowcount == 0:
+            held = self._conn.execute(
+                "SELECT stabilize_tenant FROM processed_messages WHERE message_id = :message_id",
+                {"message_id": message_id},
+            ).fetchone()
+            refuse_foreign_row("processed_messages", message_id, held[0] if held else None, self._tenant)
         return bool(cursor.rowcount == 1)
 
     def acquire_claim(
@@ -298,11 +314,12 @@ class AtomicTransaction(StoreTransaction):
             "execution_id": execution_id,
             "claim_key": claim_key,
             "stage_id": stage_id,
+            "tenant": self._tenant,
         }
         cursor = self._conn.execute(
             """
-            INSERT OR IGNORE INTO stage_claims (execution_id, claim_key, stage_id)
-            VALUES (:execution_id, :claim_key, :stage_id)
+            INSERT OR IGNORE INTO stage_claims (execution_id, claim_key, stage_id, stabilize_tenant)
+            VALUES (:execution_id, :claim_key, :stage_id, :tenant)
             """,
             params,
         )
@@ -310,15 +327,18 @@ class AtomicTransaction(StoreTransaction):
             return True
 
         row = self._conn.execute(
-            "SELECT stage_id FROM stage_claims WHERE execution_id = :execution_id AND claim_key = :claim_key",
+            "SELECT stage_id, stabilize_tenant FROM stage_claims "
+            "WHERE execution_id = :execution_id AND claim_key = :claim_key",
             params,
         ).fetchone()
+        if row is not None:
+            refuse_foreign_row("stage_claims", f"{execution_id}/{claim_key}", row[1], self._tenant)
         if row is None:
             # Claim row vanished between insert and select; retry the insert.
             cursor = self._conn.execute(
                 """
-                INSERT OR IGNORE INTO stage_claims (execution_id, claim_key, stage_id)
-                VALUES (:execution_id, :claim_key, :stage_id)
+                INSERT OR IGNORE INTO stage_claims (execution_id, claim_key, stage_id, stabilize_tenant)
+                VALUES (:execution_id, :claim_key, :stage_id, :tenant)
                 """,
                 params,
             )
@@ -332,8 +352,8 @@ class AtomicTransaction(StoreTransaction):
             from stabilize.models.status import WorkflowStatus
 
             owner_row = self._conn.execute(
-                "SELECT status FROM stage_executions WHERE id = :id",
-                {"id": owner_id},
+                "SELECT status FROM stage_executions WHERE id = :id AND stabilize_tenant = :tenant",
+                {"id": owner_id, "tenant": self._tenant},
             ).fetchone()
             owner_gone = owner_row is None
             owner_terminal = owner_row is not None and WorkflowStatus[owner_row[0]].is_complete
@@ -344,7 +364,7 @@ class AtomicTransaction(StoreTransaction):
                     SET stage_id = :stage_id, claimed_at = datetime('now', 'utc')
                     WHERE execution_id = :execution_id
                       AND claim_key = :claim_key
-                      AND stage_id = :owner_id
+                      AND stage_id = :owner_id AND stabilize_tenant = :tenant
                     """,
                     {**params, "owner_id": owner_id},
                 )
@@ -359,28 +379,32 @@ class AtomicTransaction(StoreTransaction):
 
     def count_running(self, pipeline_config_id: str) -> int:
         row = self._conn.execute(
-            "SELECT COUNT(*) FROM pipeline_executions WHERE pipeline_config_id = ? AND status = 'RUNNING'",
-            (pipeline_config_id,),
+            "SELECT COUNT(*) FROM pipeline_executions "
+            "WHERE pipeline_config_id = ? AND status = 'RUNNING' AND stabilize_tenant = ?",
+            (pipeline_config_id, self._tenant),
         ).fetchone()
         return int(row[0])
 
     def buffered_ids(self, pipeline_config_id: str) -> list[str]:
         rows = self._conn.execute(
-            "SELECT id FROM pipeline_executions WHERE pipeline_config_id = ? AND status = 'BUFFERED' ORDER BY id",
-            (pipeline_config_id,),
+            "SELECT id FROM pipeline_executions "
+            "WHERE pipeline_config_id = ? AND status = 'BUFFERED' AND stabilize_tenant = ? ORDER BY id",
+            (pipeline_config_id, self._tenant),
         ).fetchall()
         return [r[0] for r in rows]
 
     def workflow_status(self, workflow_id: str) -> tuple[str | None, bool]:
         row = self._conn.execute(
-            "SELECT status, is_canceled FROM pipeline_executions WHERE id = ?", (workflow_id,)
+            "SELECT status, is_canceled FROM pipeline_executions WHERE id = ? AND stabilize_tenant = ?",
+            (workflow_id, self._tenant),
         ).fetchone()
         return (None, False) if row is None else (str(row[0]), bool(row[1]))
 
     def paused_stage_ids(self, workflow_id: str) -> list[str]:
         rows = self._conn.execute(
-            "SELECT id FROM stage_executions WHERE execution_id = ? AND status = 'PAUSED' ORDER BY id",
-            (workflow_id,),
+            "SELECT id FROM stage_executions "
+            "WHERE execution_id = ? AND status = 'PAUSED' AND stabilize_tenant = ? ORDER BY id",
+            (workflow_id, self._tenant),
         ).fetchall()
         return [str(r[0]) for r in rows]
 

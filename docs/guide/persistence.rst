@@ -264,3 +264,45 @@ transaction. Measured on PostgreSQL 16 for one idle processor:
 
 Raise ``poll_frequency_ms`` where pickup latency allows; the same cost applies per
 processor instance.
+
+Tenancy mode
+------------
+
+Every engine table carries a ``stabilize_tenant`` column. A schema starts in
+single-tenant mode. There the column is ``''`` on every row and the engine filters on
+it without anyone noticing. In tenancy mode every store, queue and event store is
+built for one tenant. It stamps that tenant on each row it writes and reads only rows
+that carry it.
+
+.. code-block:: bash
+
+    stabilize mg-up --db-url "$DSN"
+    stabilize mg-tenancy enable --db-url "$DSN"
+    stabilize mg-tenancy status --db-url "$DSN"
+
+``mg-tenancy enable`` and ``disable`` work only on a schema with no rows in any
+engine table and with every shipped migration applied. Custom queue tables are found
+by shape or named with ``--queue-table``. The command takes the ``mg-up`` lock and
+changes nothing when a precondition fails. Stop every engine process before running
+it and start them again afterwards. Converting a schema that holds data means
+exporting it, recreating the schema in tenancy mode and importing. For a SQLite file,
+pass a ``sqlite:///path`` URL.
+
+.. code-block:: python
+
+    store = PostgresWorkflowStore(dsn, tenant="acme")
+    queue = PostgresQueue(dsn, tenant="acme")
+    events = PostgresEventStore(dsn, tenant="acme")
+
+A tenant is 1 to 64 characters from ``A-Z a-z 0-9 . : -``. In tenancy mode a part
+built without a tenant is refused at its first statement with ``TenancyModeError``.
+In single-tenant mode a part built with a tenant gets the same refusal. Parts carrying
+different tenants cannot be combined in a ``QueueProcessor``, an ``Orchestrator`` or
+``store.transaction(queue)``. A write that collides with a row another tenant owns
+raises ``TenantMismatchError``.
+
+The runtime role needs ``SELECT`` on ``stabilize_tenancy``, and ``mg-check-grants``
+reports whether it has it. Never put a row-level security policy on that table. The
+monitor takes ``--tenant NAME`` or ``--all-tenants``. In tenancy mode one of them is
+required.
+

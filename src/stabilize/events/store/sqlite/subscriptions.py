@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EventType, parse_event_type
 from stabilize.persistence.columns import select_list
+from stabilize.persistence.tenancy import refuse_foreign_row
 
 _SUBSCRIPTIONS = select_list("event_subscriptions", "sqlite")
 
@@ -31,6 +32,8 @@ def _row_value(row: Any, column: str, default: str = "0") -> str:
 class SqliteSubscriptionsMixin:
     """Mixin providing subscription CRUD operations."""
 
+    tenant: str
+
     if TYPE_CHECKING:
 
         def _get_connection(self) -> sqlite3.Connection: ...
@@ -49,11 +52,18 @@ class SqliteSubscriptionsMixin:
         event_types_json = json.dumps([et.value for et in event_types]) if event_types else None
         entity_filter_json = json.dumps(entity_filter) if entity_filter else None
 
-        conn.execute(
+        cursor = conn.execute(
             """
-            INSERT OR REPLACE INTO event_subscriptions
-            (id, event_types, entity_filter, last_sequence, webhook_url, updated_at)
-            VALUES (?, ?, ?, ?, ?, datetime('now', 'utc'))
+            INSERT INTO event_subscriptions
+            (id, event_types, entity_filter, last_sequence, webhook_url, updated_at, stabilize_tenant)
+            VALUES (?, ?, ?, ?, ?, datetime('now', 'utc'), ?)
+            ON CONFLICT (id) DO UPDATE SET
+                event_types = excluded.event_types,
+                entity_filter = excluded.entity_filter,
+                last_sequence = excluded.last_sequence,
+                webhook_url = excluded.webhook_url,
+                updated_at = datetime('now', 'utc')
+            WHERE event_subscriptions.stabilize_tenant = excluded.stabilize_tenant
             """,
             (
                 subscription_id,
@@ -61,8 +71,14 @@ class SqliteSubscriptionsMixin:
                 entity_filter_json,
                 last_sequence,
                 webhook_url,
+                self.tenant,
             ),
         )
+        if cursor.rowcount == 0:
+            held = conn.execute(
+                "SELECT stabilize_tenant FROM event_subscriptions WHERE id = ?", (subscription_id,)
+            ).fetchone()
+            refuse_foreign_row("event_subscriptions", subscription_id, held[0] if held else None, self.tenant)
         conn.commit()
 
     def get_subscription(self, subscription_id: str) -> dict[str, Any] | None:
@@ -70,8 +86,8 @@ class SqliteSubscriptionsMixin:
         conn = self._get_connection()
 
         cursor = conn.execute(
-            f"SELECT {_SUBSCRIPTIONS} FROM event_subscriptions WHERE id = ?",
-            (subscription_id,),
+            f"SELECT {_SUBSCRIPTIONS} FROM event_subscriptions WHERE id = ? AND stabilize_tenant = ?",
+            (subscription_id, self.tenant),
         )
 
         row = cursor.fetchone()
@@ -114,9 +130,9 @@ class SqliteSubscriptionsMixin:
             SET last_sequence = ?,
                 last_commit_cursor = ?,
                 updated_at = datetime('now', 'utc')
-            WHERE id = ?
+            WHERE id = ? AND stabilize_tenant = ?
             """,
-            (last_sequence, last_commit_cursor, subscription_id),
+            (last_sequence, last_commit_cursor, subscription_id, self.tenant),
         )
         conn.commit()
 
@@ -128,9 +144,9 @@ class SqliteSubscriptionsMixin:
             """
             UPDATE event_subscriptions
             SET last_sequence = ?, updated_at = datetime('now', 'utc')
-            WHERE id = ?
+            WHERE id = ? AND stabilize_tenant = ?
             """,
-            (last_sequence, subscription_id),
+            (last_sequence, subscription_id, self.tenant),
         )
         conn.commit()
 
@@ -139,8 +155,8 @@ class SqliteSubscriptionsMixin:
         conn = self._get_connection()
 
         conn.execute(
-            "DELETE FROM event_subscriptions WHERE id = ?",
-            (subscription_id,),
+            "DELETE FROM event_subscriptions WHERE id = ? AND stabilize_tenant = ?",
+            (subscription_id, self.tenant),
         )
         conn.commit()
 
@@ -148,6 +164,8 @@ class SqliteSubscriptionsMixin:
         """List all durable subscriptions."""
         conn = self._get_connection()
 
-        cursor = conn.execute("SELECT id, last_sequence FROM event_subscriptions")
+        cursor = conn.execute(
+            "SELECT id, last_sequence FROM event_subscriptions WHERE stabilize_tenant = ?", (self.tenant,)
+        )
 
         return [{"id": row["id"], "last_sequence": row["last_sequence"]} for row in cursor]

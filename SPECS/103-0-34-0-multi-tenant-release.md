@@ -29,6 +29,22 @@ on the current code before the fix is written. No gate until every item is done.
 - `PostgresEventStore(create_tables=True)` shall create the three event tables with the tenant column plus the mode table and its seed; `setup_ddl()` shall contain the same DDL; `PostgresEventStore` shall apply `with_schema` to its pool options.
 - If the target schema of `mg-up` is named after the connecting role while `"$user"` is on the search_path, then `mg-up` shall refuse with `TakeoverRefusedError` before any change (B65).
 
+### WI-2 slice 3: tenancy-mode CLI and tenant-scoped statements (done)
+- `stabilize mg-tenancy status` shall print the mode, `enabled_at` and `enabled_by` of the target schema.
+- `stabilize mg-tenancy enable` shall take mg-up's advisory lock, require every shipped migration applied, require zero rows in every engine table and in every custom queue table named by `pipeline_executions.queue_table`, and shall then set `stabilize_tenancy` to `(mode = 'tenancy', enabled_at = now(), enabled_by = current_user)` in one transaction. It shall print that every engine process must be stopped first (rule 2).
+- `stabilize mg-tenancy disable` shall have the same preconditions and set the mode back to `single`.
+- If any precondition fails, `mg-tenancy enable|disable` shall exit 1, name the failing table or migration, and change nothing.
+- Every INSERT into an engine table shall set `stabilize_tenant` to the constructing part's tenant, on both backends.
+- Every SELECT, UPDATE and DELETE on an engine table, including subqueries, CTE arms and the queue poll, shall carry `stabilize_tenant = <tenant>` as a bound parameter; module-level functions take the tenant from the `EngineBorrower` they receive.
+- When an insert conflicts with a row the caller cannot see (another tenant's), the engine shall raise `TenantMismatchError`; a conflict with a visible row keeps its usual contention result (rule 4).
+- While a schema is in tenancy mode, a part constructed for tenant A shall observe none of tenant B's rows through any public operation; `tests/test_tenant_isolation.py` enumerates the operations on PostgreSQL, and on SQLite through two processes sharing one file.
+- The SQLite `ConnectionManager` shall refuse a second tenant on the same file within one process (`:memory:` exempt).
+- The monitor shall accept `--tenant` and `--all-tenants`; while the schema is in tenancy mode, one of them shall be required.
+- `stabilize mg-tenancy` shall accept a `sqlite:///` URL and switch the file's mode record under the same empty-file rule.
+- B66 (found by this slice's live run): the PostgreSQL processed-message retention batch shall delete at most `batch_size` rows per statement and at most `max_rows` per call, whatever the plan and however `processed_at` ties (`tests/test_audit_retention.py::test_cleanup_never_deletes_past_max_rows_when_timestamps_tie`).
+- Deferred from this slice to slice 4: the SQLite one-tenant-per-file refusal in the `ConnectionManager` (the in-process isolation tests use two tenants on one file today and move to two processes when the refusal lands).
+- Slice 4 adds the GUC checks, the FORCE RLS refusal, the CHECK constraint, the fence, the default drop and the `TenancyModeChanged` latch.
+
 ### WI-2 remaining slices (to be specified as each starts)
 Statements on every SQL site (rule 1 explicit column lists), the trigger fence and `mg-tenancy enable|disable|status`, the `TenancyModeChanged` latch, per-instance recorder/deduplicator, namespaced subscription ids and locks, the schema check, indexes, SQLite triggers, runbooks.
 

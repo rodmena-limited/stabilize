@@ -10,8 +10,9 @@ from typing import Any
 class EngineBorrower:
     """Wraps an owner's ``_borrow`` so code written against ``pool.connection()`` keeps working and stays admitted."""
 
-    def __init__(self, borrow: Callable[[], AbstractContextManager[Any]]) -> None:
+    def __init__(self, borrow: Callable[[], AbstractContextManager[Any]], tenant: str = "") -> None:
         self._borrow = borrow
+        self.tenant = tenant
 
     @contextmanager
     def connection(self) -> Iterator[Any]:

@@ -32,6 +32,8 @@ if TYPE_CHECKING:
 class SqliteEventStoreMixin:
     """Mixin providing event append, query, and retrieval methods."""
 
+    tenant: str
+
     if TYPE_CHECKING:
 
         def _get_connection(self) -> sqlite3.Connection: ...
@@ -58,8 +60,8 @@ class SqliteEventStoreMixin:
                     INSERT INTO events (
                         event_id, event_type, timestamp, entity_type, entity_id,
                         workflow_id, version, data, correlation_id, causation_id,
-                        actor, source_handler, schema_version
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        actor, source_handler, schema_version, stabilize_tenant
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         event.event_id,
@@ -75,6 +77,7 @@ class SqliteEventStoreMixin:
                         event.metadata.actor,
                         event.metadata.source_handler,
                         event.schema_version,
+                        self.tenant,
                     ),
                 )
 
@@ -96,8 +99,8 @@ class SqliteEventStoreMixin:
         """Query events matching criteria."""
         conn = self._get_connection()
 
-        sql_parts = [f"SELECT {_EVENTS} FROM events WHERE 1=1"]
-        params: list[Any] = []
+        sql_parts = [f"SELECT {_EVENTS} FROM events WHERE stabilize_tenant = ?"]
+        params: list[Any] = [self.tenant]
 
         if query.entity_type is not None:
             sql_parts.append("AND entity_type = ?")
@@ -159,10 +162,10 @@ class SqliteEventStoreMixin:
         cursor = conn.execute(
             f"""
             SELECT {_EVENTS} FROM events
-            WHERE entity_type = ? AND entity_id = ? AND version > ?
+            WHERE entity_type = ? AND entity_id = ? AND version > ? AND stabilize_tenant = ?
             ORDER BY sequence ASC
             """,
-            (entity_type.value, entity_id, from_version),
+            (entity_type.value, entity_id, from_version, self.tenant),
         )
 
         return [self._row_to_event(row) for row in cursor]
@@ -178,10 +181,10 @@ class SqliteEventStoreMixin:
         cursor = conn.execute(
             f"""
             SELECT {_EVENTS} FROM events
-            WHERE workflow_id = ? AND sequence > ?
+            WHERE workflow_id = ? AND sequence > ? AND stabilize_tenant = ?
             ORDER BY sequence ASC
             """,
-            (workflow_id, from_sequence),
+            (workflow_id, from_sequence, self.tenant),
         )
 
         return [self._row_to_event(row) for row in cursor]
@@ -190,7 +193,7 @@ class SqliteEventStoreMixin:
         """Get the current (latest) global sequence number."""
         conn = self._get_connection()
 
-        cursor = conn.execute("SELECT MAX(sequence) FROM events")
+        cursor = conn.execute("SELECT MAX(sequence) FROM events WHERE stabilize_tenant = ?", (self.tenant,))
         result = cursor.fetchone()
         return result[0] if result and result[0] is not None else 0
 
@@ -205,11 +208,11 @@ class SqliteEventStoreMixin:
         cursor = conn.execute(
             f"""
             SELECT {_EVENTS} FROM events
-            WHERE sequence > ?
+            WHERE sequence > ? AND stabilize_tenant = ?
             ORDER BY sequence ASC
             LIMIT ?
             """,
-            (sequence, limit),
+            (sequence, self.tenant, limit),
         )
 
         return [self._row_to_event(row) for row in cursor]
@@ -243,8 +246,8 @@ class SqliteEventStoreMixin:
         conn = self._get_connection()
 
         cursor = conn.execute(
-            f"SELECT {_EVENTS} FROM events WHERE event_id = ?",
-            (event_id,),
+            f"SELECT {_EVENTS} FROM events WHERE event_id = ? AND stabilize_tenant = ?",
+            (event_id, self.tenant),
         )
 
         row = cursor.fetchone()
@@ -255,10 +258,10 @@ class SqliteEventStoreMixin:
         conn = self._get_connection()
 
         if query is None:
-            cursor = conn.execute("SELECT COUNT(*) FROM events")
+            cursor = conn.execute("SELECT COUNT(*) FROM events WHERE stabilize_tenant = ?", (self.tenant,))
         else:
-            sql_parts = ["SELECT COUNT(*) FROM events WHERE 1=1"]
-            params: list[Any] = []
+            sql_parts = ["SELECT COUNT(*) FROM events WHERE stabilize_tenant = ?"]
+            params: list[Any] = [self.tenant]
 
             if query.entity_type is not None:
                 sql_parts.append("AND entity_type = ?")

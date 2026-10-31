@@ -34,6 +34,8 @@ if TYPE_CHECKING:
 class SqliteWorkflowCrudMixin:
     """Mixin providing workflow CRUD operations."""
 
+    tenant: str
+
     if TYPE_CHECKING:
 
         def _get_connection(self) -> sqlite3.Connection: ...
@@ -71,20 +73,20 @@ class SqliteWorkflowCrudMixin:
                 start_time_expiry, trigger, is_canceled, canceled_by,
                 cancellation_reason, paused, pipeline_config_id,
                 is_limit_concurrent, max_concurrent_executions,
-                keep_waiting_pipelines, origin{columns}
+                keep_waiting_pipelines, origin, stabilize_tenant{columns}
             ) VALUES (
                 :id, :type, :application, :name, :status, :context, :start_time, :end_time,
                 :start_time_expiry, :trigger, :is_canceled, :canceled_by,
                 :cancellation_reason, :paused, :pipeline_config_id,
                 :is_limit_concurrent, :max_concurrent_executions,
-                :keep_waiting_pipelines, :origin{values}
+                :keep_waiting_pipelines, :origin, :tenant{values}
             )
             """,
-            execution_to_dict(execution),
+            {**execution_to_dict(execution), "tenant": self.tenant},
         )
 
         for stage in execution.stages:
-            insert_stage(conn, stage, execution.id)
+            insert_stage(conn, stage, execution.id, self.tenant)
 
     def retrieve(self, execution_id: str) -> Workflow:
         """Retrieve an execution by ID."""
@@ -92,8 +94,8 @@ class SqliteWorkflowCrudMixin:
 
         # Get execution
         result = conn.execute(
-            f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = :id",
-            {"id": execution_id},
+            f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = :id AND stabilize_tenant = :tenant",
+            {"id": execution_id, "tenant": self.tenant},
         )
         row = result.fetchone()
         if not row:
@@ -105,9 +107,9 @@ class SqliteWorkflowCrudMixin:
         result = conn.execute(
             f"""
             SELECT {_STAGE} FROM stage_executions
-            WHERE execution_id = :execution_id
+            WHERE execution_id = :execution_id AND stabilize_tenant = :tenant
             """,
-            {"execution_id": execution_id},
+            {"execution_id": execution_id, "tenant": self.tenant},
         )
         stages = []
         for stage_row in result.fetchall():
@@ -119,10 +121,10 @@ class SqliteWorkflowCrudMixin:
             task_result = conn.execute(
                 f"""
                 SELECT {_TASK} FROM task_executions
-                WHERE stage_id = :stage_id
+                WHERE stage_id = :stage_id AND stabilize_tenant = :tenant
                 ORDER BY id ASC
                 """,
-                {"stage_id": stage.id},
+                {"stage_id": stage.id, "tenant": self.tenant},
             )
             for task_row in task_result.fetchall():
                 task = row_to_task(task_row)
@@ -138,8 +140,8 @@ class SqliteWorkflowCrudMixin:
         """Retrieve execution metadata without stages."""
         conn = self._get_connection()
         result = conn.execute(
-            f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = :id",
-            {"id": execution_id},
+            f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = :id AND stabilize_tenant = :tenant",
+            {"id": execution_id, "tenant": self.tenant},
         )
         row = result.fetchone()
         if not row:
@@ -160,10 +162,11 @@ class SqliteWorkflowCrudMixin:
                 canceled_by = :canceled_by,
                 cancellation_reason = :cancellation_reason,
                 paused = :paused
-            WHERE id = :id
+            WHERE id = :id AND stabilize_tenant = :tenant
             """,
             {
                 "id": execution.id,
+                "tenant": self.tenant,
                 "status": execution.status.name,
                 "start_time": execution.start_time,
                 "end_time": execution.end_time,
@@ -185,7 +188,10 @@ class SqliteWorkflowCrudMixin:
         try:
             for table, column in WORKFLOW_OWNED_ROWS:
                 if table in present:
-                    conn.execute(f"DELETE FROM {table} WHERE {column} = :id", {"id": execution_id})
+                    conn.execute(
+                        f"DELETE FROM {table} WHERE {column} = :id AND stabilize_tenant = :tenant",
+                        {"id": execution_id, "tenant": self.tenant},
+                    )
             conn.commit()
         except Exception:
             conn.rollback()
@@ -202,7 +208,7 @@ class SqliteWorkflowCrudMixin:
         """
         conn = self._get_connection()
         result = conn.execute(
-            "SELECT 1 FROM pipeline_executions WHERE id = :id",
-            {"id": execution_id},
+            "SELECT 1 FROM pipeline_executions WHERE id = :id AND stabilize_tenant = :tenant",
+            {"id": execution_id, "tenant": self.tenant},
         )
         return result.fetchone() is not None

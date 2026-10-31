@@ -25,6 +25,7 @@ GRANT_HINT = (
 
 
 class PostgresSignalMixin:
+    tenant: str
     """Persistent signal buffering, guarded by a one-time usability check.
 
     `workflow_signals` arrived in 0.28.1 and is read on every stage completion.
@@ -100,13 +101,14 @@ class PostgresSignalMixin:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"INSERT INTO {SIGNAL_TABLE} "
-                        "(execution_id, stage_ref_id, signal_name, signal_data) "
-                        "VALUES (%s, %s, %s, %s) RETURNING id",
+                        "(execution_id, stage_ref_id, signal_name, signal_data, stabilize_tenant) "
+                        "VALUES (%s, %s, %s, %s, %s) RETURNING id",
                         (
                             execution_id,
                             stage_ref_id,
                             signal_name,
                             json.dumps(signal_data or {}, default=str),
+                            self.tenant,
                         ),
                     )
                     row = cur.fetchone()
@@ -134,7 +136,9 @@ class PostgresSignalMixin:
             return None
         clause = "AND signal_name = %s" if signal_name else ""
         params: tuple[Any, ...] = (
-            (execution_id, stage_ref_id, signal_name) if signal_name else (execution_id, stage_ref_id)
+            (execution_id, stage_ref_id, self.tenant, signal_name)
+            if signal_name
+            else (execution_id, stage_ref_id, self.tenant)
         )
         try:
             with self._borrow() as conn:  # type: ignore[attr-defined]
@@ -142,7 +146,7 @@ class PostgresSignalMixin:
                     cur.execute(
                         f"UPDATE {SIGNAL_TABLE} SET consumed = TRUE, consumed_at = NOW() "
                         f"WHERE id = (SELECT id FROM {SIGNAL_TABLE} "
-                        "            WHERE execution_id = %s AND stage_ref_id = %s "
+                        "            WHERE execution_id = %s AND stage_ref_id = %s AND stabilize_tenant = %s "
                         f"          AND consumed = FALSE {clause} "
                         "            ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1) "
                         "RETURNING signal_name, signal_data",
@@ -169,8 +173,8 @@ class PostgresSignalMixin:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"SELECT count(*) AS n FROM {SIGNAL_TABLE} "
-                        "WHERE execution_id = %s AND stage_ref_id = %s AND consumed = FALSE",
-                        (execution_id, stage_ref_id),
+                        "WHERE execution_id = %s AND stage_ref_id = %s AND consumed = FALSE AND stabilize_tenant = %s",
+                        (execution_id, stage_ref_id, self.tenant),
                     )
                     row = cur.fetchone()
                 conn.rollback()
@@ -191,8 +195,8 @@ class PostgresSignalMixin:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"DELETE FROM {SIGNAL_TABLE} WHERE execution_id = %s "
-                        "AND stage_ref_id = %s AND consumed = FALSE",
-                        (execution_id, stage_ref_id),
+                        "AND stage_ref_id = %s AND consumed = FALSE AND stabilize_tenant = %s",
+                        (execution_id, stage_ref_id, self.tenant),
                     )
                     dropped = cur.rowcount or 0
                 conn.commit()

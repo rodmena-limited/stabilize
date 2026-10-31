@@ -48,3 +48,27 @@ def test_cleanup_respects_max_rows(repository: WorkflowStore) -> None:
     except TypeError as exc:
         raise AssertionError(f"C3 cleanup_old_processed_messages has no max_rows: {exc}") from exc
     assert 3 <= removed <= 4
+
+
+def test_cleanup_never_deletes_past_max_rows_when_timestamps_tie(postgres_url: str) -> None:
+    """B66: the batch subquery was rescanned per row; with equal processed_at values LIMIT 2 removed every row."""
+    import psycopg
+
+    from stabilize.persistence.postgres import PostgresWorkflowStore
+
+    ids = [f"tie-{i}" for i in range(12)]
+    with psycopg.connect(postgres_url, autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO processed_messages (message_id, processed_at, stabilize_tenant) "
+            "SELECT unnest(%s::text[]), NOW() - INTERVAL '1 day', ''",
+            (ids,),
+        )
+    store = PostgresWorkflowStore(postgres_url)
+    try:
+        removed = store.cleanup_old_processed_messages(max_age_hours=0.0, batch_size=2, max_rows=3)
+        survivors = [i for i in ids if store.is_message_processed(i)]
+    finally:
+        store.cleanup_old_processed_messages(max_age_hours=0.0)
+        store.close()
+    assert removed <= 3, f"cleanup removed {removed} rows with max_rows=3"
+    assert len(survivors) >= 9, f"only {len(survivors)} of 12 tied rows survived a max_rows=3 cleanup"

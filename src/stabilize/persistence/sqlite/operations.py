@@ -15,6 +15,7 @@ from stabilize.models.workflow import PausedDetails
 from stabilize.persistence.control_states import PAUSABLE
 from stabilize.persistence.signal_scope import signal_status_filter as _signal_status_filter
 from stabilize.persistence.sqlite.converters import paused_to_dict
+from stabilize.persistence.tenancy import refuse_foreign_row
 from stabilize.queue.message_ids import owner_prefix
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ def pause_execution(
     conn: sqlite3.Connection,
     execution_id: str,
     paused_by: str,
+    tenant: str,
 ) -> None:
     """Pause an execution."""
     paused = PausedDetails(
@@ -36,10 +38,11 @@ def pause_execution(
         UPDATE pipeline_executions SET
             status = :status,
             paused = :paused
-        WHERE id = :id AND status IN ({pausable})
+        WHERE id = :id AND status IN ({pausable}) AND stabilize_tenant = :tenant
         """.format(pausable=", ".join(f"'{s.name}'" for s in PAUSABLE)),
         {
             "id": execution_id,
+            "tenant": tenant,
             "status": WorkflowStatus.PAUSED.name,
             "paused": json.dumps(paused_to_dict(paused)),
         },
@@ -50,6 +53,7 @@ def pause_execution(
 def resume_execution(
     conn: sqlite3.Connection,
     execution_id: str,
+    tenant: str,
 ) -> None:
     """Resume a paused execution.
 
@@ -74,10 +78,11 @@ def resume_execution(
                     )
                 ELSE NULL
             END
-        WHERE id = :id AND status = 'PAUSED'
+        WHERE id = :id AND status = 'PAUSED' AND stabilize_tenant = :tenant
         """,
         {
             "id": execution_id,
+            "tenant": tenant,
             "status": WorkflowStatus.RUNNING.name,
             "resume_time": current_time,
         },
@@ -95,6 +100,7 @@ def cancel_execution(
     execution_id: str,
     canceled_by: str,
     reason: str,
+    tenant: str,
 ) -> None:
     """Cancel an execution."""
     conn.execute(
@@ -103,7 +109,7 @@ def cancel_execution(
             is_canceled = 1,
             canceled_by = :canceled_by,
             cancellation_reason = :reason
-        WHERE id = :id AND status NOT IN ({complete})
+        WHERE id = :id AND status NOT IN ({complete}) AND stabilize_tenant = :tenant
         """.format(
             complete=", ".join(
                 f"'{s.name}'" for s in WorkflowStatus if s.is_complete and s is not WorkflowStatus.CANCELED
@@ -111,6 +117,7 @@ def cancel_execution(
         ),
         {
             "id": execution_id,
+            "tenant": tenant,
             "canceled_by": canceled_by,
             "reason": reason,
         },
@@ -121,43 +128,48 @@ def cancel_execution(
 def is_message_processed(
     conn: sqlite3.Connection,
     message_id: str,
+    tenant: str,
 ) -> bool:
     """Check if a message has already been processed."""
     result = conn.execute(
-        "SELECT 1 FROM processed_messages WHERE message_id = :message_id",
-        {"message_id": message_id},
+        "SELECT 1 FROM processed_messages WHERE message_id = :message_id AND stabilize_tenant = :tenant",
+        {"message_id": message_id, "tenant": tenant},
     ).fetchone()
     return result is not None
 
 
 def get_processed_message_ids(
     conn: sqlite3.Connection,
+    tenant: str,
     limit: int | None = None,
 ) -> list[str]:
     """Return processed message IDs, for hydrating an in-memory dedup cache."""
     if limit is not None:
         rows = conn.execute(
-            "SELECT message_id FROM processed_messages LIMIT :limit",
-            {"limit": limit},
+            "SELECT message_id FROM processed_messages WHERE stabilize_tenant = :tenant LIMIT :limit",
+            {"limit": limit, "tenant": tenant},
         ).fetchall()
     else:
-        rows = conn.execute("SELECT message_id FROM processed_messages").fetchall()
+        rows = conn.execute(
+            "SELECT message_id FROM processed_messages WHERE stabilize_tenant = :tenant", {"tenant": tenant}
+        ).fetchall()
     return [row[0] for row in rows]
 
 
 def mark_message_processed(
     conn: sqlite3.Connection,
     message_id: str,
+    tenant: str,
     handler_type: str | None = None,
     execution_id: str | None = None,
 ) -> None:
     """Mark a message as successfully processed."""
-    conn.execute(
+    cursor = conn.execute(
         """
         INSERT OR IGNORE INTO processed_messages (
-            message_id, processed_at, handler_type, execution_id
+            message_id, processed_at, handler_type, execution_id, stabilize_tenant
         ) VALUES (
-            :message_id, :processed_at, :handler_type, :execution_id
+            :message_id, :processed_at, :handler_type, :execution_id, :tenant
         )
         """,
         {
@@ -165,8 +177,14 @@ def mark_message_processed(
             "processed_at": datetime.now(UTC).isoformat(),
             "handler_type": handler_type,
             "execution_id": execution_id,
+            "tenant": tenant,
         },
     )
+    if cursor.rowcount == 0:
+        held = conn.execute(
+            "SELECT stabilize_tenant FROM processed_messages WHERE message_id = :message_id", {"message_id": message_id}
+        ).fetchone()
+        refuse_foreign_row("processed_messages", message_id, held[0] if held else None, tenant)
     conn.commit()
 
 
@@ -175,14 +193,15 @@ SQLITE_RETENTION_BATCH = 2_000
 _DELETE_STALE_BATCH = (
     "DELETE FROM processed_messages WHERE rowid IN ("
     "SELECT rowid FROM processed_messages "
-    "WHERE processed_at < :cutoff AND julianday(processed_at) < julianday(:cutoff) "
+    "WHERE processed_at < :cutoff AND julianday(processed_at) < julianday(:cutoff) AND stabilize_tenant = :tenant "
     "ORDER BY processed_at LIMIT :n"
-    ") AND processed_at < :cutoff AND julianday(processed_at) < julianday(:cutoff)"
+    ") AND processed_at < :cutoff AND julianday(processed_at) < julianday(:cutoff) AND stabilize_tenant = :tenant"
 )
 
 
 def cleanup_old_processed_messages(
     conn: sqlite3.Connection,
+    tenant: str,
     max_age_hours: float = 24.0,
     batch_size: int | None = None,
     max_rows: int | None = None,
@@ -193,7 +212,7 @@ def cleanup_old_processed_messages(
     total = 0
     while max_rows is None or total < max_rows:
         n = batch if max_rows is None else min(batch, max_rows - total)
-        cursor = conn.execute(_DELETE_STALE_BATCH, {"cutoff": cutoff, "n": n})
+        cursor = conn.execute(_DELETE_STALE_BATCH, {"cutoff": cutoff, "n": n, "tenant": tenant})
         conn.commit()
         deleted = int(cursor.rowcount or 0)
         total += deleted
@@ -207,6 +226,7 @@ KEPT_LIMIT = 5_000
 
 def cleanup_processed_not_in_queue(
     conn: sqlite3.Connection,
+    tenant: str,
     max_age_hours: float,
     batch_size: int | None,
     max_rows: int | None,
@@ -220,12 +240,18 @@ def cleanup_processed_not_in_queue(
         owner = "message_id <> '' AND message_id NOT GLOB '*[^0-9]*'"
     else:
         owner = "substr(message_id, 1, :plen) = :prefix"
-    stale = "processed_at < :cutoff AND julianday(processed_at) < julianday(:cutoff)"
+    stale = "processed_at < :cutoff AND julianday(processed_at) < julianday(:cutoff) AND stabilize_tenant = :tenant"
     batch = int(batch_size or SQLITE_RETENTION_BATCH)
     total = 0
     kept: list[str] = []
     while max_rows is None or total < max_rows:
-        params: dict[str, Any] = {"cutoff": cutoff, "n": batch, "prefix": prefix, "plen": len(prefix or "")}
+        params: dict[str, Any] = {
+            "cutoff": cutoff,
+            "n": batch,
+            "prefix": prefix,
+            "plen": len(prefix or ""),
+            "tenant": tenant,
+        }
         exclude = ""
         if kept:
             exclude = " AND message_id NOT IN (" + ",".join(f":x{i}" for i in range(len(kept))) + ")"
@@ -249,6 +275,7 @@ def cleanup_processed_not_in_queue(
             marks = ",".join(f":k{j}" for j in range(len(chunk)))
             args: dict[str, Any] = {f"k{j}": k for j, k in enumerate(chunk)}
             args["cutoff"] = cutoff
+            args["tenant"] = tenant
             cursor = conn.execute(f"DELETE FROM processed_messages WHERE message_id IN ({marks}) AND {stale}", args)
             total += int(cursor.rowcount or 0)
         conn.commit()
@@ -257,7 +284,7 @@ def cleanup_processed_not_in_queue(
     return total
 
 
-def cleanup_completed_stage_claims(conn: sqlite3.Connection) -> int:
+def cleanup_completed_stage_claims(conn: sqlite3.Connection, tenant: str) -> int:
     """Delete stage claims belonging to executions in terminal states.
 
     Claims of live executions are never touched: removing one would
@@ -267,15 +294,16 @@ def cleanup_completed_stage_claims(conn: sqlite3.Connection) -> int:
 
     terminal = [s.name for s in WorkflowStatus if s.is_complete]
     placeholders = ", ".join("?" for _ in terminal)
+    args: list[Any] = [tenant, *terminal, tenant]
     cursor = conn.execute(
         f"""
         DELETE FROM stage_claims
-        WHERE execution_id IN (
+        WHERE stabilize_tenant = ? AND execution_id IN (
             SELECT id FROM pipeline_executions
-            WHERE status IN ({placeholders})
+            WHERE status IN ({placeholders}) AND stabilize_tenant = ?
         )
         """,
-        terminal,
+        args,
     )
     conn.commit()
     return cursor.rowcount
@@ -283,6 +311,7 @@ def cleanup_completed_stage_claims(conn: sqlite3.Connection) -> int:
 
 def cleanup_buffered_signals(
     conn: sqlite3.Connection,
+    tenant: str,
     only_complete: bool = True,
     statuses: list[str] | None = None,
 ) -> int:
@@ -290,13 +319,13 @@ def cleanup_buffered_signals(
     sql = """
         UPDATE stage_executions
         SET context = json_remove(context, '$._buffered_signals')
-        WHERE json_extract(context, '$._buffered_signals') IS NOT NULL
+        WHERE json_extract(context, '$._buffered_signals') IS NOT NULL AND stabilize_tenant = ?
     """
     selected = _signal_status_filter(only_complete, statuses)
-    params: list[str] = []
+    params: list[str] = [tenant]
     if selected is not None:
         sql += f" AND status IN ({', '.join('?' for _ in selected)})"
-        params = selected
+        params = [tenant, *selected]
 
     cursor = conn.execute(sql, params)
     conn.commit()
@@ -305,19 +334,20 @@ def cleanup_buffered_signals(
 
 def count_buffered_signal_stages(
     conn: sqlite3.Connection,
+    tenant: str,
     only_complete: bool = True,
     statuses: list[str] | None = None,
 ) -> int:
     """Count stage rows carrying a _buffered_signals buffer."""
     sql = """
         SELECT COUNT(*) FROM stage_executions
-        WHERE json_extract(context, '$._buffered_signals') IS NOT NULL
+        WHERE json_extract(context, '$._buffered_signals') IS NOT NULL AND stabilize_tenant = ?
     """
     selected = _signal_status_filter(only_complete, statuses)
-    params: list[str] = []
+    params: list[str] = [tenant]
     if selected is not None:
         sql += f" AND status IN ({', '.join('?' for _ in selected)})"
-        params = selected
+        params = [tenant, *selected]
 
     row = conn.execute(sql, params).fetchone()
     return int(row[0]) if row else 0

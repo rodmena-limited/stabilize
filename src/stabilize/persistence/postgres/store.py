@@ -62,7 +62,13 @@ from stabilize.persistence.store import (
 from stabilize.persistence.store.ids import check_ids
 from stabilize.persistence.store.owned_rows import WORKFLOW_OWNED_ROWS
 from stabilize.persistence.task_state import capture, commit_captured, restore_versions, versions
-from stabilize.persistence.tenancy import ModeReader, postgres_mode, require_same_tenant, validate_tenant
+from stabilize.persistence.tenancy import (
+    ModeReader,
+    postgres_mode,
+    refuse_foreign_row,
+    require_same_tenant,
+    validate_tenant,
+)
 
 _PIPELINE = select_list("pipeline_executions", "postgres")
 _STAGE = select_list("stage_executions", "postgres")
@@ -111,7 +117,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         resolved_options = with_schema(options, schema, connection_string)
         self._pool = self._manager.get_postgres_pool(connection_string, options=resolved_options)
         self._mode = ModeReader(postgres_mode)
-        self._engine = EngineBorrower(self._borrow)
+        self._engine = EngineBorrower(self._borrow, self.tenant)
 
     @contextmanager
     def _borrow(self) -> Iterator[Any]:
@@ -135,21 +141,22 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
                         start_time_expiry, trigger, is_canceled, canceled_by,
                         cancellation_reason, paused, pipeline_config_id,
                         is_limit_concurrent, max_concurrent_executions,
-                        keep_waiting_pipelines, origin, queue_table, config_version
+                        keep_waiting_pipelines, origin, queue_table, config_version, stabilize_tenant
                     ) VALUES (
                         %(id)s, %(type)s, %(application)s, %(name)s, %(status)s,
                         %(context)s::jsonb, %(start_time)s, %(end_time)s, %(start_time_expiry)s,
                         %(trigger)s::jsonb, %(is_canceled)s, %(canceled_by)s,
                         %(cancellation_reason)s, %(paused)s::jsonb, %(pipeline_config_id)s,
                         %(is_limit_concurrent)s, %(max_concurrent_executions)s,
-                        %(keep_waiting_pipelines)s, %(origin)s, %(queue_table)s, %(config_version)s
+                        %(keep_waiting_pipelines)s, %(origin)s, %(queue_table)s, %(config_version)s,
+                        %(tenant)s
                     )
                     """,
-                    execution_to_dict(execution),
+                    {**execution_to_dict(execution), "tenant": self.tenant},
                 )
 
                 for stage in execution.stages:
-                    insert_stage(cur, stage, execution.id)
+                    insert_stage(cur, stage, execution.id, self.tenant)
 
             conn.commit()
 
@@ -158,8 +165,8 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = %(id)s",
-                    {"id": execution_id},
+                    f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
+                    {"id": execution_id, "tenant": self.tenant},
                 )
                 row = cur.fetchone()
                 if not row:
@@ -168,8 +175,9 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
                 execution = row_to_execution(row)
 
                 cur.execute(
-                    f"SELECT {_STAGE} FROM stage_executions WHERE execution_id = %(execution_id)s",
-                    {"execution_id": execution_id},
+                    f"SELECT {_STAGE} FROM stage_executions "
+                    "WHERE execution_id = %(execution_id)s AND stabilize_tenant = %(tenant)s",
+                    {"execution_id": execution_id, "tenant": self.tenant},
                 )
 
                 stages_by_id: dict[str, Any] = {}
@@ -181,7 +189,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
                     stages.append(stage)
 
                 if stages:
-                    load_tasks_for_stages(cur, stages)
+                    load_tasks_for_stages(cur, stages, self.tenant)
 
                 execution.stages = stages
                 return execution
@@ -191,8 +199,8 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = %(id)s",
-                    {"id": execution_id},
+                    f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
+                    {"id": execution_id, "tenant": self.tenant},
                 )
                 row = cur.fetchone()
                 if not row:
@@ -214,10 +222,11 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
                         canceled_by = %(canceled_by)s,
                         cancellation_reason = %(cancellation_reason)s,
                         paused = %(paused)s::jsonb
-                    WHERE id = %(id)s
+                    WHERE id = %(id)s AND stabilize_tenant = %(tenant)s
                     """,
                     {
                         "id": execution.id,
+                        "tenant": self.tenant,
                         "status": execution.status.name,
                         "start_time": execution.start_time,
                         "end_time": execution.end_time,
@@ -237,7 +246,10 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 for table, column in WORKFLOW_OWNED_ROWS:
-                    cur.execute(f"DELETE FROM {table} WHERE {column} = %(id)s", {"id": execution_id})
+                    cur.execute(
+                        f"DELETE FROM {table} WHERE {column} = %(id)s AND stabilize_tenant = %(tenant)s",
+                        {"id": execution_id, "tenant": self.tenant},
+                    )
             conn.commit()
 
     def store_stage(
@@ -290,13 +302,14 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
                 start_time = %(start_time)s,
                 end_time = %(end_time)s,
                 version = version + 1
-            WHERE id = %(id)s AND version = %(version)s"""
+            WHERE id = %(id)s AND version = %(version)s AND stabilize_tenant = %(tenant)s"""
             + phase_clause
             + """
             RETURNING version
             """,
             {
                 "id": stage.id,
+                "tenant": self.tenant,
                 "status": stage.status.name,
                 "context": json.dumps(stage.context, default=str),
                 "outputs": json.dumps(stage.outputs, default=str),
@@ -310,13 +323,15 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         if result:
             stage.version = result[0] if isinstance(result, tuple) else result.get("version", stage.version + 1)
             if stage.tasks:
-                upsert_tasks_bulk(cur, stage.tasks, stage.id, only_changed=True)
+                upsert_tasks_bulk(cur, stage.tasks, stage.id, self.tenant, only_changed=True)
             return
 
-        cur.execute("SELECT id FROM stage_executions WHERE id = %(id)s", {"id": stage.id})
-        if cur.fetchone() is None:
-            insert_stage(cur, stage, stage.execution.id)
+        cur.execute("SELECT stabilize_tenant AS owner FROM stage_executions WHERE id = %(id)s", {"id": stage.id})
+        owner = cur.fetchone()
+        if owner is None:
+            insert_stage(cur, stage, stage.execution.id, self.tenant)
             return
+        refuse_foreign_row("stage_executions", stage.id, owner["owner"], self.tenant)
         if expected_phase is not None:
             raise ConcurrencyError(
                 f"Optimistic lock failed for stage {stage.id} "
@@ -337,8 +352,8 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "DELETE FROM stage_executions WHERE id = %(id)s",
-                    {"id": stage_id},
+                    "DELETE FROM stage_executions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
+                    {"id": stage_id, "tenant": self.tenant},
                 )
             conn.commit()
 
@@ -347,8 +362,8 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT {_STAGE} FROM stage_executions WHERE id = %(id)s",
-                    {"id": stage_id},
+                    f"SELECT {_STAGE} FROM stage_executions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
+                    {"id": stage_id, "tenant": self.tenant},
                 )
                 stage_row = cur.fetchone()
                 if not stage_row:
@@ -357,8 +372,8 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
                 stage = row_to_stage(stage_row)
 
                 cur.execute(
-                    f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = %(id)s",
-                    {"id": stage_row["execution_id"]},
+                    f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
+                    {"id": stage_row["execution_id"], "tenant": self.tenant},
                 )
                 exec_row = cur.fetchone()
                 if exec_row:
@@ -371,21 +386,28 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
                         SELECT {_STAGE} FROM stage_executions
                         WHERE execution_id = %(execution_id)s
                         AND (ref_id = ANY(%(requisites)s) OR parent_stage_id = %(stage_id)s)
+                        AND stabilize_tenant = %(tenant)s
                         """,
-                        {"execution_id": execution.id, "requisites": requisites, "stage_id": stage.id},
+                        {
+                            "execution_id": execution.id,
+                            "requisites": requisites,
+                            "stage_id": stage.id,
+                            "tenant": self.tenant,
+                        },
                     )
                     related = cur.fetchall()
                     upstream = [row_to_stage(r) for r in related if r["ref_id"] in stage.requisite_stage_ref_ids]
                     synthetic = [row_to_stage(r) for r in related if r["parent_stage_id"] == stage.id]
-                    load_tasks_for_stages(cur, synthetic)
+                    load_tasks_for_stages(cur, synthetic, self.tenant)
                     for related_stage in upstream + synthetic:
                         related_stage.set_execution_strong(execution)
                     execution.stages = [stage, *upstream, *synthetic]
 
                 # ORDER BY id ensures consistent task sequencing (ULID encodes creation time)
                 cur.execute(
-                    f"SELECT {_TASK} FROM task_executions WHERE stage_id = %(stage_id)s ORDER BY id ASC",
-                    {"stage_id": stage.id},
+                    f"SELECT {_TASK} FROM task_executions "
+                    "WHERE stage_id = %(stage_id)s AND stabilize_tenant = %(tenant)s ORDER BY id ASC",
+                    {"stage_id": stage.id, "tenant": self.tenant},
                 )
                 for task_row in cur.fetchall():
                     task = row_to_task(task_row)

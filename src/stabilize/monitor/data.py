@@ -62,10 +62,22 @@ class MonitorDataFetcher:
         store: WorkflowStore,
         queue: Queue | None = None,
         stuck_threshold_seconds: int = 300,
+        tenant: str | None = None,
     ):
         self.store = store
         self.queue = queue
         self.stuck_threshold_seconds = stuck_threshold_seconds
+        self.tenant = tenant
+
+    def _pg_tenant(self) -> tuple[str, dict[str, Any]]:
+        if self.tenant is None:
+            return "", {}
+        return " AND stabilize_tenant = %(tenant)s", {"tenant": self.tenant}
+
+    def _sqlite_tenant(self) -> tuple[str, list[Any]]:
+        if self.tenant is None:
+            return "", []
+        return " AND stabilize_tenant = ?", [self.tenant]
 
     def fetch(
         self,
@@ -129,10 +141,10 @@ class MonitorDataFetcher:
                     cur.execute(
                         f"""
                         SELECT {_PG_STAGE} FROM stage_executions
-                        WHERE execution_id = ANY(%(ids)s)
+                        WHERE execution_id = ANY(%(ids)s){self._pg_tenant()[0]}
                         ORDER BY start_time ASC
                         """,
-                        {"ids": workflow_ids},
+                        {"ids": workflow_ids, **self._pg_tenant()[1]},
                     )
                     stage_rows = cur.fetchall()
 
@@ -154,10 +166,10 @@ class MonitorDataFetcher:
                     cur.execute(
                         f"""
                         SELECT {_PG_TASK} FROM task_executions
-                        WHERE stage_id = ANY(%(ids)s)
+                        WHERE stage_id = ANY(%(ids)s){self._pg_tenant()[0]}
                         ORDER BY start_time ASC
                         """,
-                        {"ids": stage_ids},
+                        {"ids": stage_ids, **self._pg_tenant()[1]},
                     )
                     task_rows = cur.fetchall()
 
@@ -202,10 +214,10 @@ class MonitorDataFetcher:
             cursor.execute(
                 f"""
                 SELECT {_SQLITE_STAGE} FROM stage_executions
-                WHERE execution_id IN ({placeholders})
+                WHERE execution_id IN ({placeholders}){self._sqlite_tenant()[0]}
                 ORDER BY start_time ASC
                 """,
-                workflow_ids,
+                [*workflow_ids, *self._sqlite_tenant()[1]],
             )
             stage_rows = cursor.fetchall()
 
@@ -228,10 +240,10 @@ class MonitorDataFetcher:
             cursor.execute(
                 f"""
                 SELECT {_SQLITE_TASK} FROM task_executions
-                WHERE stage_id IN ({placeholders})
+                WHERE stage_id IN ({placeholders}){self._sqlite_tenant()[0]}
                 ORDER BY start_time ASC
                 """,
-                stage_ids,
+                [*stage_ids, *self._sqlite_tenant()[1]],
             )
             task_rows = cursor.fetchall()
 
@@ -258,6 +270,9 @@ class MonitorDataFetcher:
             if app:
                 clauses.append("application = %(app)s")
                 pg_params["app"] = app
+            if self.tenant is not None:
+                clauses.append("stabilize_tenant = %(tenant)s")
+                pg_params["tenant"] = self.tenant
 
             if status == "running":
                 clauses.append("status = 'RUNNING'")
@@ -281,6 +296,9 @@ class MonitorDataFetcher:
             if app:
                 clauses.append("application = ?")
                 sqlite_params.append(app)
+            if self.tenant is not None:
+                clauses.append("stabilize_tenant = ?")
+                sqlite_params.append(self.tenant)
 
             if status == "running":
                 clauses.append("status = 'RUNNING'")
@@ -366,35 +384,35 @@ class MonitorDataFetcher:
 
                 # Count pending (not locked, ready to deliver)
                 cursor.execute(
-                    """
+                    f"""
                     SELECT COUNT(*) FROM queue_messages
                     WHERE (locked_until IS NULL OR locked_until < ?)
-                    AND deliver_at <= ?
+                    AND deliver_at <= ?{self._sqlite_tenant()[0]}
                     """,
-                    (now, now),
+                    (now, now, *self._sqlite_tenant()[1]),
                 )
                 pending = cursor.fetchone()[0]
 
                 # Count processing (locked and not expired)
                 cursor.execute(
-                    """
+                    f"""
                     SELECT COUNT(*) FROM queue_messages
-                    WHERE locked_until IS NOT NULL AND locked_until > ?
+                    WHERE locked_until IS NOT NULL AND locked_until > ?{self._sqlite_tenant()[0]}
                     """,
-                    (now,),
+                    (now, *self._sqlite_tenant()[1]),
                 )
                 processing = cursor.fetchone()[0]
 
                 # Count stuck (locked for too long)
                 stuck_threshold = datetime.fromtimestamp(threshold).isoformat()
                 cursor.execute(
-                    """
+                    f"""
                     SELECT COUNT(*) FROM queue_messages
                     WHERE locked_until IS NOT NULL
                     AND locked_until < ?
-                    AND locked_until < ?
+                    AND locked_until < ?{self._sqlite_tenant()[0]}
                     """,
-                    (now, stuck_threshold),
+                    (now, stuck_threshold, *self._sqlite_tenant()[1]),
                 )
                 stuck = cursor.fetchone()[0]
 
@@ -412,19 +430,23 @@ class MonitorDataFetcher:
                     with conn.cursor() as cur:
                         # Alias the count so it works under the pool's dict_row
                         # factory (rows are dict-like, not tuples).
+                        tenant_sql, tenant_params = self._pg_tenant()
                         cur.execute(
                             f"SELECT COUNT(*) AS n FROM {table} "
-                            "WHERE (locked_until IS NULL OR locked_until < NOW()) AND deliver_at <= NOW()"
+                            f"WHERE (locked_until IS NULL OR locked_until < NOW()) AND deliver_at <= NOW(){tenant_sql}",
+                            tenant_params,
                         )
                         pending = _count(cur.fetchone())
                         cur.execute(
-                            f"SELECT COUNT(*) AS n FROM {table} WHERE locked_until IS NOT NULL AND locked_until > NOW()"
+                            f"SELECT COUNT(*) AS n FROM {table} "
+                            f"WHERE locked_until IS NOT NULL AND locked_until > NOW(){tenant_sql}",
+                            tenant_params,
                         )
                         processing = _count(cur.fetchone())
                         cur.execute(
                             f"SELECT COUNT(*) AS n FROM {table} "
-                            "WHERE locked_until IS NOT NULL AND locked_until < %(threshold)s",
-                            {"threshold": stuck_threshold_dt},
+                            f"WHERE locked_until IS NOT NULL AND locked_until < %(threshold)s{tenant_sql}",
+                            {"threshold": stuck_threshold_dt, **tenant_params},
                         )
                         stuck = _count(cur.fetchone())
                 return QueueStats(pending=pending, processing=processing, stuck=stuck)

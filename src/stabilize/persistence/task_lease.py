@@ -24,6 +24,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from stabilize.persistence.factory import detect_backend
+from stabilize.persistence.tenancy import refuse_foreign_row
 
 if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
@@ -64,6 +65,7 @@ class TaskLeaseManager:
         self.owner = owner or f"worker-{uuid.uuid4()}"
         self.ttl_ms = int(ttl_seconds * 1000)
         self._backend = detect_backend(getattr(store, "connection_string", "sqlite"))
+        self._tenant: str = getattr(store, "tenant", "")
         self._ensure_table()
 
     # -- table management ---------------------------------------------------
@@ -120,16 +122,19 @@ class TaskLeaseManager:
             # Single transaction: clear an expired/owned lease, then claim.
             with conn:
                 conn.execute(
-                    "DELETE FROM task_leases WHERE task_id = ? AND (expires_at < ? OR owner = ?)",
-                    (task_id, now, self.owner),
+                    "DELETE FROM task_leases "
+                    "WHERE task_id = ? AND (expires_at < ? OR owner = ?) AND stabilize_tenant = ?",
+                    (task_id, now, self.owner, self._tenant),
                 )
                 conn.execute(
-                    "INSERT INTO task_leases (task_id, owner, acquired_at, expires_at) VALUES (?, ?, ?, ?)",
-                    (task_id, self.owner, now, expires),
+                    "INSERT INTO task_leases (task_id, owner, acquired_at, expires_at, stabilize_tenant) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (task_id, self.owner, now, expires, self._tenant),
                 )
             return True
         except sqlite3.IntegrityError:
-            # A non-expired lease owned by another worker exists.
+            held = conn.execute("SELECT stabilize_tenant FROM task_leases WHERE task_id = ?", (task_id,)).fetchone()
+            refuse_foreign_row("task_leases", task_id, held[0] if held else None, self._tenant)
             return False
 
     def _acquire_postgres(self, task_id: str, now: int, expires: int) -> bool:
@@ -138,19 +143,26 @@ class TaskLeaseManager:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO task_leases (task_id, owner, acquired_at, expires_at)
-                    VALUES (%(task_id)s, %(owner)s, %(now)s, %(expires)s)
+                    INSERT INTO task_leases (task_id, owner, acquired_at, expires_at, stabilize_tenant)
+                    VALUES (%(task_id)s, %(owner)s, %(now)s, %(expires)s, %(tenant)s)
                     ON CONFLICT (task_id) DO UPDATE
                         SET owner = EXCLUDED.owner,
                             acquired_at = EXCLUDED.acquired_at,
                             expires_at = EXCLUDED.expires_at
-                        WHERE task_leases.expires_at < %(now)s
-                           OR task_leases.owner = %(owner)s
+                        WHERE (task_leases.expires_at < %(now)s OR task_leases.owner = %(owner)s)
+                          AND task_leases.stabilize_tenant = EXCLUDED.stabilize_tenant
                     RETURNING owner
                     """,
-                    {"task_id": task_id, "owner": self.owner, "now": now, "expires": expires},
+                    {"task_id": task_id, "owner": self.owner, "now": now, "expires": expires, "tenant": pool.tenant},
                 )
                 row = cur.fetchone()
+                if row is None:
+                    cur.execute(
+                        "SELECT stabilize_tenant AS owner FROM task_leases WHERE task_id = %(task_id)s",
+                        {"task_id": task_id},
+                    )
+                    held = cur.fetchone()
+                    refuse_foreign_row("task_leases", task_id, held["owner"] if held else None, pool.tenant)
             conn.commit()
         if row is None:
             return False
@@ -164,15 +176,16 @@ class TaskLeaseManager:
             conn = self._store._get_connection()  # type: ignore[attr-defined]
             with conn:
                 conn.execute(
-                    "DELETE FROM task_leases WHERE task_id = ? AND owner = ?",
-                    (task_id, self.owner),
+                    "DELETE FROM task_leases WHERE task_id = ? AND owner = ? AND stabilize_tenant = ?",
+                    (task_id, self.owner, self._tenant),
                 )
         else:
             pool = self._store._engine  # type: ignore[attr-defined]
             with pool.connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "DELETE FROM task_leases WHERE task_id = %(task_id)s AND owner = %(owner)s",
-                        {"task_id": task_id, "owner": self.owner},
+                        "DELETE FROM task_leases WHERE task_id = %(task_id)s AND owner = %(owner)s "
+                        "AND stabilize_tenant = %(tenant)s",
+                        {"task_id": task_id, "owner": self.owner, "tenant": pool.tenant},
                     )
                 conn.commit()

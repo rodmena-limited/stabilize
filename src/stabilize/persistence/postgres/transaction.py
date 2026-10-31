@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.persistence.store import StoreTransaction
 from stabilize.persistence.task_state import Captured, capture, commit_captured, versions
+from stabilize.persistence.tenancy import refuse_foreign_row
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -42,6 +43,7 @@ class PostgresTransaction(StoreTransaction):
         """
         self._conn = conn
         self._store = store
+        self._tenant = store.tenant
         self._queue = queue
         # Track stage/task objects and their original versions for rollback
         self._staged_objects: list[tuple[StageExecution | TaskExecution, int]] = []
@@ -84,8 +86,9 @@ class PostgresTransaction(StoreTransaction):
     def set_config_version(self, workflow_id: str, config_version: str) -> None:
         with self._conn.cursor() as cur:
             cur.execute(
-                "UPDATE pipeline_executions SET config_version = %(v)s WHERE id = %(id)s",
-                {"v": config_version, "id": workflow_id},
+                "UPDATE pipeline_executions SET config_version = %(v)s "
+                "WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
+                {"v": config_version, "id": workflow_id, "tenant": self._tenant},
             )
 
     def update_workflow_status(self, workflow: Workflow) -> None:
@@ -98,10 +101,11 @@ class PostgresTransaction(StoreTransaction):
                     start_time = %(start_time)s,
                     end_time = %(end_time)s,
                     queue_table = COALESCE(%(queue_table)s, queue_table)
-                WHERE id = %(id)s
+                WHERE id = %(id)s AND stabilize_tenant = %(tenant)s
                 """,
                 {
                     "id": workflow.id,
+                    "tenant": self._tenant,
                     "status": workflow.status.name,
                     "start_time": workflow.start_time,
                     "end_time": workflow.end_time,
@@ -136,9 +140,9 @@ class PostgresTransaction(StoreTransaction):
             cur.execute(
                 """
                 INSERT INTO processed_messages (
-                    message_id, processed_at, handler_type, execution_id
+                    message_id, processed_at, handler_type, execution_id, stabilize_tenant
                 ) VALUES (
-                    %(message_id)s, NOW(), %(handler_type)s, %(execution_id)s
+                    %(message_id)s, NOW(), %(handler_type)s, %(execution_id)s, %(tenant)s
                 )
                 ON CONFLICT (message_id) DO NOTHING
                 """,
@@ -146,9 +150,17 @@ class PostgresTransaction(StoreTransaction):
                     "message_id": message_id,
                     "handler_type": handler_type,
                     "execution_id": execution_id,
+                    "tenant": self._tenant,
                 },
             )
             inserted = bool(cur.rowcount == 1)
+            if not inserted:
+                cur.execute(
+                    "SELECT stabilize_tenant AS owner FROM processed_messages WHERE message_id = %(message_id)s",
+                    {"message_id": message_id},
+                )
+                owner = cur.fetchone()
+                refuse_foreign_row("processed_messages", message_id, owner["owner"] if owner else None, self._tenant)
         if inserted:
             self._marked_ids.append(message_id)
         return inserted
@@ -171,12 +183,13 @@ class PostgresTransaction(StoreTransaction):
             "execution_id": execution_id,
             "claim_key": claim_key,
             "stage_id": stage_id,
+            "tenant": self._tenant,
         }
         with self._conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO stage_claims (execution_id, claim_key, stage_id)
-                VALUES (%(execution_id)s, %(claim_key)s, %(stage_id)s)
+                INSERT INTO stage_claims (execution_id, claim_key, stage_id, stabilize_tenant)
+                VALUES (%(execution_id)s, %(claim_key)s, %(stage_id)s, %(tenant)s)
                 ON CONFLICT (execution_id, claim_key) DO NOTHING
                 """,
                 params,
@@ -186,7 +199,7 @@ class PostgresTransaction(StoreTransaction):
 
             cur.execute(
                 """
-                SELECT stage_id FROM stage_claims
+                SELECT stage_id, stabilize_tenant AS owner FROM stage_claims
                 WHERE execution_id = %(execution_id)s AND claim_key = %(claim_key)s
                 """,
                 params,
@@ -195,15 +208,15 @@ class PostgresTransaction(StoreTransaction):
             if row is None:
                 cur.execute(
                     """
-                    INSERT INTO stage_claims (execution_id, claim_key, stage_id)
-                    VALUES (%(execution_id)s, %(claim_key)s, %(stage_id)s)
+                    INSERT INTO stage_claims (execution_id, claim_key, stage_id, stabilize_tenant)
+                    VALUES (%(execution_id)s, %(claim_key)s, %(stage_id)s, %(tenant)s)
                     ON CONFLICT (execution_id, claim_key) DO NOTHING
                     """,
                     params,
                 )
                 return bool(cur.rowcount == 1)
 
-            # The pool uses dict_row, so rows are dict-like: access by name.
+            refuse_foreign_row("stage_claims", f"{execution_id}/{claim_key}", row["owner"], self._tenant)
             owner_id = row["stage_id"]
             if owner_id == stage_id:
                 return True
@@ -212,8 +225,8 @@ class PostgresTransaction(StoreTransaction):
                 from stabilize.models.status import WorkflowStatus
 
                 cur.execute(
-                    "SELECT status FROM stage_executions WHERE id = %(id)s",
-                    {"id": owner_id},
+                    "SELECT status FROM stage_executions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
+                    {"id": owner_id, "tenant": self._tenant},
                 )
                 owner_row = cur.fetchone()
                 owner_gone = owner_row is None
@@ -226,6 +239,7 @@ class PostgresTransaction(StoreTransaction):
                         WHERE execution_id = %(execution_id)s
                           AND claim_key = %(claim_key)s
                           AND stage_id = %(owner_id)s
+                          AND stabilize_tenant = %(tenant)s
                         """,
                         {**params, "owner_id": owner_id},
                     )
@@ -244,8 +258,9 @@ class PostgresTransaction(StoreTransaction):
     def count_running(self, pipeline_config_id: str) -> int:
         with self._conn.cursor() as cur:
             cur.execute(
-                "SELECT COUNT(*) AS n FROM pipeline_executions WHERE pipeline_config_id = %(c)s AND status = 'RUNNING'",
-                {"c": pipeline_config_id},
+                "SELECT COUNT(*) AS n FROM pipeline_executions "
+                "WHERE pipeline_config_id = %(c)s AND status = 'RUNNING' AND stabilize_tenant = %(tenant)s",
+                {"c": pipeline_config_id, "tenant": self._tenant},
             )
             row = cur.fetchone()
         return int(row["n"] if isinstance(row, dict) else row[0])
@@ -254,15 +269,20 @@ class PostgresTransaction(StoreTransaction):
         with self._conn.cursor() as cur:
             cur.execute(
                 "SELECT id FROM pipeline_executions "
-                "WHERE pipeline_config_id = %(c)s AND status = 'BUFFERED' ORDER BY id",
-                {"c": pipeline_config_id},
+                "WHERE pipeline_config_id = %(c)s AND status = 'BUFFERED' "
+                "AND stabilize_tenant = %(tenant)s ORDER BY id",
+                {"c": pipeline_config_id, "tenant": self._tenant},
             )
             rows = cur.fetchall()
         return [r["id"] if isinstance(r, dict) else r[0] for r in rows]
 
     def workflow_status(self, workflow_id: str) -> tuple[str | None, bool]:
         with self._conn.cursor() as cur:
-            cur.execute("SELECT status, is_canceled FROM pipeline_executions WHERE id = %(id)s", {"id": workflow_id})
+            cur.execute(
+                "SELECT status, is_canceled FROM pipeline_executions "
+                "WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
+                {"id": workflow_id, "tenant": self._tenant},
+            )
             row = cur.fetchone()
         if row is None:
             return None, False
@@ -273,8 +293,9 @@ class PostgresTransaction(StoreTransaction):
     def paused_stage_ids(self, workflow_id: str) -> list[str]:
         with self._conn.cursor() as cur:
             cur.execute(
-                "SELECT id FROM stage_executions WHERE execution_id = %(id)s AND status = 'PAUSED' ORDER BY id",
-                {"id": workflow_id},
+                "SELECT id FROM stage_executions "
+                "WHERE execution_id = %(id)s AND status = 'PAUSED' AND stabilize_tenant = %(tenant)s ORDER BY id",
+                {"id": workflow_id, "tenant": self._tenant},
             )
             rows = cur.fetchall()
         return [str(row["id"]) if isinstance(row, dict) else str(row[0]) for row in rows]

@@ -178,7 +178,7 @@ class SqliteWorkflowStore(
 
     def is_message_processed(self, message_id: str) -> bool:
         """Check if a message has already been processed."""
-        return _is_message_processed(self._get_connection(), message_id)
+        return _is_message_processed(self._get_connection(), message_id, self.tenant)
 
     def mark_message_processed(
         self,
@@ -187,7 +187,7 @@ class SqliteWorkflowStore(
         execution_id: str | None = None,
     ) -> None:
         """Mark a message as successfully processed."""
-        _mark_message_processed(self._get_connection(), message_id, handler_type, execution_id)
+        _mark_message_processed(self._get_connection(), message_id, self.tenant, handler_type, execution_id)
 
     def cleanup_old_processed_messages(
         self,
@@ -204,16 +204,25 @@ class SqliteWorkflowStore(
         """
         if live is not None:
             return _cleanup_processed_not_in_queue(
-                self._get_connection(), max_age_hours, batch_size, max_rows, table_name or DEFAULT_TABLE, live
+                self._get_connection(),
+                self.tenant,
+                max_age_hours,
+                batch_size,
+                max_rows,
+                table_name or DEFAULT_TABLE,
+                live,
             )
-        return _cleanup_old_processed_messages(self._get_connection(), max_age_hours, batch_size, max_rows)
+        return _cleanup_old_processed_messages(self._get_connection(), self.tenant, max_age_hours, batch_size, max_rows)
 
     def completed_workflow_ids(self, completed_before_ms: int, limit: int, application: str | None = None) -> list[str]:
         from stabilize.maintenance import PURGEABLE
 
         marks = ", ".join("?" for _ in PURGEABLE)
-        sql = f"SELECT id FROM pipeline_executions WHERE +status IN ({marks}) AND end_time IS NOT NULL AND end_time < ?"
-        params: list[Any] = [*PURGEABLE, completed_before_ms]
+        sql = (
+            f"SELECT id FROM pipeline_executions WHERE +status IN ({marks}) "
+            "AND end_time IS NOT NULL AND end_time < ? AND stabilize_tenant = ?"
+        )
+        params: list[Any] = [*PURGEABLE, completed_before_ms, self.tenant]
         if application is not None:
             sql += " AND application = ?"
             params.append(application)
@@ -227,7 +236,7 @@ class SqliteWorkflowStore(
             cleanup_completed_stage_claims as _cleanup_claims,
         )
 
-        return _cleanup_claims(self._get_connection())
+        return _cleanup_claims(self._get_connection(), self.tenant)
 
     def cleanup_buffered_signals(
         self,
@@ -239,7 +248,7 @@ class SqliteWorkflowStore(
             cleanup_buffered_signals as _cleanup_signals,
         )
 
-        return _cleanup_signals(self._get_connection(), only_complete, statuses)
+        return _cleanup_signals(self._get_connection(), self.tenant, only_complete, statuses)
 
     def count_buffered_signal_stages(
         self,
@@ -251,11 +260,11 @@ class SqliteWorkflowStore(
             count_buffered_signal_stages as _count_signals,
         )
 
-        return _count_signals(self._get_connection(), only_complete, statuses)
+        return _count_signals(self._get_connection(), self.tenant, only_complete, statuses)
 
     def get_processed_message_ids(self, limit: int | None = None) -> list[str] | None:
         """Return processed message IDs, for hydrating an in-memory dedup cache."""
-        return _get_processed_message_ids(self._get_connection(), limit)
+        return _get_processed_message_ids(self._get_connection(), self.tenant, limit)
 
     def supports_signal_storage(self) -> bool:
         return True
@@ -270,7 +279,7 @@ class SqliteWorkflowStore(
         from stabilize.persistence.sqlite.signals import buffer_signal as _buffer
 
         conn = self._get_connection()
-        signal_id = _buffer(conn, execution_id, stage_ref_id, signal_name, signal_data)
+        signal_id = _buffer(conn, execution_id, stage_ref_id, signal_name, signal_data, tenant=self.tenant)
         conn.commit()
         return signal_id
 
@@ -283,7 +292,7 @@ class SqliteWorkflowStore(
         from stabilize.persistence.sqlite.signals import consume_signal as _consume
 
         conn = self._get_connection()
-        signal = _consume(conn, execution_id, stage_ref_id, signal_name)
+        signal = _consume(conn, execution_id, stage_ref_id, signal_name, tenant=self.tenant)
         conn.commit()
         if signal is None:
             return None
@@ -292,13 +301,14 @@ class SqliteWorkflowStore(
     def pending_signal_count(self, execution_id: str, stage_ref_id: str) -> int:
         from stabilize.persistence.sqlite.signals import get_pending_signals
 
-        return len(get_pending_signals(self._get_connection(), execution_id, stage_ref_id))
+        return len(get_pending_signals(self._get_connection(), execution_id, stage_ref_id, tenant=self.tenant))
 
     def discard_signals(self, execution_id: str, stage_ref_id: str) -> int:
         conn = self._get_connection()
         cur = conn.execute(
-            "DELETE FROM workflow_signals WHERE execution_id = :e AND stage_ref_id = :s AND consumed = 0",
-            {"e": execution_id, "s": stage_ref_id},
+            "DELETE FROM workflow_signals WHERE execution_id = :e AND stage_ref_id = :s AND consumed = 0 "
+            "AND stabilize_tenant = :tenant",
+            {"e": execution_id, "s": stage_ref_id, "tenant": self.tenant},
         )
         conn.commit()
         return cur.rowcount or 0

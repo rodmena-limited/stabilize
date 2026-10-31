@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EntityType
 from stabilize.persistence.columns import select_list
+from stabilize.persistence.tenancy import refuse_foreign_row
 
 _SNAPSHOTS = select_list("snapshots", "postgres")
 
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
 
 
 class PostgresSnapshotsMixin:
+    tenant: str
     """Mixin providing snapshot save and retrieval methods."""
 
     if TYPE_CHECKING:
@@ -42,15 +44,16 @@ class PostgresSnapshotsMixin:
                 cur.execute(
                     """
                     INSERT INTO snapshots
-                    (entity_type, entity_id, workflow_id, version, sequence, state, state_hash)
+                    (entity_type, entity_id, workflow_id, version, sequence, state, state_hash, stabilize_tenant)
                     VALUES (%(entity_type)s, %(entity_id)s, %(workflow_id)s,
-                            %(version)s, %(sequence)s, %(state)s, %(state_hash)s)
+                            %(version)s, %(sequence)s, %(state)s, %(state_hash)s, %(tenant)s)
                     ON CONFLICT (entity_type, entity_id, version)
                     DO UPDATE SET
                         sequence = EXCLUDED.sequence,
                         state = EXCLUDED.state,
                         state_hash = EXCLUDED.state_hash,
                         created_at = NOW()
+                    WHERE snapshots.stabilize_tenant = EXCLUDED.stabilize_tenant
                     """,
                     {
                         "entity_type": entity_type.value,
@@ -60,8 +63,22 @@ class PostgresSnapshotsMixin:
                         "sequence": sequence,
                         "state": state_json,
                         "state_hash": state_hash,
+                        "tenant": self.tenant,
                     },
                 )
+                if cur.rowcount == 0:
+                    cur.execute(
+                        "SELECT stabilize_tenant AS owner FROM snapshots "
+                        "WHERE entity_type = %(entity_type)s AND entity_id = %(entity_id)s AND version = %(version)s",
+                        {"entity_type": entity_type.value, "entity_id": entity_id, "version": version},
+                    )
+                    held = cur.fetchone()
+                    refuse_foreign_row(
+                        "snapshots",
+                        f"{entity_type.value}/{entity_id}/{version}",
+                        held["owner"] if held else None,
+                        self.tenant,
+                    )
             conn.commit()
 
     def get_latest_snapshot(
@@ -75,11 +92,11 @@ class PostgresSnapshotsMixin:
                 cur.execute(
                     f"""
                     SELECT {_SNAPSHOTS} FROM snapshots
-                    WHERE entity_type = %(entity_type)s AND entity_id = %(entity_id)s
+                    WHERE entity_type = %(entity_type)s AND entity_id = %(entity_id)s AND stabilize_tenant = %(tenant)s
                     ORDER BY version DESC
                     LIMIT 1
                     """,
-                    {"entity_type": entity_type.value, "entity_id": entity_id},
+                    {"entity_type": entity_type.value, "entity_id": entity_id, "tenant": self.tenant},
                 )
 
                 row = cur.fetchone()

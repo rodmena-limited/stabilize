@@ -33,6 +33,7 @@ from stabilize.queue.sqlite.serialization import serialize_message
 logger = logging.getLogger(__name__)
 
 _FENCE = " AND (:attempts IS NULL OR attempts = :attempts)"
+_TENANT = " AND stabilize_tenant = :tenant"
 
 
 class SqliteQueue(SqliteDLQMixin, Queue):
@@ -133,8 +134,8 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         conn.execute(
             f"""
             INSERT INTO {self.table_name}
-            (message_id, message_type, payload, deliver_at, attempts, max_attempts)
-            VALUES (:message_id, :type, :payload, :deliver_at, 0, :max_attempts)
+            (message_id, message_type, payload, deliver_at, attempts, max_attempts, stabilize_tenant)
+            VALUES (:message_id, :type, :payload, :deliver_at, 0, :max_attempts, :tenant)
             """,
             {
                 "message_id": message_id,
@@ -142,6 +143,7 @@ class SqliteQueue(SqliteDLQMixin, Queue):
                 "payload": payload,
                 "deliver_at": deliver_at.isoformat(),
                 "max_attempts": self.max_attempts,
+                "tenant": self.tenant,
             },
         )
         # Only commit when we own the connection; with an external connection
@@ -186,12 +188,13 @@ class SqliteQueue(SqliteDLQMixin, Queue):
             SELECT id, message_type, payload, attempts, version
             FROM {self.table_name}
             WHERE julianday(deliver_at) <= julianday(:now)
+            AND stabilize_tenant = :tenant
             AND (locked_until IS NULL OR julianday(locked_until) < julianday(:now))
             AND attempts < :max_attempts
             ORDER BY deliver_at
             LIMIT 1
             """,
-            {"max_attempts": self.max_attempts, "now": datetime.now(UTC).isoformat()},
+            {"max_attempts": self.max_attempts, "now": datetime.now(UTC).isoformat(), "tenant": self.tenant},
         )
         row = result.fetchone()
 
@@ -211,12 +214,13 @@ class SqliteQueue(SqliteDLQMixin, Queue):
             SET locked_until = :locked_until,
                 attempts = attempts + 1,
                 version = version + 1
-            WHERE id = :id AND version = :version
+            WHERE id = :id AND version = :version AND stabilize_tenant = :tenant
             """,
             {
                 "id": msg_id,
                 "locked_until": locked_until.isoformat(),
                 "version": version,
+                "tenant": self.tenant,
             },
         )
         conn.commit()
@@ -260,8 +264,8 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         conn = self._get_connection()
 
         cursor = conn.execute(
-            f"DELETE FROM {self.table_name} WHERE id = :id{_FENCE}",
-            {"id": msg_id, "attempts": getattr(message, "attempts", None)},
+            f"DELETE FROM {self.table_name} WHERE id = :id{_FENCE}{_TENANT}",
+            {"id": msg_id, "attempts": getattr(message, "attempts", None), "tenant": self.tenant},
         )
         conn.commit()
         if cursor.rowcount == 0:
@@ -279,8 +283,13 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         locked_until = datetime.now(UTC) + (duration or self.lock_duration)
         conn = self._get_connection()
         cursor = conn.execute(
-            f"UPDATE {self.table_name} SET locked_until = :locked_until WHERE id = :id{_FENCE}",
-            {"locked_until": locked_until.isoformat(), "id": msg_id, "attempts": getattr(message, "attempts", None)},
+            f"UPDATE {self.table_name} SET locked_until = :locked_until WHERE id = :id{_FENCE}{_TENANT}",
+            {
+                "locked_until": locked_until.isoformat(),
+                "id": msg_id,
+                "attempts": getattr(message, "attempts", None),
+                "tenant": self.tenant,
+            },
         )
         conn.commit()
         return cursor.rowcount == 1
@@ -313,9 +322,14 @@ class SqliteQueue(SqliteDLQMixin, Queue):
             UPDATE {self.table_name}
             SET deliver_at = :deliver_at,
                 locked_until = NULL
-            WHERE id = :id{_FENCE}
+            WHERE id = :id{_FENCE}{_TENANT}
             """,
-            {"id": msg_id, "deliver_at": deliver_at.isoformat(), "attempts": getattr(message, "attempts", None)},
+            {
+                "id": msg_id,
+                "deliver_at": deliver_at.isoformat(),
+                "attempts": getattr(message, "attempts", None),
+                "tenant": self.tenant,
+            },
         )
         conn.commit()
 
@@ -332,21 +346,24 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         for i in range(0, len(ids), 500):
             chunk = ids[i : i + 500]
             marks = ",".join("?" for _ in chunk)
-            for row in conn.execute(f"SELECT id FROM {self.table_name} WHERE id IN ({marks})", chunk):
+            for row in conn.execute(
+                f"SELECT id FROM {self.table_name} WHERE id IN ({marks}) AND stabilize_tenant = ?",
+                [*chunk, self.tenant],
+            ):
                 found.add(owned[int(row[0])])
         return found
 
     def size(self) -> int:
         """Get the number of messages in the queue."""
         conn = self._get_connection()
-        result = conn.execute(f"SELECT COUNT(*) FROM {self.table_name}")
+        result = conn.execute(f"SELECT COUNT(*) FROM {self.table_name} WHERE stabilize_tenant = ?", (self.tenant,))
         row = result.fetchone()
         return row[0] if row else 0
 
     def clear(self) -> None:
         """Clear all messages from the queue."""
         conn = self._get_connection()
-        conn.execute(f"DELETE FROM {self.table_name}")
+        conn.execute(f"DELETE FROM {self.table_name} WHERE stabilize_tenant = ?", (self.tenant,))
         conn.commit()
 
         self._pending.clear()
@@ -357,8 +374,8 @@ class SqliteQueue(SqliteDLQMixin, Queue):
             self._get_connection()
             .execute(
                 f"SELECT 1 FROM {self.table_name} WHERE CASE WHEN json_valid(payload) "
-                "THEN json_extract(payload, '$.stage_id') END = ? LIMIT 1",
-                (stage_id,),
+                "THEN json_extract(payload, '$.stage_id') END = ? AND stabilize_tenant = ? LIMIT 1",
+                (stage_id, self.tenant),
             )
             .fetchone()
         )
@@ -370,8 +387,8 @@ class SqliteQueue(SqliteDLQMixin, Queue):
             self._get_connection()
             .execute(
                 f"SELECT 1 FROM {self.table_name} WHERE CASE WHEN json_valid(payload) "
-                "THEN json_extract(payload, '$.execution_id') END = ? LIMIT 1",
-                (execution_id,),
+                "THEN json_extract(payload, '$.execution_id') END = ? AND stabilize_tenant = ? LIMIT 1",
+                (execution_id, self.tenant),
             )
             .fetchone()
         )
@@ -385,8 +402,8 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         for table in (t for t in (self.table_name, f"{self.table_name}_dlq") if t in present):
             cur = conn.execute(
                 f"DELETE FROM {table} WHERE CASE WHEN json_valid(payload) "
-                "THEN json_extract(payload, '$.execution_id') END = ?",
-                (execution_id,),
+                "THEN json_extract(payload, '$.execution_id') END = ? AND stabilize_tenant = ?",
+                (execution_id, self.tenant),
             )
             deleted += cur.rowcount
         conn.commit()
@@ -407,9 +424,9 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         result = conn.execute(
             f"""
             SELECT 1 FROM {self.table_name}
-            WHERE json_extract(payload, '$.task_id') = :task_id
+            WHERE json_extract(payload, '$.task_id') = :task_id AND stabilize_tenant = :tenant
             LIMIT 1
             """,
-            {"task_id": task_id},
+            {"task_id": task_id, "tenant": self.tenant},
         )
         return result.fetchone() is not None

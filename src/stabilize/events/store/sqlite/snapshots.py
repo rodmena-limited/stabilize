@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EntityType
 from stabilize.persistence.columns import select_list
+from stabilize.persistence.tenancy import refuse_foreign_row
 
 _SNAPSHOTS = select_list("snapshots", "sqlite")
 
@@ -22,6 +23,8 @@ if TYPE_CHECKING:
 
 class SqliteSnapshotsMixin:
     """Mixin providing snapshot operations."""
+
+    tenant: str
 
     if TYPE_CHECKING:
 
@@ -41,11 +44,17 @@ class SqliteSnapshotsMixin:
 
         state_json = json.dumps(state, default=str)
         state_hash = hashlib.sha256(json.dumps(state, sort_keys=True, default=str).encode()).hexdigest()
-        conn.execute(
+        cursor = conn.execute(
             """
-            INSERT OR REPLACE INTO snapshots
-            (entity_type, entity_id, workflow_id, version, sequence, state, state_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO snapshots
+            (entity_type, entity_id, workflow_id, version, sequence, state, state_hash, stabilize_tenant)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (entity_type, entity_id, version) DO UPDATE SET
+                sequence = excluded.sequence,
+                state = excluded.state,
+                state_hash = excluded.state_hash,
+                created_at = CURRENT_TIMESTAMP
+            WHERE snapshots.stabilize_tenant = excluded.stabilize_tenant
             """,
             (
                 entity_type.value,
@@ -55,8 +64,16 @@ class SqliteSnapshotsMixin:
                 sequence,
                 state_json,
                 state_hash,
+                self.tenant,
             ),
         )
+        if cursor.rowcount == 0:
+            held = conn.execute(
+                "SELECT stabilize_tenant FROM snapshots WHERE entity_type = ? AND entity_id = ? AND version = ?",
+                (entity_type.value, entity_id, version),
+            ).fetchone()
+            key = f"{entity_type.value}/{entity_id}/{version}"
+            refuse_foreign_row("snapshots", key, held[0] if held else None, self.tenant)
         conn.commit()
 
     def get_latest_snapshot(
@@ -70,11 +87,11 @@ class SqliteSnapshotsMixin:
         cursor = conn.execute(
             f"""
             SELECT {_SNAPSHOTS} FROM snapshots
-            WHERE entity_type = ? AND entity_id = ?
+            WHERE entity_type = ? AND entity_id = ? AND stabilize_tenant = ?
             ORDER BY version DESC
             LIMIT 1
             """,
-            (entity_type.value, entity_id),
+            (entity_type.value, entity_id, self.tenant),
         )
 
         row = cursor.fetchone()

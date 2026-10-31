@@ -64,6 +64,7 @@ def buffer_signal(
     stage_ref_id: str,
     signal_name: str,
     signal_data: dict[str, Any] | None = None,
+    tenant: str = "",
 ) -> int:
     """Buffer a signal for later consumption.
 
@@ -72,14 +73,15 @@ def buffer_signal(
     """
     cursor = conn.execute(
         """
-        INSERT INTO workflow_signals (execution_id, stage_ref_id, signal_name, signal_data)
-        VALUES (:execution_id, :stage_ref_id, :signal_name, :signal_data)
+        INSERT INTO workflow_signals (execution_id, stage_ref_id, signal_name, signal_data, stabilize_tenant)
+        VALUES (:execution_id, :stage_ref_id, :signal_name, :signal_data, :tenant)
         """,
         {
             "execution_id": execution_id,
             "stage_ref_id": stage_ref_id,
             "signal_name": signal_name,
             "signal_data": json.dumps(signal_data or {}, default=str),
+            "tenant": tenant,
         },
     )
     return cursor.lastrowid or 0
@@ -90,6 +92,7 @@ def consume_signal(
     execution_id: str,
     stage_ref_id: str,
     signal_name: str | None = None,
+    tenant: str = "",
 ) -> BufferedSignal | None:
     """Consume the oldest unconsumed signal for a stage.
 
@@ -110,7 +113,7 @@ def consume_signal(
             WHERE execution_id = :execution_id
               AND stage_ref_id = :stage_ref_id
               AND signal_name = :signal_name
-              AND consumed = 0
+              AND consumed = 0 AND stabilize_tenant = :tenant
             ORDER BY id ASC
             LIMIT 1
             """,
@@ -118,6 +121,7 @@ def consume_signal(
                 "execution_id": execution_id,
                 "stage_ref_id": stage_ref_id,
                 "signal_name": signal_name,
+                "tenant": tenant,
             },
         ).fetchone()
     else:
@@ -127,13 +131,14 @@ def consume_signal(
             FROM workflow_signals
             WHERE execution_id = :execution_id
               AND stage_ref_id = :stage_ref_id
-              AND consumed = 0
+              AND consumed = 0 AND stabilize_tenant = :tenant
             ORDER BY id ASC
             LIMIT 1
             """,
             {
                 "execution_id": execution_id,
                 "stage_ref_id": stage_ref_id,
+                "tenant": tenant,
             },
         ).fetchone()
 
@@ -143,8 +148,8 @@ def consume_signal(
     # Mark as consumed
     now = datetime.now(UTC).isoformat()
     conn.execute(
-        "UPDATE workflow_signals SET consumed = 1, consumed_at = :now WHERE id = :id",
-        {"id": row["id"], "now": now},
+        "UPDATE workflow_signals SET consumed = 1, consumed_at = :now WHERE id = :id AND stabilize_tenant = :tenant",
+        {"id": row["id"], "now": now, "tenant": tenant},
     )
 
     return BufferedSignal(
@@ -163,6 +168,7 @@ def get_pending_signals(
     conn: sqlite3.Connection,
     execution_id: str,
     stage_ref_id: str,
+    tenant: str = "",
 ) -> list[BufferedSignal]:
     """Get all unconsumed signals for a stage.
 
@@ -175,12 +181,13 @@ def get_pending_signals(
         FROM workflow_signals
         WHERE execution_id = :execution_id
           AND stage_ref_id = :stage_ref_id
-          AND consumed = 0
+          AND consumed = 0 AND stabilize_tenant = :tenant
         ORDER BY id ASC
         """,
         {
             "execution_id": execution_id,
             "stage_ref_id": stage_ref_id,
+            "tenant": tenant,
         },
     ).fetchall()
 
@@ -200,6 +207,7 @@ def get_pending_signals(
 def cleanup_consumed_signals(
     conn: sqlite3.Connection,
     execution_id: str,
+    tenant: str = "",
 ) -> int:
     """Remove consumed signals for an execution.
 
@@ -207,7 +215,8 @@ def cleanup_consumed_signals(
         Number of signals removed.
     """
     cursor = conn.execute(
-        "DELETE FROM workflow_signals WHERE execution_id = :execution_id AND consumed = 1",
-        {"execution_id": execution_id},
+        "DELETE FROM workflow_signals "
+        "WHERE execution_id = :execution_id AND consumed = 1 AND stabilize_tenant = :tenant",
+        {"execution_id": execution_id, "tenant": tenant},
     )
     return cursor.rowcount

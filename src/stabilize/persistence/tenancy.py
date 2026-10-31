@@ -28,6 +28,20 @@ class TenancyModeError(StabilizeError):
     """The schema's tenancy mode does not admit this tenant, or the mode record is unreadable."""
 
 
+class TenantMismatchError(StabilizeError):
+    """A write collided with a row that belongs to another tenant, or the row is invisible to this one."""
+
+
+def refuse_foreign_row(table: str, key: str, owner: str | None, tenant: str) -> None:
+    """Raise when an upsert found a conflicting row the caller does not own (rule 4)."""
+    if owner is None:
+        raise TenantMismatchError(
+            f"{table} row {key!r} conflicts with a row this tenant cannot see; another tenant owns it"
+        )
+    if owner != tenant:
+        raise TenantMismatchError(f"{table} row {key!r} belongs to tenant {owner!r}, not {tenant!r}")
+
+
 def validate_tenant(tenant: Any) -> str:
     if tenant == "":
         return ""

@@ -41,6 +41,7 @@ def run_monitor(
     app_filter: str | None = None,
     refresh_interval: int = 2,
     status_filter: str = "all",
+    tenant: str | None = None,
 ) -> None:
     """
     Launch the real-time monitoring dashboard.
@@ -52,7 +53,7 @@ def run_monitor(
         refresh_interval: Refresh interval in seconds (default: 2)
         status_filter: Filter by status ('all', 'running', 'failed', 'recent')
     """
-    data_fetcher = MonitorDataFetcher(store, queue)
+    data_fetcher = MonitorDataFetcher(store, queue, tenant=tenant)
 
     curses.wrapper(
         run_display,

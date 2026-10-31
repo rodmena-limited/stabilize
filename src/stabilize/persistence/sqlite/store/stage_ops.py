@@ -19,6 +19,7 @@ from stabilize.persistence.sqlite.converters import (
 )
 from stabilize.persistence.sqlite.helpers import insert_stage, upsert_task
 from stabilize.persistence.task_state import capture, commit_captured, restore_versions, versions
+from stabilize.persistence.tenancy import refuse_foreign_row
 
 _PIPELINE = select_list("pipeline_executions", "sqlite")
 _STAGE = select_list("stage_executions", "sqlite")
@@ -31,6 +32,8 @@ if TYPE_CHECKING:
 
 class SqliteStageOpsMixin:
     """Mixin providing stage operations."""
+
+    tenant: str
 
     if TYPE_CHECKING:
 
@@ -65,10 +68,13 @@ class SqliteStageOpsMixin:
         try:
             # Check if stage exists
             result = conn.execute(
-                "SELECT id FROM stage_executions WHERE id = :id",
+                "SELECT stabilize_tenant FROM stage_executions WHERE id = :id",
                 {"id": stage.id},
             )
-            exists = result.fetchone() is not None
+            held = result.fetchone()
+            if held is not None:
+                refuse_foreign_row("stage_executions", stage.id, held[0], self.tenant)
+            exists = held is not None
 
             if exists:
                 # Build update query with optimistic locking
@@ -84,9 +90,11 @@ class SqliteStageOpsMixin:
                             end_time = :end_time,
                             version = version + 1
                         WHERE id = :id AND version = :version AND status = :expected_phase
+                          AND stabilize_tenant = :tenant
                         """,
                         {
                             "id": stage.id,
+                            "tenant": self.tenant,
                             "status": stage.status.name,
                             "context": json.dumps(stage.context, default=str),
                             "outputs": json.dumps(stage.outputs, default=str),
@@ -106,10 +114,11 @@ class SqliteStageOpsMixin:
                             start_time = :start_time,
                             end_time = :end_time,
                             version = version + 1
-                        WHERE id = :id AND version = :version
+                        WHERE id = :id AND version = :version AND stabilize_tenant = :tenant
                         """,
                         {
                             "id": stage.id,
+                            "tenant": self.tenant,
                             "status": stage.status.name,
                             "context": json.dumps(stage.context, default=str),
                             "outputs": json.dumps(stage.outputs, default=str),
@@ -132,9 +141,9 @@ class SqliteStageOpsMixin:
 
                 # Update tasks
                 for task in stage.tasks:
-                    upsert_task(conn, task, stage.id, only_changed=True)
+                    upsert_task(conn, task, stage.id, self.tenant, only_changed=True)
             else:
-                insert_stage(conn, stage, stage.execution.id)
+                insert_stage(conn, stage, stage.execution.id, self.tenant)
             written = capture(stage.tasks)
             conn.commit()
         except Exception:
@@ -156,8 +165,8 @@ class SqliteStageOpsMixin:
         """Remove a stage."""
         conn = self._get_connection()
         conn.execute(
-            "DELETE FROM stage_executions WHERE id = :id",
-            {"id": stage_id},
+            "DELETE FROM stage_executions WHERE id = :id AND stabilize_tenant = :tenant",
+            {"id": stage_id, "tenant": self.tenant},
         )
         conn.commit()
 
@@ -167,8 +176,8 @@ class SqliteStageOpsMixin:
 
         # Get stage
         result = conn.execute(
-            f"SELECT {_STAGE} FROM stage_executions WHERE id = :id",
-            {"id": stage_id},
+            f"SELECT {_STAGE} FROM stage_executions WHERE id = :id AND stabilize_tenant = :tenant",
+            {"id": stage_id, "tenant": self.tenant},
         )
         stage_row = result.fetchone()
         if not stage_row:
@@ -178,8 +187,8 @@ class SqliteStageOpsMixin:
 
         # Get execution summary for context
         exec_result = conn.execute(
-            f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = :id",
-            {"id": stage_row["execution_id"]},
+            f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = :id AND stabilize_tenant = :tenant",
+            {"id": stage_row["execution_id"], "tenant": self.tenant},
         )
         exec_row = exec_result.fetchone()
         if exec_row:
@@ -210,10 +219,10 @@ class SqliteStageOpsMixin:
         task_result = conn.execute(
             f"""
             SELECT {_TASK} FROM task_executions
-            WHERE stage_id = :stage_id
+            WHERE stage_id = :stage_id AND stabilize_tenant = :tenant
             ORDER BY id ASC
             """,
-            {"stage_id": stage.id},
+            {"stage_id": stage.id, "tenant": self.tenant},
         )
         for task_row in task_result.fetchall():
             task = row_to_task(task_row)

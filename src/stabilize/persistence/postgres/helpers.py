@@ -7,13 +7,14 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.errors import ConcurrencyError
 from stabilize.persistence.task_state import needs_write
+from stabilize.persistence.tenancy import refuse_foreign_row
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.models.task import TaskExecution
 
 
-def insert_stage(cur: Any, stage: StageExecution, execution_id: str) -> None:
+def insert_stage(cur: Any, stage: StageExecution, execution_id: str, tenant: str) -> None:
     """Insert a stage."""
     cur.execute(
         """
@@ -23,7 +24,7 @@ def insert_stage(cur: Any, stage: StageExecution, execution_id: str) -> None:
             start_time, end_time, start_time_expiry, scheduled_time, version,
             join_type, join_threshold, split_type, split_conditions,
             mi_config, deferred_choice_group, milestone_ref_id,
-            milestone_status, mutex_key, cancel_region
+            milestone_status, mutex_key, cancel_region, stabilize_tenant
         ) VALUES (
             %(id)s, %(execution_id)s, %(ref_id)s, %(type)s, %(name)s, %(status)s,
             %(context)s::jsonb, %(outputs)s::jsonb, %(requisite_stage_ref_ids)s,
@@ -32,7 +33,7 @@ def insert_stage(cur: Any, stage: StageExecution, execution_id: str) -> None:
             %(join_type)s, %(join_threshold)s, %(split_type)s,
             %(split_conditions)s::jsonb, %(mi_config)s::jsonb,
             %(deferred_choice_group)s, %(milestone_ref_id)s,
-            %(milestone_status)s, %(mutex_key)s, %(cancel_region)s
+            %(milestone_status)s, %(mutex_key)s, %(cancel_region)s, %(tenant)s
         )
         """,
         {
@@ -62,15 +63,18 @@ def insert_stage(cur: Any, stage: StageExecution, execution_id: str) -> None:
             "milestone_status": stage.milestone_status,
             "mutex_key": stage.mutex_key,
             "cancel_region": stage.cancel_region,
+            "tenant": tenant,
         },
     )
 
     # Batch insert tasks
     if stage.tasks:
-        upsert_tasks_bulk(cur, stage.tasks, stage.id)
+        upsert_tasks_bulk(cur, stage.tasks, stage.id, tenant)
 
 
-def upsert_tasks_bulk(cur: Any, tasks: list[TaskExecution], stage_id: str, only_changed: bool = False) -> None:
+def upsert_tasks_bulk(
+    cur: Any, tasks: list[TaskExecution], stage_id: str, tenant: str, only_changed: bool = False
+) -> None:
     """
     Batch upsert tasks with optimistic locking.
 
@@ -101,6 +105,7 @@ def upsert_tasks_bulk(cur: Any, tasks: list[TaskExecution], stage_id: str, only_
             "loop_end": task.loop_end,
             "task_exception_details": json.dumps(task.task_exception_details, default=str),
             "version": task.version,
+            "tenant": tenant,
         }
 
         # Use INSERT ... ON CONFLICT with RETURNING to detect what happened
@@ -109,11 +114,11 @@ def upsert_tasks_bulk(cur: Any, tasks: list[TaskExecution], stage_id: str, only_
             INSERT INTO task_executions (
                 id, stage_id, name, implementing_class, status,
                 start_time, end_time, stage_start, stage_end,
-                loop_start, loop_end, task_exception_details, version
+                loop_start, loop_end, task_exception_details, version, stabilize_tenant
             ) VALUES (
                 %(id)s, %(stage_id)s, %(name)s, %(implementing_class)s, %(status)s,
                 %(start_time)s, %(end_time)s, %(stage_start)s, %(stage_end)s,
-                %(loop_start)s, %(loop_end)s, %(task_exception_details)s::jsonb, %(version)s
+                %(loop_start)s, %(loop_end)s, %(task_exception_details)s::jsonb, %(version)s, %(tenant)s
             )
             ON CONFLICT (id) DO UPDATE SET
                 status = EXCLUDED.status,
@@ -122,6 +127,7 @@ def upsert_tasks_bulk(cur: Any, tasks: list[TaskExecution], stage_id: str, only_
                 task_exception_details = EXCLUDED.task_exception_details,
                 version = task_executions.version + 1
             WHERE task_executions.version = EXCLUDED.version
+              AND task_executions.stabilize_tenant = EXCLUDED.stabilize_tenant
             RETURNING version
             """,
             params,
@@ -133,7 +139,9 @@ def upsert_tasks_bulk(cur: Any, tasks: list[TaskExecution], stage_id: str, only_
             new_version = result[0] if isinstance(result, tuple) else result.get("version", task.version + 1)
             task.version = new_version
         else:
-            # No row returned means the update failed due to version mismatch
+            cur.execute("SELECT stabilize_tenant AS owner FROM task_executions WHERE id = %(id)s", {"id": task.id})
+            owner = cur.fetchone()
+            refuse_foreign_row("task_executions", task.id, owner["owner"] if owner else None, tenant)
             raise ConcurrencyError(
                 f"Optimistic lock failed for task {task.id} (version {task.version}). "
                 f"Another process has modified this task."

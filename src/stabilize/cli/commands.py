@@ -24,6 +24,7 @@ from stabilize.cli.driver import (
 from stabilize.cli.migrate import mg_status, mg_up
 from stabilize.cli.migrations import get_migrations
 from stabilize.cli.prompt_text import PROMPT_TEXT
+from stabilize.persistence.tenancy import MODE_TENANCY, validate_tenant
 from stabilize.redaction import redact_db_url, redact_text
 
 __all__ = [
@@ -54,12 +55,42 @@ def monitor_target(config: dict[str, Any]) -> tuple[str, str | None]:
     return build_db_url(config), validate_schema_name(schema) if schema else None
 
 
+def resolve_monitor_tenant(mode: str, tenant: str | None, all_tenants: bool) -> str | None:
+    """The tenant the monitor filters on: None means every tenant; '' is the single-tenant install."""
+    if tenant is not None and all_tenants:
+        print("Error: --tenant and --all-tenants exclude each other")
+        sys.exit(1)
+    if all_tenants:
+        return None
+    if tenant is not None:
+        return validate_tenant(tenant)
+    if mode == MODE_TENANCY:
+        print(
+            "Error: this schema is in tenancy mode; pass --tenant NAME to watch one tenant "
+            "or --all-tenants for every one"
+        )
+        sys.exit(1)
+    return ""
+
+
+def _schema_mode(store: Any) -> str:
+    from stabilize.persistence.sqlite.tenant_schema import read_mode
+    from stabilize.persistence.tenancy import postgres_mode
+
+    if hasattr(store, "_pool"):
+        with store._pool.connection() as conn:
+            return str(postgres_mode(conn))
+    return read_mode(store._get_connection())
+
+
 def monitor(
     db_url: str | None,
     app_filter: str | None,
     refresh_interval: int,
     status_filter: str,
     config_path: Path | None = None,
+    tenant: str | None = None,
+    all_tenants: bool = False,
 ) -> None:
     """Launch the real-time monitoring dashboard."""
     from stabilize.monitor import run_monitor
@@ -105,12 +136,14 @@ def monitor(
         sys.exit(1)
 
     print(f"Connecting to {redact_db_url(db_url)}")
+    watched = resolve_monitor_tenant(_schema_mode(store), tenant, all_tenants)
     run_monitor(
         store=store,
         queue=queue,
         app_filter=app_filter,
         refresh_interval=refresh_interval,
         status_filter=status_filter,
+        tenant=watched,
     )
 
 

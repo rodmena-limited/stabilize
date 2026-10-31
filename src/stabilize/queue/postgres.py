@@ -31,6 +31,7 @@ _VALID_TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 logger = logging.getLogger(__name__)
 
 _FENCE = " AND (%(attempts)s::int IS NULL OR attempts = %(attempts)s::int)"
+_TENANT = " AND stabilize_tenant = %(tenant)s"
 
 
 class PostgresQueue(Queue):
@@ -89,7 +90,7 @@ class PostgresQueue(Queue):
         self._manager = get_connection_manager()
         self._pool = self._manager.get_postgres_pool(connection_string, options=self._pool_options)
         self._mode = ModeReader(postgres_mode)
-        self._engine = EngineBorrower(self._borrow)
+        self._engine = EngineBorrower(self._borrow, self.tenant)
         self._pending: dict[int, dict[str, Any]] = {}
         # Size caching
         self._size_cache: int | None = None
@@ -148,13 +149,14 @@ class PostgresQueue(Queue):
 
         sql = f"""
             INSERT INTO {self.table_name}
-            (message_id, message_type, payload, deliver_at, attempts)
-            VALUES (%(message_id)s, %(type)s, %(payload)s::jsonb, {deliver_at_expr}, 0)
+            (message_id, message_type, payload, deliver_at, attempts, stabilize_tenant)
+            VALUES (%(message_id)s, %(type)s, %(payload)s::jsonb, {deliver_at_expr}, 0, %(tenant)s)
         """
         params = {
             "message_id": message_id,
             "type": message_type,
             "payload": payload,
+            "tenant": self.tenant,
             **extra_params,
         }
 
@@ -193,6 +195,7 @@ class PostgresQueue(Queue):
                     WHERE id = (
                         SELECT id FROM {self.table_name}
                         WHERE deliver_at <= NOW()
+                        AND stabilize_tenant = %(tenant)s
                         AND (locked_until IS NULL OR locked_until < NOW())
                         AND attempts < %(max_attempts)s
                         ORDER BY deliver_at
@@ -204,6 +207,7 @@ class PostgresQueue(Queue):
                     {
                         "lock_seconds": self.lock_duration.total_seconds(),
                         "max_attempts": self.max_attempts,
+                        "tenant": self.tenant,
                     },
                 )
                 row = cur.fetchone()
@@ -243,8 +247,8 @@ class PostgresQueue(Queue):
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"DELETE FROM {self.table_name} WHERE id = %(id)s{_FENCE}",
-                    {"id": msg_id, "attempts": getattr(message, "attempts", None)},
+                    f"DELETE FROM {self.table_name} WHERE id = %(id)s{_FENCE}{_TENANT}",
+                    {"id": msg_id, "attempts": getattr(message, "attempts", None), "tenant": self.tenant},
                 )
                 if cur.rowcount == 0:
                     logger.warning("ack(%s): the lease was taken by another worker; not deleted", message.message_id)
@@ -265,8 +269,13 @@ class PostgresQueue(Queue):
             with conn.cursor() as cur:
                 cur.execute(
                     f"UPDATE {self.table_name} SET locked_until = NOW() + %(seconds)s * INTERVAL '1 second' "
-                    f"WHERE id = %(id)s{_FENCE}",
-                    {"seconds": seconds, "id": msg_id, "attempts": getattr(message, "attempts", None)},
+                    f"WHERE id = %(id)s{_FENCE}{_TENANT}",
+                    {
+                        "seconds": seconds,
+                        "id": msg_id,
+                        "attempts": getattr(message, "attempts", None),
+                        "tenant": self.tenant,
+                    },
                 )
                 extended = bool(cur.rowcount == 1)
             conn.commit()
@@ -300,9 +309,14 @@ class PostgresQueue(Queue):
                     UPDATE {self.table_name}
                     SET deliver_at = NOW() + %(delay)s * INTERVAL '1 second',
                         locked_until = NULL
-                    WHERE id = %(id)s{_FENCE}
+                    WHERE id = %(id)s{_FENCE}{_TENANT}
                     """,
-                    {"id": msg_id, "delay": delay.total_seconds(), "attempts": getattr(message, "attempts", None)},
+                    {
+                        "id": msg_id,
+                        "delay": delay.total_seconds(),
+                        "attempts": getattr(message, "attempts", None),
+                        "tenant": self.tenant,
+                    },
                 )
             conn.commit()
 
@@ -314,7 +328,10 @@ class PostgresQueue(Queue):
             return set()
         with self._borrow() as conn:
             with conn.cursor() as cur:
-                cur.execute(f"SELECT id FROM {self.table_name} WHERE id = ANY(%(ids)s)", {"ids": list(owned)})
+                cur.execute(
+                    f"SELECT id FROM {self.table_name} WHERE id = ANY(%(ids)s){_TENANT}",
+                    {"ids": list(owned), "tenant": self.tenant},
+                )
                 rows = cur.fetchall()
         return {owned[int(r["id"])] for r in rows}
 
@@ -326,7 +343,10 @@ class PostgresQueue(Queue):
 
         with self._borrow() as conn:
             with conn.cursor() as cur:
-                cur.execute(f"SELECT COUNT(*) as cnt FROM {self.table_name}")
+                cur.execute(
+                    f"SELECT COUNT(*) as cnt FROM {self.table_name} WHERE stabilize_tenant = %(tenant)s",
+                    {"tenant": self.tenant},
+                )
                 row = cur.fetchone()
                 count = row["cnt"] if row else 0
 
@@ -338,7 +358,9 @@ class PostgresQueue(Queue):
         """Clear all messages from the queue."""
         with self._borrow() as conn:
             with conn.cursor() as cur:
-                cur.execute(f"DELETE FROM {self.table_name}")
+                cur.execute(
+                    f"DELETE FROM {self.table_name} WHERE stabilize_tenant = %(tenant)s", {"tenant": self.tenant}
+                )
             conn.commit()
 
         self._pending.clear()
@@ -363,10 +385,10 @@ class PostgresQueue(Queue):
                 cur.execute(
                     f"""
                     SELECT 1 FROM {self.table_name}
-                    WHERE payload ->> 'task_id' = %s
+                    WHERE payload ->> 'task_id' = %s AND stabilize_tenant = %s
                     LIMIT 1
                     """,
-                    (task_id,),
+                    (task_id, self.tenant),
                 )
                 return cur.fetchone() is not None
 
@@ -374,8 +396,9 @@ class PostgresQueue(Queue):
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT 1 FROM {self.table_name} WHERE payload ->> 'stage_id' = %s LIMIT 1",
-                    (stage_id,),
+                    f"SELECT 1 FROM {self.table_name} "
+                    "WHERE payload ->> 'stage_id' = %s AND stabilize_tenant = %s LIMIT 1",
+                    (stage_id, self.tenant),
                 )
                 return cur.fetchone() is not None
 
@@ -384,8 +407,9 @@ class PostgresQueue(Queue):
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT 1 FROM {self.table_name} WHERE payload ->> 'execution_id' = %s LIMIT 1",
-                    (execution_id,),
+                    f"SELECT 1 FROM {self.table_name} "
+                    "WHERE payload ->> 'execution_id' = %s AND stabilize_tenant = %s LIMIT 1",
+                    (execution_id, self.tenant),
                 )
                 return cur.fetchone() is not None
 
@@ -396,8 +420,8 @@ class PostgresQueue(Queue):
             with conn.cursor() as cur:
                 for table in (self.table_name, f"{self.table_name}_dlq"):
                     cur.execute(
-                        f"DELETE FROM {table} WHERE payload ->> 'execution_id' = %s",
-                        (execution_id,),
+                        f"DELETE FROM {table} WHERE payload ->> 'execution_id' = %s AND stabilize_tenant = %s",
+                        (execution_id, self.tenant),
                     )
                     deleted += cur.rowcount
             conn.commit()

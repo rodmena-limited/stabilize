@@ -8,6 +8,7 @@ from pathlib import Path
 
 from stabilize.cli.commands import mg_check_grants, mg_status, mg_up, monitor, prompt, prune_signals
 from stabilize.cli.migrations import MigrationsNotFoundError
+from stabilize.cli.tenancy_cli import mg_tenancy
 
 
 def main() -> None:
@@ -77,6 +78,35 @@ def main() -> None:
         help="Read the database target from this migretti-style YAML file (never from the working directory)",
     )
 
+    tenancy_parser = subparsers.add_parser(
+        "mg-tenancy",
+        help="Report or switch the schema's tenancy mode (enable|disable|status); a switch needs an empty schema",
+    )
+    tenancy_parser.add_argument("action", choices=["enable", "disable", "status"])
+    tenancy_parser.add_argument(
+        "--db-url", help="Database URL of the migration role (postgres://user:pass@host:port/dbname)"
+    )
+    tenancy_parser.add_argument(
+        "--queue-table",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="A custom queue table that must also be empty (its _dlq sibling is checked too); repeatable",
+    )
+    tenancy_parser.add_argument(
+        "--lock-timeout",
+        type=float,
+        default=900.0,
+        metavar="SECONDS",
+        help="How long to wait for the mg-up lock before giving up (default 900)",
+    )
+    tenancy_parser.add_argument(
+        "--config",
+        type=Path,
+        metavar="PATH",
+        help="Read the database target from this migretti-style YAML file (never from the working directory)",
+    )
+
     # prompt command
     subparsers.add_parser(
         "prompt",
@@ -88,6 +118,10 @@ def main() -> None:
         "monitor",
         help="Real-time workflow monitoring dashboard (htop-like)",
     )
+    monitor_parser.add_argument(
+        "--tenant", help="Show one tenant's workflows (required in tenancy mode unless --all-tenants)"
+    )
+    monitor_parser.add_argument("--all-tenants", action="store_true", help="Show every tenant's workflows")
     monitor_parser.add_argument(
         "--app",
         help="Filter by application name",
@@ -202,10 +236,30 @@ def main() -> None:
         except MigrationsNotFoundError as exc:
             print(exc, file=sys.stderr)
             sys.exit(2)
+    elif args.command == "mg-tenancy":
+        try:
+            mg_tenancy(
+                args.action,
+                args.db_url,
+                queue_tables=args.queue_table,
+                config_path=args.config,
+                lock_timeout=args.lock_timeout,
+            )
+        except MigrationsNotFoundError as exc:
+            print(exc, file=sys.stderr)
+            sys.exit(1)
     elif args.command == "prompt":
         prompt()
     elif args.command == "monitor":
-        monitor(args.db_url, args.app, args.refresh, args.status, config_path=args.config)
+        monitor(
+            args.db_url,
+            args.app,
+            args.refresh,
+            args.status,
+            config_path=args.config,
+            tenant=args.tenant,
+            all_tenants=args.all_tenants,
+        )
     elif args.command == "prune-signals":
         prune_signals(args.db_url, args.include_active, args.dry_run, args.statuses)
     elif args.command == "prune-processed":

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EventType, parse_event_type
 from stabilize.persistence.columns import select_list
+from stabilize.persistence.tenancy import refuse_foreign_row
 
 _SUBSCRIPTIONS = select_list("event_subscriptions", "postgres")
 
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
 
 
 class PostgresSubscriptionsMixin:
+    tenant: str
     """Mixin providing durable subscription CRUD methods."""
 
     if TYPE_CHECKING:
@@ -40,9 +42,9 @@ class PostgresSubscriptionsMixin:
                 cur.execute(
                     """
                     INSERT INTO event_subscriptions
-                    (id, event_types, entity_filter, last_sequence, webhook_url, updated_at)
+                    (id, event_types, entity_filter, last_sequence, webhook_url, updated_at, stabilize_tenant)
                     VALUES (%(id)s, %(event_types)s, %(entity_filter)s,
-                            %(last_sequence)s, %(webhook_url)s, NOW())
+                            %(last_sequence)s, %(webhook_url)s, NOW(), %(tenant)s)
                     ON CONFLICT (id)
                     DO UPDATE SET
                         event_types = EXCLUDED.event_types,
@@ -50,6 +52,7 @@ class PostgresSubscriptionsMixin:
                         last_sequence = EXCLUDED.last_sequence,
                         webhook_url = EXCLUDED.webhook_url,
                         updated_at = NOW()
+                    WHERE event_subscriptions.stabilize_tenant = EXCLUDED.stabilize_tenant
                     """,
                     {
                         "id": subscription_id,
@@ -57,8 +60,18 @@ class PostgresSubscriptionsMixin:
                         "entity_filter": (json.dumps(entity_filter) if entity_filter else None),
                         "last_sequence": last_sequence,
                         "webhook_url": webhook_url,
+                        "tenant": self.tenant,
                     },
                 )
+                if cur.rowcount == 0:
+                    cur.execute(
+                        "SELECT stabilize_tenant AS owner FROM event_subscriptions WHERE id = %(id)s",
+                        {"id": subscription_id},
+                    )
+                    held = cur.fetchone()
+                    refuse_foreign_row(
+                        "event_subscriptions", subscription_id, held["owner"] if held else None, self.tenant
+                    )
             conn.commit()
 
     def get_subscription(self, subscription_id: str) -> dict[str, Any] | None:
@@ -66,8 +79,9 @@ class PostgresSubscriptionsMixin:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT {_SUBSCRIPTIONS} FROM event_subscriptions WHERE id = %(id)s",
-                    {"id": subscription_id},
+                    f"SELECT {_SUBSCRIPTIONS} FROM event_subscriptions "
+                    "WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
+                    {"id": subscription_id, "tenant": self.tenant},
                 )
 
                 row = cur.fetchone()
@@ -113,9 +127,9 @@ class PostgresSubscriptionsMixin:
                     """
                     UPDATE event_subscriptions
                     SET last_sequence = %(last_sequence)s, updated_at = NOW()
-                    WHERE id = %(id)s
+                    WHERE id = %(id)s AND stabilize_tenant = %(tenant)s
                     """,
-                    {"id": subscription_id, "last_sequence": last_sequence},
+                    {"id": subscription_id, "last_sequence": last_sequence, "tenant": self.tenant},
                 )
             conn.commit()
 
@@ -134,12 +148,13 @@ class PostgresSubscriptionsMixin:
                     SET last_sequence = %(last_sequence)s,
                         last_commit_cursor = %(last_commit_cursor)s,
                         updated_at = NOW()
-                    WHERE id = %(id)s
+                    WHERE id = %(id)s AND stabilize_tenant = %(tenant)s
                     """,
                     {
                         "id": subscription_id,
                         "last_sequence": last_sequence,
                         "last_commit_cursor": last_commit_cursor,
+                        "tenant": self.tenant,
                     },
                 )
             conn.commit()
@@ -149,8 +164,8 @@ class PostgresSubscriptionsMixin:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "DELETE FROM event_subscriptions WHERE id = %(id)s",
-                    {"id": subscription_id},
+                    "DELETE FROM event_subscriptions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
+                    {"id": subscription_id, "tenant": self.tenant},
                 )
             conn.commit()
 
@@ -158,7 +173,10 @@ class PostgresSubscriptionsMixin:
         """List all durable subscriptions."""
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT id, last_sequence FROM event_subscriptions")
+                cur.execute(
+                    "SELECT id, last_sequence FROM event_subscriptions WHERE stabilize_tenant = %(tenant)s",
+                    {"tenant": self.tenant},
+                )
                 return [
                     {
                         "id": row["id"],

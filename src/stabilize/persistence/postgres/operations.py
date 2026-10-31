@@ -13,29 +13,31 @@ from stabilize.models.workflow import PausedDetails
 from stabilize.persistence.control_states import PAUSABLE
 from stabilize.persistence.postgres.converters import paused_to_dict
 from stabilize.persistence.signal_scope import signal_status_filter as _signal_status_filter
+from stabilize.persistence.tenancy import refuse_foreign_row
 from stabilize.queue.message_ids import owner_prefix
 
 logger = logging.getLogger(__name__)
 
 
-def pause_execution(pool: Any, execution_id: str, paused_by: str) -> None:
+def pause_execution(engine: Any, execution_id: str, paused_by: str) -> None:
     """Pause an execution."""
     paused = PausedDetails(
         paused_by=paused_by,
         pause_time=int(time.time() * 1000),
     )
 
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 UPDATE pipeline_executions SET
                     status = %(status)s,
                     paused = %(paused)s::jsonb
-                WHERE id = %(id)s AND status = ANY(%(pausable)s)
+                WHERE id = %(id)s AND status = ANY(%(pausable)s) AND stabilize_tenant = %(tenant)s
                 """,
                 {
                     "id": execution_id,
+                    "tenant": engine.tenant,
                     "pausable": [s.name for s in PAUSABLE],
                     "status": WorkflowStatus.PAUSED.name,
                     "paused": json.dumps(paused_to_dict(paused)),
@@ -44,14 +46,14 @@ def pause_execution(pool: Any, execution_id: str, paused_by: str) -> None:
         conn.commit()
 
 
-def resume_execution(pool: Any, execution_id: str) -> None:
+def resume_execution(engine: Any, execution_id: str) -> None:
     """Resume a paused execution.
 
     Uses atomic UPDATE with status check to prevent race conditions.
     """
     current_time = int(time.time() * 1000)
 
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -66,10 +68,11 @@ def resume_execution(pool: Any, execution_id: str) -> None:
                             )
                         ELSE NULL
                     END
-                WHERE id = %(id)s AND status = 'PAUSED'
+                WHERE id = %(id)s AND status = 'PAUSED' AND stabilize_tenant = %(tenant)s
                 """,
                 {
                     "id": execution_id,
+                    "tenant": engine.tenant,
                     "status": WorkflowStatus.RUNNING.name,
                     "resume_time": current_time,
                 },
@@ -82,9 +85,9 @@ def resume_execution(pool: Any, execution_id: str) -> None:
         conn.commit()
 
 
-def cancel_execution(pool: Any, execution_id: str, canceled_by: str, reason: str) -> None:
+def cancel_execution(engine: Any, execution_id: str, canceled_by: str, reason: str) -> None:
     """Cancel an execution."""
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -92,10 +95,11 @@ def cancel_execution(pool: Any, execution_id: str, canceled_by: str, reason: str
                     is_canceled = TRUE,
                     canceled_by = %(canceled_by)s,
                     cancellation_reason = %(reason)s
-                WHERE id = %(id)s AND NOT (status = ANY(%(complete)s))
+                WHERE id = %(id)s AND NOT (status = ANY(%(complete)s)) AND stabilize_tenant = %(tenant)s
                 """,
                 {
                     "id": execution_id,
+                    "tenant": engine.tenant,
                     "complete": [s.name for s in WorkflowStatus if s.is_complete and s is not WorkflowStatus.CANCELED],
                     "canceled_by": canceled_by,
                     "reason": reason,
@@ -104,47 +108,50 @@ def cancel_execution(pool: Any, execution_id: str, canceled_by: str, reason: str
         conn.commit()
 
 
-def is_message_processed(pool: Any, message_id: str) -> bool:
+def is_message_processed(engine: Any, message_id: str) -> bool:
     """Check if a message has already been processed."""
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT 1 FROM processed_messages WHERE message_id = %(message_id)s",
-                {"message_id": message_id},
+                "SELECT 1 FROM processed_messages WHERE message_id = %(message_id)s AND stabilize_tenant = %(tenant)s",
+                {"message_id": message_id, "tenant": engine.tenant},
             )
             return cur.fetchone() is not None
 
 
-def get_processed_message_ids(pool: Any, limit: int | None = None) -> list[str]:
+def get_processed_message_ids(engine: Any, limit: int | None = None) -> list[str]:
     """Return processed message IDs, for hydrating an in-memory dedup cache."""
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             if limit is not None:
                 cur.execute(
-                    "SELECT message_id FROM processed_messages LIMIT %(limit)s",
-                    {"limit": limit},
+                    "SELECT message_id FROM processed_messages WHERE stabilize_tenant = %(tenant)s LIMIT %(limit)s",
+                    {"limit": limit, "tenant": engine.tenant},
                 )
             else:
-                cur.execute("SELECT message_id FROM processed_messages")
+                cur.execute(
+                    "SELECT message_id FROM processed_messages WHERE stabilize_tenant = %(tenant)s",
+                    {"tenant": engine.tenant},
+                )
             # Pool uses dict_row: rows are dict-like, access by column name.
             return [row["message_id"] for row in cur.fetchall()]
 
 
 def mark_message_processed(
-    pool: Any,
+    engine: Any,
     message_id: str,
     handler_type: str | None = None,
     execution_id: str | None = None,
 ) -> None:
     """Mark a message as successfully processed."""
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO processed_messages (
-                    message_id, processed_at, handler_type, execution_id
+                    message_id, processed_at, handler_type, execution_id, stabilize_tenant
                 ) VALUES (
-                    %(message_id)s, NOW(), %(handler_type)s, %(execution_id)s
+                    %(message_id)s, NOW(), %(handler_type)s, %(execution_id)s, %(tenant)s
                 )
                 ON CONFLICT (message_id) DO NOTHING
                 """,
@@ -152,28 +159,37 @@ def mark_message_processed(
                     "message_id": message_id,
                     "handler_type": handler_type,
                     "execution_id": execution_id,
+                    "tenant": engine.tenant,
                 },
             )
+            if cur.rowcount == 0:
+                cur.execute(
+                    "SELECT stabilize_tenant AS owner FROM processed_messages WHERE message_id = %(message_id)s",
+                    {"message_id": message_id},
+                )
+                owner = cur.fetchone()
+                refuse_foreign_row("processed_messages", message_id, owner["owner"] if owner else None, engine.tenant)
         conn.commit()
 
 
 PG_RETENTION_BATCH = 10_000
 
 _DELETE_STALE_BATCH = """
-    DELETE FROM processed_messages
-    WHERE message_id IN (
+    WITH victims AS MATERIALIZED (
         SELECT message_id FROM processed_messages
-        WHERE processed_at < NOW() - %(hours)s * INTERVAL '1 hour'
-        ORDER BY processed_at
+        WHERE processed_at < NOW() - %(hours)s * INTERVAL '1 hour' AND stabilize_tenant = %(tenant)s
+        ORDER BY processed_at, message_id
         LIMIT %(n)s
         FOR UPDATE SKIP LOCKED
     )
-    AND processed_at < NOW() - %(hours)s * INTERVAL '1 hour'
+    DELETE FROM processed_messages p
+    USING victims v
+    WHERE p.message_id = v.message_id AND p.stabilize_tenant = %(tenant)s
 """
 
 
 def cleanup_old_processed_messages(
-    pool: Any,
+    engine: Any,
     max_age_hours: float = 24.0,
     batch_size: int | None = None,
     max_rows: int | None = None,
@@ -183,9 +199,9 @@ def cleanup_old_processed_messages(
     total = 0
     while max_rows is None or total < max_rows:
         n = batch if max_rows is None else min(batch, max_rows - total)
-        with pool.connection() as conn:
+        with engine.connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(_DELETE_STALE_BATCH, {"hours": float(max_age_hours), "n": n})
+                cur.execute(_DELETE_STALE_BATCH, {"hours": float(max_age_hours), "n": n, "tenant": engine.tenant})
                 deleted = int(cur.rowcount or 0)
             conn.commit()
         total += deleted
@@ -202,7 +218,7 @@ KEPT_LIMIT = 5_000
 
 
 def cleanup_processed_not_in_queue(
-    pool: Any,
+    engine: Any,
     max_age_hours: float,
     batch_size: int | None,
     max_rows: int | None,
@@ -213,13 +229,13 @@ def cleanup_processed_not_in_queue(
     prefix = owner_prefix(table_name)
     owner = "message_id ~ '^[0-9]+$'" if prefix is None else "left(message_id, %(plen)s) = %(prefix)s"
     batch = int(batch_size or PG_RETENTION_BATCH)
-    stale = "processed_at < NOW() - %(hours)s * INTERVAL '1 hour'"
+    stale = "processed_at < NOW() - %(hours)s * INTERVAL '1 hour' AND stabilize_tenant = %(tenant)s"
     total = 0
     kept: list[str] = []
     while max_rows is None or total < max_rows:
-        params: dict[str, Any] = {"hours": float(max_age_hours), "n": batch, "kept": kept}
+        params: dict[str, Any] = {"hours": float(max_age_hours), "n": batch, "kept": kept, "tenant": engine.tenant}
         params.update(prefix=prefix, plen=len(prefix or ""))
-        with pool.connection() as conn:
+        with engine.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"SELECT message_id FROM processed_messages WHERE {stale} AND {owner} "
@@ -237,11 +253,11 @@ def cleanup_processed_not_in_queue(
         if max_rows is not None:
             gone = gone[: max_rows - total]
         if gone:
-            with pool.connection() as conn:
+            with engine.connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"DELETE FROM processed_messages WHERE message_id = ANY(%(ids)s) AND {stale}",
-                        {"ids": gone, "hours": float(max_age_hours)},
+                        {"ids": gone, "hours": float(max_age_hours), "tenant": engine.tenant},
                     )
                     total += int(cur.rowcount or 0)
                 conn.commit()
@@ -250,7 +266,7 @@ def cleanup_processed_not_in_queue(
     return total
 
 
-def cleanup_completed_stage_claims(pool: Any) -> int:
+def cleanup_completed_stage_claims(engine: Any) -> int:
     """Delete stage claims belonging to executions in terminal states.
 
     Claims of live executions are never touched: removing one would
@@ -259,17 +275,17 @@ def cleanup_completed_stage_claims(pool: Any) -> int:
     from stabilize.models.status import WorkflowStatus
 
     terminal = [s.name for s in WorkflowStatus if s.is_complete]
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 DELETE FROM stage_claims
-                WHERE execution_id IN (
+                WHERE stabilize_tenant = %(tenant)s AND execution_id IN (
                     SELECT id FROM pipeline_executions
-                    WHERE status = ANY(%(statuses)s)
+                    WHERE status = ANY(%(statuses)s) AND stabilize_tenant = %(tenant)s
                 )
                 """,
-                {"statuses": terminal},
+                {"statuses": terminal, "tenant": engine.tenant},
             )
             deleted: int = cur.rowcount or 0
         conn.commit()
@@ -277,7 +293,7 @@ def cleanup_completed_stage_claims(pool: Any) -> int:
 
 
 def cleanup_buffered_signals(
-    pool: Any,
+    engine: Any,
     only_complete: bool = True,
     statuses: list[str] | None = None,
 ) -> int:
@@ -285,15 +301,15 @@ def cleanup_buffered_signals(
     sql = """
         UPDATE stage_executions
         SET context = context - '_buffered_signals'
-        WHERE context ? '_buffered_signals'
+        WHERE context ? '_buffered_signals' AND stabilize_tenant = %(tenant)s
     """
     selected = _signal_status_filter(only_complete, statuses)
-    params: dict[str, Any] = {}
+    params: dict[str, Any] = {"tenant": engine.tenant}
     if selected is not None:
         sql += " AND status = ANY(%(statuses)s)"
         params["statuses"] = selected
 
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params)
             count = cur.rowcount
@@ -302,19 +318,22 @@ def cleanup_buffered_signals(
 
 
 def count_buffered_signal_stages(
-    pool: Any,
+    engine: Any,
     only_complete: bool = True,
     statuses: list[str] | None = None,
 ) -> int:
     """Count stage rows carrying a _buffered_signals buffer."""
-    sql = "SELECT COUNT(*) AS n FROM stage_executions WHERE context ? '_buffered_signals'"
+    sql = (
+        "SELECT COUNT(*) AS n FROM stage_executions "
+        "WHERE context ? '_buffered_signals' AND stabilize_tenant = %(tenant)s"
+    )
     selected = _signal_status_filter(only_complete, statuses)
-    params: dict[str, Any] = {}
+    params: dict[str, Any] = {"tenant": engine.tenant}
     if selected is not None:
         sql += " AND status = ANY(%(statuses)s)"
         params["statuses"] = selected
 
-    with pool.connection() as conn:
+    with engine.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params)
             row = cur.fetchone()

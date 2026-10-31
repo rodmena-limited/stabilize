@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 
 class PostgresEventsMixin:
+    tenant: str
     """Mixin providing event append, query, and retrieval methods."""
 
     if TYPE_CHECKING:
@@ -53,12 +54,12 @@ class PostgresEventsMixin:
                     INSERT INTO events (
                         event_id, event_type, timestamp, entity_type, entity_id,
                         workflow_id, version, data, correlation_id, causation_id,
-                        actor, source_handler, schema_version
+                        actor, source_handler, schema_version, stabilize_tenant
                     ) VALUES (
                         %(event_id)s, %(event_type)s, %(timestamp)s, %(entity_type)s,
                         %(entity_id)s, %(workflow_id)s, %(version)s, %(data)s,
                         %(correlation_id)s, %(causation_id)s, %(actor)s, %(source_handler)s,
-                        %(schema_version)s
+                        %(schema_version)s, %(tenant)s
                     )
                     RETURNING sequence
                     """,
@@ -70,6 +71,7 @@ class PostgresEventsMixin:
                         "entity_id": event.entity_id,
                         "workflow_id": event.workflow_id,
                         "version": event.version,
+                        "tenant": self.tenant,
                         "data": json.dumps(event.data),
                         "correlation_id": event.metadata.correlation_id,
                         "causation_id": event.metadata.causation_id,
@@ -97,8 +99,8 @@ class PostgresEventsMixin:
 
     def get_events(self, query: EventQuery) -> Iterator[Event]:
         """Query events matching criteria."""
-        sql_parts = [f"SELECT {_EVENTS} FROM events WHERE 1=1"]
-        params: dict[str, Any] = {}
+        sql_parts = [f"SELECT {_EVENTS} FROM events WHERE stabilize_tenant = %(tenant)s"]
+        params: dict[str, Any] = {"tenant": self.tenant}
 
         if query.entity_type is not None:
             sql_parts.append("AND entity_type = %(entity_type)s")
@@ -164,13 +166,14 @@ class PostgresEventsMixin:
                     SELECT {_EVENTS} FROM events
                     WHERE entity_type = %(entity_type)s
                       AND entity_id = %(entity_id)s
-                      AND version > %(from_version)s
+                      AND version > %(from_version)s AND stabilize_tenant = %(tenant)s
                     ORDER BY sequence ASC
                     """,
                     {
                         "entity_type": entity_type.value,
                         "entity_id": entity_id,
                         "from_version": from_version,
+                        "tenant": self.tenant,
                     },
                 )
                 return [self._row_to_event(row) for row in cur.fetchall()]
@@ -187,10 +190,10 @@ class PostgresEventsMixin:
                     f"""
                     SELECT {_EVENTS} FROM events
                     WHERE workflow_id = %(workflow_id)s
-                      AND sequence > %(from_sequence)s
+                      AND sequence > %(from_sequence)s AND stabilize_tenant = %(tenant)s
                     ORDER BY sequence ASC
                     """,
-                    {"workflow_id": workflow_id, "from_sequence": from_sequence},
+                    {"workflow_id": workflow_id, "from_sequence": from_sequence, "tenant": self.tenant},
                 )
                 return [self._row_to_event(row) for row in cur.fetchall()]
 
@@ -198,7 +201,9 @@ class PostgresEventsMixin:
         """Get the current (latest) global sequence number."""
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT MAX(sequence) FROM events")
+                cur.execute(
+                    "SELECT MAX(sequence) FROM events WHERE stabilize_tenant = %(tenant)s", {"tenant": self.tenant}
+                )
                 row = cur.fetchone()
                 if row is None:
                     return 0
@@ -216,11 +221,11 @@ class PostgresEventsMixin:
                 cur.execute(
                     f"""
                     SELECT {_EVENTS} FROM events
-                    WHERE sequence > %(sequence)s
+                    WHERE sequence > %(sequence)s AND stabilize_tenant = %(tenant)s
                     ORDER BY sequence ASC
                     LIMIT %(limit)s
                     """,
-                    {"sequence": sequence, "limit": limit},
+                    {"sequence": sequence, "limit": limit, "tenant": self.tenant},
                 )
                 return [self._row_to_event(row) for row in cur.fetchall()]
 
@@ -252,11 +257,11 @@ class PostgresEventsMixin:
                     f"""
                     SELECT {_EVENTS} FROM events
                     WHERE coalesce(commit_xid, '0'::xid8) >= %(cursor)s::xid8
-                      AND coalesce(commit_xid, '0'::xid8) < %(watermark)s::xid8
+                      AND coalesce(commit_xid, '0'::xid8) < %(watermark)s::xid8 AND stabilize_tenant = %(tenant)s
                     ORDER BY coalesce(commit_xid, '0'::xid8) ASC, sequence ASC
                     LIMIT %(limit)s
                     """,
-                    {"cursor": cursor or "0", "watermark": watermark, "limit": limit},
+                    {"cursor": cursor or "0", "watermark": watermark, "limit": limit, "tenant": self.tenant},
                 )
                 events = [self._row_to_event(row) for row in cur.fetchall()]
 
@@ -267,8 +272,8 @@ class PostgresEventsMixin:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT {_EVENTS} FROM events WHERE event_id = %(event_id)s",
-                    {"event_id": event_id},
+                    f"SELECT {_EVENTS} FROM events WHERE event_id = %(event_id)s AND stabilize_tenant = %(tenant)s",
+                    {"event_id": event_id, "tenant": self.tenant},
                 )
                 row = cur.fetchone()
                 return self._row_to_event(row) if row else None
@@ -278,10 +283,12 @@ class PostgresEventsMixin:
         with self._pool.connection() as conn:
             with conn.cursor() as cur:
                 if query is None:
-                    cur.execute("SELECT COUNT(*) FROM events")
+                    cur.execute(
+                        "SELECT COUNT(*) FROM events WHERE stabilize_tenant = %(tenant)s", {"tenant": self.tenant}
+                    )
                 else:
-                    sql_parts = ["SELECT COUNT(*) FROM events WHERE 1=1"]
-                    params: dict[str, Any] = {}
+                    sql_parts = ["SELECT COUNT(*) FROM events WHERE stabilize_tenant = %(tenant)s"]
+                    params: dict[str, Any] = {"tenant": self.tenant}
 
                     if query.entity_type is not None:
                         sql_parts.append("AND entity_type = %(entity_type)s")

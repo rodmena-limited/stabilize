@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class SqliteDLQMixin:
+    tenant: str
     """Mixin providing Dead Letter Queue functionality for SQLite queue.
 
     This mixin provides methods for managing messages that have failed
@@ -58,10 +59,10 @@ class SqliteDLQMixin:
         cursor = conn.execute(
             f"""
             DELETE FROM {self.table_name}
-            WHERE id = :id
-            RETURNING id, message_id, message_type, payload, attempts, created_at
+            WHERE id = :id AND stabilize_tenant = :tenant
+            RETURNING id, message_id, message_type, payload, attempts, created_at, stabilize_tenant
             """,
-            {"id": msg_id},
+            {"id": msg_id, "tenant": self.tenant},
         )
         row = cursor.fetchone()
 
@@ -73,10 +74,10 @@ class SqliteDLQMixin:
             f"""
             INSERT INTO {self.table_name}_dlq (
                 original_id, message_id, message_type, payload,
-                attempts, error, last_error_at, created_at
+                attempts, error, last_error_at, created_at, stabilize_tenant
             ) VALUES (
                 :original_id, :message_id, :message_type, :payload,
-                :attempts, :error, datetime('now', 'utc'), :created_at
+                :attempts, :error, datetime('now', 'utc'), :created_at, :tenant
             )
             """,
             {
@@ -87,6 +88,7 @@ class SqliteDLQMixin:
                 "attempts": row["attempts"],
                 "error": error or "Max attempts exceeded",
                 "created_at": row["created_at"],
+                "tenant": row["stabilize_tenant"],
             },
         )
         conn.commit()
@@ -125,11 +127,11 @@ class SqliteDLQMixin:
         """
         conn = self._get_connection()
 
-        query = f"SELECT {_DLQ} FROM {self.table_name}_dlq"
-        params: dict[str, Any] = {"limit": limit}
+        query = f"SELECT {_DLQ} FROM {self.table_name}_dlq WHERE stabilize_tenant = :tenant"
+        params: dict[str, Any] = {"limit": limit, "tenant": self.tenant}
 
         if message_type:
-            query += " WHERE message_type = :message_type"
+            query += " AND message_type = :message_type"
             params["message_type"] = message_type
 
         query += " ORDER BY moved_at DESC LIMIT :limit"
@@ -152,8 +154,8 @@ class SqliteDLQMixin:
         conn = self._get_connection()
 
         cursor = conn.execute(
-            f"DELETE FROM {self.table_name}_dlq WHERE id = :id RETURNING {_DLQ}",
-            {"id": dlq_id},
+            f"DELETE FROM {self.table_name}_dlq WHERE id = :id AND stabilize_tenant = :tenant RETURNING {_DLQ}",
+            {"id": dlq_id, "tenant": self.tenant},
         )
         row = cursor.fetchone()
 
@@ -164,9 +166,9 @@ class SqliteDLQMixin:
         conn.execute(
             f"""
             INSERT INTO {self.table_name} (
-                message_id, message_type, payload, deliver_at, attempts
+                message_id, message_type, payload, deliver_at, attempts, stabilize_tenant
             ) VALUES (
-                :message_id, :message_type, :payload, :now, 0
+                :message_id, :message_type, :payload, :now, 0, :tenant
             )
             """,
             {
@@ -174,6 +176,7 @@ class SqliteDLQMixin:
                 "message_type": row["message_type"],
                 "payload": row["payload"],
                 "now": datetime.now(UTC).isoformat(),
+                "tenant": row["stabilize_tenant"],
             },
         )
         conn.commit()
@@ -184,7 +187,7 @@ class SqliteDLQMixin:
     def dlq_size(self) -> int:
         """Get the number of messages in the Dead Letter Queue."""
         conn = self._get_connection()
-        result = conn.execute(f"SELECT COUNT(*) FROM {self.table_name}_dlq")
+        result = conn.execute(f"SELECT COUNT(*) FROM {self.table_name}_dlq WHERE stabilize_tenant = ?", (self.tenant,))
         row = result.fetchone()
         return row[0] if row else 0
 
@@ -196,7 +199,7 @@ class SqliteDLQMixin:
         """
         conn = self._get_connection()
         count = self.dlq_size()
-        conn.execute(f"DELETE FROM {self.table_name}_dlq")
+        conn.execute(f"DELETE FROM {self.table_name}_dlq WHERE stabilize_tenant = ?", (self.tenant,))
         conn.commit()
         logger.info("Cleared %d messages from DLQ", count)
         return count
@@ -216,8 +219,9 @@ class SqliteDLQMixin:
             f"""
             SELECT id, message_type, attempts
             FROM {self.table_name}
-            WHERE attempts >= max_attempts
+            WHERE attempts >= max_attempts AND stabilize_tenant = :tenant
             """,
+            {"tenant": self.tenant},
         )
         rows = result.fetchall()
 

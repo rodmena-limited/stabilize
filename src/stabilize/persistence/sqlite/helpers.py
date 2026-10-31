@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from stabilize.errors import ConcurrencyError
 from stabilize.persistence.task_state import needs_write
+from stabilize.persistence.tenancy import refuse_foreign_row
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -37,7 +38,7 @@ def has_queue_table_column(conn: sqlite3.Connection) -> bool:
     return _QUEUE_TABLE_COLUMN[key]
 
 
-def insert_stage(conn: sqlite3.Connection, stage: StageExecution, execution_id: str) -> None:
+def insert_stage(conn: sqlite3.Connection, stage: StageExecution, execution_id: str, tenant: str) -> None:
     """Insert a stage."""
     conn.execute(
         """
@@ -47,7 +48,7 @@ def insert_stage(conn: sqlite3.Connection, stage: StageExecution, execution_id: 
             start_time, end_time, start_time_expiry, scheduled_time, version,
             join_type, join_threshold, split_type, split_conditions,
             mi_config, deferred_choice_group, milestone_ref_id,
-            milestone_status, mutex_key, cancel_region
+            milestone_status, mutex_key, cancel_region, stabilize_tenant
         ) VALUES (
             :id, :execution_id, :ref_id, :type, :name, :status,
             :context, :outputs, :requisite_stage_ref_ids,
@@ -55,7 +56,7 @@ def insert_stage(conn: sqlite3.Connection, stage: StageExecution, execution_id: 
             :end_time, :start_time_expiry, :scheduled_time, :version,
             :join_type, :join_threshold, :split_type, :split_conditions,
             :mi_config, :deferred_choice_group, :milestone_ref_id,
-            :milestone_status, :mutex_key, :cancel_region
+            :milestone_status, :mutex_key, :cancel_region, :tenant
         )
         """,
         {
@@ -85,15 +86,18 @@ def insert_stage(conn: sqlite3.Connection, stage: StageExecution, execution_id: 
             "milestone_status": stage.milestone_status,
             "mutex_key": stage.mutex_key,
             "cancel_region": stage.cancel_region,
+            "tenant": tenant,
         },
     )
 
     # Insert tasks
     for task in stage.tasks:
-        upsert_task(conn, task, stage.id)
+        upsert_task(conn, task, stage.id, tenant)
 
 
-def upsert_task(conn: sqlite3.Connection, task: TaskExecution, stage_id: str, only_changed: bool = False) -> None:
+def upsert_task(
+    conn: sqlite3.Connection, task: TaskExecution, stage_id: str, tenant: str, only_changed: bool = False
+) -> None:
     """Insert or update a task with optimistic locking."""
     if only_changed and not needs_write(task):
         return
@@ -112,10 +116,11 @@ def upsert_task(conn: sqlite3.Connection, task: TaskExecution, stage_id: str, on
             loop_end = :loop_end,
             task_exception_details = :task_exception_details,
             version = version + 1
-        WHERE id = :id AND version = :version
+        WHERE id = :id AND version = :version AND stabilize_tenant = :tenant
         """,
         {
             "id": task.id,
+            "tenant": tenant,
             "name": task.name,
             "implementing_class": task.implementing_class,
             "status": task.status.name,
@@ -138,16 +143,17 @@ def upsert_task(conn: sqlite3.Connection, task: TaskExecution, stage_id: str, on
                 INSERT INTO task_executions (
                     id, stage_id, name, implementing_class, status,
                     start_time, end_time, stage_start, stage_end,
-                    loop_start, loop_end, task_exception_details, version
+                    loop_start, loop_end, task_exception_details, version, stabilize_tenant
                 ) VALUES (
                     :id, :stage_id, :name, :implementing_class, :status,
                     :start_time, :end_time, :stage_start, :stage_end,
-                    :loop_start, :loop_end, :task_exception_details, 0
+                    :loop_start, :loop_end, :task_exception_details, 0, :tenant
                 )
                 """,
                 {
                     "id": task.id,
                     "stage_id": stage_id,
+                    "tenant": tenant,
                     "name": task.name,
                     "implementing_class": task.implementing_class,
                     "status": task.status.name,
@@ -161,7 +167,10 @@ def upsert_task(conn: sqlite3.Connection, task: TaskExecution, stage_id: str, on
                 },
             )
         except sqlite3.IntegrityError:
-            # Row exists but version mismatch - concurrent modification
+            held = conn.execute(
+                "SELECT stabilize_tenant FROM task_executions WHERE id = :id", {"id": task.id}
+            ).fetchone()
+            refuse_foreign_row("task_executions", task.id, held[0] if held else None, tenant)
             raise ConcurrencyError(f"Task {task.id} was modified concurrently (expected version {task.version})")
     else:
         # Update successful - increment local version
