@@ -8,6 +8,7 @@ from stabilize.handlers.start_stage.planner import HYDRATED_KEYS
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.queue.messages import JumpToStage
+    from stabilize.tasks.registry import TaskRegistry
 
 
 def apply_jump_to_target(
@@ -16,8 +17,9 @@ def apply_jump_to_target(
     message: JumpToStage,
     jump_count: int,
     history: list[dict[str, Any]],
+    task_registry: TaskRegistry | None = None,
 ) -> None:
-    reset_stage_for_retry(stage)
+    reset_stage_for_retry(stage, task_registry=task_registry)
     if message.jump_context:
         stage.context.update(message.jump_context)
         hydrated = stage.context.get(HYDRATED_KEYS)

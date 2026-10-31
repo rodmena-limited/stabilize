@@ -18,6 +18,7 @@ from stabilize.models.stage.completion_records import recorded_completion
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import CancelStage, CompleteStage, CompleteWorkflow
 from stabilize.resilience.config import HandlerConfig
+from stabilize.tasks.handles import bind_engine
 
 if TYPE_CHECKING:
     from stabilize.events.recorder import EventRecorder
@@ -77,8 +78,9 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
         )
         stage = settled.get("stage")
         if stage is not None:
-            self._run_hooks(stage, settled["moved"])
-            self.run_stage_finalizers(stage)
+            with bind_engine(self.repository, self.queue):
+                self._run_hooks(stage, settled["moved"])
+                self.run_stage_finalizers(stage)
 
     def _handle_with_retry(self, message: CancelStage, settled: dict[str, Any]) -> None:
         """Inner handle logic to be retried."""

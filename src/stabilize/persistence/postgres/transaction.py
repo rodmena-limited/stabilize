@@ -85,6 +85,14 @@ class PostgresTransaction(StoreTransaction):
         self._staged_objects.extend(task_versions)
         self._written_tasks.extend(capture(stage.tasks))
 
+    def store_workflow(self, workflow: Workflow) -> None:
+        from stabilize.persistence.postgres.helpers import insert_execution
+        from stabilize.persistence.store.ids import check_ids
+
+        check_ids(workflow, self._tenant)
+        with self._conn.cursor() as cur:
+            insert_execution(cur, workflow, self._tenant)
+
     def set_config_version(self, workflow_id: str, config_version: str) -> None:
         with self._conn.cursor() as cur:
             cur.execute(

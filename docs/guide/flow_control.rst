@@ -573,7 +573,10 @@ Use ``SubWorkflowTask`` to start a child workflow and wait for its completion:
         ...
     )
 
-Recursion depth is tracked via ``_recursion_depth`` (default max: 10).
+Recursion depth is tracked via ``_recursion_depth`` (default max: 10). The ``stages``
+list holds plain dictionaries, because the configuration lives in the stage context and is
+stored as JSON; ``stabilize.models.stage.definition.stage_to_definition`` produces one from a
+``StageExecution``.
 
 The task runs on the store and queue of the processor that executes it. The child is
 stored and its ``StartWorkflow`` pushed in one transaction, and the child's id is derived

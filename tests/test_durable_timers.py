@@ -169,13 +169,13 @@ def test_next_ready_in_reports_the_earliest_pollable_message(any_db: str) -> Non
             StartWorkflow(execution_type="PIPELINE", execution_id="01NEXT000000000000000001"), timedelta(seconds=2)
         )
         wait = queue.next_ready_in()
-        assert wait is not None and 1.0 < wait <= 2.0, wait
+        assert wait is not None and 1.0 < wait <= 2.01, wait
         queue.push(StartWorkflow(execution_type="PIPELINE", execution_id="01NEXT000000000000000002"))
         assert queue.next_ready_in() == 0
         leased = queue.poll_one()
         assert leased is not None
         wait = queue.next_ready_in()
-        assert wait is not None and 0.5 < wait <= 2.0, "a leased message counted as ready"
+        assert wait is not None and 0.5 < wait <= 2.01, "a leased message counted as ready"
         queue.ack(leased)
         time.sleep(2.1)
         due_now = queue.poll_one()

@@ -156,6 +156,9 @@ host's own migretti history, now upgrade with no change to the command.
 - **Paused time is not task lifetime.** `PauseTask` records `_paused_at`, `ResumeStage`
   adds the interval to `_paused_ms`, and the RunTask lifetime and stage-timeout checks
   subtract it for every `RetryableTask`.
+- **`stabilize.models.stage.definition`**: `stage_to_definition()` and `stage_from_definition()`
+  convert a stage to and from the JSON shape a sub-workflow configuration carries in a
+  stage context. `SubWorkflowTask` accepts those dictionaries or `StageExecution` objects.
 - **`stabilize.tasks.handles.current_engine()`** returns the store and queue of the
   processor running the task, bound for the task's execution and its hooks;
   `bind_engine(store, queue)` binds them in tests. `StoreTransaction.store_workflow()`

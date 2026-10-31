@@ -23,13 +23,12 @@ from stabilize.persistence.pool_options import (
     with_schema,
 )
 from stabilize.persistence.postgres.converters import (
-    execution_to_dict,
     paused_to_dict,
     row_to_execution,
     row_to_stage,
     row_to_task,
 )
-from stabilize.persistence.postgres.helpers import insert_stage, upsert_tasks_bulk
+from stabilize.persistence.postgres.helpers import insert_execution, insert_stage, upsert_tasks_bulk
 from stabilize.persistence.postgres.maintenance import PostgresMaintenanceMixin
 from stabilize.persistence.postgres.operations import (
     cancel_execution,
@@ -156,34 +155,11 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         release_pool_once(self, self._manager, self._pool)
 
     def store(self, execution: Workflow) -> None:
-        """Store a complete execution."""
+        """Store a new workflow with its stages and tasks."""
         check_ids(execution, self.tenant)
         with self._borrow() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO pipeline_executions (
-                        id, type, application, name, status, context, start_time, end_time,
-                        start_time_expiry, trigger, is_canceled, canceled_by,
-                        cancellation_reason, paused, pipeline_config_id,
-                        is_limit_concurrent, max_concurrent_executions,
-                        keep_waiting_pipelines, origin, queue_table, config_version, stabilize_tenant
-                    ) VALUES (
-                        %(id)s, %(type)s, %(application)s, %(name)s, %(status)s,
-                        %(context)s::jsonb, %(start_time)s, %(end_time)s, %(start_time_expiry)s,
-                        %(trigger)s::jsonb, %(is_canceled)s, %(canceled_by)s,
-                        %(cancellation_reason)s, %(paused)s::jsonb, %(pipeline_config_id)s,
-                        %(is_limit_concurrent)s, %(max_concurrent_executions)s,
-                        %(keep_waiting_pipelines)s, %(origin)s, %(queue_table)s, %(config_version)s,
-                        %(tenant)s
-                    )
-                    """,
-                    {**execution_to_dict(execution), "tenant": self.tenant},
-                )
-
-                for stage in execution.stages:
-                    insert_stage(cur, stage, execution.id, self.tenant)
-
+                insert_execution(cur, execution, self.tenant)
             conn.commit()
 
     def retrieve(self, execution_id: str) -> Workflow:

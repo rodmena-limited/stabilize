@@ -23,6 +23,7 @@ from stabilize.queue.messages import (
     StartStage,
 )
 from stabilize.resilience.config import HandlerConfig
+from stabilize.tasks.handles import bind_engine
 
 if TYPE_CHECKING:
     from stabilize.events.recorder import EventRecorder
@@ -80,8 +81,9 @@ class SkipStageHandler(StabilizeHandler[SkipStage]):
         )
         stage = settled.get("stage")
         if stage is not None and message.pruned:
-            run_cancel_hooks(self.task_registry, stage, settled["moved"])
-            self.run_stage_finalizers(stage)
+            with bind_engine(self.repository, self.queue):
+                run_cancel_hooks(self.task_registry, stage, settled["moved"])
+                self.run_stage_finalizers(stage)
 
     def _handle_with_retry(self, message: SkipStage, settled: dict[str, Any]) -> None:
         """Inner handle logic to be retried."""

@@ -107,6 +107,10 @@ class StoreTransaction(ABC):
         """
         return True
 
+    def store_workflow(self, workflow: Workflow) -> None:
+        """Insert a new workflow with its stages and tasks inside the transaction."""
+        raise NotImplementedError(f"{type(self).__name__} cannot store workflows")
+
     def purge_stage_messages(self, stage_id: str, *, except_message_id: str | None = None) -> int:
         """Delete the queued messages that target *stage_id* or its tasks, keeping the in-flight one."""
         return 0

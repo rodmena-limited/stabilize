@@ -12,6 +12,35 @@ from stabilize.persistence.tenancy import refuse_foreign_row
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.models.task import TaskExecution
+    from stabilize.models.workflow import Workflow
+
+
+def insert_execution(cur: Any, execution: Workflow, tenant: str) -> None:
+    """Insert a workflow row and its stages; the caller commits."""
+    from stabilize.persistence.postgres.converters import execution_to_dict
+
+    cur.execute(
+        """
+        INSERT INTO pipeline_executions (
+            id, type, application, name, status, context, start_time, end_time,
+            start_time_expiry, trigger, is_canceled, canceled_by,
+            cancellation_reason, paused, pipeline_config_id,
+            is_limit_concurrent, max_concurrent_executions,
+            keep_waiting_pipelines, origin, queue_table, config_version, stabilize_tenant
+        ) VALUES (
+            %(id)s, %(type)s, %(application)s, %(name)s, %(status)s,
+            %(context)s::jsonb, %(start_time)s, %(end_time)s, %(start_time_expiry)s,
+            %(trigger)s::jsonb, %(is_canceled)s, %(canceled_by)s,
+            %(cancellation_reason)s, %(paused)s::jsonb, %(pipeline_config_id)s,
+            %(is_limit_concurrent)s, %(max_concurrent_executions)s,
+            %(keep_waiting_pipelines)s, %(origin)s, %(queue_table)s, %(config_version)s,
+            %(tenant)s
+        )
+        """,
+        {**execution_to_dict(execution), "tenant": tenant},
+    )
+    for stage in execution.stages:
+        insert_stage(cur, stage, execution.id, tenant)
 
 
 def insert_stage(cur: Any, stage: StageExecution, execution_id: str, tenant: str) -> None:

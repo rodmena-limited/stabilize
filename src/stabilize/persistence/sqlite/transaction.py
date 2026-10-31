@@ -183,6 +183,12 @@ class AtomicTransaction(StoreTransaction):
             insert_stage(self._conn, stage, stage.execution.id, self._tenant)
         self._written_tasks.extend(capture(stage.tasks))
 
+    def store_workflow(self, workflow: Workflow) -> None:
+        from stabilize.persistence.store.ids import check_ids
+
+        check_ids(workflow, self._tenant)
+        self._store._insert_execution(self._conn, workflow)
+
     def set_config_version(self, workflow_id: str, config_version: str) -> None:
         if not has_execution_column(self._conn, "config_version"):
             return

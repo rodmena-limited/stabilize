@@ -56,6 +56,7 @@ from stabilize.resilience.circuits import WorkflowCircuitFactory
 from stabilize.resilience.config import HandlerConfig, ResilienceConfig
 from stabilize.resilience.process_executor import ProcessIsolatedTaskExecutor
 from stabilize.resilience.timeouts import TimeoutManager
+from stabilize.tasks.handles import bind_engine
 from stabilize.tasks.interface import RetryableTask
 from stabilize.tasks.registry import TaskNotFoundError, TaskRegistry
 
@@ -454,7 +455,8 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 if lease_acquired and self.task_lease is not None:
                     self.task_lease.release(task_model.id)
 
-        self.with_task(message, on_task)
+        with bind_engine(self.repository, self.queue):
+            self.with_task(message, on_task)
 
     def _save_result(self, task_model: TaskExecution, result: TaskResult, message: RunTask) -> None:
         save_or_hold(self, task_model, result, message)

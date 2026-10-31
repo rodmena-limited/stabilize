@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import multiprocessing
+import pickle
 import traceback
 from dataclasses import dataclass
 from typing import Any
@@ -29,6 +30,9 @@ from stabilize.tasks.result import TaskResult
 logger = logging.getLogger(__name__)
 
 
+IN_WORKER_PROCESS = False
+
+
 @dataclass
 class ProcessResult:
     """Result returned from the worker process."""
@@ -37,6 +41,8 @@ class ProcessResult:
     result: TaskResult | None = None
     error: str | None = None
     traceback: str | None = None
+    exception: BaseException | None = None
+    exception_type: str | None = None
 
 
 def _worker_wrapper(
@@ -51,8 +57,9 @@ def _worker_wrapper(
     pickling issues with complex objects attached to stage (like execution ref).
     We reconstruct a minimal StageExecution for the task.
     """
+    global IN_WORKER_PROCESS
+    IN_WORKER_PROCESS = True
     try:
-        # Reconstruct minimal stage context
         stage = StageExecution(
             id=stage_data["id"],
             ref_id=stage_data["ref_id"],
@@ -70,12 +77,33 @@ def _worker_wrapper(
         queue.put(ProcessResult(success=True, result=result))
 
     except Exception as e:
-        # Send back failure
-        queue.put(ProcessResult(success=False, error=str(e), traceback=traceback.format_exc()))
+        text = traceback.format_exc()
+        try:
+            pickle.dumps(e)
+            carried: BaseException | None = e
+        except Exception:
+            carried = None
+        queue.put(
+            ProcessResult(
+                success=False, error=str(e), traceback=text, exception=carried, exception_type=type(e).__name__
+            )
+        )
 
 
 class ProcessIsolatedTaskExecutor:
     """Executes tasks in isolated processes."""
+
+    @staticmethod
+    def _on_timeout(task: Task, stage: StageExecution, seconds: float) -> TaskResult | None:
+        hook = getattr(task, "on_timeout", None)
+        if hook is None:
+            return None
+        try:
+            result = hook(stage)
+        except Exception as exc:
+            logger.error("on_timeout raised for %s after %.1fs: %s", type(task).__name__, seconds, exc)
+            return None
+        return result if isinstance(result, TaskResult) else None
 
     def __init__(self, timeout_seconds: float = 14400.0) -> None:
         """Initialize executor with timeout.
@@ -141,6 +169,9 @@ class ProcessIsolatedTaskExecutor:
                     process.join(timeout=5)
                     if process.is_alive():
                         process.kill()
+                    hooked = self._on_timeout(task, stage, effective_timeout)
+                    if hooked is not None:
+                        return hooked
                     return TaskResult.terminal(error=f"Task timed out after {effective_timeout}s (Process enforced)")
                 # Process died without producing a result
                 process.join(timeout=5)
@@ -161,7 +192,10 @@ class ProcessIsolatedTaskExecutor:
                 # For now, let's wrap it in a logic that allows the handler to decide?
                 # Actually, RunTaskHandler catches exceptions. We should re-raise
                 # if we want RunTaskHandler's standard logic to apply.
-                raise RuntimeError(result_wrapper.error)
+                if result_wrapper.exception is not None:
+                    raise result_wrapper.exception
+                kind = result_wrapper.exception_type or "Exception"
+                raise RuntimeError(f"{kind}: {result_wrapper.error or 'Unknown error'}")
 
         finally:
             # Cleanup

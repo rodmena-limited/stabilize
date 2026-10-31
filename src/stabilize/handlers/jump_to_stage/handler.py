@@ -275,7 +275,13 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             mutations.append(
                 (
                     target_stage.id,
-                    partial(apply_jump_to_target, message=message, jump_count=new_jump_count, history=jump_history),
+                    partial(
+                        apply_jump_to_target,
+                        message=message,
+                        jump_count=new_jump_count,
+                        history=jump_history,
+                        task_registry=self.task_registry,
+                    ),
                 )
             )
 
