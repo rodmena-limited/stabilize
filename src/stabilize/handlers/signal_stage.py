@@ -21,7 +21,7 @@ from stabilize.resilience.config import HandlerConfig
 if TYPE_CHECKING:
     from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
-    from stabilize.persistence.store import WorkflowStore
+    from stabilize.persistence.store import StoreTransaction, WorkflowStore
     from stabilize.queue import Queue
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,22 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
             f"signaling stage {message.stage_id}",
         )
 
+    def _record_delivery(self, txn: StoreTransaction, stage: StageExecution, message: SignalStage) -> bool:
+        """Record the delivered signal as a consumed row; False when the row the message names is gone."""
+        if message.signal_row_id is not None:
+            return txn.consume_signal(stage.execution.id, stage.ref_id, row_id=message.signal_row_id) is not None
+        if self.repository.supports_signal_storage():
+            txn.buffer_signal(
+                stage.execution.id,
+                stage.ref_id,
+                message.signal_name,
+                message.signal_data,
+                consumed=True,
+                user=message.user,
+                persistent=message.persistent,
+            )
+        return True
+
     def _handle_with_retry(self, message: SignalStage) -> None:
         """Inner handle logic to be retried."""
 
@@ -69,36 +85,28 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
             self.set_event_context(message.execution_id, actor=message.user or None)
 
             if stage.status == WorkflowStatus.SUSPENDED:
-                # Stage is waiting for a signal - deliver it
-                logger.info(
-                    "Delivering signal '%s' to suspended stage %s",
-                    message.signal_name,
-                    stage.name,
-                )
-
-                # Merge signal data into stage context
-                stage.context["_signal_name"] = message.signal_name
-                stage.context["_signal_data"] = message.signal_data
-
-                # Transition back to RUNNING
-                self.set_stage_status(stage, WorkflowStatus.RUNNING)
-
-                # Find the suspended task and set it back to RUNNING
-                suspended_task = None
-                for task in stage.tasks:
-                    if task.status == WorkflowStatus.SUSPENDED:
-                        suspended_task = task
-                        task.status = WorkflowStatus.RUNNING
-                        break
-
+                logger.info("Delivering signal '%s' to suspended stage %s", message.signal_name, stage.name)
                 with self.repository.transaction(self.queue) as txn:
-                    txn.store_stage(stage)
-                    if message.message_id:
-                        txn.mark_message_processed(
-                            message_id=message.message_id,
-                            handler_type="SignalStage",
-                            execution_id=message.execution_id,
+                    if not self._record_delivery(txn, stage, message):
+                        logger.info(
+                            "Dropping signal '%s' for stage %s: signal row %s is already consumed",
+                            message.signal_name,
+                            stage.name,
+                            message.signal_row_id,
                         )
+                        self.mark_in(txn, message, "SignalStage")
+                        return
+                    stage.context["_signal_name"] = message.signal_name
+                    stage.context["_signal_data"] = message.signal_data
+                    self.set_stage_status(stage, WorkflowStatus.RUNNING)
+                    suspended_task = None
+                    for task in stage.tasks:
+                        if task.status == WorkflowStatus.SUSPENDED:
+                            suspended_task = task
+                            task.status = WorkflowStatus.RUNNING
+                            break
+                    txn.store_stage(stage)
+                    self.mark_in(txn, message, "SignalStage")
                     if self.event_recorder:
                         self.event_recorder.record_stage_resumed(
                             stage,
@@ -106,7 +114,6 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
                             source_handler="SignalStageHandler",
                         )
                     if suspended_task:
-                        # Push RunTask to re-execute the suspended task
                         txn.push_message(
                             RunTask(
                                 execution_type=message.execution_type,
@@ -118,7 +125,6 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
                             )
                         )
                     else:
-                        # No suspended task found - re-start the stage
                         txn.push_message(
                             StartStage(
                                 execution_type=message.execution_type,
@@ -154,54 +160,28 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
                     stage.status,
                 )
 
-                if store_backed:
-                    # workflow_signals, not stage context: the context copy grew
-                    # unbounded and is visible to every consumer reading that
-                    # column. Rows already carrying _buffered_signals keep
-                    # working -- the consume path reads both.
-                    stored = self.repository.buffer_signal(
-                        stage.execution.id,
-                        stage.ref_id,
-                        message.signal_name,
-                        message.signal_data,
-                    )
-                    if not stored:
-                        # The store accepted nothing. Falling through to the
-                        # context buffer keeps the signal; taking this branch
-                        # and returning would drop it with no error, which is
-                        # worse than the crash this guard replaced.
-                        logger.warning(
-                            "Signal store accepted no row for '%s' on stage %s; buffering in stage context instead",
-                            message.signal_name,
-                            stage.name,
-                        )
-                        store_backed = False
-                    else:
-                        with self.repository.transaction(self.queue) as txn:
-                            txn.store_stage(stage)
-                            if message.message_id:
-                                txn.mark_message_processed(
-                                    message_id=message.message_id,
-                                    handler_type="SignalStage",
-                                    execution_id=message.execution_id,
-                                )
-
-                if not store_backed:
-                    context_buffered.append(
-                        {
-                            "signal_name": message.signal_name,
-                            "signal_data": message.signal_data,
-                        }
-                    )
-                    stage.context["_buffered_signals"] = context_buffered
-                    with self.repository.transaction(self.queue) as txn:
-                        txn.store_stage(stage)
-                        if message.message_id:
-                            txn.mark_message_processed(
-                                message_id=message.message_id,
-                                handler_type="SignalStage",
-                                execution_id=message.execution_id,
+                with self.repository.transaction(self.queue) as txn:
+                    if message.signal_row_id is None:
+                        stored = 0
+                        if store_backed:
+                            stored = txn.buffer_signal(
+                                stage.execution.id,
+                                stage.ref_id,
+                                message.signal_name,
+                                message.signal_data,
+                                user=message.user,
+                                persistent=True,
                             )
+                        if not stored:
+                            context_buffered.append(
+                                {
+                                    "signal_name": message.signal_name,
+                                    "signal_data": message.signal_data,
+                                }
+                            )
+                            stage.context["_buffered_signals"] = context_buffered
+                            txn.store_stage(stage)
+                    self.mark_in(txn, message, "SignalStage")
             else:
                 # WCP-23: Transient signal - discard
                 logger.debug(

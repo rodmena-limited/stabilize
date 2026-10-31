@@ -139,6 +139,7 @@ class TransactionHelper:
         require_atomic: bool = False,
         *,
         during_txn: Callable[[], None] | None = None,
+        within: Callable[[StoreTransaction], Sequence[tuple[Message, float | None]] | None] | None = None,
     ) -> bool:
         """
         Execute an atomic transaction to update state and queue messages.
@@ -158,6 +159,10 @@ class TransactionHelper:
             during_txn: Optional callable invoked inside the transaction, after
                         the stage write and before the message pushes. A retried
                         attempt rolled back, so it must be safe to repeat.
+            within: Optional callable invoked first inside the transaction with the
+                    transaction itself. It may mutate the stage and may return the
+                    messages to push in place of messages_to_push. A retried attempt
+                    rolled back, so it must be safe to repeat.
 
         Raises:
             RuntimeError: If require_atomic=True and transaction is not atomic
@@ -177,8 +182,13 @@ class TransactionHelper:
                         "production critical systems."
                     )
 
+                to_push = messages_to_push
+                if within is not None:
+                    decided = within(txn)
+                    if decided is not None:
+                        to_push = list(decided)
                 if stage:
-                    _record_task_completions(stage, messages_to_push)
+                    _record_task_completions(stage, to_push)
                     txn.store_stage(stage)
 
                 if source_message and source_message.message_id:
@@ -192,7 +202,7 @@ class TransactionHelper:
                 if during_txn is not None:
                     during_txn()
 
-                for msg, delay in messages_to_push:
+                for msg, delay in to_push:
                     txn.push_message(msg, delay or 0)
 
         try:

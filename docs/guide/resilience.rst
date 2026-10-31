@@ -387,6 +387,10 @@ Recovery automatically:
    written before 0.34.0 carry no stamp. A workflow that was already old at the upgrade
    therefore stays unrecovered until something writes to it.
 
+   A ``SUSPENDED`` stage that holds an unconsumed signal row and has no queued message
+   gets a ``SignalStage`` naming that row. A signal buffered before a crash is therefore
+   delivered after it. The handler drops the message if the row was consumed meanwhile.
+
 Automatic recovery (opt-in)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -17,8 +17,9 @@ from stabilize.tasks.interface import RetryableTask
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.models.task import TaskExecution
+    from stabilize.persistence.store import StoreTransaction
     from stabilize.persistence.transaction import TransactionHelper
-    from stabilize.queue.messages import RunTask
+    from stabilize.queue.messages import Message, RunTask
     from stabilize.tasks.registry import TaskRegistry
     from stabilize.tasks.result import TaskResult
 
@@ -195,68 +196,62 @@ def _handle_suspended(
     message: RunTask,
     txn_helper: TransactionHelper,
 ) -> None:
-    """Handle SUSPENDED status (WCP-23/24).
+    """The task waits for a signal (WCP-23/24).
 
-    The task is waiting for an external signal. Set the task and stage
-    to SUSPENDED and do NOT push any continuation messages. The stage
-    will be resumed when a SignalStage message is received.
+    A pending signal is consumed in the transaction that saves the resumed stage,
+    so a save that rolls back leaves the signal where it was. Without one, the
+    task and stage are stored SUSPENDED and no continuation is pushed.
     """
-    logger.info(
-        "Task %s suspended, waiting for signal",
-        task_model.name,
-    )
+    from stabilize.queue.messages import RunTask as RunTaskMsg
 
-    # Set task to SUSPENDED
-    task_model.status = WorkflowStatus.SUSPENDED
+    logger.info("Task %s suspended, waiting for signal", task_model.name)
+    repository = txn_helper.repository
+    store_backed = repository.supports_signal_storage()
+    signal_keys = ("_signal_name", "_signal_data", "_buffered_signals")
+    before = {key: stage.context[key] for key in signal_keys if key in stage.context}
+    resumed = False
 
-    # Set stage to SUSPENDED - this tells the engine the stage is waiting
-    stage.status = WorkflowStatus.SUSPENDED
-
-    # Check for any buffered signals (WCP-24: persistent triggers)
-    # Dual-read, context FIRST: a signal buffered before the storage move must
-    # drain rather than sit behind every signal written since. Rows carrying
-    # _buffered_signals keep working until they empty, and nothing rewrites them.
-    signal: dict[str, Any] | None = None
-    buffered = stage.context.get("_buffered_signals", [])
-    if buffered:
-        signal = buffered.pop(0)
+    def resume_or_wait(txn: StoreTransaction) -> list[tuple[Message, float | None]]:
+        nonlocal resumed
+        for key in signal_keys:
+            stage.context.pop(key, None)
+        stage.context.update(before)
+        task_model.status = WorkflowStatus.SUSPENDED
+        stage.status = WorkflowStatus.SUSPENDED
+        signal: dict[str, Any] | None = None
+        buffered = list(stage.context.get("_buffered_signals", []))
         if buffered:
-            stage.context["_buffered_signals"] = buffered
-        else:
-            stage.context.pop("_buffered_signals", None)
-    elif txn_helper.repository.supports_signal_storage():
-        signal = txn_helper.repository.consume_signal(stage.execution.id, stage.ref_id)
-
-    if signal:
+            signal = buffered.pop(0)
+            if buffered:
+                stage.context["_buffered_signals"] = buffered
+            else:
+                stage.context.pop("_buffered_signals", None)
+        elif store_backed:
+            signal = txn.consume_signal(stage.execution.id, stage.ref_id)
+        resumed = bool(signal)
+        if not signal:
+            return []
         stage.context["_signal_name"] = signal.get("signal_name", "")
         stage.context["_signal_data"] = signal.get("signal_data", {})
-        # Resume by re-running the same task (stage is already RUNNING)
-        from stabilize.queue.messages import RunTask as RunTaskMsg
-
         stage.status = WorkflowStatus.RUNNING
         task_model.status = WorkflowStatus.RUNNING
-        txn_helper.execute_atomic(
-            stage=stage,
-            source_message=message,
-            messages_to_push=[
-                (
-                    RunTaskMsg(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=message.stage_id,
-                        task_id=task_model.id,
-                        generation=task_model.generation,
-                        task_type=message.task_type,
-                    ),
-                    None,
-                )
-            ],
-            handler_name="RunTask",
-        )
-        return
+        return [
+            (
+                RunTaskMsg(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=message.stage_id,
+                    task_id=task_model.id,
+                    generation=task_model.generation,
+                    task_type=message.task_type,
+                ),
+                None,
+            )
+        ]
 
-    # No buffered signals - stay suspended (no continuation message)
-    def _record_suspension() -> None:
+    def record_suspension() -> None:
+        if resumed:
+            return
         from stabilize.events.recorder import get_event_recorder
 
         recorder = get_event_recorder()
@@ -266,9 +261,9 @@ def _handle_suspended(
     txn_helper.execute_atomic(
         stage=stage,
         source_message=message,
-        messages_to_push=[],
         handler_name="RunTask",
-        during_txn=_record_suspension,
+        during_txn=record_suspension,
+        within=resume_or_wait,
     )
 
 

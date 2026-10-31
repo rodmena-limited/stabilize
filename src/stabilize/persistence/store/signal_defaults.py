@@ -14,6 +14,9 @@ class SignalStoreDefaults:
         stage_ref_id: str,
         signal_name: str,
         signal_data: dict[str, Any] | None = None,
+        *,
+        user: str = "",
+        persistent: bool = True,
     ) -> int:
         """Buffer a persistent signal for a stage that has not yet suspended.
 
@@ -32,6 +35,8 @@ class SignalStoreDefaults:
         execution_id: str,
         stage_ref_id: str,
         signal_name: str | None = None,
+        *,
+        row_id: int | None = None,
     ) -> dict[str, Any] | None:
         """Consume the oldest unconsumed buffered signal for a stage.
 
@@ -43,6 +48,10 @@ class SignalStoreDefaults:
     def pending_signal_count(self, execution_id: str, stage_ref_id: str) -> int:
         """How many unconsumed signals are buffered for a stage."""
         return 0
+
+    def pending_signals(self, execution_id: str, stage_ref_id: str) -> list[dict[str, Any]]:
+        """The unconsumed signals of a stage, oldest first, as {id, signal_name, signal_data, user}."""
+        return []
 
     def discard_signals(self, execution_id: str, stage_ref_id: str) -> int:
         """Drop unconsumed signals for a stage that can no longer receive them.

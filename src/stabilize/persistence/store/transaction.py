@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -130,6 +130,35 @@ class StoreTransaction(ABC):
     def remove_stage(self, stage_id: str) -> None:
         """Delete a synthetic stage, its tasks, its claims and its queued messages."""
         raise NotImplementedError(f"{type(self).__name__} cannot remove stages")
+
+    def consume_signal(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+        signal_name: str | None = None,
+        *,
+        row_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Consume one pending signal of a stage on the transaction's connection; None when nothing waits."""
+        return None
+
+    def buffer_signal(
+        self,
+        execution_id: str,
+        stage_ref_id: str,
+        signal_name: str,
+        signal_data: dict[str, Any] | None = None,
+        *,
+        consumed: bool = False,
+        user: str = "",
+        persistent: bool = True,
+    ) -> int:
+        """Store a signal row on the transaction's connection; 0 when the store has no signal table."""
+        return 0
+
+    def discard_signals(self, execution_id: str, stage_ref_id: str) -> int:
+        """Delete the pending signals of a stage on the transaction's connection."""
+        return 0
 
     def try_lock_recovery(self, key: str) -> bool:
         """Take the recovery lock for *key* for this transaction; False when another sweep holds it."""

@@ -87,8 +87,8 @@ def test_overlapping_sweeps_re_queue_a_lost_task_once(any_db: str, monkeypatch: 
         planned = threading.Barrier(2)
         original_plan = recovery_module.plan_running_workflow
 
-        def plan_then_meet(workflow: Any, queue: Any) -> Any:
-            messages = original_plan(workflow, queue)
+        def plan_then_meet(*args: Any, **kwargs: Any) -> Any:
+            messages = original_plan(*args, **kwargs)
             try:
                 planned.wait(timeout=2)
             except threading.BrokenBarrierError:

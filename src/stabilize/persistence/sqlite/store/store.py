@@ -278,11 +278,23 @@ class SqliteWorkflowStore(
         stage_ref_id: str,
         signal_name: str,
         signal_data: dict[str, Any] | None = None,
+        *,
+        user: str = "",
+        persistent: bool = True,
     ) -> int:
         from stabilize.persistence.sqlite.signals import buffer_signal as _buffer
 
         conn = self._get_connection()
-        signal_id = _buffer(conn, execution_id, stage_ref_id, signal_name, signal_data, tenant=self.tenant)
+        signal_id = _buffer(
+            conn,
+            execution_id,
+            stage_ref_id,
+            signal_name,
+            signal_data,
+            tenant=self.tenant,
+            user=user,
+            persistent=persistent,
+        )
         conn.commit()
         return signal_id
 
@@ -291,11 +303,13 @@ class SqliteWorkflowStore(
         execution_id: str,
         stage_ref_id: str,
         signal_name: str | None = None,
+        *,
+        row_id: int | None = None,
     ) -> dict[str, Any] | None:
         from stabilize.persistence.sqlite.signals import consume_signal as _consume
 
         conn = self._get_connection()
-        signal = _consume(conn, execution_id, stage_ref_id, signal_name, tenant=self.tenant)
+        signal = _consume(conn, execution_id, stage_ref_id, signal_name, tenant=self.tenant, row_id=row_id)
         conn.commit()
         if signal is None:
             return None
@@ -305,6 +319,14 @@ class SqliteWorkflowStore(
         from stabilize.persistence.sqlite.signals import get_pending_signals
 
         return len(get_pending_signals(self._get_connection(), execution_id, stage_ref_id, tenant=self.tenant))
+
+    def pending_signals(self, execution_id: str, stage_ref_id: str) -> list[dict[str, Any]]:
+        from stabilize.persistence.sqlite.signals import get_pending_signals
+
+        rows = get_pending_signals(self._get_connection(), execution_id, stage_ref_id, tenant=self.tenant)
+        return [
+            {"id": int(r.id), "signal_name": r.signal_name, "signal_data": r.signal_data, "user": r.user} for r in rows
+        ]
 
     def pending_signal_latest_ms(self, execution_id: str) -> int | None:
         """The creation time (epoch ms) of the newest unconsumed signal of a workflow, or None."""

@@ -159,6 +159,15 @@ host's own migretti history, now upgrade with no change to the command.
 - **`StoreTransaction.try_lock_recovery(key)`**, `buffered_ids(config, queue_table=)`,
   `Queue.has_pending_message_for_config()` and `Queue.dead_letter_moved_at_ms()`;
   `RecoveryResult.status` gains `locked`, `dead_lettered` and `dead_letter_stale`.
+- **Signals inside their transactions.** `StoreTransaction.consume_signal()`,
+  `buffer_signal(..., consumed=, user=, persistent=)` and `discard_signals()` run on the
+  transaction's own connection. `TransactionHelper.execute_atomic(within=)` hands a
+  callable the open transaction before the stage write. `SignalStage.signal_row_id` names
+  a stored row. `WorkflowStore.pending_signals()` lists a stage's unconsumed rows.
+  `workflow_signals` gains `signal_user` and `persistent`, added by migration
+  `01M68J0WB7ASSYV0JQYBA2KAQM_signal_delivery.sql` on PostgreSQL and SQLite migration 9.
+- **Recovery delivers buffered signals.** A `SUSPENDED` stage with an unconsumed signal
+  row and no queued message gets a `SignalStage` naming the oldest row.
 - **`stabilize_updated_at`** on the three execution tables and **`created_at_ms`** on
   `pipeline_executions`, added by migration `01M68FGEZVQR6KPAMW6P5N8B0E_recovery_activity.sql`
   on PostgreSQL and SQLite migration 8, with the trigger function
@@ -216,6 +225,25 @@ host's own migretti history, now upgrade with no change to the command.
   moved at or after the workflow's latest activity is reported `dead_lettered` and left
   there for an operator. A row older than new activity is reported `dead_letter_stale` and
   the message is re-pushed.
+- **A signal is not lost to a save that rolls back (B03).** The RunTask SUSPENDED path
+  consumed the pending signal on its own connection and saved the resumed stage in a second
+  transaction. When that save failed, the signal was gone and the stage stayed SUSPENDED.
+  The consume now runs inside the saving transaction. A save that rolls back leaves the row
+  where it was.
+- **A signal does not arrive twice (B04).** `SignalStage` committed the buffered row before
+  the processed mark. A redelivery therefore buffered it again. The row, the stage write and the
+  processed mark are now one transaction. A direct delivery records a consumed row that
+  carries the sender, and a message naming a row is dropped when that row is already
+  consumed.
+- **Signal storage no longer reads a failover as "no signal" (B32).** The PostgreSQL
+  signal mixin disabled storage on every error and then answered "nothing pending". It now
+  degrades only on `42P01` (no table) or `42501` (no grant). Every other error reaches the
+  handler and the message is redelivered.
+- **Pending signals are discarded in the transaction that completes or resets the stage.**
+  `set_stage_status` no longer issues an autocommit delete beside the handler's transaction.
+  A transaction's `store_stage` of a stage in a complete status drops that stage's pending
+  rows, and the jump, restart and multi-merge re-arm paths call `discard_signals` inside
+  theirs.
 - **Recovery ages a workflow by its activity, not by its start (B21).** A run started 30
   hours ago whose task row changed five minutes ago was never recovered, because the only
   clock was `start_time`. `pipeline_executions`, `stage_executions` and `task_executions`

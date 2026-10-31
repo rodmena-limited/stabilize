@@ -223,6 +223,8 @@ class RestartStageHandler(StabilizeHandler[RestartStage], _ControlHandler):
                 for stage_id in (stage.id, *(child.id for child in children)):
                     txn.purge_stage_messages(stage_id, except_message_id=message.message_id)
                     txn.release_claims(execution.id, stage_id)
+                for reset in (stage, *children):
+                    txn.discard_signals(execution.id, reset.ref_id)
                 if execution_changed:
                     txn.update_workflow_status(execution)
                 if message.message_id:

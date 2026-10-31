@@ -132,6 +132,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                     txn.store_stage(fresh)
                     txn.purge_stage_messages(stage_id, except_message_id=message.message_id)
                     txn.release_claims(message.execution_id, stage_id)
+                    txn.discard_signals(message.execution_id, fresh.ref_id)
                 if message.message_id:
                     txn.mark_message_processed(
                         message_id=message.message_id,

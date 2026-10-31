@@ -7,11 +7,19 @@ handled) names the task, the stage or the workflow.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from stabilize.models.stage.completion_records import recorded_completion
 from stabilize.models.status import WorkflowStatus
-from stabilize.queue.messages import CompleteStage, CompleteTask, CompleteWorkflow, RunTask, StartStage, StartTask
+from stabilize.queue.messages import (
+    CompleteStage,
+    CompleteTask,
+    CompleteWorkflow,
+    RunTask,
+    SignalStage,
+    StartStage,
+    StartTask,
+)
 from stabilize.recovery_rules import can_start, has_started
 
 if TYPE_CHECKING:
@@ -23,11 +31,13 @@ if TYPE_CHECKING:
 ACTIVE = frozenset({WorkflowStatus.RUNNING, WorkflowStatus.PAUSED, WorkflowStatus.SUSPENDED, WorkflowStatus.BUFFERED})
 
 
-def plan_running_workflow(workflow: Workflow, queue: Queue) -> list[Message]:
+def plan_running_workflow(workflow: Workflow, queue: Queue, store: Any | None = None) -> list[Message]:
     messages: list[Message] = []
     for stage in workflow.stages:
         if stage.status == WorkflowStatus.RUNNING:
             messages.extend(_plan_running_stage(workflow, stage, queue))
+        elif stage.status == WorkflowStatus.SUSPENDED and store is not None:
+            messages.extend(_plan_suspended_stage(workflow, stage, queue, store))
         elif (
             stage.status == WorkflowStatus.NOT_STARTED
             and (has_started(stage) or can_start(stage, workflow))
@@ -97,6 +107,27 @@ def _plan_running_stage(workflow: Workflow, stage: StageExecution, queue: Queue)
     if queue.has_pending_message_for_stage(stage.id):
         return []
     return [StartStage(execution_type=kind, execution_id=workflow.id, stage_id=stage.id)]
+
+
+def _plan_suspended_stage(workflow: Workflow, stage: StageExecution, queue: Queue, store: Any) -> list[Message]:
+    """A SignalStage for the oldest unconsumed signal row of a suspended stage nothing is about to deliver to."""
+    pending = getattr(store, "pending_signals", None)
+    if not callable(pending) or queue.has_pending_message_for_stage(stage.id):
+        return []
+    rows = pending(workflow.id, stage.ref_id)
+    return [
+        SignalStage(
+            execution_type=workflow.type.value,
+            execution_id=workflow.id,
+            stage_id=stage.id,
+            signal_name=row["signal_name"],
+            signal_data=row["signal_data"],
+            persistent=True,
+            user=row.get("user", ""),
+            signal_row_id=row["id"],
+        )
+        for row in rows[:1]
+    ]
 
 
 def _needs_completion(workflow: Workflow) -> bool:

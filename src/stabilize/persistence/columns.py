@@ -120,6 +120,8 @@ WORKFLOW_SIGNALS: tuple[str, ...] = (
     "consumed",
     "created_at",
     "consumed_at",
+    "signal_user",
+    "persistent",
     TENANT_COLUMN,
 )
 

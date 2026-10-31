@@ -406,7 +406,7 @@ class WorkflowRecovery:
                     return RecoveryResult(
                         workflow_id=workflow.id, status="locked", message="Another sweep holds this workflow"
                     )
-                recovery_messages = plan_running_workflow(full_workflow, self.queue)
+                recovery_messages = plan_running_workflow(full_workflow, self.queue, self.store)
                 to_push = []
                 for msg in recovery_messages:
                     moved_at = self._dead_letter_moved_at(msg, workflow.id)

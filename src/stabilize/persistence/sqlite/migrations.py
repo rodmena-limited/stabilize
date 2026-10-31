@@ -19,6 +19,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
+from stabilize.persistence.sqlite.signals import signal_table_statements
 from stabilize.queue.sqlite.schema import queue_lookup_indexes
 
 # Version of the baseline schema defined in schema.SCHEMA. Bump only if the
@@ -175,6 +176,15 @@ MIGRATIONS: tuple[Migration, ...] = (
             "UPDATE pipeline_executions SET created_at_ms = CAST(strftime('%s', created_at) AS INTEGER) * 1000 "
             "WHERE created_at_ms IS NULL AND created_at IS NOT NULL",
             *activity_triggers(),
+        ),
+    ),
+    Migration(
+        9,
+        "add_signal_delivery_columns",
+        (
+            *signal_table_statements(),
+            "ALTER TABLE workflow_signals ADD COLUMN signal_user TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE workflow_signals ADD COLUMN persistent INTEGER NOT NULL DEFAULT 1",
         ),
     ),
 )

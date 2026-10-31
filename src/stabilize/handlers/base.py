@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from stabilize.persistence.store.transaction import StoreTransaction
     from stabilize.queue import Queue
 
-from stabilize.handlers.signal_cleanup import discard_pending_signals
+from stabilize.handlers.signal_cleanup import drop_context_signals
 
 logger = logging.getLogger(__name__)
 
@@ -399,7 +399,7 @@ class StabilizeHandler(EventRecordingMixin, MessageHandler[M], ABC):
         )
         stage.status = new_status
         if new_status.is_complete:
-            discard_pending_signals(self.repository, stage, new_status)
+            drop_context_signals(stage, new_status)
 
     def set_task_status(
         self,

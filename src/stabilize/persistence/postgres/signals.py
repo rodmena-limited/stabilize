@@ -21,6 +21,8 @@ ENGINE_REFUSALS = (TenancyModeError, TenantError, TenancyModeChanged, TenantCont
 
 SIGNAL_TABLE = "workflow_signals"
 
+DEGRADING_SQLSTATES = frozenset({"42P01", "42501"})
+
 SIGNAL_STORAGE_RETRY_SECONDS = 30.0
 
 GRANT_HINT = (
@@ -46,6 +48,10 @@ class PostgresSignalMixin:
     _signal_storage_retry_at: float = 0.0
 
     def _signal_storage_unusable(self, exc: Exception) -> None:
+        from stabilize.persistence.tenancy import sqlstate
+
+        if sqlstate(exc) not in DEGRADING_SQLSTATES:
+            raise exc
         if self._signal_storage_usable is not False:
             logger.warning(
                 "Signal storage disabled: %s is unreachable (%s). Signals now "
@@ -99,6 +105,9 @@ class PostgresSignalMixin:
         stage_ref_id: str,
         signal_name: str,
         signal_data: dict[str, Any] | None = None,
+        *,
+        user: str = "",
+        persistent: bool = True,
     ) -> int:
         if not self.supports_signal_storage():
             return 0
@@ -107,13 +116,16 @@ class PostgresSignalMixin:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"INSERT INTO {SIGNAL_TABLE} "
-                        "(execution_id, stage_ref_id, signal_name, signal_data, stabilize_tenant) "
-                        "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                        "(execution_id, stage_ref_id, signal_name, signal_data, signal_user, persistent, "
+                        "stabilize_tenant) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
                         (
                             execution_id,
                             stage_ref_id,
                             signal_name,
                             json.dumps(signal_data or {}, default=str),
+                            user,
+                            persistent,
                             self.tenant,
                         ),
                     )
@@ -131,8 +143,10 @@ class PostgresSignalMixin:
         execution_id: str,
         stage_ref_id: str,
         signal_name: str | None = None,
+        *,
+        row_id: int | None = None,
     ) -> dict[str, Any] | None:
-        """Claim the oldest unconsumed signal atomically.
+        """Claim the oldest unconsumed signal atomically, or the one row named by row_id.
 
         FOR UPDATE SKIP LOCKED so two workers racing on the same suspended stage
         cannot both claim one signal; the UPDATE and the read are one statement
@@ -140,12 +154,14 @@ class PostgresSignalMixin:
         """
         if not self.supports_signal_storage():
             return None
-        clause = "AND signal_name = %s" if signal_name else ""
-        params: tuple[Any, ...] = (
-            (execution_id, stage_ref_id, self.tenant, signal_name)
-            if signal_name
-            else (execution_id, stage_ref_id, self.tenant)
-        )
+        clauses = ""
+        params: list[Any] = [execution_id, stage_ref_id, self.tenant]
+        if signal_name:
+            clauses += " AND signal_name = %s"
+            params.append(signal_name)
+        if row_id is not None:
+            clauses += " AND id = %s"
+            params.append(row_id)
         try:
             with self._borrow() as conn:  # type: ignore[attr-defined]
                 with conn.cursor() as cur:
@@ -153,10 +169,10 @@ class PostgresSignalMixin:
                         f"UPDATE {SIGNAL_TABLE} SET consumed = TRUE, consumed_at = NOW() "
                         f"WHERE id = (SELECT id FROM {SIGNAL_TABLE} "
                         "            WHERE execution_id = %s AND stage_ref_id = %s AND stabilize_tenant = %s "
-                        f"          AND consumed = FALSE {clause} "
+                        f"          AND consumed = FALSE{clauses} "
                         "            ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1) "
                         "RETURNING signal_name, signal_data",
-                        params,
+                        tuple(params),
                     )
                     row = cur.fetchone()
                 conn.commit()
@@ -192,6 +208,43 @@ class PostgresSignalMixin:
         if not row:
             return 0
         return int(row["n"] if isinstance(row, dict) else row[0])
+
+    def pending_signals(self, execution_id: str, stage_ref_id: str) -> list[dict[str, Any]]:
+        """The unconsumed signals of a stage, oldest first, as {id, signal_name, signal_data, user}."""
+        if not self.supports_signal_storage():
+            return []
+        try:
+            with self._borrow() as conn:  # type: ignore[attr-defined]
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"SELECT id, signal_name, signal_data, signal_user FROM {SIGNAL_TABLE} "
+                        "WHERE execution_id = %s AND stage_ref_id = %s AND consumed = FALSE AND stabilize_tenant = %s "
+                        "ORDER BY id",
+                        (execution_id, stage_ref_id, self.tenant),
+                    )
+                    rows = cur.fetchall()
+                conn.rollback()
+        except ENGINE_REFUSALS:
+            raise
+        except Exception as exc:
+            self._signal_storage_unusable(exc)
+            return []
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            values = (
+                (row["id"], row["signal_name"], row["signal_data"], row["signal_user"])
+                if isinstance(row, dict)
+                else (row[0], row[1], row[2], row[3])
+            )
+            out.append(
+                {
+                    "id": int(values[0]),
+                    "signal_name": values[1],
+                    "signal_data": values[2] or {},
+                    "user": values[3] or "",
+                }
+            )
+        return out
 
     def pending_signal_latest_ms(self, execution_id: str) -> int | None:
         """The creation time (epoch ms) of the newest unconsumed signal of a workflow, or None."""

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from stabilize.errors import ConcurrencyError
 from stabilize.errors.delivery import DuplicateDeliveryError
 from stabilize.persistence.sqlite.helpers import has_execution_column, has_queue_table_column, insert_stage, upsert_task
+from stabilize.persistence.sqlite.transaction_ops import SqliteTransactionOps
 from stabilize.persistence.store import StoreTransaction
 from stabilize.persistence.task_state import Captured, capture, commit_captured
 from stabilize.persistence.tenancy import refuse_foreign_row
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
 _QUEUE_TABLE_SET = ",\n                queue_table = COALESCE(:queue_table, queue_table)"
 
 
-class AtomicTransaction(StoreTransaction):
+class AtomicTransaction(SqliteTransactionOps, StoreTransaction):
     """Atomic transaction spanning store and queue operations.
 
     This class ensures that stage updates and message pushes happen
@@ -182,6 +183,7 @@ class AtomicTransaction(StoreTransaction):
         else:
             insert_stage(self._conn, stage, stage.execution.id, self._tenant)
         self._written_tasks.extend(capture(stage.tasks))
+        self._discard_if_complete(stage)
 
     def store_workflow(self, workflow: Workflow) -> None:
         from stabilize.persistence.store.ids import check_ids
@@ -391,94 +393,6 @@ class AtomicTransaction(StoreTransaction):
 
         return False
 
-    def purge_stage_messages(self, stage_id: str, *, except_message_id: str | None = None) -> int:
-        keep = _queue_row_id(except_message_id)
-        cursor = self._conn.execute(
-            f"DELETE FROM {self._queue_table} WHERE json_extract(payload, '$.stage_id') = :stage_id "
-            "AND stabilize_tenant = :tenant AND (:keep IS NULL OR id <> :keep)",
-            {"stage_id": stage_id, "tenant": self._tenant, "keep": keep},
-        )
-        return int(cursor.rowcount or 0)
-
-    def release_claims(self, execution_id: str, stage_id: str) -> int:
-        cursor = self._conn.execute(
-            "DELETE FROM stage_claims WHERE execution_id = :execution_id AND stage_id = :stage_id "
-            "AND stabilize_tenant = :tenant",
-            {"execution_id": execution_id, "stage_id": stage_id, "tenant": self._tenant},
-        )
-        return int(cursor.rowcount or 0)
-
-    def count_claims(self, execution_id: str, prefix: str) -> int:
-        row = self._conn.execute(
-            "SELECT count(*) FROM stage_claims WHERE execution_id = :execution_id "
-            "AND substr(claim_key, 1, :length) = :prefix AND stabilize_tenant = :tenant",
-            {"execution_id": execution_id, "length": len(prefix), "prefix": prefix, "tenant": self._tenant},
-        ).fetchone()
-        return int(row[0]) if row else 0
-
-    def claim_owner(self, execution_id: str, claim_key: str) -> str | None:
-        row = self._conn.execute(
-            "SELECT stage_id FROM stage_claims WHERE execution_id = :execution_id AND claim_key = :claim_key "
-            "AND stabilize_tenant = :tenant",
-            {"execution_id": execution_id, "claim_key": claim_key, "tenant": self._tenant},
-        ).fetchone()
-        return str(row[0]) if row else None
-
-    def remove_stage(self, stage_id: str) -> None:
-        self.purge_stage_messages(stage_id)
-        params = {"stage_id": stage_id, "tenant": self._tenant}
-        self._conn.execute(
-            "DELETE FROM task_executions WHERE stage_id = :stage_id AND stabilize_tenant = :tenant", params
-        )
-        self._conn.execute("DELETE FROM stage_claims WHERE stage_id = :stage_id AND stabilize_tenant = :tenant", params)
-        self._conn.execute("DELETE FROM stage_executions WHERE id = :stage_id AND stabilize_tenant = :tenant", params)
-
-    def try_lock_recovery(self, key: str) -> bool:
-        if not self._conn.in_transaction:
-            self._conn.execute("BEGIN IMMEDIATE")
-        return True
-
-    def lock_admission(self, key: str) -> None:
-        if self._conn.in_transaction:
-            raise RuntimeError("lock_admission must be the first statement of its transaction")
-        self._conn.execute("BEGIN IMMEDIATE")
-
-    def count_running(self, pipeline_config_id: str) -> int:
-        row = self._conn.execute(
-            "SELECT COUNT(*) FROM pipeline_executions "
-            "WHERE pipeline_config_id = ? AND status = 'RUNNING' AND stabilize_tenant = ?",
-            (pipeline_config_id, self._tenant),
-        ).fetchone()
-        return int(row[0])
-
-    def buffered_ids(self, pipeline_config_id: str, queue_table: str | None = None) -> list[str]:
-        scope = ""
-        params: list[Any] = [pipeline_config_id, self._tenant]
-        if queue_table is not None:
-            scope = " AND (queue_table = ? OR (? = 1 AND queue_table IS NULL))"
-            params.extend([queue_table, 1 if queue_table == "queue_messages" else 0])
-        rows = self._conn.execute(
-            "SELECT id FROM pipeline_executions "
-            f"WHERE pipeline_config_id = ? AND status = 'BUFFERED' AND stabilize_tenant = ?{scope} ORDER BY id",
-            params,
-        ).fetchall()
-        return [r[0] for r in rows]
-
-    def workflow_status(self, workflow_id: str) -> tuple[str | None, bool]:
-        row = self._conn.execute(
-            "SELECT status, is_canceled FROM pipeline_executions WHERE id = ? AND stabilize_tenant = ?",
-            (workflow_id, self._tenant),
-        ).fetchone()
-        return (None, False) if row is None else (str(row[0]), bool(row[1]))
-
-    def paused_stage_ids(self, workflow_id: str) -> list[str]:
-        rows = self._conn.execute(
-            "SELECT id FROM stage_executions "
-            "WHERE execution_id = ? AND status = 'PAUSED' AND stabilize_tenant = ? ORDER BY id",
-            (workflow_id, self._tenant),
-        ).fetchall()
-        return [str(r[0]) for r in rows]
-
 
 def _queue_table_for(store: Any, queue: Any) -> str:
     if queue is None:
@@ -503,15 +417,3 @@ def _queue_table_for(store: Any, queue: Any) -> str:
 
 # Forward reference for type hint
 from stabilize.persistence.sqlite.store import SqliteWorkflowStore  # noqa: E402, F401
-
-
-def _queue_row_id(message_id: str | None) -> int | None:
-    """The queue row behind a delivered message id; None when the id names no row (a test or foreign id)."""
-    if not message_id:
-        return None
-    from stabilize.queue.message_ids import row_id
-
-    try:
-        return int(row_id(message_id))
-    except (TypeError, ValueError):
-        return None

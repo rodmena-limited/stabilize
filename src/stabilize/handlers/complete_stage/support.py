@@ -116,6 +116,7 @@ class CompleteStageSupport(
         stage.end_time = None
         stage.outputs = {}
         reset_tasks(stage, self.task_registry)
+        txn.discard_signals(execution.id, stage.ref_id)
 
         txn.store_stage(stage)
         txn.push_message(
