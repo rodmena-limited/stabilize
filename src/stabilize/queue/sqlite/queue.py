@@ -399,6 +399,26 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         )
         return row is not None
 
+    def has_pending_message_for_config(self, pipeline_config_id: str) -> bool:
+        conn = self._get_connection()
+        row = conn.execute(
+            f"SELECT 1 FROM {self.table_name} "
+            "WHERE json_extract(payload, '$.pipeline_config_id') = :config AND stabilize_tenant = :tenant LIMIT 1",
+            {"config": pipeline_config_id, "tenant": self.tenant},
+        ).fetchone()
+        return row is not None
+
+    def dead_letter_moved_at_ms(self, message_type: str, execution_id: str, target_id: str | None) -> int | None:
+        conn = self._get_connection()
+        row = conn.execute(
+            f"SELECT CAST((julianday(max(moved_at)) - 2440587.5) * 86400000 AS INTEGER) FROM {self.table_name}_dlq "
+            "WHERE message_type = :type AND json_extract(payload, '$.execution_id') = :execution_id "
+            "AND stabilize_tenant = :tenant AND (:target IS NULL "
+            "OR json_extract(payload, '$.task_id') = :target OR json_extract(payload, '$.stage_id') = :target)",
+            {"type": message_type, "execution_id": execution_id, "tenant": self.tenant, "target": target_id},
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
     def has_pending_message_for_execution(self, execution_id: str) -> bool:
         """Whether any queued message targets this workflow."""
         row = (

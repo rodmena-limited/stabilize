@@ -131,6 +131,10 @@ class StoreTransaction(ABC):
         """Delete a synthetic stage, its tasks, its claims and its queued messages."""
         raise NotImplementedError(f"{type(self).__name__} cannot remove stages")
 
+    def try_lock_recovery(self, key: str) -> bool:
+        """Take the recovery lock for *key* for this transaction; False when another sweep holds it."""
+        return True
+
     def lock_admission(self, key: str) -> None:
         """Serialize admission for ``key`` until this transaction ends."""
         raise NotImplementedError(f"{type(self).__name__} does not support admission control")
@@ -139,7 +143,7 @@ class StoreTransaction(ABC):
         """RUNNING workflows of the config, as this transaction sees them."""
         raise NotImplementedError(f"{type(self).__name__} does not support admission control")
 
-    def buffered_ids(self, pipeline_config_id: str) -> list[str]:
+    def buffered_ids(self, pipeline_config_id: str, queue_table: str | None = None) -> list[str]:
         """BUFFERED workflow ids of the config, oldest (lowest id) first."""
         raise NotImplementedError(f"{type(self).__name__} does not support admission control")
 

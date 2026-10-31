@@ -51,7 +51,7 @@ def start_running(
 ) -> None:
     handler.set_workflow_status(execution, WorkflowStatus.RUNNING)
     execution.start_time = handler.current_time_millis()
-    execution.queue_table = queue_table_name(handler.queue)
+    execution.queue_table = execution.queue_table or queue_table_name(handler.queue)
     txn.update_workflow_status(execution)
     for stage in initial_stages:
         txn.push_message(
@@ -73,7 +73,7 @@ def promote_waiting(handler: Any, config_id: str, purge: bool, message: Any) -> 
     repository = handler.repository
     with repository.transaction(handler.queue) as txn:
         if try_lock_admission(txn, config_id):
-            ids = txn.buffered_ids(config_id)
+            ids = txn.buffered_ids(config_id, queue_table=queue_table_name(handler.queue))
         else:
             ids = sorted(w.id for w in _by_status(repository, config_id, WorkflowStatus.BUFFERED))
     candidates = [repository.retrieve(i) for i in ids]

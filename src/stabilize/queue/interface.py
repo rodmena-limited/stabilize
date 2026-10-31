@@ -157,6 +157,14 @@ class Queue(ABC):
         """Whether any queued message (including one being handled) names this stage. Default: False."""
         return False
 
+    def has_pending_message_for_config(self, pipeline_config_id: str) -> bool:
+        """Whether a queued message names this pipeline config (a buffered wake-up in flight)."""
+        return False
+
+    def dead_letter_moved_at_ms(self, message_type: str, execution_id: str, target_id: str | None) -> int | None:
+        """When the newest dead-letter row for this message (type, workflow and task or stage) was moved, or None."""
+        return None
+
     def extend_lock(self, message: Message, duration: timedelta | None = None) -> bool:
         """Extend the visibility lock of an in-flight message (heartbeat).
 

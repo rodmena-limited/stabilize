@@ -223,7 +223,7 @@ Synthesis notes recorded while building 5a:
 - `created_at_ms` is written at insert and counts as activity, so a workflow inserted now is new whatever its `start_time` says. Three existing tests simulated an old workflow by `start_time` alone; they now set `created_at_ms` to the same age (`test_recovery.py`, `test_recovery_window.py`, `test_recovery_examines_all.py`), which is what a pre-0.34 row looks like after the backfill.
 - The same three tests asserted the old workflow was absent from the sweep's results; it is now present with status `stale` and nothing queued, which is the contract (an operator sees why a run was left alone).
 
-### WI-5 slice 5b: recovery coordination, buffered wake-ups, dead letters (planned, tests first)
+### WI-5 slice 5b: recovery coordination, buffered wake-ups, dead letters (done)
 - Each workflow's recovery shall run inside `store.transaction(queue)` holding a per-workflow lock as its first statement (PostgreSQL `pg_try_advisory_xact_lock(hashtextextended("recovery\x1f<tenant>\x1f<id>", 0))`, a miss reported as `RecoveryResult.status = "locked"`; SQLite `BEGIN IMMEDIATE`), with the pending-message checks re-run inside it, so two overlapping sweeps never both push (B17).
 - A `BUFFERED` config shall be woken only under the lock `recovery\x1f<tenant>\x1fconfig\x1f<id>`, only when a slot is free and no `StartWaitingWorkflows` for it is queued, never age-gated; the sweep shall load only the free-slot count, not the BUFFERED runs (B20).
 - `buffered_ids` shall be filtered by the caller's queue table and `start_running` shall not re-stamp a non-NULL `queue_table`, so a buffered workflow is never promoted onto a processor that lacks its tasks (B18).

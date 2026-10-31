@@ -59,6 +59,11 @@ class RecoveryResult:
     failed_pushes: int = 0
 
 
+_COUNTED_OUTCOMES = frozenset(
+    {"recovered", "partial", "skipped", "stale", "failed", "locked", "dead_lettered", "dead_letter_stale"}
+)
+
+
 @dataclass
 class RecoverySummary:
     """What the last recovery sweep did, by outcome."""
@@ -69,13 +74,16 @@ class RecoverySummary:
     skipped: int = 0
     stale: int = 0
     failed: int = 0
+    locked: int = 0
+    dead_lettered: int = 0
+    dead_letter_stale: int = 0
     error: str | None = None
 
     @classmethod
     def of(cls, results: list[RecoveryResult]) -> RecoverySummary:
         summary = cls(results=list(results))
         for result in results:
-            if result.status in ("recovered", "partial", "skipped", "stale", "failed"):
+            if result.status in _COUNTED_OUTCOMES:
                 setattr(summary, result.status, getattr(summary, result.status) + 1)
         return summary
 
@@ -157,6 +165,7 @@ class WorkflowRecovery:
             own_table = queue_table_name(self.queue)
             applications: set[str] = set()
             waiting_configs: set[str] = set()
+            waiting_limits: dict[str, int] = {}
 
             unowned = 0
             for workflow in workflows:
@@ -168,6 +177,9 @@ class WorkflowRecovery:
                 if workflow.status == WorkflowStatus.BUFFERED:
                     if workflow.pipeline_config_id:
                         waiting_configs.add(workflow.pipeline_config_id)
+                        waiting_limits[workflow.pipeline_config_id] = max(
+                            waiting_limits.get(workflow.pipeline_config_id, 0), workflow.max_concurrent_executions
+                        )
                     continue
                 try:
                     result = self._recover_workflow(workflow)
@@ -202,7 +214,7 @@ class WorkflowRecovery:
                     unowned,
                 )
             for config_id in sorted(waiting_configs):
-                results.append(self._wake_waiting(config_id))
+                results.append(self._wake_waiting(config_id, waiting_limits.get(config_id, 0)))
             if application is None and len(applications) > 1:
                 logger.warning(
                     "Unfiltered recovery on queue table %s examined %d applications (%s); "
@@ -223,14 +235,18 @@ class WorkflowRecovery:
         partial = sum(1 for r in results if r.status == "partial")
         skipped = sum(1 for r in results if r.status == "skipped")
         stale = sum(1 for r in results if r.status == "stale")
+        locked = sum(1 for r in results if r.status == "locked")
+        dead = sum(1 for r in results if r.status in ("dead_lettered", "dead_letter_stale"))
         failed = sum(1 for r in results if r.status == "failed")
 
         logger.info(
-            "Recovery complete: %d recovered, %d partial, %d skipped, %d stale, %d failed",
+            "Recovery complete: %d recovered, %d partial, %d skipped, %d stale, %d locked, %d dead-lettered, %d failed",
             recovered,
             partial,
             skipped,
             stale,
+            locked,
+            dead,
             failed,
         )
 
@@ -301,10 +317,32 @@ class WorkflowRecovery:
             )
         return None
 
-    def _wake_waiting(self, pipeline_config_id: str) -> RecoveryResult:
+    def _wake_waiting(self, pipeline_config_id: str, limit: int = 0) -> RecoveryResult:
         from stabilize.queue.messages import StartWaitingWorkflows
 
+        if self.queue.has_pending_message_for_config(pipeline_config_id):
+            return RecoveryResult(
+                workflow_id=pipeline_config_id, status="skipped", message="A wake-up is already queued"
+            )
         try:
+            with self.store.transaction(self.queue) as txn:
+                if not txn.try_lock_recovery(f"config\x1f{pipeline_config_id}"):
+                    return RecoveryResult(
+                        workflow_id=pipeline_config_id, status="locked", message="Another sweep holds this config"
+                    )
+                running = txn.count_running(pipeline_config_id) if limit > 0 else 0
+                if limit > 0 and running >= limit:
+                    return RecoveryResult(
+                        workflow_id=pipeline_config_id,
+                        status="skipped",
+                        message=f"No free slot ({running} running of {limit})",
+                    )
+                if self.queue.has_pending_message_for_config(pipeline_config_id):
+                    return RecoveryResult(
+                        workflow_id=pipeline_config_id, status="skipped", message="A wake-up is already queued"
+                    )
+                txn.push_message(StartWaitingWorkflows(pipeline_config_id=pipeline_config_id, purge_queue=False))
+        except NotImplementedError:
             with delivery_exempt():
                 self.queue.push(StartWaitingWorkflows(pipeline_config_id=pipeline_config_id, purge_queue=False))
         except Exception as e:
@@ -357,38 +395,70 @@ class WorkflowRecovery:
         if full_workflow.status == WorkflowStatus.NOT_STARTED:
             return self._recover_not_started(full_workflow)
 
-        recovery_messages = plan_running_workflow(full_workflow, self.queue)
-        messages_queued = 0
-        failed_pushes = 0
-        if not recovery_messages:
-            return RecoveryResult(
-                workflow_id=workflow.id,
-                status="skipped",
-                message="No recovery messages to push",
-            )
-        stages_requeued = len({getattr(m, "stage_id", None) for m in recovery_messages})
+        from stabilize.recovery_age import workflow_activity_ms
 
-        # Push all messages atomically in a single transaction
+        activity = workflow_activity_ms(full_workflow, self.store)
+        withheld = 0
+        stale_letters = 0
         try:
             with self.store.transaction(self.queue) as txn:
+                if not txn.try_lock_recovery(workflow.id):
+                    return RecoveryResult(
+                        workflow_id=workflow.id, status="locked", message="Another sweep holds this workflow"
+                    )
+                recovery_messages = plan_running_workflow(full_workflow, self.queue)
+                to_push = []
                 for msg in recovery_messages:
+                    moved_at = self._dead_letter_moved_at(msg, workflow.id)
+                    if moved_at is not None and (activity is None or moved_at >= activity):
+                        withheld += 1
+                        continue
+                    if moved_at is not None:
+                        stale_letters += 1
+                    to_push.append(msg)
+                if not to_push:
+                    if withheld:
+                        return RecoveryResult(
+                            workflow_id=workflow.id,
+                            status="dead_lettered",
+                            message=f"{withheld} message(s) sit in the dead-letter queue since the last activity",
+                        )
+                    return RecoveryResult(
+                        workflow_id=workflow.id, status="skipped", message="No recovery messages to push"
+                    )
+                for msg in to_push:
                     txn.push_message(msg)
-            messages_queued = len(recovery_messages)
         except Exception as e:
-            logger.warning(
-                "Failed to push recovery messages atomically for workflow %s: %s",
-                workflow.id,
-                e,
+            logger.warning("Failed to push recovery messages atomically for workflow %s: %s", workflow.id, e)
+            return RecoveryResult(
+                workflow_id=workflow.id,
+                status="partial",
+                message=f"Recovery transaction failed: {e}",
+                failed_pushes=1,
             )
-            failed_pushes = len(recovery_messages)
-
+        stages_requeued = len({getattr(m, "stage_id", None) for m in to_push})
+        status = "dead_letter_stale" if stale_letters else "recovered"
         return RecoveryResult(
             workflow_id=workflow.id,
-            status="recovered" if failed_pushes == 0 else "partial",
-            message=f"Re-queued {stages_requeued} stages ({messages_queued} messages, {failed_pushes} failed)",
+            status=status,
+            message=f"Re-queued {stages_requeued} stages ({len(to_push)} messages, {withheld} withheld)",
             stages_requeued=stages_requeued,
-            failed_pushes=failed_pushes,
+            failed_pushes=0,
         )
+
+    def _dead_letter_moved_at(self, message: Any, execution_id: str) -> int | None:
+        lookup = getattr(self.queue, "dead_letter_moved_at_ms", None)
+        if not callable(lookup):
+            return None
+        from stabilize.queue.messages import get_message_type_name
+
+        target = getattr(message, "task_id", None) or getattr(message, "stage_id", None)
+        try:
+            moved = lookup(get_message_type_name(message), execution_id, target)
+            return int(moved) if moved is not None else None
+        except Exception as e:
+            logger.warning("Dead-letter lookup failed for workflow %s: %s", execution_id, e)
+            return None
 
 
 def recover_on_startup(

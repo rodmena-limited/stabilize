@@ -313,6 +313,15 @@ class PostgresTransaction(StoreTransaction):
                 "DELETE FROM stage_executions WHERE id = %(stage_id)s AND stabilize_tenant = %(tenant)s", params
             )
 
+    def try_lock_recovery(self, key: str) -> bool:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended(%(key)s, 0)) AS taken",
+                {"key": f"recovery\x1f{self._tenant}\x1f{key}"},
+            )
+            row = cur.fetchone()
+        return bool(row["taken"]) if row else False
+
     def lock_admission(self, key: str) -> None:
         with self._conn.cursor() as cur:
             cur.execute("SET LOCAL lock_timeout = '30s'")
@@ -337,13 +346,19 @@ class PostgresTransaction(StoreTransaction):
             row = cur.fetchone()
         return int(row["n"] if isinstance(row, dict) else row[0])
 
-    def buffered_ids(self, pipeline_config_id: str) -> list[str]:
+    def buffered_ids(self, pipeline_config_id: str, queue_table: str | None = None) -> list[str]:
+        scope = ""
+        params: dict[str, Any] = {"c": pipeline_config_id, "tenant": self._tenant}
+        if queue_table is not None:
+            scope = " AND (queue_table = %(queue_table)s OR (%(own_default)s AND queue_table IS NULL))"
+            params["queue_table"] = queue_table
+            params["own_default"] = queue_table == "queue_messages"
         with self._conn.cursor() as cur:
             cur.execute(
                 "SELECT id FROM pipeline_executions "
                 "WHERE pipeline_config_id = %(c)s AND status = 'BUFFERED' "
-                "AND stabilize_tenant = %(tenant)s ORDER BY id",
-                {"c": pipeline_config_id, "tenant": self._tenant},
+                f"AND stabilize_tenant = %(tenant)s{scope} ORDER BY id",
+                params,
             )
             rows = cur.fetchall()
         return [r["id"] if isinstance(r, dict) else r[0] for r in rows]

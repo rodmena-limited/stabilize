@@ -433,6 +433,11 @@ class AtomicTransaction(StoreTransaction):
         self._conn.execute("DELETE FROM stage_claims WHERE stage_id = :stage_id AND stabilize_tenant = :tenant", params)
         self._conn.execute("DELETE FROM stage_executions WHERE id = :stage_id AND stabilize_tenant = :tenant", params)
 
+    def try_lock_recovery(self, key: str) -> bool:
+        if not self._conn.in_transaction:
+            self._conn.execute("BEGIN IMMEDIATE")
+        return True
+
     def lock_admission(self, key: str) -> None:
         if self._conn.in_transaction:
             raise RuntimeError("lock_admission must be the first statement of its transaction")
@@ -446,11 +451,16 @@ class AtomicTransaction(StoreTransaction):
         ).fetchone()
         return int(row[0])
 
-    def buffered_ids(self, pipeline_config_id: str) -> list[str]:
+    def buffered_ids(self, pipeline_config_id: str, queue_table: str | None = None) -> list[str]:
+        scope = ""
+        params: list[Any] = [pipeline_config_id, self._tenant]
+        if queue_table is not None:
+            scope = " AND (queue_table = ? OR (? = 1 AND queue_table IS NULL))"
+            params.extend([queue_table, 1 if queue_table == "queue_messages" else 0])
         rows = self._conn.execute(
             "SELECT id FROM pipeline_executions "
-            "WHERE pipeline_config_id = ? AND status = 'BUFFERED' AND stabilize_tenant = ? ORDER BY id",
-            (pipeline_config_id, self._tenant),
+            f"WHERE pipeline_config_id = ? AND status = 'BUFFERED' AND stabilize_tenant = ?{scope} ORDER BY id",
+            params,
         ).fetchall()
         return [r[0] for r in rows]
 
