@@ -11,6 +11,8 @@ from stabilize.cli.migrations import extract_up_migration
 TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE")
 
 OPTIONAL_FEATURE_TABLES = frozenset({"events", "snapshots", "event_subscriptions", "task_leases"})
+MODE_TABLE = "stabilize_tenancy"
+NON_ENGINE_TABLES = frozenset({MODE_TABLE})
 
 _CREATE_RE = re.compile(r"(?i)\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?\"?([A-Za-z_][A-Za-z0-9_]*)\"?")
 _DROP_RE = re.compile(r"(?i)\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?\"?([A-Za-z_][A-Za-z0-9_]*)\"?")
@@ -23,7 +25,7 @@ def engine_tables(migrations: list[tuple[str, str]]) -> list[str]:
         up = extract_up_migration(content)
         for statement in up.split(";"):
             created = _CREATE_RE.search(statement)
-            if created and created.group(1) not in tables:
+            if created and created.group(1) not in tables and created.group(1) not in NON_ENGINE_TABLES:
                 tables.append(created.group(1))
             dropped = _DROP_RE.search(statement)
             if dropped and dropped.group(1) in tables:
@@ -104,6 +106,20 @@ def check_role_grants(cur: Any, role: str, schema: str, tables: list[str]) -> Gr
             if not (usage and usage[0]):
                 report.missing_sequences[table] = sequence
 
+    cur.execute(
+        "SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = %s AND c.relname = %s AND c.relkind IN ('r', 'p')",
+        (schema, MODE_TABLE),
+    )
+    mode_table = cur.fetchone()
+    if mode_table is None:
+        report.missing_tables.append(MODE_TABLE)
+    else:
+        cur.execute("SELECT has_table_privilege(%s, %s::oid, 'SELECT')", (role, mode_table[0]))
+        granted = cur.fetchone()
+        if not (granted and granted[0]):
+            report.missing_privileges[MODE_TABLE] = ["SELECT"]
+
     return report
 
 
@@ -122,5 +138,7 @@ def format_report(report: GrantReport) -> list[str]:
     for table, sequence in report.missing_sequences.items():
         lines.append(f"  MISSING  USAGE on sequence {sequence} (INSERT into {table} needs it)")
     if report.complete:
-        lines.append(f"OK: {report.role} can SELECT, INSERT, UPDATE and DELETE every engine table")
+        lines.append(
+            f"OK: {report.role} can SELECT, INSERT, UPDATE and DELETE every engine table and read {MODE_TABLE}"
+        )
     return lines

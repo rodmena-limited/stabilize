@@ -12,12 +12,15 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Any
 
+from stabilize.persistence.borrow import EngineBorrower
 from stabilize.persistence.connection import release_pool_once
 from stabilize.persistence.pool_options import PoolOptions, with_schema
+from stabilize.persistence.tenancy import ModeReader, postgres_mode, validate_tenant
 from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.interface import Queue
 from stabilize.queue.message_ids import delivery_key, own_row_ids, row_id
@@ -49,6 +52,7 @@ class PostgresQueue(Queue):
         max_attempts: int = 10,
         schema: str | None = None,
         options: PoolOptions | None = None,
+        tenant: str = "",
     ) -> None:
         """
         Initialize the PostgreSQL queue.
@@ -73,6 +77,7 @@ class PostgresQueue(Queue):
         """
         from stabilize.persistence.connection import get_connection_manager
 
+        self.tenant = validate_tenant(tenant)
         self.connection_string = connection_string
         if not _VALID_TABLE_NAME_RE.match(table_name):
             raise ValueError(f"Invalid table name: {table_name!r}")
@@ -83,6 +88,8 @@ class PostgresQueue(Queue):
         self._pool_options = with_schema(options, schema, connection_string)
         self._manager = get_connection_manager()
         self._pool = self._manager.get_postgres_pool(connection_string, options=self._pool_options)
+        self._mode = ModeReader(postgres_mode)
+        self._engine = EngineBorrower(self._borrow)
         self._pending: dict[int, dict[str, Any]] = {}
         # Size caching
         self._size_cache: int | None = None
@@ -92,6 +99,13 @@ class PostgresQueue(Queue):
     def _get_pool(self) -> Any:
         """Return the pool acquired at construction."""
         return self._pool
+
+    @contextmanager
+    def _borrow(self) -> Iterator[Any]:
+        """Every engine borrow: the pool's connection, admitted against the schema's tenancy mode."""
+        with self._pool.connection() as conn:
+            self._mode.admit(conn, self.tenant)
+            yield conn
 
     def close(self) -> None:
         """Release this queue's hold on its pool."""
@@ -120,7 +134,6 @@ class PostgresQueue(Queue):
         connection: Any | None = None,
     ) -> None:
         """Push a message onto the queue."""
-        pool = self._get_pool()
 
         message_type = get_message_type_name(message)
         message_id = str(uuid.uuid4())
@@ -149,7 +162,7 @@ class PostgresQueue(Queue):
             with connection.cursor() as cur:
                 cur.execute(sql, params)
         else:
-            with pool.connection() as conn:
+            with self._borrow() as conn:
                 with conn.cursor() as cur:
                     cur.execute(sql, params)
                 conn.commit()
@@ -170,8 +183,7 @@ class PostgresQueue(Queue):
 
     def poll_one(self) -> Message | None:
         """Poll for a single message without callback."""
-        pool = self._get_pool()
-        with pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -228,9 +240,7 @@ class PostgresQueue(Queue):
             logger.error("Invalid message_id format in ack(): %s", message.message_id)
             return
 
-        pool = self._get_pool()
-
-        with pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"DELETE FROM {self.table_name} WHERE id = %(id)s{_FENCE}",
@@ -251,8 +261,7 @@ class PostgresQueue(Queue):
         msg_id = row_id(message.message_id)
 
         seconds = (duration or self.lock_duration).total_seconds()
-        pool = self._get_pool()
-        with pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"UPDATE {self.table_name} SET locked_until = NOW() + %(seconds)s * INTERVAL '1 second' "
@@ -283,9 +292,8 @@ class PostgresQueue(Queue):
             return
 
         msg_id = row_id(message.message_id)
-        pool = self._get_pool()
 
-        with pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -304,8 +312,7 @@ class PostgresQueue(Queue):
         owned = own_row_ids(self.table_name, keys)
         if not owned:
             return set()
-        pool = self._get_pool()
-        with pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(f"SELECT id FROM {self.table_name} WHERE id = ANY(%(ids)s)", {"ids": list(owned)})
                 rows = cur.fetchall()
@@ -317,8 +324,7 @@ class PostgresQueue(Queue):
         if self._size_cache is not None and now - self._last_size_check < self._size_cache_ttl:
             return self._size_cache
 
-        pool = self._get_pool()
-        with pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(f"SELECT COUNT(*) as cnt FROM {self.table_name}")
                 row = cur.fetchone()
@@ -330,8 +336,7 @@ class PostgresQueue(Queue):
 
     def clear(self) -> None:
         """Clear all messages from the queue."""
-        pool = self._get_pool()
-        with pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(f"DELETE FROM {self.table_name}")
             conn.commit()
@@ -351,8 +356,7 @@ class PostgresQueue(Queue):
         Returns:
             True if a pending message exists for this task
         """
-        pool = self._get_pool()
-        with pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 # Exact top-level match; served by the expression index
                 # idx_<table>_task_id (see add_queue_task_id_index migration).
@@ -367,7 +371,7 @@ class PostgresQueue(Queue):
                 return cur.fetchone() is not None
 
     def has_pending_message_for_stage(self, stage_id: str) -> bool:
-        with self._get_pool().connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"SELECT 1 FROM {self.table_name} WHERE payload ->> 'stage_id' = %s LIMIT 1",
@@ -377,7 +381,7 @@ class PostgresQueue(Queue):
 
     def has_pending_message_for_execution(self, execution_id: str) -> bool:
         """Whether any queued message targets this workflow."""
-        with self._get_pool().connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"SELECT 1 FROM {self.table_name} WHERE payload ->> 'execution_id' = %s LIMIT 1",
@@ -388,7 +392,7 @@ class PostgresQueue(Queue):
     def purge_workflow(self, execution_id: str) -> int:
         """Delete every queued and dead-lettered message for one workflow."""
         deleted = 0
-        with self._get_pool().connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 for table in (self.table_name, f"{self.table_name}_dlq"):
                     cur.execute(
@@ -410,7 +414,7 @@ class PostgresQueue(Queue):
         """Move a message to the Dead Letter Queue."""
         from stabilize.queue.dlq import move_to_dlq as _move_to_dlq
 
-        _move_to_dlq(self._get_pool(), self.table_name, self._pending, message_id, error)
+        _move_to_dlq(self._engine, self.table_name, self._pending, message_id, error)
 
     def list_dlq(
         self,
@@ -420,28 +424,28 @@ class PostgresQueue(Queue):
         """List messages in the Dead Letter Queue."""
         from stabilize.queue.dlq import list_dlq as _list_dlq
 
-        return _list_dlq(self._get_pool(), self.table_name, limit, message_type)
+        return _list_dlq(self._engine, self.table_name, limit, message_type)
 
     def replay_dlq(self, dlq_id: int) -> bool:
         """Replay a message from the DLQ back to the main queue."""
         from stabilize.queue.dlq import replay_dlq as _replay_dlq
 
-        return _replay_dlq(self._get_pool(), self.table_name, dlq_id)
+        return _replay_dlq(self._engine, self.table_name, dlq_id)
 
     def dlq_size(self) -> int:
         """Get the number of messages in the Dead Letter Queue."""
         from stabilize.queue.dlq import dlq_size as _dlq_size
 
-        return _dlq_size(self._get_pool(), self.table_name)
+        return _dlq_size(self._engine, self.table_name)
 
     def clear_dlq(self) -> int:
         """Clear all messages from the Dead Letter Queue."""
         from stabilize.queue.dlq import clear_dlq as _clear_dlq
 
-        return _clear_dlq(self._get_pool(), self.table_name)
+        return _clear_dlq(self._engine, self.table_name)
 
     def check_and_move_expired(self) -> int:
         """Check for messages exceeding max_attempts and move to DLQ."""
         from stabilize.queue.dlq import check_and_move_expired as _check_and_move_expired
 
-        return _check_and_move_expired(self._get_pool(), self.table_name, self._pending, self.max_attempts)
+        return _check_and_move_expired(self._engine, self.table_name, self._pending, self.max_attempts)

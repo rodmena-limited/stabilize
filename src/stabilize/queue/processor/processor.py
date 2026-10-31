@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, TypeVar
 
+from stabilize.persistence.tenancy import require_same_tenant
 from stabilize.queue import Queue
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.processor.config import QueueProcessorConfig
@@ -86,6 +87,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
             bulkhead_manager: Optional bulkhead manager for RunTaskHandler concurrency control.
             circuit_factory: Optional circuit breaker factory for workflow-level circuit breaking.
         """
+        require_same_tenant(queue=queue, store=store)
         self.queue = queue
         self._sync_lease_warned = False
         # Use explicit config if provided, otherwise create from handler_config

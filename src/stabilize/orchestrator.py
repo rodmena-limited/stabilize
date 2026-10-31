@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from stabilize.models.status import WorkflowStatus
+from stabilize.persistence.tenancy import require_same_tenant
 from stabilize.queue.messages import (
     CancelWorkflow,
     CompleteWorkflow,
@@ -52,6 +53,7 @@ class Orchestrator:
             store: Optional workflow store for atomic operations. When provided,
                    queue operations are wrapped in store transactions.
         """
+        require_same_tenant(queue=queue, store=store)
         self.queue = queue
         self.store = store
         # Register as the global instance for SubWorkflowTask access

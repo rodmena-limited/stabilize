@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from stabilize.models.workflow import Workflow
+from stabilize.persistence.borrow import EngineBorrower
 from stabilize.persistence.connection import release_pool_once
 from stabilize.persistence.pool_options import (
     DEFAULT_HEALTH_TIMEOUT_SECONDS,
@@ -60,6 +61,7 @@ from stabilize.persistence.store import (
 from stabilize.persistence.store.ids import check_ids
 from stabilize.persistence.store.owned_rows import WORKFLOW_OWNED_ROWS
 from stabilize.persistence.task_state import capture, commit_captured, restore_versions, versions
+from stabilize.persistence.tenancy import ModeReader, postgres_mode, require_same_tenant, validate_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +81,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         schema: str | None = None,
         options: PoolOptions | None = None,
         health_timeout: float = DEFAULT_HEALTH_TIMEOUT_SECONDS,
+        tenant: str = "",
     ) -> None:
         """Initialize the repository.
 
@@ -95,12 +98,22 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         """
         from stabilize.persistence.connection import get_connection_manager
 
+        self.tenant = validate_tenant(tenant)
         self.connection_string = connection_string
         self._manager = get_connection_manager()
         self._health_timeout = health_timeout
         self.schema = schema
         resolved_options = with_schema(options, schema, connection_string)
         self._pool = self._manager.get_postgres_pool(connection_string, options=resolved_options)
+        self._mode = ModeReader(postgres_mode)
+        self._engine = EngineBorrower(self._borrow)
+
+    @contextmanager
+    def _borrow(self) -> Iterator[Any]:
+        """Every engine borrow: the pool's connection, admitted against the schema's tenancy mode."""
+        with self._pool.connection() as conn:
+            self._mode.admit(conn, self.tenant)
+            yield conn
 
     def close(self) -> None:
         release_pool_once(self, self._manager, self._pool)
@@ -108,7 +121,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
     def store(self, execution: Workflow) -> None:
         """Store a complete execution."""
         check_ids(execution)
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -137,7 +150,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
 
     def retrieve(self, execution_id: str) -> Workflow:
         """Retrieve an execution by ID."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT * FROM pipeline_executions WHERE id = %(id)s",
@@ -170,7 +183,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
 
     def retrieve_execution_summary(self, execution_id: str) -> Workflow:
         """Retrieve execution metadata without stages."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT * FROM pipeline_executions WHERE id = %(id)s",
@@ -184,7 +197,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
 
     def update_status(self, execution: Workflow) -> None:
         """Update execution status."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -216,7 +229,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
 
         Queue and dead-letter rows belong to the queue: see Queue.purge_workflow.
         """
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 for table, column in WORKFLOW_OWNED_ROWS:
                     cur.execute(f"DELETE FROM {table} WHERE {column} = %(id)s", {"id": execution_id})
@@ -242,7 +255,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
             return
         stage_version, task_versions = stage.version, versions(stage.tasks)
         try:
-            with self._pool.connection() as conn:
+            with self._borrow() as conn:
                 with conn.cursor() as cur:
                     self._store_stage_impl(cur, stage, expected_phase)
                 written = capture(stage.tasks)
@@ -316,7 +329,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
 
     def remove_stage(self, execution: Workflow, stage_id: str) -> None:
         """Remove a stage."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "DELETE FROM stage_executions WHERE id = %(id)s",
@@ -326,7 +339,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
 
     def retrieve_stage(self, stage_id: str) -> Any:
         """Retrieve a single stage by ID."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT * FROM stage_executions WHERE id = %(id)s",
@@ -378,19 +391,19 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
 
     def get_upstream_stages(self, execution_id: str, stage_ref_id: str) -> list[Any]:
         """Get upstream stages with tasks loaded."""
-        return _get_upstream_stages(self._pool, execution_id, stage_ref_id)
+        return _get_upstream_stages(self._engine, execution_id, stage_ref_id)
 
     def get_downstream_stages(self, execution_id: str, stage_ref_id: str) -> list[Any]:
         """Get downstream stages with tasks loaded."""
-        return _get_downstream_stages(self._pool, execution_id, stage_ref_id)
+        return _get_downstream_stages(self._engine, execution_id, stage_ref_id)
 
     def get_synthetic_stages(self, execution_id: str, parent_stage_id: str) -> list[Any]:
         """Get synthetic stages with tasks loaded."""
-        return _get_synthetic_stages(self._pool, execution_id, parent_stage_id)
+        return _get_synthetic_stages(self._engine, execution_id, parent_stage_id)
 
     def get_merged_ancestor_outputs(self, execution_id: str, stage_ref_id: str) -> dict[str, Any]:
         """Get merged outputs from all ancestor stages."""
-        return _get_merged_ancestor_outputs(self._pool, execution_id, stage_ref_id)
+        return _get_merged_ancestor_outputs(self._engine, execution_id, stage_ref_id)
 
     def retrieve_by_pipeline_config_id(
         self,
@@ -398,7 +411,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         criteria: WorkflowCriteria | None = None,
     ) -> Iterator[Workflow]:
         """Retrieve executions by pipeline config ID."""
-        return _retrieve_by_pipeline_config_id(self._pool, pipeline_config_id, criteria, self.retrieve)
+        return _retrieve_by_pipeline_config_id(self._engine, pipeline_config_id, criteria, self.retrieve)
 
     def retrieve_by_application(
         self,
@@ -406,26 +419,26 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         criteria: WorkflowCriteria | None = None,
     ) -> Iterator[Workflow]:
         """Retrieve executions by application."""
-        return _retrieve_by_application(self._pool, application, criteria, self.retrieve)
+        return _retrieve_by_application(self._engine, application, criteria, self.retrieve)
 
     def get_all_pending_workflows(
         self,
         criteria: WorkflowCriteria | None = None,
     ) -> Iterator[Workflow]:
         """Get all workflows matching criteria across all applications (for recovery)."""
-        return _get_all_pending_workflows(self._pool, criteria, self.retrieve)
+        return _get_all_pending_workflows(self._engine, criteria, self.retrieve)
 
     def pause(self, execution_id: str, paused_by: str) -> None:
         """Pause an execution."""
-        pause_execution(self._pool, execution_id, paused_by)
+        pause_execution(self._engine, execution_id, paused_by)
 
     def resume(self, execution_id: str) -> None:
         """Resume a paused execution."""
-        resume_execution(self._pool, execution_id)
+        resume_execution(self._engine, execution_id)
 
     def cancel(self, execution_id: str, canceled_by: str, reason: str) -> None:
         """Cancel an execution."""
-        cancel_execution(self._pool, execution_id, canceled_by, reason)
+        cancel_execution(self._engine, execution_id, canceled_by, reason)
 
     def is_healthy(self, timeout: float | None = None) -> bool:
         """Whether the database answers, within a bounded interval.
@@ -458,7 +471,8 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         )
         from stabilize.persistence.postgres.transaction import PostgresTransaction
 
-        with self._pool.connection() as conn:
+        require_same_tenant(store=self, queue=queue)
+        with self._borrow() as conn:
             txn = PostgresTransaction(conn, self, queue)
             # Bind a thread-local scope so event recording inside this block
             # joins the transaction (same-database event stores) and bus
@@ -474,4 +488,3 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
                 abort_store_transaction()
                 raise
             commit_store_transaction()
-

@@ -53,6 +53,9 @@ def create_signals_table(conn: sqlite3.Connection) -> None:
         if statement:
             conn.execute(statement)
     conn.commit()
+    from stabilize.persistence.sqlite.tenant_schema import ensure_tenant_schema
+
+    ensure_tenant_schema(conn)
 
 
 def buffer_signal(

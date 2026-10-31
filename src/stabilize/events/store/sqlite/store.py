@@ -22,6 +22,8 @@ from stabilize.events.store.sqlite.schema import (
 from stabilize.events.store.sqlite.snapshots import SqliteSnapshotsMixin
 from stabilize.events.store.sqlite.subscriptions import SqliteSubscriptionsMixin
 from stabilize.persistence.connection import get_connection_manager
+from stabilize.persistence.sqlite.tenant_schema import engine_shaped_tables, ensure_tenant_schema, read_mode
+from stabilize.persistence.tenancy import check_mode_admits, validate_tenant
 
 
 class SqliteEventStore(
@@ -46,6 +48,7 @@ class SqliteEventStore(
         self,
         connection_string: str,
         create_tables: bool = True,
+        tenant: str = "",
     ) -> None:
         """
         Initialize SQLite event store.
@@ -54,11 +57,16 @@ class SqliteEventStore(
             connection_string: SQLite connection string (e.g., "sqlite:///./app.db")
             create_tables: Whether to create tables if they don't exist.
         """
+        self.tenant = validate_tenant(tenant)
         self._connection_string = connection_string
         self._lock = threading.Lock()
 
         if create_tables:
             self._create_tables()
+        conn = self._get_connection()
+        if engine_shaped_tables(conn):
+            ensure_tenant_schema(conn)
+            check_mode_admits(read_mode(conn), self.tenant)
 
     def _get_connection(self) -> sqlite3.Connection:
         """Get thread-local connection."""
@@ -71,6 +79,7 @@ class SqliteEventStore(
         conn.executescript(SNAPSHOTS_SCHEMA)
         conn.executescript(SUBSCRIPTIONS_SCHEMA)
         self._add_missing_columns(conn)
+        ensure_tenant_schema(conn)
 
     @staticmethod
     def _add_missing_columns(conn: Any) -> None:

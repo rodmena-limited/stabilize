@@ -22,12 +22,15 @@ from stabilize.events.store.postgres.schema import (
     SNAPSHOTS_SCHEMA,
     SUBSCRIPTIONS_CURSOR_MIGRATION,
     SUBSCRIPTIONS_SCHEMA,
+    TENANCY_MODE_SCHEMA,
+    TENANCY_MODE_SEED,
     setup_ddl,
 )
 from stabilize.events.store.postgres.snapshots import PostgresSnapshotsMixin
 from stabilize.events.store.postgres.subscriptions import PostgresSubscriptionsMixin
 from stabilize.persistence.connection import get_connection_manager, release_pool_once
-from stabilize.persistence.pool_options import PoolOptions
+from stabilize.persistence.pool_options import PoolOptions, with_schema
+from stabilize.persistence.tenancy import check_mode_admits, postgres_mode, validate_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +81,7 @@ class PostgresEventStore(
         create_tables: bool = False,
         schema: str | None = None,
         options: PoolOptions | None = None,
+        tenant: str = "",
     ) -> None:
         """
         Initialize PostgreSQL event store.
@@ -96,9 +100,11 @@ class PostgresEventStore(
                 the workflow store and the queue to share their pool, and with it
                 their ``on_borrow`` and ``reset``.
         """
+        self.tenant = validate_tenant(tenant)
         self._connection_string = connection_string
         self._manager = get_connection_manager()
-        self._pool = self._manager.get_postgres_pool(connection_string, options=options)
+        resolved = with_schema(options, schema, connection_string)
+        self._pool = self._manager.get_postgres_pool(connection_string, options=resolved)
         self._lock = threading.Lock()
         self._schema = schema
 
@@ -113,6 +119,8 @@ class PostgresEventStore(
                 self._create_tables()
             else:
                 self._verify_schema()
+            with self._pool.connection() as conn:
+                check_mode_admits(postgres_mode(conn), self.tenant)
         except BaseException:
             release_pool_once(self, self._manager, self._pool)
             raise
@@ -268,6 +276,8 @@ class PostgresEventStore(
                 cur.execute(EVENTS_SCHEMA)
                 cur.execute(SNAPSHOTS_SCHEMA)
                 cur.execute(SUBSCRIPTIONS_SCHEMA)
+                cur.execute(TENANCY_MODE_SCHEMA)
+                cur.execute(TENANCY_MODE_SEED)
                 for statement in SUBSCRIPTIONS_CURSOR_MIGRATION:
                     cur.execute(statement)
             conn.commit()

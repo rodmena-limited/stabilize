@@ -61,6 +61,7 @@ def _make_role(pg: Any, grant_all: bool) -> str:
     if grant_all:
         for table in engine_tables(get_migrations()):
             pg.execute(f'GRANT SELECT, INSERT, UPDATE, DELETE ON public."{table}" TO "{role}"')
+        pg.execute(f'GRANT SELECT ON public.stabilize_tenancy TO "{role}"')
         pg.execute(f'GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO "{role}"')
     return role
 
@@ -143,5 +144,6 @@ def test_wrong_schema_reports_missing_tables(postgres_url: str, pg: Any, capsys:
         _drop_role(pg, role)
         pg.execute(f'DROP SCHEMA "{schema}"')
     assert code == 1
-    assert out.count("does not exist") == 8
+    assert out.count("does not exist") == 9
+    assert f"table {schema}.stabilize_tenancy does not exist" in out
     assert "OK:" not in out

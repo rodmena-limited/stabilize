@@ -6,6 +6,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -102,7 +103,7 @@ def test_another_projects_migretti_history_in_the_same_schema_is_refused(db: str
     assert "does not ship" in output(shared) and "?schema=" in output(shared), output(shared)
     assert not relation_exists(db, "pipeline_executions"), "mg-up created tables beside another project's history"
 
-    own = stabilize("mg-up", "--db-url", with_schema(db, "stabilize"))
+    own = stabilize("mg-up", "--db-url", with_schema(db, "orch"))
     assert own.returncode == 0, output(own)
     other = mg(app, db, "verify")
     assert other.returncode == 0, f"the other project's mg verify fails beside stabilize: {output(other)}"
@@ -171,3 +172,14 @@ def test_mg_status_reports_migrettis_state_and_creates_nothing(db: str) -> None:
     after = stabilize("mg-status", "--db-url", db)
     assert f"Applied {SHIPPED_COUNT} of {SHIPPED_COUNT}" in output(after), output(after)
     assert "pending" not in output(after), output(after)
+
+
+def test_a_target_schema_named_after_the_connecting_role_is_refused(db: str, tmp_path: Path) -> None:
+    role = urlsplit(db).username
+    assert role, db
+    with psycopg.connect(db) as conn:
+        assert conn.execute("SHOW search_path").fetchone()[0].startswith('"$user"'), "the role's search_path"
+    result = stabilize("mg-up", "--db-url", with_schema(db, role))
+    assert result.returncode == 1, f"mg-up accepted a schema that shadows public for role {role}: {output(result)}"
+    assert "$user" in output(result) and role in output(result), output(result)
+    assert not relation_exists(db, f"{role}.pipeline_executions") and not relation_exists(db, f"{role}._migrations")

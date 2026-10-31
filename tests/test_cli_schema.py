@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from stabilize.cli.config import load_config, parse_db_url, validate_schema_name
+from stabilize.cli.config import TARGET_VARIABLES, load_config, parse_db_url, validate_schema_name
 
 try:
     import psycopg
@@ -32,10 +32,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 class TestSchemaConfig:
     def test_parse_db_url_extracts_schema(self) -> None:
-        config = parse_db_url("postgres://user:pass@host:5433/mydb?schema=stabilize")
+        config = parse_db_url("postgres://user:pass@host:5433/mydb?schema=orch")
         assert config["dbname"] == "mydb"
         assert config["port"] == 5433
-        assert config["schema"] == "stabilize"
+        assert config["schema"] == "orch"
 
     def test_parse_db_url_without_query_has_no_schema(self) -> None:
         config = parse_db_url("postgres://user:pass@host:5432/mydb")
@@ -47,6 +47,8 @@ class TestSchemaConfig:
         assert "schema" not in config
 
     def test_mg_schema_env_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for name in TARGET_VARIABLES:
+            monkeypatch.delenv(name, raising=False)
         monkeypatch.setenv("MG_DATABASE_URL", "postgres://u:p@h:5432/d")
         monkeypatch.setenv("MG_SCHEMA", "stabilize")
         config = load_config()
@@ -114,17 +116,17 @@ class TestMgUpSchemaPostgres:
     ) -> None:
         from stabilize.cli import commands
 
-        commands.mg_up(fresh_database + "?schema=stabilize")
+        commands.mg_up(fresh_database + "?schema=orch")
 
-        in_schema = _tables_in_schema(fresh_database, "stabilize")
+        in_schema = _tables_in_schema(fresh_database, "orch")
         for expected in ("_migrations", "queue_messages", "stage_executions", "task_executions"):
-            assert expected in in_schema, f"{expected} not created in stabilize schema"
+            assert expected in in_schema, f"{expected} not created in orch schema"
 
         in_public = _tables_in_schema(fresh_database, "public")
         assert not (in_public & in_schema), f"stabilize tables leaked into public: {in_public & in_schema}"
 
         # Idempotence: a second run applies nothing and does not error.
-        commands.mg_up(fresh_database + "?schema=stabilize")
+        commands.mg_up(fresh_database + "?schema=orch")
         assert "No pending migrations" in capsys.readouterr().out
 
         # The documented runtime path resolves tables in the target schema:
@@ -132,7 +134,7 @@ class TestMgUpSchemaPostgres:
         from stabilize.persistence.postgres import PostgresWorkflowStore
         from stabilize.persistence.store import WorkflowNotFoundError
 
-        runtime_url = fresh_database + "?options=-csearch_path%3Dstabilize"
+        runtime_url = fresh_database + "?options=-csearch_path%3Dorch"
         store = PostgresWorkflowStore(connection_string=runtime_url)
         try:
             with pytest.raises(WorkflowNotFoundError):
@@ -156,10 +158,10 @@ class TestMgUpSchemaPostgres:
     ) -> None:
         from stabilize.cli import commands
 
-        commands.mg_up(fresh_database + "?schema=stabilize")
+        commands.mg_up(fresh_database + "?schema=orch")
         capsys.readouterr()
 
-        commands.mg_status(fresh_database + "?schema=stabilize")
+        commands.mg_status(fresh_database + "?schema=orch")
         out = capsys.readouterr().out
         assert "pending" not in out
         assert "applied" in out

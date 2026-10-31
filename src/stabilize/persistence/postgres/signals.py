@@ -7,7 +7,11 @@ import logging
 import time
 from typing import Any
 
+from stabilize.persistence.tenancy import TenancyModeError, TenantError
+
 logger = logging.getLogger(__name__)
+
+ENGINE_REFUSALS = (TenancyModeError, TenantError)
 
 SIGNAL_TABLE = "workflow_signals"
 
@@ -62,18 +66,17 @@ class PostgresSignalMixin:
         """
         if self._signal_storage_usable is True:
             return True
-        if (
-            self._signal_storage_usable is False
-            and time.monotonic() < self._signal_storage_retry_at
-        ):
+        if self._signal_storage_usable is False and time.monotonic() < self._signal_storage_retry_at:
             return False
 
         try:
-            with self._pool.connection() as conn:  # type: ignore[attr-defined]
+            with self._borrow() as conn:  # type: ignore[attr-defined]
                 with conn.cursor() as cur:
                     cur.execute(f"SELECT 1 FROM {SIGNAL_TABLE} WHERE FALSE")
                     cur.fetchall()
                 conn.rollback()
+        except ENGINE_REFUSALS:
+            raise
         except Exception as exc:
             self._signal_storage_unusable(exc)
             return False
@@ -93,7 +96,7 @@ class PostgresSignalMixin:
         if not self.supports_signal_storage():
             return 0
         try:
-            with self._pool.connection() as conn:  # type: ignore[attr-defined]
+            with self._borrow() as conn:  # type: ignore[attr-defined]
                 with conn.cursor() as cur:
                     cur.execute(
                         f"INSERT INTO {SIGNAL_TABLE} "
@@ -108,6 +111,8 @@ class PostgresSignalMixin:
                     )
                     row = cur.fetchone()
                 conn.commit()
+        except ENGINE_REFUSALS:
+            raise
         except Exception as exc:
             self._signal_storage_unusable(exc)
             return 0
@@ -129,12 +134,10 @@ class PostgresSignalMixin:
             return None
         clause = "AND signal_name = %s" if signal_name else ""
         params: tuple[Any, ...] = (
-            (execution_id, stage_ref_id, signal_name)
-            if signal_name
-            else (execution_id, stage_ref_id)
+            (execution_id, stage_ref_id, signal_name) if signal_name else (execution_id, stage_ref_id)
         )
         try:
-            with self._pool.connection() as conn:  # type: ignore[attr-defined]
+            with self._borrow() as conn:  # type: ignore[attr-defined]
                 with conn.cursor() as cur:
                     cur.execute(
                         f"UPDATE {SIGNAL_TABLE} SET consumed = TRUE, consumed_at = NOW() "
@@ -147,6 +150,8 @@ class PostgresSignalMixin:
                     )
                     row = cur.fetchone()
                 conn.commit()
+        except ENGINE_REFUSALS:
+            raise
         except Exception as exc:
             self._signal_storage_unusable(exc)
             return None
@@ -160,7 +165,7 @@ class PostgresSignalMixin:
         if not self.supports_signal_storage():
             return 0
         try:
-            with self._pool.connection() as conn:  # type: ignore[attr-defined]
+            with self._borrow() as conn:  # type: ignore[attr-defined]
                 with conn.cursor() as cur:
                     cur.execute(
                         f"SELECT count(*) AS n FROM {SIGNAL_TABLE} "
@@ -169,6 +174,8 @@ class PostgresSignalMixin:
                     )
                     row = cur.fetchone()
                 conn.rollback()
+        except ENGINE_REFUSALS:
+            raise
         except Exception as exc:
             self._signal_storage_unusable(exc)
             return 0
@@ -180,7 +187,7 @@ class PostgresSignalMixin:
         if not self.supports_signal_storage():
             return 0
         try:
-            with self._pool.connection() as conn:  # type: ignore[attr-defined]
+            with self._borrow() as conn:  # type: ignore[attr-defined]
                 with conn.cursor() as cur:
                     cur.execute(
                         f"DELETE FROM {SIGNAL_TABLE} WHERE execution_id = %s "
@@ -189,6 +196,8 @@ class PostgresSignalMixin:
                     )
                     dropped = cur.rowcount or 0
                 conn.commit()
+        except ENGINE_REFUSALS:
+            raise
         except Exception as exc:
             self._signal_storage_unusable(exc)
             return 0

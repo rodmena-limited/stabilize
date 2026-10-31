@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 
@@ -9,6 +10,7 @@ from stabilize.cli.migrations import extract_up_migration
 
 _TYPE_NAMES = {
     "BIGINT": "bigint",
+    "SMALLINT": "smallint",
     "BIGSERIAL": "bigint",
     "INTEGER": "integer",
     "INT": "integer",
@@ -38,6 +40,16 @@ _VERSION_GUARD_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _SETVAL_RE = re.compile(r"^SELECT setval\(", re.IGNORECASE)
+_SET_LOCAL_RE = re.compile(r"^SET LOCAL (lock_timeout|statement_timeout) = ", re.IGNORECASE)
+_CREATE_FUNCTION_RE = re.compile(
+    r"^CREATE (OR REPLACE )?FUNCTION ([a-z_][a-z0-9_]*)\s*\((.*?)\) RETURNS (.*)$", re.IGNORECASE | re.DOTALL
+)
+_CREATE_TRIGGER_RE = re.compile(
+    r"^CREATE TRIGGER ([a-z_][a-z0-9_]*) (BEFORE|AFTER) .*? ON ([a-z_][a-z0-9_]*) ", re.IGNORECASE | re.DOTALL
+)
+_SEED_INSERT_RE = re.compile(
+    r"^INSERT INTO ([a-z_][a-z0-9_]*) .* ON CONFLICT \(.*\) DO NOTHING$", re.IGNORECASE | re.DOTALL
+)
 _CONSTRAINT_RE = re.compile(r"^(PRIMARY|UNIQUE|FOREIGN|CONSTRAINT|CHECK|EXCLUDE)\b", re.IGNORECASE)
 
 
@@ -176,6 +188,23 @@ def _model_statement(statement: str, model: MigrationModel, min_server: int = 0)
             _model_statement(inner, model, int(guarded.group(1)))
         return
     if _SETVAL_RE.match(statement) and min_server == 0:
+        model.rerun_on_adoption.append(statement)
+        return
+    if _SET_LOCAL_RE.match(statement):
+        return
+    function = _CREATE_FUNCTION_RE.match(statement)
+    if function:
+        body_hash = hashlib.sha256(" ".join(statement.split()).lower().encode()).hexdigest()
+        model.expectations.append(Expectation("function", function.group(2).lower(), body_hash, "", False, min_server))
+        return
+    trigger = _CREATE_TRIGGER_RE.match(statement)
+    if trigger:
+        model.expectations.append(
+            Expectation("trigger", trigger.group(3).lower(), trigger.group(1).lower(), "", False, min_server)
+        )
+        return
+    seed = _SEED_INSERT_RE.match(statement)
+    if seed and min_server == 0:
         model.rerun_on_adoption.append(statement)
         return
     model.unmodelled.append(statement)

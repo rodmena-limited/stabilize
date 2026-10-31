@@ -481,6 +481,11 @@ stabilize mg-up --db-url "postgres://user:pass@host:5432/dbname?schema=stabilize
 # postgres://user:pass@host:5432/dbname?options=-csearch_path%3Dstabilize
 ```
 
+Don't name the schema after the connecting role: with role `stabilize` and schema `stabilize`,
+PostgreSQL's default `search_path` (`"$user", public`) searches that schema before `public` for
+every unqualified name, and another project's migretti reads stabilize's history as its own.
+`mg-up` refuses the combination.
+
 To move an existing install out of `public`, run the script below once, then run
 `mg-up` with `?schema=stabilize` and use the schema-qualified URLs above from then on.
 If your own project has a table with one of these names in `public` (`events` and

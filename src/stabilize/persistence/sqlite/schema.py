@@ -149,3 +149,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
     from stabilize.persistence.sqlite.migrations import apply_migrations
 
     apply_migrations(conn)
+
+    from stabilize.persistence.sqlite.tenant_schema import ensure_tenant_schema
+
+    ensure_tenant_schema(conn)

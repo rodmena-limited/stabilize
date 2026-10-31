@@ -103,6 +103,29 @@ def _acquire_lock(psycopg: Any, conn: Any, timeout: float) -> None:
         cur.execute("SELECT set_config('lock_timeout', '0', false)")
 
 
+def _refuse_role_shadow(conn: Any, schema: str | None) -> None:
+    """A target schema named after the connecting role shadows public for every unqualified name.
+
+    PostgreSQL's default search_path is "$user", public. With a role called X, a
+    schema called X is searched first, so a host project's migretti then reads
+    X._migrations instead of public._migrations and reports stabilize's ids as
+    its own (B65).
+    """
+    if not schema:
+        return
+    with conn.cursor() as cur:
+        cur.execute("SELECT current_user, current_setting('search_path')")
+        row = cur.fetchone()
+    role, path = (str(row[0]), str(row[1])) if row else ("", "")
+    if schema == role and '"$user"' in path:
+        raise TakeoverRefusedError(
+            f"the target schema {schema} is named after the connecting role {role}, whose search_path "
+            f"({path}) lists \"$user\" first; every unqualified name, including other projects' "
+            "_migrations, would then resolve into stabilize's schema. Choose another schema name, "
+            "or connect as a role with a different name"
+        )
+
+
 def _read_legacy(conn: Any) -> dict[str, str] | None:
     with conn.cursor() as cur:
         cur.execute("SELECT to_regclass(%s) IS NOT NULL", (LEGACY_TABLE,))
@@ -220,6 +243,7 @@ def mg_up(
     try:
         with psycopg.connect(**params, autocommit=True) as conn:
             _acquire_lock(psycopg, conn, lock_timeout)
+            _refuse_role_shadow(conn, schema)
             run = _prepare(conn, params, schema, history)
             if schema:
                 conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')

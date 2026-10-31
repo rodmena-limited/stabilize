@@ -1,13 +1,50 @@
 # Changelog
 
-## [0.33.3] - 2026-10-30
+## [0.34.0] - Unreleased
 
-Fixes the bugs reported against 0.33.2 (#97, #98, #99) and adds the pool features
-Casebound asked for (#100, #101). **Run `stabilize mg-up` once after upgrading, as for 0.33.2.**
-Installs that 0.33.2 refused, because stabilize's tables share a schema with the
+The multi-tenant release (#103). It also carries everything prepared for 0.33.3, which was
+never published: the fixes for #97, #98 and #99 and the pool features Casebound asked for
+(#100, #101). **Stop every engine process, run `stabilize mg-up` once, then start them
+again.** Installs that 0.33.2 refused, because stabilize's tables share a schema with the
 host's own migretti history, now upgrade with no change to the command.
 
+### Added
+
+- **A tenant key on every engine row.** `mg-up` adds `stabilize_tenant TEXT NOT NULL
+  DEFAULT ''` to the 12 engine tables. The column is metadata-only to add and costs no
+  rewrite. SQLite files get the same column the first time 0.34 opens them, in every
+  engine-shaped table including custom queue tables and their `_dlq` siblings.
+- **A tenancy-mode record, `stabilize_tenancy`.** One row, seeded `single` by `mg-up`.
+  The store and queue read it on the first connection they borrow and again at most
+  every 5 s; the event store reads it when constructed. Engine work is refused when the
+  table is absent, has no row, has row-level security enabled, or cannot be read by the
+  role. The refusal names the remedy in each case. Constructing a store or queue still
+  borrows no connection, so `on_borrow` hooks run only under real work. **Grant the
+  runtime role `SELECT ON stabilize_tenancy`**; `mg-check-grants` now reports that grant
+  and treats the table as required. Policies never go on this table.
+- **`tenant=` on `PostgresWorkflowStore`, `PostgresQueue`, `PostgresEventStore`,
+  `SqliteWorkflowStore`, `SqliteQueue` and `SqliteEventStore`.** A tenant is 1 to 64
+  characters from `A-Z a-z 0-9 . : -`, or `''` for a single-tenant install. `None` is
+  refused. A schema in single-tenant mode refuses a named tenant. `QueueProcessor`,
+  `Orchestrator` and `store.transaction(queue)` refuse parts built with different
+  tenants.
+- **`PoolOptions.tenant_setting` and `PoolOptions.audit_key`.** Both are part of the
+  pool key. `tenant_setting` must be a custom GUC such as `app.current_tenant`, never
+  in the `stabilize.` class.
+- **`PostgresEventStore` honours `schema=` the way the store does**: its pool options go
+  through `with_schema`, so event writes land in the target schema under the same pool
+  hooks. `create_tables=True` creates the mode table and the tenant column too, and
+  `setup_ddl()` prints the same DDL.
+- **`stabilize_is_table_owner(regclass)`**, created by `mg-up`: STABLE, SECURITY
+  INVOKER, for host policies that let the table owner act across tenants.
+
 ### Fixed
+
+- **A target schema named after the connecting role is refused (B65).** With role
+  `stabilize` and `?schema=stabilize`, the default `search_path` of `"$user", public`
+  makes the new schema shadow `public`. A host's own `mg verify` then reads stabilize's
+  history table and fails on every id. `mg-up` refuses that combination before any
+  change. Found by the live test of the tenant migration on 2026-10-31.
 
 - **stabilize's history can live apart from a host's schema (#99).** migretti keeps one
   history table per schema, so 0.33.2 refused a schema that held a host project's

@@ -35,7 +35,9 @@ from stabilize.persistence.sqlite.schema import create_tables
 from stabilize.persistence.sqlite.store.queries import SqliteQueriesMixin
 from stabilize.persistence.sqlite.store.stage_ops import SqliteStageOpsMixin
 from stabilize.persistence.sqlite.store.workflow_crud import SqliteWorkflowCrudMixin
+from stabilize.persistence.sqlite.tenant_schema import engine_shaped_tables, ensure_tenant_schema, read_mode
 from stabilize.persistence.store import WorkflowStore
+from stabilize.persistence.tenancy import check_mode_admits, require_same_tenant, validate_tenant
 from stabilize.queue.ownership import DEFAULT_TABLE
 
 if TYPE_CHECKING:
@@ -69,6 +71,7 @@ class SqliteWorkflowStore(
         self,
         connection_string: str,
         create_tables: bool = False,
+        tenant: str = "",
     ) -> None:
         """
         Initialize the repository.
@@ -79,15 +82,18 @@ class SqliteWorkflowStore(
         """
         from stabilize.persistence.connection import get_connection_manager
 
+        self.tenant = validate_tenant(tenant)
         self.connection_string = connection_string
         self._manager = get_connection_manager()
 
-        # Verify connection works
         conn = self._get_connection()
         conn.execute("SELECT 1")
 
         if create_tables:
             self._create_tables()
+        if _has_engine_tables(conn):
+            ensure_tenant_schema(conn)
+            check_mode_admits(read_mode(conn), self.tenant)
 
     def _get_connection(self) -> sqlite3.Connection:
         """
@@ -149,6 +155,7 @@ class SqliteWorkflowStore(
         )
         from stabilize.persistence.sqlite.transaction import AtomicTransaction
 
+        require_same_tenant(store=self, queue=queue)
         conn = self._get_connection()
         txn = AtomicTransaction(conn, self, queue)
         # Bind a thread-local scope so event recording inside this block
@@ -295,3 +302,7 @@ class SqliteWorkflowStore(
         )
         conn.commit()
         return cur.rowcount or 0
+
+
+def _has_engine_tables(conn: sqlite3.Connection) -> bool:
+    return bool(engine_shaped_tables(conn))

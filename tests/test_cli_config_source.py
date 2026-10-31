@@ -9,7 +9,16 @@ import pytest
 from stabilize.cli.config import load_config
 
 MG_YAML = "database:\n  host: yaml-host\n  port: 5433\n  user: yaml_user\n  password: pw\n  dbname: yaml_db\n"
-TARGET_VARS = ("MG_DB_HOST", "MG_DB_PORT", "MG_DB_USER", "MG_DB_PASSWORD", "MG_DB_NAME", "PGHOST", "PGPORT", "PGDATABASE")
+TARGET_VARS = (
+    "MG_DB_HOST",
+    "MG_DB_PORT",
+    "MG_DB_USER",
+    "MG_DB_PASSWORD",
+    "MG_DB_NAME",
+    "PGHOST",
+    "PGPORT",
+    "PGDATABASE",
+)
 
 
 def _clear(monkeypatch: pytest.MonkeyPatch) -> None:

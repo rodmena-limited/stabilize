@@ -68,6 +68,7 @@ def app_dsn(postgres_container: Any) -> Iterator[tuple[str, str]]:
                     "WITH CHECK (tenant_id = current_setting('app.tenant_id', true))"
                 )
                 conn.execute(f'GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO "{role}"')
+            conn.execute(f'GRANT SELECT ON stabilize_tenancy TO "{role}"')
             conn.execute(f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "{role}"')
         parts = urlsplit(owner)
         app = urlunsplit((parts.scheme, f"{role}:{password}@{parts.hostname}:{parts.port}", parts.path, "", ""))

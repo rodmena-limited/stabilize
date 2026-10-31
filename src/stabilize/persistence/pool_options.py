@@ -62,12 +62,20 @@ class PoolOptions:
     max_idle: float | None = None
     on_borrow: Callable[[Any], None] | None = None
     reset: Callable[[Any], None] | None = None
+    tenant_setting: str | None = None
+    audit_key: bytes | None = None
 
     def __post_init__(self) -> None:
         if self.max_idle is not None and (
             isinstance(self.max_idle, bool) or not isinstance(self.max_idle, (int, float)) or not self.max_idle > 0
         ):
             raise ValueError(f"max_idle must be a positive number of seconds, not {self.max_idle!r}")
+        if self.tenant_setting is not None:
+            from stabilize.persistence.tenancy import validate_tenant_setting
+
+            validate_tenant_setting(self.tenant_setting)
+        if self.audit_key is not None and not isinstance(self.audit_key, bytes):
+            raise ValueError("audit_key must be bytes")
 
     def key(self) -> tuple[Any, ...]:
         """A hashable identity for pool sharing."""
@@ -81,6 +89,8 @@ class PoolOptions:
             self.max_idle,
             _identity(self.on_borrow),
             _identity(self.reset),
+            self.tenant_setting,
+            self.audit_key,
         )
 
 

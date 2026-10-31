@@ -82,8 +82,11 @@ class TaskLeaseManager:
                 """
             )
             conn.commit()
+            from stabilize.persistence.sqlite.tenant_schema import ensure_tenant_schema
+
+            ensure_tenant_schema(conn)
         else:
-            pool = self._store._pool  # type: ignore[attr-defined]
+            pool = self._store._engine  # type: ignore[attr-defined]
             with pool.connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT to_regclass('task_leases') IS NOT NULL AS present")
@@ -130,7 +133,7 @@ class TaskLeaseManager:
             return False
 
     def _acquire_postgres(self, task_id: str, now: int, expires: int) -> bool:
-        pool = self._store._pool  # type: ignore[attr-defined]
+        pool = self._store._engine  # type: ignore[attr-defined]
         with pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -165,7 +168,7 @@ class TaskLeaseManager:
                     (task_id, self.owner),
                 )
         else:
-            pool = self._store._pool  # type: ignore[attr-defined]
+            pool = self._store._engine  # type: ignore[attr-defined]
             with pool.connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(

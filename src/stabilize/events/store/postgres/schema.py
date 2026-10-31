@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS events (
     causation_id VARCHAR(26),
     actor VARCHAR(255) DEFAULT 'system',
     source_handler VARCHAR(100),
-    schema_version INTEGER DEFAULT 1
+    schema_version INTEGER DEFAULT 1,
+    stabilize_tenant TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_entity ON events(entity_type, entity_id, sequence);
@@ -42,7 +43,8 @@ CREATE TABLE IF NOT EXISTS snapshots (
     state JSONB NOT NULL,
     state_hash VARCHAR(64),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(entity_type, entity_id, version)
+    UNIQUE(entity_type, entity_id, version),
+    stabilize_tenant TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_entity ON snapshots(entity_type, entity_id);
@@ -58,9 +60,21 @@ CREATE TABLE IF NOT EXISTS event_subscriptions (
     webhook_url VARCHAR(500),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    last_commit_cursor TEXT DEFAULT '0'
+    last_commit_cursor TEXT DEFAULT '0',
+    stabilize_tenant TEXT NOT NULL DEFAULT ''
 );
 """
+
+TENANCY_MODE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS stabilize_tenancy (
+    id SMALLINT PRIMARY KEY CHECK (id = 1),
+    mode TEXT NOT NULL,
+    enabled_at TIMESTAMPTZ,
+    enabled_by TEXT
+);
+"""
+
+TENANCY_MODE_SEED = "INSERT INTO stabilize_tenancy (id, mode) VALUES (1, 'single') ON CONFLICT (id) DO NOTHING"
 
 
 # Commit-ordered delivery for durable subscriptions.
@@ -104,6 +118,10 @@ SETUP_DDL = "\n".join(
         SNAPSHOTS_SCHEMA.strip(),
         "",
         SUBSCRIPTIONS_SCHEMA.strip(),
+        "",
+        TENANCY_MODE_SCHEMA.strip(),
+        "",
+        f"{TENANCY_MODE_SEED};",
         "",
         *(f"{statement};" for statement in SUBSCRIPTIONS_CURSOR_MIGRATION),
         "",

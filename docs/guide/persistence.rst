@@ -108,6 +108,13 @@ migrations into it. Point the runtime store at the same schema with a
         "postgres://user:pass@localhost:5432/stabilize?options=-csearch_path%3Dstabilize"
     )
 
+Do not name the schema after the connecting role. PostgreSQL's default
+``search_path`` is ``"$user", public``, so with a role called ``stabilize`` a
+schema called ``stabilize`` is searched before ``public`` for every unqualified
+name, and another project's migretti then reads stabilize's ``_migrations`` as
+its own. ``mg-up`` refuses that combination (0.34.0). The examples above assume
+the role is not called ``stabilize``.
+
 Without ``?schema=``, both the migrator and the runtime store use the
 connection's default schema and the DSN needs no options:
 

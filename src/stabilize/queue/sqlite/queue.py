@@ -20,6 +20,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from stabilize.persistence.sqlite.tenant_schema import engine_shaped_tables, ensure_tenant_schema, read_mode
+from stabilize.persistence.tenancy import check_mode_admits, validate_tenant
 from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.interface import Queue
 from stabilize.queue.message_ids import delivery_key, own_row_ids, row_id
@@ -60,6 +62,7 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         table_name: str = "queue_messages",
         lock_duration: timedelta = timedelta(seconds=60),
         max_attempts: int = 10,
+        tenant: str = "",
     ) -> None:
         """
         Initialize the SQLite queue.
@@ -72,12 +75,17 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         """
         from stabilize.persistence.connection import get_connection_manager
 
+        self.tenant = validate_tenant(tenant)
         self.connection_string = connection_string
         self.table_name = table_name
         self.lock_duration = lock_duration
         self.max_attempts = max_attempts
         self._manager = get_connection_manager()
         self._pending: dict[int, dict[str, Any]] = {}
+        conn = self._get_connection()
+        if engine_shaped_tables(conn):
+            ensure_tenant_schema(conn)
+            check_mode_admits(read_mode(conn), self.tenant)
 
     def _get_connection(self) -> sqlite3.Connection:
         """
@@ -98,6 +106,8 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         """Create the queue table and DLQ table if they don't exist."""
         conn = self._get_connection()
         create_queue_tables(conn, self.table_name)
+        ensure_tenant_schema(conn)
+        check_mode_admits(read_mode(conn), self.tenant)
 
     def push(
         self,

@@ -35,10 +35,11 @@ class PostgresMaintenanceMixin:
     """Dedup bookkeeping and row reclamation, split out of the store body."""
 
     _pool: Any
+    _engine: Any
 
     def is_message_processed(self, message_id: str) -> bool:
         """Check if a message has already been processed."""
-        return _is_message_processed(self._pool, message_id)
+        return _is_message_processed(self._engine, message_id)
 
     def mark_message_processed(
         self,
@@ -47,7 +48,7 @@ class PostgresMaintenanceMixin:
         execution_id: str | None = None,
     ) -> None:
         """Mark a message as successfully processed."""
-        _mark_message_processed(self._pool, message_id, handler_type, execution_id)
+        _mark_message_processed(self._engine, message_id, handler_type, execution_id)
 
     def cleanup_old_processed_messages(
         self,
@@ -64,13 +65,13 @@ class PostgresMaintenanceMixin:
         """
         if live is not None:
             return _cleanup_processed_not_in_queue(
-                self._pool, max_age_hours, batch_size, max_rows, table_name or DEFAULT_TABLE, live
+                self._engine, max_age_hours, batch_size, max_rows, table_name or DEFAULT_TABLE, live
             )
-        return _cleanup_old_processed_messages(self._pool, max_age_hours, batch_size, max_rows)
+        return _cleanup_old_processed_messages(self._engine, max_age_hours, batch_size, max_rows)
 
     def cleanup_completed_stage_claims(self) -> int:
         """Delete stage claims of executions in terminal states."""
-        return _cleanup_claims(self._pool)
+        return _cleanup_claims(self._engine)
 
     def cleanup_buffered_signals(
         self,
@@ -78,11 +79,11 @@ class PostgresMaintenanceMixin:
         statuses: list[str] | None = None,
     ) -> int:
         """Strip unconsumable WCP-24 signal buffers from stage contexts."""
-        return _cleanup_buffered_signals(self._pool, only_complete, statuses)
+        return _cleanup_buffered_signals(self._engine, only_complete, statuses)
 
     def get_processed_message_ids(self, limit: int | None = None) -> list[str] | None:
         """Return processed message IDs, for hydrating an in-memory dedup cache."""
-        return _get_processed_message_ids(self._pool, limit)
+        return _get_processed_message_ids(self._engine, limit)
 
     def count_buffered_signal_stages(
         self,
@@ -90,7 +91,7 @@ class PostgresMaintenanceMixin:
         statuses: list[str] | None = None,
     ) -> int:
         """Count stage rows carrying a WCP-24 signal buffer."""
-        return _count_buffered_signal_stages(self._pool, only_complete, statuses)
+        return _count_buffered_signal_stages(self._engine, only_complete, statuses)
 
     def completed_workflow_ids(self, completed_before_ms: int, limit: int, application: str | None = None) -> list[str]:
         sql = (
@@ -102,7 +103,7 @@ class PostgresMaintenanceMixin:
             sql += " AND application = %(app)s"
             params["app"] = application
         sql += " ORDER BY end_time LIMIT %(limit)s"
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:  # type: ignore[attr-defined]
             with conn.cursor() as cur:
                 cur.execute(sql, params)
                 rows = cur.fetchall()
