@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.34.1] - 2026-10-31
+
+### Fixed
+
+- **A missing workflow is a `StabilizeError` (#104).** The stores raised their own
+  `WorkflowNotFoundError`, a plain `Exception` subclass defined in the persistence package
+  since the first release, while `stabilize.errors.WorkflowNotFoundError`, the class the
+  error-handling guide documents, was never raised. `except stabilize.StabilizeError` around a
+  store call therefore missed it. The persistence package now re-exports the `stabilize.errors`
+  class, which takes the execution id positionally and keeps the message
+  `Execution not found: <id>`, so both import paths name one class and the documented
+  hierarchy is the real one. `tests/test_error_hierarchy.py`. Found from a consumer's report;
+  present in every earlier release.
+
 ## [0.34.0] - 2026-10-31
 
 The multi-tenant release (#103). It also carries everything prepared for 0.33.3, which was

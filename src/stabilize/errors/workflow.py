@@ -38,6 +38,15 @@ class WorkflowNotFoundError(WorkflowError):
 
     code: int = 301
 
+    def __init__(
+        self,
+        execution_id: str,
+        *,
+        code: int | None = None,
+        cause: Exception | None = None,
+    ) -> None:
+        super().__init__(f"Execution not found: {execution_id}", code=code, cause=cause, execution_id=execution_id)
+
 
 class StageError(StabilizeError):
     """Stage-level error.
