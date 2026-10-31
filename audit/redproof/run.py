@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mutants import Mutant, all_mutants, apply  # noqa: E402
+from proofs import assert_baseline_usable, confirm_with_control  # noqa: E402
 from shards import shard_suites  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
@@ -171,11 +172,23 @@ def baseline(out: Path) -> None:
     wait_host()
     log("baseline with per-test coverage contexts")
     cov_env_file = out / ".coverage"
+    for stale in out.glob(".coverage*"):
+        stale.unlink()
     os.environ["COVERAGE_FILE"] = str(cov_env_file)
     os.environ["COVERAGE_CORE"] = "ctrace"
-    res = run_pytest(ws, 0, SUITES, ["--cov=stabilize", "--cov-context=test", "--cov-report="], 7200)
+    rc = ws / "audit" / "redproof" / "coveragerc"
+    res = run_pytest(
+        ws, 0, SUITES, ["--cov=stabilize", "--cov-context=test", "--cov-report=", f"--cov-config={rc}"], 7200
+    )
+    subprocess.run(
+        [worker_python(ws), "-m", "coverage", "combine", "--keep", "--rcfile", str(rc)],
+        cwd=out,
+        env={**os.environ, "COVERAGE_FILE": str(cov_env_file), "PYTHONPATH": worker_pythonpath(ws)},
+        check=False,
+    )
     os.environ.pop("COVERAGE_FILE")
     os.environ.pop("COVERAGE_CORE")
+    assert_baseline_usable(res)
     results = res["results"]
     failed = sorted(k for k, v in results.items() if v["outcome"] in ("failed", "error"))
     if failed:
@@ -304,29 +317,29 @@ class State:
                     if t not in self.proven:
                         self.proven[t] = m.key
                         self.file_proofs[m.path] += 1
-                        fh.write(f"{t}\t{m.key}\t{m.operator}\t{m.replacement[:80]}\t{kind}\n")
+                        fh.write(f"{t}\t{m.stable_key}\t{m.operator}\t{m.replacement[:80]}\t{kind}\n")
 
 
 def try_mutant(ws: Path, worker: int, m: Mutant, ids: list[str]) -> tuple[dict[str, str], bool]:
+    """Proofs for *m* among *ids*: red twice with the mutant, green without it, by the test's own check."""
     target = ws / m.path
     original = target.read_text()
     try:
         mutated = apply(original, m)
     except SyntaxError:
         return {}, True
-    target.write_text(mutated)
+
+    def runner(label: str, subset: list[str]) -> dict:
+        target.write_text(original if label == "control" else mutated)
+        return run_pytest(ws, worker, subset, [], 1800)
+
     try:
-        first = run_pytest(ws, worker, ids, [], 1800)
-        res = first["results"]
-        if first["exitstatus"] not in (0, 1) or any(t not in res for t in ids):
-            return {}, True
-        red = [t for t in ids if res[t]["outcome"] == "failed"]
-        if not red:
-            return {}, False
-        second = run_pytest(ws, worker, red, [], 1800)["results"]
-        return {t: res[t]["kind"] for t in red if second.get(t, {}).get("outcome") == "failed"}, False
+        confirmed = confirm_with_control(ids, runner)
     finally:
         target.write_text(original)
+    if confirmed is None:
+        return {}, True
+    return confirmed, False
 
 
 def prove(out: Path, workers: int, budget_s: float) -> None:
@@ -366,9 +379,11 @@ def prove(out: Path, workers: int, budget_s: float) -> None:
     threads = [threading.Thread(target=worker_loop, args=(i,)) for i in range(workers)]
     for t in threads:
         t.start()
-    for t in threads:
-        t.join()
-    report(out, state)
+    try:
+        for t in threads:
+            t.join()
+    finally:
+        report(out, state)
 
 
 def report(out: Path, state: State) -> None:

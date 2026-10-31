@@ -17,8 +17,7 @@ retention sweep compared "YYYY-MM-DD HH:MM:SS" with an ISO cutoff as text.
   F  CONTROL: retention with max_age 0 h removes that same mark (E can say no)
 
 Run under an old SQLite and a non-UTC zone to exercise the defect, e.g.
-    docker run --rm -e TZ=America/New_York -v "$PWD":/src:ro python:3.11-slim-bookworm \\
-      sh -c 'pip install -q /src && python /src/audit/evaluations/probe_sqlite_queue_clock.py'
+    TZ=America/New_York python audit/evaluations/probe_sqlite_queue_clock.py
 
     python audit/evaluations/probe_sqlite_queue_clock.py
 """

@@ -30,54 +30,14 @@ import sys
 import time
 import uuid
 
-from _backends import skip  # noqa: E402
+from _backends import probe_dsn  # noqa: E402
 
 logging.basicConfig(level=logging.CRITICAL)
-
-CONTAINER = "stabilize-probe-watermark"
-PORT = 55434
-
-
-def _start_container() -> str | None:
-    subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True, check=False)
-    started = subprocess.run(
-        [
-            "docker", "run", "-d", "--name", CONTAINER,
-            "-e", "POSTGRES_PASSWORD=probe",
-            "-e", "POSTGRES_DB=probe",
-            "-p", f"{PORT}:5432",
-            "postgres:16-alpine",
-        ],
-        capture_output=True, text=True, check=False,
-    )
-    if started.returncode != 0:
-        skip(f"could not start container: {started.stderr.strip()}")
-    dsn = f"postgresql://postgres:probe@127.0.0.1:{PORT}/probe"
-    import psycopg
-
-    for _ in range(60):
-        try:
-            with psycopg.connect(dsn, connect_timeout=2):
-                return dsn
-        except Exception:  # noqa: BLE001
-            time.sleep(1)
-    skip("container never became reachable")
-
-
-def _stop_container() -> None:
-    subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True, check=False)
-
 
 def main() -> int:
     import psycopg
 
-    dsn = os.environ.get("STABILIZE_PROBE_DSN")
-    owned = False
-    if not dsn:
-        dsn = _start_container()
-        owned = True
-        if not dsn:
-            return 0  # environmental, not a defect
+    dsn = probe_dsn("watermark")
 
     try:
         from stabilize.events.base import EntityType, Event, EventType
@@ -161,8 +121,7 @@ def main() -> int:
         print("PASS: no event is skipped or duplicated by a concurrent commit.")
         return 0
     finally:
-        if owned:
-            _stop_container()
+        pass
 
 
 if __name__ == "__main__":

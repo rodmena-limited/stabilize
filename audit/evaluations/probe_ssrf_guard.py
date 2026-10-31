@@ -48,8 +48,27 @@ MUST_ALLOW = [
 ]
 
 
+PUBLIC_NAMES = {"example.com": "93.184.216.34", "api.github.com": "140.82.121.6"}
+
+
+def _stub_resolver() -> None:
+    """Answer the public names this probe checks without outbound DNS; everything else goes to the real resolver."""
+    import socket
+
+    real = socket.getaddrinfo
+
+    def getaddrinfo(host: object, port: object, *args: object, **kwargs: object) -> object:
+        address = PUBLIC_NAMES.get(str(host).rstrip("."))
+        if address is not None:
+            return real(address, port, *args, **kwargs)
+        return real(host, port, *args, **kwargs)
+
+    socket.getaddrinfo = getaddrinfo
+
+
 def main() -> int:
     failures = 0
+    _stub_resolver()
 
     print("=" * 72)
     print("DIRECTION 1 — must BLOCK")

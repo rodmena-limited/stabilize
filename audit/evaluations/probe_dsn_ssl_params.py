@@ -17,37 +17,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _backends import skip  # noqa: E402
+from _backends import probe_dsn, skip  # noqa: E402
 
 import os
 import subprocess
 import sys
-import time
-
-CONTAINER = "stabilize-probe-ssl"
-PORT = 55438
 
 TLS_KEYS = ("sslmode", "sslrootcert", "sslcert", "sslkey")
-
-
-def _start() -> str | None:
-    subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True, check=False)
-    if subprocess.run(
-        ["docker", "run", "-d", "--name", CONTAINER,
-         "-e", "POSTGRES_PASSWORD=pw", "-e", "POSTGRES_USER=vu", "-e", "POSTGRES_DB=vdb",
-         "-p", f"{PORT}:5432", "postgres:16"],
-        capture_output=True, check=False,
-    ).returncode != 0:
-        return None
-    for _ in range(60):
-        if subprocess.run(
-            ["docker", "exec", CONTAINER, "pg_isready", "-U", "vu", "-d", "vdb"],
-            capture_output=True, check=False,
-        ).returncode == 0:
-            time.sleep(2)
-            return f"postgresql://vu:pw@127.0.0.1:{PORT}/vdb"
-        time.sleep(1)
-    return None
 
 
 def _mg_status(dsn: str) -> str:
@@ -87,13 +63,12 @@ def main() -> int:
     if extra:
         failures += 1
 
-    dsn = os.environ.get("STABILIZE_PROBE_DSN") or _start()
-    owns = "STABILIZE_PROBE_DSN" not in os.environ
-    if dsn is None:
+    if not os.environ.get("STABILIZE_PROBE_DSN"):
         print(f"RESULT: {'STATIC CHECKS PASSED' if failures == 0 else f'{failures} FAILED'}")
         if failures:
             return 1
-        skip("live half: no PostgreSQL available")
+        skip("live half: no PostgreSQL available (set STABILIZE_PROBE_DSN)")
+    dsn = probe_dsn("ssl")
 
     try:
         print()
@@ -128,8 +103,7 @@ def main() -> int:
             print("    >>> FAIL: the guard is refusing everything, not honouring sslmode")
             failures += 1
     finally:
-        if owns:
-            subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True, check=False)
+        pass
 
     print()
     print("=" * 72)

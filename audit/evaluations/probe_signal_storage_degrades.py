@@ -24,10 +24,13 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _backends import dsn_as, fresh_database, unique_name  # noqa: E402
 import time
 
 import psycopg
-from testcontainers.postgres import PostgresContainer
 
 logging.basicConfig(level=logging.WARNING)
 
@@ -58,8 +61,12 @@ ENGINE_TABLES = (
 )
 
 
-def _dsn(c: PostgresContainer, user: str, pw: str) -> str:
-    return f"postgresql://{user}:{pw}@{c.get_container_host_ip()}:{c.get_exposed_port(5432)}/{c.dbname}"
+GRANTED = unique_name("granted")
+UNGRANTED = unique_name("ungranted")
+
+
+def _dsn(admin: str, user: str, pw: str) -> str:
+    return dsn_as(admin, user, pw)
 
 
 def _run_workflow(dsn: str, name: str) -> WorkflowStatus:
@@ -94,25 +101,24 @@ def _run_workflow(dsn: str, name: str) -> WorkflowStatus:
 def main() -> int:
     results: list[tuple[str, bool, str]] = []
 
-    with PostgresContainer("postgres:16") as c:
-        admin = _dsn(c, c.username, c.password)
-
+    with fresh_database("signals", [GRANTED, UNGRANTED]) as admin:
         from stabilize.cli.commands import mg_up
 
         mg_up(admin)
 
         with psycopg.connect(admin, autocommit=True) as conn:
-            conn.execute("CREATE ROLE granted LOGIN PASSWORD 'pw'")
-            conn.execute("CREATE ROLE ungranted LOGIN PASSWORD 'pw'")
-            for role in ("granted", "ungranted"):
+            conn.execute(f"CREATE ROLE {GRANTED} LOGIN PASSWORD 'pw'")
+            conn.execute(f"CREATE ROLE {UNGRANTED} LOGIN PASSWORD 'pw'")
+            for role in (GRANTED, UNGRANTED):
                 conn.execute(f"GRANT USAGE ON SCHEMA public TO {role}")
                 for t in ENGINE_TABLES:
                     conn.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {t} TO {role}")
                 conn.execute(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}")
-            conn.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON workflow_signals TO granted")
+                conn.execute(f"GRANT SELECT ON stabilize_tenancy TO {role}")
+            conn.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON workflow_signals TO {GRANTED}")
 
-        granted = _dsn(c, "granted", "pw")
-        ungranted = _dsn(c, "ungranted", "pw")
+        granted = _dsn(admin, GRANTED, "pw")
+        ungranted = _dsn(admin, UNGRANTED, "pw")
 
         print("=== CONTROL: the ungranted role really cannot read workflow_signals ===")
         denied = False
@@ -184,7 +190,7 @@ def main() -> int:
         print(f"    1. ungranted store reports usable: {before}")
 
         with psycopg.connect(admin, autocommit=True) as conn:
-            conn.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON workflow_signals TO ungranted")
+            conn.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON workflow_signals TO {UNGRANTED}")
 
         print("    2. grant RESTORED on the live database")
 

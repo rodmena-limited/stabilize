@@ -13,40 +13,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _backends import skip  # noqa: E402
+from _backends import probe_dsn  # noqa: E402
 
 import os
 import subprocess
 import sys
 import time
 import uuid
-
-CONTAINER = "stabilize-probe-pool"
-PORT = 55433
-
-
-def _start_container() -> str | None:
-    subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True, check=False)
-    started = subprocess.run(
-        [
-            "docker", "run", "-d", "--name", CONTAINER,
-            "-e", "POSTGRES_PASSWORD=probepw", "-e", "POSTGRES_USER=probe",
-            "-e", "POSTGRES_DB=probedb", "-p", f"{PORT}:5432", "postgres:16",
-        ],
-        capture_output=True, text=True, check=False,
-    )
-    if started.returncode != 0:
-        return None
-    for _ in range(40):
-        ready = subprocess.run(
-            ["docker", "exec", CONTAINER, "pg_isready", "-U", "probe", "-d", "probedb"],
-            capture_output=True, check=False,
-        )
-        if ready.returncode == 0:
-            return f"postgresql://probe:probepw@127.0.0.1:{PORT}/probedb"
-        time.sleep(1)
-    return None
-
 
 def _show(pool, setting: str) -> str:
     with pool.connection() as conn:
@@ -60,10 +33,7 @@ def main() -> int:
     from stabilize.persistence.connection import ConnectionManager, SingletonMeta
     from stabilize.persistence.pool_options import PoolOptions
 
-    dsn = os.environ.get("STABILIZE_PROBE_DSN") or _start_container()
-    owns_container = "STABILIZE_PROBE_DSN" not in os.environ
-    if dsn is None:
-        skip("no PostgreSQL available (set STABILIZE_PROBE_DSN or enable docker)")
+    dsn = probe_dsn("pool")
 
     failures = 0
     try:
@@ -192,8 +162,7 @@ def main() -> int:
         SingletonMeta.reset(ConnectionManager)
 
     finally:
-        if owns_container:
-            subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True, check=False)
+        pass
 
     print()
     print("=" * 72)

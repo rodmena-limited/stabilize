@@ -27,7 +27,21 @@ import sys
 logging.basicConfig(level=logging.CRITICAL)
 
 from stabilize.models.stage import StageExecution  # noqa: E402
+from stabilize.models.task import TaskExecution  # noqa: E402
+from stabilize.stages.builder import StageDefinitionBuilder, register_builder  # noqa: E402
 from stabilize.stages.multi_instance_builder import MultiInstanceBuilder  # noqa: E402
+
+
+class _StepBuilder(StageDefinitionBuilder):
+    @property
+    def type(self) -> str:
+        return "step"
+
+    def build_tasks(self, stage: StageExecution) -> list[TaskExecution]:
+        return []
+
+
+register_builder(_StepBuilder())
 
 
 def _build(initial_count: int) -> tuple[StageExecution, list[StageExecution]]:

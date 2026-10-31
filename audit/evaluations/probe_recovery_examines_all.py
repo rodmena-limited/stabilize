@@ -10,7 +10,7 @@ old, outside the default 24 h window.
 
   A  all 150 stored-not-started workflows are recovered (StartWorkflow pushed)
   B  the application-filtered path recovers all 150 too
-  C  CONTROL: the 48 h old workflow is NOT examined -- the window still applies
+  C  CONTROL: the 48 h old workflow is reported stale and is not recovered
   D  CONTROL: recovery run twice pushes nothing new the second time... is NOT
      asserted: NOT_STARTED recovery is not deduplicated against the queue, and
      this probe does not claim it is.
@@ -61,6 +61,7 @@ def _check(store, queue, application: str | None) -> tuple[bool, str]:
     old = _wf(app)
     old.status = WorkflowStatus.RUNNING
     old.start_time = int(time.time() * 1000) - 48 * 3600 * 1000
+    old.created_at_ms = old.start_time
     old.stages[0].status = WorkflowStatus.RUNNING
     store.store(old)
 
@@ -68,12 +69,12 @@ def _check(store, queue, application: str | None) -> tuple[bool, str]:
         application=app if application else None
     )
     recovered = {r.workflow_id for r in results if r.status == "recovered"}
-    examined = {r.workflow_id for r in results}
+    old_status = next((r.status for r in results if r.workflow_id == old.id), "not examined")
     missing = pending_ids - recovered
-    ok = not missing and old.id not in examined
+    ok = not missing and old.id not in recovered and old_status == "stale"
     return ok, (
         f"recovered {len(pending_ids & recovered)}/{PENDING} stored-not-started, "
-        f"48h-old workflow examined={old.id in examined}"
+        f"48h-old workflow reported {old_status} (want stale, never recovered)"
     )
 
 

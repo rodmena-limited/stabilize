@@ -5,7 +5,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from fallback import helper_mutants
 from mutants import Mutant, all_mutants
 
 KNOWN = Path(__file__).resolve().parent / "known_proofs.tsv"
@@ -32,11 +31,7 @@ def write_known(proof_tsv: Path, path: Path = KNOWN) -> int:
 
 
 def _lookup(ws0: Path, keys: set[str]) -> dict[str, Mutant]:
-    found = {m.key: m for m in all_mutants(ws0 / "src" / "stabilize") if m.key in keys}
-    for test_file in sorted({k.split(":", 1)[0] for k in keys if k.startswith("tests/")}):
-        if (ws0 / test_file).exists():
-            found.update({m.key: m for m in helper_mutants(ws0 / test_file, test_file) if m.key in keys})
-    return found
+    return {m.stable_key: m for m in all_mutants(ws0 / "src" / "stabilize") if m.stable_key in keys}
 
 
 def run(state: Any, out: Path, workers: int, try_mutant: Any, wait_host: Any, log: Any) -> None:
@@ -62,7 +57,8 @@ def run(state: Any, out: Path, workers: int, try_mutant: Any, wait_host: Any, lo
             confirmed, discarded = try_mutant(ws, i, m, tests)
             state.record(m, tests, confirmed, discarded)
             log(
-                f"replay w{i} {m.key} ran={len(tests)} proven+={len(confirmed)} total_proven={len(state.proven)}"
+                f"replay w{i} {m.stable_key} ran={len(tests)} proven+={len(confirmed)} "
+                f"total_proven={len(state.proven)}"
             )
 
     threads = [threading.Thread(target=worker, args=(i,)) for i in range(workers)]

@@ -405,6 +405,30 @@ host's own migretti history, now upgrade with no change to the command.
   red-proof runner and the probe backends read `SHOW cluster_name` first and refuse any cluster not
   named `stabilize-gate-*`. The red-proof runner no longer shells out to docker; `REDPROOF_NO_VENV=1`
   runs its workers on the image interpreter with the workspace on `PYTHONPATH`.
+- **The fourteen PostgreSQL probes run on CI (B56).** They started their own containers, which the CI
+  runner has no docker for, so they were skipped and counted as coverage. Every probe that needs
+  PostgreSQL now takes it from `STABILIZE_PROBE_DSN`: a database of its own next to the DSN's, or an
+  empty one created for the run and dropped after it together with the roles the probe made. Without a
+  DSN a probe exits SKIP, and `PROBE_REQUIRE_PG=1` turns that into a failure. The SSRF guard probe
+  answers the public names it checks itself and needs no outbound DNS.
+- **Red-proof counts only the test's own verdict (B55).** 715 of the 2,442 recorded proofs rested
+  on two mutants that crashed the engine for every test that touched them. The plugin now records
+  the phase, the location inside the checkout where the exception was raised and its type; a failure
+  counts only in the call phase, raised in the suite's own files, and not as an import, name, syntax,
+  recursion or timeout signature. A red set is run once more without the mutant, and a test that
+  fails there is flaky, not a proof. Mutants of test files never count. Mutant keys are stable across
+  line shifts (`path:qualname:operator:shape:ordinal`); the ledger was re-baselined from 90024d1 to
+  2,262 proofs. A `tenant-pred-drop` operator replaces one `stabilize_tenant = <param>` predicate with
+  a tautology that keeps the parameter, so the isolation tests have a mutant that can prove them.
+  Coverage follows subprocesses and attributes their lines to the running test, so tests that drive
+  the CLI are provable. A killed or empty baseline is a named failure, and the reports are written
+  even when a run is cut short.
+- **The examples run under test.** `tests/test_examples_run.py` runs every example that needs no
+  external service on SQLite and names the service each of the others needs.
+- **Five probes caught up with 0.34.0 behaviour.** The dynamic multi-instance probe registers its
+  instance builder, the recovery probe expects the 48-hour-old workflow to be reported stale rather
+  than unexamined, the RLS and signal-storage probes grant `SELECT` on `stabilize_tenancy`, and the
+  runtime-role probe uses a schema not named after the connecting role.
 - **Recovery ages a workflow by its activity, not by its start (B21).** A run started 30
   hours ago whose task row changed five minutes ago was never recovered, because the only
   clock was `start_time`. `pipeline_executions`, `stage_executions` and `task_executions`

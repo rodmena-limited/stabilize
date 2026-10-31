@@ -21,17 +21,17 @@ if [ ! -x "$PYTHON" ]; then
     PYTHON="python3"
 fi
 
-# Probes that need a live PostgreSQL container via testcontainers. A machine
-# with no Docker cannot run these, and "could not run" is NOT "failed" -- a
+# Probes that need PostgreSQL take it from STABILIZE_PROBE_DSN and exit SKIP (77)
+# without it; "could not run" is NOT "failed" -- a
 # runner that conflates them reports a red that means nothing, which is the
-# defect this harness exists to catch. Select with PROBE_SET.
-DOCKER_PROBES="$(cd audit/evaluations && grep -lE "PostgresContainer|docker (run|exec|rm)" probe_*.py | sort)"
+# defect this harness exists to catch. PROBE_REQUIRE_PG=1 fails a SKIP. Select with PROBE_SET.
+POSTGRES_PROBES="$(cd audit/evaluations && grep -lE "probe_dsn\(|fresh_database\(|postgres_dsn\(|backends\(\)|STABILIZE_PROBE_DSN" probe_*.py | sort)"
 
-# PROBE_SET: all (default) | sqlite (skip Docker probes) | postgres (only those)
+# PROBE_SET: all (default) | sqlite (skip PostgreSQL probes) | postgres (only those)
 PROBE_SET="${PROBE_SET:-all}"
 
-_needs_docker() {
-    grep -qxF "$1" <<<"$DOCKER_PROBES"
+_needs_postgres() {
+    grep -qxF "$1" <<<"$POSTGRES_PROBES"
 }
 
 declare -A EXCLUDED=()
@@ -56,11 +56,11 @@ for name in "${ALL[@]}"; do
         EXCLUDED["$name"]="listed in $PROBE_EXCLUDE_FILE: expected red on the release under test"
         continue
     fi
-    if [ "$PROBE_SET" = "sqlite" ] && _needs_docker "$name"; then
+    if [ "$PROBE_SET" = "sqlite" ] && _needs_postgres "$name"; then
         SKIPPED+=("$name")
         continue
     fi
-    if [ "$PROBE_SET" = "postgres" ] && ! _needs_docker "$name"; then
+    if [ "$PROBE_SET" = "postgres" ] && ! _needs_postgres "$name"; then
         continue
     fi
     PROBES+=("audit/evaluations/$name")

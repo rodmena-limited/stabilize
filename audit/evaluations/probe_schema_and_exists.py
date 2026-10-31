@@ -6,7 +6,7 @@ Three claims:
      without the caller hand-writing a search_path into the DSN.
   3. mg-status --db-url must honour MG_SCHEMA.
 
-Needs docker, or STABILIZE_PROBE_DSN pointing at a database where the engine's
+Needs STABILIZE_PROBE_DSN pointing at a gate database where the engine's
 tables live in the schema named by STABILIZE_PROBE_SCHEMA.
 
 Run:  python audit/evaluations/probe_schema_and_exists.py
@@ -18,64 +18,28 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _backends import skip  # noqa: E402
+from _backends import probe_dsn  # noqa: E402
 
 import os
 import subprocess
 import sys
 import time
 
-CONTAINER = "stabilize-probe-schema"
-PORT = 55435
 SCHEMA = "orchestration"
 ABSENT_ID = "01ABSENTWORKFLOWID000000000"
-
-
-def _start() -> str | None:
-    subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True, check=False)
-    if subprocess.run(
-        ["docker", "run", "-d", "--name", CONTAINER,
-         "-e", "POSTGRES_PASSWORD=pw", "-e", "POSTGRES_USER=vu", "-e", "POSTGRES_DB=vdb",
-         "-p", f"{PORT}:5432", "postgres:16"],
-        capture_output=True, check=False,
-    ).returncode != 0:
-        return None
-    for _ in range(40):
-        if subprocess.run(
-            ["docker", "exec", CONTAINER, "pg_isready", "-U", "vu", "-d", "vdb"],
-            capture_output=True, check=False,
-        ).returncode == 0:
-            dsn = f"postgresql://vu:pw@127.0.0.1:{PORT}/vdb"
-            subprocess.run(
-                ["docker", "exec", CONTAINER, "psql", "-U", "vu", "-d", "vdb",
-                 "-c", f"CREATE SCHEMA {SCHEMA};"],
-                capture_output=True, check=False,
-            )
-            env = {**os.environ, "MG_SCHEMA": SCHEMA, "MG_DATABASE_URL": dsn}
-            subprocess.run(
-                [sys.executable, "-m", "stabilize.cli.main", "mg-up"],
-                env=env, capture_output=True, text=True, check=False,
-            )
-            return dsn
-        time.sleep(1)
-    return None
 
 
 def main() -> int:
     from stabilize.persistence.postgres.store import PostgresWorkflowStore
 
-    dsn = os.environ.get("STABILIZE_PROBE_DSN") or _start()
-    owns = "STABILIZE_PROBE_DSN" not in os.environ
-    if dsn is None:
-        skip("no PostgreSQL available (need docker or STABILIZE_PROBE_DSN)")
+    dsn = probe_dsn("schema")
     schema = os.environ.get("STABILIZE_PROBE_SCHEMA", SCHEMA)
-    if not owns:
-        separator = "&" if "?" in dsn else "?"
-        prepared = subprocess.run(
-            [sys.executable, "-m", "stabilize.cli.main", "mg-up", "--db-url", f"{dsn}{separator}schema={schema}"],
-            capture_output=True, text=True, check=False,
-        )
-        print(f"stabilize mg-up into schema {schema}: exit {prepared.returncode}")
+    separator = "&" if "?" in dsn else "?"
+    prepared = subprocess.run(
+        [sys.executable, "-m", "stabilize.cli.main", "mg-up", "--db-url", f"{dsn}{separator}schema={schema}"],
+        capture_output=True, text=True, check=False,
+    )
+    print(f"stabilize mg-up into schema {schema}: exit {prepared.returncode}")
 
     failures = 0
     try:
@@ -159,8 +123,7 @@ def main() -> int:
             else:
                 print("  >>> PASS")
     finally:
-        if owns:
-            subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True, check=False)
+        pass
 
     print()
     print("=" * 72)

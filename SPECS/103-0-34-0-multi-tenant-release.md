@@ -431,8 +431,40 @@ Synthesis notes recorded while building 10a:
 - `assert_own_runner` judges a runner by two observable facts, the version it prints and the file its interpreter imports `stabilize` from, cached per binary; the tests use shell shims standing in for a published runner, one importing from a site-packages path and one from this checkout's `src`, so both directions of the refusal are exercised without the published runners installed.
 - The red-proof runner's no-venv mode exists for the gate image, where the dependencies are installed and a per-worker venv build would only add minutes; the worker interpreter and its `PYTHONPATH` come from one pair of helpers used by `run.py` and `fallback.py`.
 
-### WI-10 … WI-11
-Specified when each item starts; the plan file holds the design.
+### WI-10 slice 10b: the probes that never ran on CI (done)
+- Every audit probe that needs PostgreSQL shall take its server from `STABILIZE_PROBE_DSN` through `_backends.probe_dsn(suffix)` (a dedicated database next to the DSN's) or `_backends.fresh_database(suffix, roles)` (an empty database created for the run and dropped after it, with the roles the probe created); no probe shall start or drive a container; without a DSN a probe shall exit SKIP (77) (B56).
+- A probe that creates a role shall give it a unique name and shall leave the cluster without it.
+- `run_all.sh` shall partition probes by their need for PostgreSQL (`_needs_postgres`), not by a docker reference; `PROBE_SET=postgres` selects exactly the probes that read the DSN.
+- The SSRF guard probe shall resolve the public names it checks itself (a resolver stub answering `example.com` and `api.github.com`), so it needs no outbound DNS; the rebinding probe already stubs its resolver.
+- After the conversion, the whole probe set shall be run against the gate database with `PROBE_REQUIRE_PG=1` and every probe shall PASS or be excluded with a reason.
+
+Synthesis notes recorded while building 10b:
+- Two shapes cover the fourteen: `probe_dsn(suffix)` for probes that only need engine tables (a dedicated database that persists between runs, migrated by the probe), and `fresh_database(suffix, roles)` for probes that need an empty database or create roles (the database and the roles go at exit). Both go through `dedicated_dsn`, so the cluster guard from 10a applies to every probe.
+- `dsn_as(admin, user, password, query)` rebuilds a DSN for another role from the admin DSN's host, port and database; the probes that used testcontainers' accessors use it instead.
+- Role names are unique per run (`unique_name`), so two probe runs on one server, or a run that died mid-way, cannot collide on `CREATE ROLE`.
+- The capacity probe's `AUDIT_ALLOW_DESTRUCTIVE` flag is gone: its blast radius is a database of its own on a gate cluster, which the guard enforces.
+- The runner's partition keys on the DSN sources in the probe text, the same expression the pin test uses, so a probe cannot need PostgreSQL without being counted as one.
+PROBE_RESULTS
+
+### WI-10 slice 10c: what red-proof counts as proof, and the examples runner (done)
+- The red-proof plugin shall record, for every test, its outcome, the phase that failed, the rootdir-relative location where the exception was raised and the exception type; the runner shall count a failure as a proof only when it happened in the call phase, was raised inside the suite's own files (`tests/`, `golden_standard_tests/`) and is not a crash signature (import, name, syntax, recursion, memory errors, timeouts, interrupts); an engine-internal crash proves nothing (rule 6, B55).
+- After two red runs under a mutant, the runner shall run the red set once more without the mutant; a test that fails there is flaky and is not a proof.
+- Mutants of test files shall never count: the fallback's helper mutants are gone and `known_proofs.tsv` carries engine mutants only.
+- A mutant shall have a stable key `path:qualname:operator:ast-hash:ordinal` that survives line shifts; `known_proofs.tsv` shall be keyed by it, re-baselined once from the base commit 90024d1 by mapping each old line key to its stable key; the replay shall look mutants up by stable key.
+- A `tenant-pred-drop` operator shall replace one `stabilize_tenant = <param>` predicate in a SQL string or f-string with a tautology that keeps the parameter (`%(tenant)s::text IS NOT NULL`, `? IS NOT NULL`, `:tenant IS NOT NULL`), one mutant per occurrence.
+- A baseline that was killed or produced no results shall be a named failure; the proof, tried and unproven reports shall be written even when a run is cut short.
+- Coverage shall follow subprocesses (`audit/redproof/coveragerc` with `patch = subprocess`, `parallel = true`, combined before the map is built) and attribute their lines to the running test through `REDPROOF_TEST_ID` and a `sitecustomize` context switch.
+- `tests/test_examples_run.py` shall run every example that needs no external service (shell, python, dynamic routing, event sourcing, the golden standard against its expected-result file) as a subprocess on SQLite and require exit 0 with no traceback; the examples that need a service are listed with the service they need; an example on disk that is neither run nor listed fails the test.
+
+Synthesis notes recorded while building 10c:
+- The location rule uses the innermost traceback frame inside the checkout, not pytest's crash frame: a `pytest.raises` that did not raise reports from `_pytest`, which is outside the checkout, so the test file is the innermost checkout frame and counts; a psycopg error raised from inside the engine reports the engine line and does not.
+- Subprocess attribution was verified by experiment before it was pinned: a line executed only in a child process was attributed to the spawning test's context through `patch = subprocess` and the `sitecustomize` switch, with coverage 7.16.2 and pytest-cov 7.1.0.
+- The stable key hashes the mutated node's shape, the operator and the replacement, qualified by the enclosing definition, with an ordinal for identical siblings; the re-baseline mapped 2,262 of 2,442 proofs, dropping 50 test-file proofs and 130 whose node or file no longer exists at the base commit's path.
+- The re-baseline runs on the base commit's sources through `git show`, so the ledger is rewritten once and later runs append stable keys.
+- The probe run of 10b found five probes written against 0.33 behaviour; all five are changes 0.34 made on purpose (A11 builder refusal, B21 activity window, the `stabilize_tenancy` grant, B65 schema naming), so the probes changed and the engine did not.
+
+### WI-11
+Specified when it starts; the plan file holds the design.
 
 ### WI-2 slice 2: rule 1 column lists (done)
 - `stabilize.persistence.columns` shall hold one column tuple per engine table, ending in `stabilize_tenant`; `columns(table, backend)` shall equal the catalog of that table on that backend (set equality; PostgreSQL `events` adds `commit_xid`, SQLite `queue_messages` adds `version`), checked live on both backends.

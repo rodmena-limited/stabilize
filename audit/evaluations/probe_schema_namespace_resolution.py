@@ -21,13 +21,15 @@ that accepts everything:
 """
 
 import sys
+from pathlib import Path
+
 import psycopg
-from testcontainers.postgres import PostgresContainer
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _backends import fresh_database  # noqa: E402
 from stabilize.events.store.postgres.store import EventStoreSchemaError, PostgresEventStore
 
-with PostgresContainer("postgres:16") as c:
-    h, p = c.get_container_host_ip(), c.get_exposed_port(5432)
-    admin = f"postgresql://{c.username}:{c.password}@{h}:{p}/{c.dbname}"
+with fresh_database("shadow") as admin:
 
     # real tables in `stabilize`, plus a SHADOW `events` in public
     PostgresEventStore(admin, create_tables=True)

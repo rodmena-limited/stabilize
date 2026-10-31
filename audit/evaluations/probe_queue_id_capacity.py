@@ -12,8 +12,7 @@ original_id were int4 as well.
      sequence that was never near its limit)
 
 SAFETY: this moves a sequence. It runs only in its own throwaway
-testcontainers PostgreSQL, unless AUDIT_ALLOW_DESTRUCTIVE=1 and
-STABILIZE_PROBE_DSN point it at a database you are willing to alter.
+a database of its own next to STABILIZE_PROBE_DSN's, on a stabilize-gate-* cluster only.
 
     python audit/evaluations/probe_queue_id_capacity.py
 """
@@ -28,7 +27,7 @@ from pathlib import Path
 logging.basicConfig(level=logging.CRITICAL)
 sys.path.insert(0, str(Path(__file__).parent))
 
-from _backends import _container_dsn, dedicated_dsn, skip  # noqa: E402
+from _backends import probe_dsn  # noqa: E402
 
 
 def main() -> int:
@@ -38,14 +37,8 @@ def main() -> int:
     from stabilize.cli.commands import mg_up
     from stabilize.queue.messages import StartWorkflow
 
-    container = None
-    if os.environ.get("AUDIT_ALLOW_DESTRUCTIVE") == "1" and os.environ.get("STABILIZE_PROBE_DSN"):
-        dsn = dedicated_dsn(os.environ["STABILIZE_PROBE_DSN"], "capacity")
-        print(f"BLAST RADIUS: moving queue_messages_id_seq on {dsn.split('@')[-1]}")
-    else:
-        dsn, container = _container_dsn()
-        if dsn is None:
-            skip("no throwaway PostgreSQL available (docker/testcontainers)")
+    dsn = probe_dsn("capacity")
+    print(f"BLAST RADIUS: moving queue_messages_id_seq on {dsn.split('@')[-1]}")
     try:
         mg_up(dsn)
         with psycopg.connect(dsn, autocommit=True) as c:
@@ -82,8 +75,7 @@ def main() -> int:
         detail = error or f"polled {first.message_id}, {second.message_id}; dlq original_id={dlq.get('original_id')}"
         print(f"[{'PASS' if a_ok else 'FAIL'}] A pushes past 2^31: {detail}")
     finally:
-        if container is not None:
-            container.stop()
+        pass
     if a_ok and b_ok:
         print("VERDICT: PASS — the queue id space is 64-bit")
         return 0

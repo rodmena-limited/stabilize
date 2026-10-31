@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,10 +36,63 @@ class Mutant:
     end_col: int
     operator: str
     replacement: str
+    qualname: str = ""
+    digest: str = ""
+    ordinal: int = 0
 
     @property
     def key(self) -> str:
         return f"{self.path}:{self.line}:{self.col}:{self.operator}"
+
+    @property
+    def stable_key(self) -> str:
+        """A key that survives line shifts: the enclosing definition, the operator, the node's shape and its rank."""
+        return f"{self.path}:{self.qualname}:{self.operator}:{self.digest}:{self.ordinal}"
+
+
+TENANT_PREDICATE = re.compile(r"(?:\b\w+\.)?stabilize_tenant = (%\(tenant\)s|\?|:tenant)")
+TAUTOLOGY = {"%(tenant)s": "%(tenant)s::text IS NOT NULL", "?": "? IS NOT NULL", ":tenant": ":tenant IS NOT NULL"}
+
+
+def _drop_nth_predicate(text: str, n: int) -> str:
+    count = -1
+
+    def swap(match: re.Match[str]) -> str:
+        nonlocal count
+        count += 1
+        return TAUTOLOGY[match.group(1)] if count == n else match.group(0)
+
+    return TENANT_PREDICATE.sub(swap, text)
+
+
+def _tenant_predicate_mutants(node: ast.AST) -> list[tuple[str, ast.AST, str]]:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        source_text = node.value
+        render = repr
+    elif isinstance(node, ast.JoinedStr):
+        source_text = ast.unparse(node)
+        render = str
+    else:
+        return []
+    hits = len(TENANT_PREDICATE.findall(source_text))
+    return [("tenant-pred-drop", node, render(_drop_nth_predicate(source_text, i))) for i in range(hits)]
+
+
+def _qualnames(tree: ast.Module) -> dict[int, str]:
+    names: dict[int, str] = {}
+
+    def visit(node: ast.AST, stack: list[str]) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                inner = [*stack, child.name]
+                names[id(child)] = ".".join(inner)
+                visit(child, inner)
+            else:
+                names[id(child)] = ".".join(stack)
+                visit(child, stack)
+
+    visit(tree, [])
+    return names
 
 
 def _segment_lines(source_lines: list[str], node: ast.AST) -> tuple[int, int, int, int]:
@@ -102,7 +157,7 @@ def _is_logging_call(node: ast.AST) -> bool:
 
 
 def _candidates(node: ast.AST) -> list[tuple[str, ast.AST, str]]:
-    out: list[tuple[str, ast.AST, str]] = []
+    out: list[tuple[str, ast.AST, str]] = _tenant_predicate_mutants(node)
     if isinstance(node, ast.Compare) and len(node.ops) == 1 and type(node.ops[0]) in FLIP_CMP:
         flipped = ast.Compare(
             left=node.left, ops=[FLIP_CMP[type(node.ops[0])]()], comparators=node.comparators
@@ -154,6 +209,15 @@ def mutants_for_file(path: Path, rel: str) -> list[Mutant]:
     annotation = _annotation_ids(tree)
     quiet = _quiet_ids(tree)
     lines = source.splitlines(keepends=True)
+    qualnames = _qualnames(tree)
+    joined_parts = {
+        id(part)
+        for joined in ast.walk(tree)
+        if isinstance(joined, ast.JoinedStr)
+        for part in joined.values
+        if isinstance(part, ast.Constant)
+    }
+    seen: dict[tuple[str, str, str], int] = {}
     result: list[Mutant] = []
     for node in ast.walk(tree):
         if id(node) in annotation or not hasattr(node, "lineno"):
@@ -163,10 +227,17 @@ def mutants_for_file(path: Path, rel: str) -> list[Mutant]:
         for op, target, replacement in _candidates(node):
             if op == "str-const" and id(node) in quiet:
                 continue
+            if op == "tenant-pred-drop" and id(node) in joined_parts:
+                continue
             line, col, end_line, end_col = _segment_lines(lines, target)
             if end_line != line and replacement != "pass":
                 replacement = replacement.replace("\n", " ")
-            result.append(Mutant(rel, line, col, end_line, end_col, op, replacement))
+            qualname = qualnames.get(id(node), "")
+            shape = ast.dump(target, include_attributes=False) + "|" + op + "|" + replacement
+            digest = hashlib.sha1(shape.encode()).hexdigest()[:10]
+            ordinal = seen.get((qualname, op, digest), 0)
+            seen[(qualname, op, digest)] = ordinal + 1
+            result.append(Mutant(rel, line, col, end_line, end_col, op, replacement, qualname, digest, ordinal))
     return result
 
 

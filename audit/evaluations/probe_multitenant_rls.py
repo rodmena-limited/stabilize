@@ -28,10 +28,13 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _backends import dsn_as, fresh_database, unique_name  # noqa: E402
 from urllib.parse import quote
 
 import psycopg
-from testcontainers.postgres import PostgresContainer
 
 logging.basicConfig(level=logging.CRITICAL)
 
@@ -58,24 +61,13 @@ TENANT_TABLES = (
     "stage_claims",
 )
 
-APP_ROLE = "stabilize_app"
+APP_ROLE = unique_name("stabilize_app")
 APP_PASSWORD = "app-pw"
 
 
-def _admin_dsn(container: PostgresContainer) -> str:
-    host = container.get_container_host_ip()
-    port = container.get_exposed_port(5432)
-    return f"postgresql://{container.username}:{container.password}@{host}:{port}/{container.dbname}"
-
-
-def _tenant_dsn(container: PostgresContainer, tenant: str) -> str:
-    host = container.get_container_host_ip()
-    port = container.get_exposed_port(5432)
+def _tenant_dsn(admin: str, tenant: str) -> str:
     opts = quote(f"-c app.tenant_id={tenant}")
-    return (
-        f"postgresql://{APP_ROLE}:{APP_PASSWORD}@{host}:{port}/{container.dbname}"
-        f"?options={opts}"
-    )
+    return dsn_as(admin, APP_ROLE, APP_PASSWORD, f"?options={opts}")
 
 
 def _apply_migrations(admin_dsn: str) -> None:
@@ -112,6 +104,7 @@ def _install_rls(admin_dsn: str) -> None:
                 f"GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO {APP_ROLE}"
             )
         conn.execute(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {APP_ROLE}")
+        conn.execute(f"GRANT SELECT ON stabilize_tenancy TO {APP_ROLE}")
 
 
 def _run_workflow(dsn: str, name: str) -> WorkflowStatus:
@@ -160,16 +153,14 @@ def _visible_rows(dsn: str, table: str) -> int:
 def main() -> int:
     results: list[tuple[str, bool, str]] = []
 
-    with PostgresContainer("postgres:16") as container:
-        admin = _admin_dsn(container)
-
+    with fresh_database("rls", [APP_ROLE]) as admin:
         print("=== SETUP: migrate as owner, then install RESTRICTIVE RLS ===")
         _apply_migrations(admin)
         _install_rls(admin)
         print(f"    {len(TENANT_TABLES)} tables carry tenant_id + RESTRICTIVE policy")
 
-        dsn_a = _tenant_dsn(container, "tenant-a")
-        dsn_b = _tenant_dsn(container, "tenant-b")
+        dsn_a = _tenant_dsn(admin, "tenant-a")
+        dsn_b = _tenant_dsn(admin, "tenant-b")
 
         print()
         print("=== CONTROL: the GUC actually arrives through the DSN ===")

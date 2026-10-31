@@ -15,42 +15,16 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _backends import skip  # noqa: E402
+from _backends import probe_dsn  # noqa: E402
 
 import os
 import subprocess
 import sys
 import time
 
-CONTAINER = "stabilize-probe-pool-tenants"
-PORT = 55434
 TENANTS = 4
 OPS_PER_TENANT = 12
 SETTLE_SECONDS = 10.0
-
-
-def _start_container() -> str | None:
-    subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True, check=False)
-    started = subprocess.run(
-        [
-            "docker", "run", "-d", "--name", CONTAINER,
-            "-e", "POSTGRES_PASSWORD=probepw", "-e", "POSTGRES_USER=probe",
-            "-e", "POSTGRES_DB=probedb", "-p", f"{PORT}:5432", "postgres:16",
-        ],
-        capture_output=True, text=True, check=False,
-    )
-    if started.returncode != 0:
-        return None
-    for _ in range(40):
-        ready = subprocess.run(
-            ["docker", "exec", CONTAINER, "pg_isready", "-U", "probe", "-d", "probedb"],
-            capture_output=True, check=False,
-        )
-        if ready.returncode == 0:
-            time.sleep(1)
-            return f"postgresql://probe:probepw@127.0.0.1:{PORT}/probedb"
-        time.sleep(1)
-    return None
 
 
 def _tenant_backends(observer_dsn: str, prefix: str) -> int:
@@ -81,10 +55,7 @@ def main() -> int:
     from stabilize.queue.messages import StartWorkflow
 
     print(f"stabilize {stabilize.__version__} from {stabilize.__file__}")
-    base = os.environ.get("STABILIZE_PROBE_DSN") or _start_container()
-    owns_container = "STABILIZE_PROBE_DSN" not in os.environ
-    if base is None:
-        skip("no PostgreSQL available (set STABILIZE_PROBE_DSN or enable docker)")
+    base = probe_dsn("pooltenants")
 
     prefix = f"stabprobe{os.getpid()}_"
     failed = False
@@ -120,8 +91,7 @@ def main() -> int:
             print(f"  >>> FAIL: {after} backend(s) still open for tenants whose owners all closed")
             failed = True
     finally:
-        if owns_container:
-            subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True, check=False)
+        pass
 
     return 1 if failed else 0
 

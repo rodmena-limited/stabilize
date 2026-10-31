@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -73,6 +74,55 @@ def dedicated_dsn(base: str, suffix: str = "probes") -> str:
         if conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,)).fetchone() is None:
             conn.execute(f'CREATE DATABASE "{name}"')
     return urlunsplit((parts.scheme, parts.netloc, f"/{name}", parts.query, parts.fragment))
+
+
+def probe_dsn(suffix: str) -> str:
+    """A database of this probe's own next to STABILIZE_PROBE_DSN's; without a DSN the probe exits SKIP."""
+    base = os.environ.get("STABILIZE_PROBE_DSN")
+    if not base:
+        skip("no PostgreSQL available (set STABILIZE_PROBE_DSN)")
+    return dedicated_dsn(base, suffix)
+
+
+def unique_name(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:6]}"
+
+
+@contextmanager
+def fresh_database(suffix: str, roles: list[str] | None = None) -> Iterator[str]:
+    """An empty database for this run, dropped afterwards with the roles the probe lists; SKIP without a DSN."""
+    from urllib.parse import urlsplit
+
+    import psycopg
+
+    base = os.environ.get("STABILIZE_PROBE_DSN")
+    if not base:
+        skip("no PostgreSQL available (set STABILIZE_PROBE_DSN)")
+    dsn = dedicated_dsn(base, unique_name(suffix))
+    try:
+        yield dsn
+    finally:
+        name = urlsplit(dsn).path.lstrip("/")
+        for role in roles or []:
+            try:
+                with psycopg.connect(dsn, autocommit=True) as conn:
+                    conn.execute(f'DROP OWNED BY "{role}"')
+            except Exception:
+                pass
+        with psycopg.connect(base, autocommit=True) as conn:
+            conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+            for role in roles or []:
+                conn.execute(f'DROP ROLE IF EXISTS "{role}"')
+
+
+def dsn_as(admin: str, user: str, password: str, query: str = "") -> str:
+    """The admin DSN's server and database, as another role."""
+    from urllib.parse import quote, urlsplit
+
+    parts = urlsplit(admin)
+    host = parts.hostname or "127.0.0.1"
+    port = f":{parts.port}" if parts.port else ""
+    return f"postgresql://{quote(user)}:{quote(password)}@{host}{port}{parts.path}{query}"
 
 
 @contextmanager

@@ -15,9 +15,12 @@ API.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _backends import dsn_as, fresh_database, unique_name  # noqa: E402
 
 import psycopg
-from testcontainers.postgres import PostgresContainer
 
 from stabilize import (
     Orchestrator,
@@ -31,15 +34,13 @@ from stabilize import (
     Workflow,
 )
 
-SCHEMA = "stabilize"
-RUNTIME_ROLE = "ci_app_probe"
+SCHEMA = "stabilize_rt"
+RUNTIME_ROLE = unique_name("ci_app_probe")
 RUNTIME_PASSWORD = "dml-only"
 
 
-def _dsn(container: PostgresContainer, user: str, password: str) -> str:
-    host = container.get_container_host_ip()
-    port = container.get_exposed_port(5432)
-    return f"postgresql://{user}:{password}@{host}:{port}/{container.dbname}?schema={SCHEMA}"
+def _dsn(admin: str, user: str, password: str) -> str:
+    return dsn_as(admin, user, password, f"?schema={SCHEMA}")
 
 
 def _apply_migrations(owner_dsn: str) -> list[str]:
@@ -138,8 +139,11 @@ def _run_workflow(runtime_dsn: str) -> str:
 def main() -> int:
     failures: list[str] = []
 
-    with PostgresContainer("postgres:16") as container:
-        owner_dsn = _dsn(container, container.username, container.password)
+    with fresh_database("runtime", [RUNTIME_ROLE]) as admin:
+        from urllib.parse import unquote, urlsplit
+
+        parts = urlsplit(admin)
+        owner_dsn = _dsn(admin, unquote(parts.username or ""), unquote(parts.password or ""))
 
         print("=== 1. MIGRATIONS APPLIED BY AN OWNER ROLE (the pgadmin/migretti step) ===")
         tables = _apply_migrations(owner_dsn)
@@ -152,7 +156,7 @@ def main() -> int:
         print()
         print("=== 2. RUNTIME ROLE WITH NO CREATE ON THE SCHEMA ===")
         _make_runtime_role(owner_dsn)
-        runtime_dsn = _dsn(container, RUNTIME_ROLE, RUNTIME_PASSWORD)
+        runtime_dsn = _dsn(admin, RUNTIME_ROLE, RUNTIME_PASSWORD)
         print(f"    {_privileges(runtime_dsn)}")
 
         with psycopg.connect(runtime_dsn.split("?", 1)[0]) as conn:

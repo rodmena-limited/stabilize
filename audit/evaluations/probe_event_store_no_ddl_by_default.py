@@ -19,9 +19,12 @@ Without D a store that always refused would pass A and B.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _backends import fresh_database  # noqa: E402
 
 import psycopg
-from testcontainers.postgres import PostgresContainer
 
 from stabilize.events.store.postgres import store as store_module
 from stabilize.events.store.postgres.schema import EVENTS_COMMIT_XID_MIGRATION
@@ -35,12 +38,6 @@ class _AbsentSchemaError(Exception):
 EventStoreSchemaError = getattr(store_module, "EventStoreSchemaError", _AbsentSchemaError)
 
 
-def _dsn(container: PostgresContainer) -> str:
-    host = container.get_container_host_ip()
-    port = container.get_exposed_port(5432)
-    return f"postgresql://{container.username}:{container.password}@{host}:{port}/{container.dbname}"
-
-
 def _tables(dsn: str) -> set[str]:
     with psycopg.connect(dsn) as conn:
         rows = conn.execute(
@@ -52,8 +49,7 @@ def _tables(dsn: str) -> set[str]:
 def main() -> int:
     results: list[tuple[str, bool, str]] = []
 
-    with PostgresContainer("postgres:16") as container:
-        dsn = _dsn(container)
+    with fresh_database("noddl") as dsn:
 
         print("=== A. DEFAULT CONSTRUCTOR ISSUES NO DDL ===")
         before = _tables(dsn)

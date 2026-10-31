@@ -9,41 +9,16 @@ Run:  python audit/evaluations/measure_queries_per_stage.py [--detail]
 from __future__ import annotations
 
 import collections
-import os
 import re
-import subprocess
 import sys
-import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _backends import probe_dsn  # noqa: E402
 import traceback
 from typing import Any
 
-CONTAINER = "stabilize-measure-queries"
-PORT = 55435
 RECORDS: list[tuple[str, str, str]] = []
-
-
-def _start_container() -> str | None:
-    subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True, check=False)
-    started = subprocess.run(
-        [
-            "docker", "run", "-d", "--name", CONTAINER,
-            "-e", "POSTGRES_PASSWORD=probepw", "-e", "POSTGRES_USER=probe",
-            "-e", "POSTGRES_DB=probedb", "-p", f"{PORT}:5432", "postgres:16",
-        ],
-        capture_output=True, text=True, check=False,
-    )
-    if started.returncode != 0:
-        return None
-    for _ in range(40):
-        ready = subprocess.run(
-            ["docker", "exec", CONTAINER, "pg_isready", "-U", "probe", "-d", "probedb"],
-            capture_output=True, check=False,
-        )
-        if ready.returncode == 0:
-            time.sleep(1)
-            return f"postgresql://probe:probepw@127.0.0.1:{PORT}/probedb"
-        time.sleep(1)
-    return None
 
 
 def _shape(sql: Any) -> str:
@@ -132,11 +107,7 @@ def _run(dsn: str, stages: int) -> int:
 
 def main() -> int:
     detail = "--detail" in sys.argv
-    base = os.environ.get("STABILIZE_PROBE_DSN") or _start_container()
-    owns_container = "STABILIZE_PROBE_DSN" not in os.environ
-    if base is None:
-        print("SKIP: no PostgreSQL available")
-        return 0
+    base = probe_dsn("measure")
     try:
         from stabilize.cli.commands import mg_up
 
@@ -171,8 +142,7 @@ def main() -> int:
             for site, n in by_site.most_common():
                 print(f"  {n:4d}  {site}")
     finally:
-        if owns_container:
-            subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True, check=False)
+        pass
     return 0
 
 

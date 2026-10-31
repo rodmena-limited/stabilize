@@ -28,13 +28,15 @@ no statement of this may reasonably conclude the engine has it covered.
 """
 
 import sys
+from pathlib import Path
+
 import psycopg
-from testcontainers.postgres import PostgresContainer
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _backends import fresh_database  # noqa: E402
 from stabilize.events.store.postgres.store import EventStoreSchemaError, PostgresEventStore
 
-with PostgresContainer("postgres:16") as c:
-    h, p = c.get_container_host_ip(), c.get_exposed_port(5432)
-    admin = f"postgresql://{c.username}:{c.password}@{h}:{p}/{c.dbname}"
+with fresh_database("split") as admin:
     PostgresEventStore(admin, create_tables=True)
     with psycopg.connect(admin, autocommit=True) as conn:
         conn.execute("CREATE SCHEMA IF NOT EXISTS stabilize")

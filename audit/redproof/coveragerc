@@ -1,0 +1,10 @@
+[run]
+source = stabilize
+branch = false
+parallel = true
+patch = subprocess
+sigterm = true
+dynamic_context = test_function
+
+[report]
+skip_empty = true

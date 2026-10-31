@@ -41,6 +41,9 @@ def test_the_gate_container_is_a_gate_cluster(postgres_container: Any) -> None:
 
     from tests.mg_support import server_url
 
+    if not os.environ.get("STABILIZE_TEST_DSN"):
+        pytest.skip("a throwaway testcontainers server carries no cluster_name; the guard is for STABILIZE_TEST_DSN")
+
     with psycopg.connect(server_url(postgres_container), autocommit=True) as conn:
         assert require_gate_cluster(conn).startswith("stabilize-gate-")
 

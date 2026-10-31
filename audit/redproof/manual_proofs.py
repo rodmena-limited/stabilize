@@ -9,7 +9,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 MANUAL = REPO / "audit" / "redproof" / "manual"
-PYTHON = os.environ.get("MANUAL_PROOFS_PYTHON", str(REPO / ".venv" / "bin" / "python"))
+PYTHON = os.environ.get("MANUAL_PROOFS_PYTHON", sys.executable)
 EXPORT = ["src", "tests", "migrations", "pyproject.toml"]
 
 
