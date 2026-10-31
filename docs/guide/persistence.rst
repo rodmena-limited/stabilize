@@ -288,6 +288,29 @@ A page filtered by status is read through the ``idx_stages_tenant_status_id`` in
 PostgreSQL. The stores do not create an index for ``context_contains``. Add a GIN index
 on ``stage_executions (context)`` yourself if that filter carries most of your queries.
 
+Listing workflows
+-----------------
+
+``retrieve_by_application``, ``retrieve_by_pipeline_config_id`` and
+``get_all_pending_workflows`` return runs newest start first, runs that have not started
+last, and ties in id order, the same on both backends. A ``WorkflowCriteria`` narrows the
+list by status, by a start-time window (runs with no ``start_time`` are outside the window
+unless ``include_unstarted=True``) and by ``pipeline_config_version``. ``page_size`` caps the
+rows one call returns. To read the next page, pass the cursor of the last run you received:
+
+.. code-block:: python
+
+    from stabilize.persistence.store import WorkflowCriteria
+
+    page = list(store.retrieve_by_application("billing", WorkflowCriteria(page_size=50)))
+    while page:
+        handle(page)
+        after = WorkflowCriteria.cursor_after(page[-1])
+        page = list(store.retrieve_by_application("billing", WorkflowCriteria(page_size=50, after=after)))
+
+The cursor is an opaque string. A cursor written by another stabilize version raises
+``ValueError``.
+
 Definition version and hash
 ---------------------------
 

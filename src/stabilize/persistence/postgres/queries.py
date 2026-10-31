@@ -13,7 +13,7 @@ from stabilize.persistence.postgres.converters import (
     row_to_task,
 )
 from stabilize.persistence.store import WorkflowCriteria
-from stabilize.persistence.store.criteria import time_window_sql, version_sql
+from stabilize.persistence.store.criteria import cursor_sql, order_sql, time_window_sql, version_sql
 
 _STAGE = select_list("stage_executions", "postgres")
 _TASK = select_list("task_executions", "postgres")
@@ -74,6 +74,7 @@ def get_upstream_stages(engine: Any, execution_id: str, stage_ref_id: str) -> li
                 SELECT {_STAGE} FROM stage_executions
                 WHERE execution_id = %(execution_id)s
                 AND ref_id = ANY(%(requisites)s) AND stabilize_tenant = %(tenant)s
+                ORDER BY id
                 """,
                 {"execution_id": execution_id, "requisites": requisites, "tenant": engine.tenant},
             )
@@ -99,6 +100,7 @@ def get_downstream_stages(engine: Any, execution_id: str, stage_ref_id: str) -> 
                 SELECT {_STAGE} FROM stage_executions
                 WHERE execution_id = %(execution_id)s
                 AND %(ref_id)s = ANY(requisite_stage_ref_ids) AND stabilize_tenant = %(tenant)s
+                ORDER BY id
                 """,
                 {"execution_id": execution_id, "ref_id": stage_ref_id, "tenant": engine.tenant},
             )
@@ -123,6 +125,7 @@ def get_synthetic_stages(engine: Any, execution_id: str, parent_stage_id: str) -
                 SELECT {_STAGE} FROM stage_executions
                 WHERE execution_id = %(execution_id)s
                 AND parent_stage_id = %(parent_id)s AND stabilize_tenant = %(tenant)s
+                ORDER BY id
                 """,
                 {"execution_id": execution_id, "parent_id": parent_stage_id, "tenant": engine.tenant},
             )
@@ -217,7 +220,8 @@ def retrieve_by_pipeline_config_id(
 
     query += time_window_sql(criteria, params, "%")
     query += version_sql(criteria, params, "%")
-    query += " ORDER BY start_time DESC"
+    query += cursor_sql(criteria, params, "%")
+    query += order_sql()
 
     if criteria and criteria.page_size:
         query += f" LIMIT {int(criteria.page_size)}"
@@ -250,7 +254,8 @@ def get_all_pending_workflows(
 
     query += time_window_sql(criteria, params, "%")
     query += version_sql(criteria, params, "%")
-    query += " ORDER BY start_time DESC NULLS LAST"
+    query += cursor_sql(criteria, params, "%")
+    query += order_sql()
 
     if criteria and criteria.page_size:
         query += f" LIMIT {int(criteria.page_size)}"
@@ -284,7 +289,8 @@ def retrieve_by_application(
 
     query += time_window_sql(criteria, params, "%")
     query += version_sql(criteria, params, "%")
-    query += " ORDER BY start_time DESC"
+    query += cursor_sql(criteria, params, "%")
+    query += order_sql()
 
     if criteria and criteria.page_size:
         query += f" LIMIT {int(criteria.page_size)}"

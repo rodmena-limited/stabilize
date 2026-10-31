@@ -306,7 +306,20 @@ Synthesis notes recorded while building WI-8:
 - The hash is computed by `Workflow.record_definition` on the object the caller passed; the launcher passes the whole configuration dict. The version label is `str(version)[:64]`, so a numeric `version` in a configuration is stored as text.
 - `supported_workflow_criteria()` is a separate capability from `supported_criteria()` (StageCriteria): the interface default is the 0.33 field set, both engine stores answer the full set through their stage-query mixins.
 
-### WI-9 … WI-11
+### WI-9 slice 9a: persistence hygiene (done)
+- Every load of several stages (`retrieve`, `retrieve_stage`'s related stages, `get_upstream_stages`, `get_downstream_stages`, `get_synthetic_stages`) shall order them by `id` on both backends (A1, B33).
+- The three workflow listings shall order by `start_time DESC NULLS LAST, id DESC` on both backends; `WorkflowCriteria.after` shall take the opaque cursor `WorkflowCriteria.cursor_after(workflow)` (`v1:<start_time or empty>:<id>`) and continue below it, the unstarted branch included; a cursor of another version or shape shall be refused with `ValueError` (A16, B35).
+- `start_time_after` and `start_time_before` shall exclude runs with no `start_time` unless `WorkflowCriteria.include_unstarted=True` (A17); `supported_workflow_criteria()` shall name `after` and `include_unstarted`.
+- `create_repository` and `create_queue` shall take `schema`, `options` (and `store_retry_budget` for the queue) as keyword arguments and pass them to the PostgreSQL classes; their docstrings shall name `stabilize mg-up` and the dead-letter queue (A13, B39).
+- `tests/test_mg_up_internals.py` shall scan the migration history reachable from `HEAD` and the tags, not every ref (B58); `tests/test_queue_pool_holder.py` shall use port 1 so no real connection is attempted.
+
+Synthesis notes recorded while building 9a:
+- The PostgreSQL stage-order test passed before the change with equal statuses: the planner walked `idx_stages_tenant_status_id`, whose order is the id order when every status is the same. With one stage RUNNING the index order differs and the test went red on both backends. That is B33 exactly: the order was whatever the planner chose.
+- The listing cursor is `v1:<start_time or empty>:<id>`; the SQL branch for a started cursor is `start_time < s OR (start_time = s AND id < i) OR start_time IS NULL`, and for an unstarted cursor `start_time IS NULL AND id < i`, which walks `start_time DESC NULLS LAST, id DESC` without gaps on both backends (SQLite 3.30+ accepts `NULLS LAST`; the floor is 3.35).
+- `time_window_sql` now excludes NULL `start_time` by default; `include_unstarted=True` restores the 0.33 result for callers that relied on it (recovery does not use the windows).
+- `create_repository`/`create_queue` take the new arguments keyword-only so positional callers keep their meaning.
+
+### WI-9 slices 9b … WI-11
 Specified when each item starts; the plan file holds the design.
 
 ### WI-2 slice 2: rule 1 column lists (done)

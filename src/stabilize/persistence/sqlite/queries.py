@@ -11,7 +11,7 @@ from stabilize.dag.merge import merge_ancestor_outputs, topological_order
 from stabilize.persistence.columns import select_list
 from stabilize.persistence.sqlite.converters import row_to_stage, row_to_task
 from stabilize.persistence.store import WorkflowCriteria
-from stabilize.persistence.store.criteria import time_window_sql, version_sql
+from stabilize.persistence.store.criteria import cursor_sql, order_sql, time_window_sql, version_sql
 
 _STAGE = select_list("stage_executions", "sqlite")
 _TASK = select_list("task_executions", "sqlite")
@@ -91,6 +91,7 @@ def get_upstream_stages(
         SELECT {_STAGE} FROM stage_executions
         WHERE execution_id = :execution_id
         AND ref_id IN ({placeholders}) AND stabilize_tenant = :tenant
+        ORDER BY id
         """,
         params,
     )
@@ -119,6 +120,7 @@ def get_downstream_stages(
         WHERE execution_id = :execution_id
         AND json_each.value = :ref_id
         AND stage_executions.stabilize_tenant = :tenant
+        ORDER BY stage_executions.id
     """
     result = conn.execute(query, {"execution_id": execution_id, "ref_id": stage_ref_id, "tenant": tenant})
 
@@ -145,6 +147,7 @@ def get_synthetic_stages(
         SELECT {_STAGE} FROM stage_executions
         WHERE execution_id = :execution_id
         AND parent_stage_id = :parent_id AND stabilize_tenant = :tenant
+        ORDER BY id
         """,
         {"execution_id": execution_id, "parent_id": parent_stage_id, "tenant": tenant},
     )
@@ -243,7 +246,8 @@ def retrieve_by_pipeline_config_id(
 
     query += time_window_sql(criteria, params, ":")
     query += version_sql(criteria, params, ":")
-    query += " ORDER BY start_time DESC"
+    query += cursor_sql(criteria, params, ":")
+    query += order_sql()
 
     if criteria and criteria.page_size:
         query += f" LIMIT {int(criteria.page_size)}"
@@ -276,7 +280,8 @@ def retrieve_by_application(
 
     query += time_window_sql(criteria, params, ":")
     query += version_sql(criteria, params, ":")
-    query += " ORDER BY start_time DESC"
+    query += cursor_sql(criteria, params, ":")
+    query += order_sql()
 
     if criteria and criteria.page_size:
         query += f" LIMIT {int(criteria.page_size)}"

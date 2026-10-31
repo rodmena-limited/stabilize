@@ -59,9 +59,17 @@ def test_retrieve_by_application_honours_start_time_window(repository: WorkflowS
     ids, old_id = _seed(repository, "rec-crit", 3)
     cutoff = int(time.time() * 1000) - 3600 * 1000
     after = {w.id for w in repository.retrieve_by_application("rec-crit", WorkflowCriteria(start_time_after=cutoff))}
-    assert ids <= after and old_id not in after
+    assert old_id not in after
+    assert not (ids & after), "a run with no start_time counted inside the window"
+    with_unstarted = {
+        w.id
+        for w in repository.retrieve_by_application(
+            "rec-crit", WorkflowCriteria(start_time_after=cutoff, include_unstarted=True)
+        )
+    }
+    assert ids <= with_unstarted and old_id not in with_unstarted
     before = {w.id for w in repository.retrieve_by_application("rec-crit", WorkflowCriteria(start_time_before=cutoff))}
-    assert old_id in before
+    assert old_id in before and not (ids & before)
 
 
 def test_not_started_workflow_is_recovered_through_start_workflow_once(repository: WorkflowStore, queue: Queue) -> None:

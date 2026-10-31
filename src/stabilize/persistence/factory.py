@@ -9,6 +9,8 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
+from stabilize.persistence.pool_options import PoolOptions
+
 if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
@@ -41,6 +43,9 @@ def create_repository(
     connection_string: str,
     create_tables: bool = False,
     tenant: str = "",
+    *,
+    schema: str | None = None,
+    options: PoolOptions | None = None,
 ) -> WorkflowStore:
     """
     Create an execution repository based on the connection string.
@@ -52,13 +57,16 @@ def create_repository(
         connection_string: Database connection URL
         create_tables: Whether to create tables if they don't exist
                       (SQLite only - PostgreSQL uses migrations)
+        tenant: The tenant this store reads and writes for ('' in single-tenant mode)
+        schema: PostgreSQL schema holding the engine tables (default search_path)
+        options: PostgreSQL pool options (sizes, hooks, tenant_setting, audit_key)
 
     Returns:
         WorkflowStore: PostgreSQL or SQLite repository instance
 
     Note:
         PostgreSQL requires running migrations first:
-            stabilize migrate --database <connection_string>
+            stabilize mg-up --db-url <connection_string>
 
     Examples:
         # PostgreSQL (requires migrations)
@@ -87,7 +95,7 @@ def create_repository(
     else:
         from stabilize.persistence.postgres import PostgresWorkflowStore
 
-        return PostgresWorkflowStore(connection_string, tenant=tenant)
+        return PostgresWorkflowStore(connection_string, schema=schema, options=options, tenant=tenant)
 
 
 def create_queue(
@@ -96,6 +104,10 @@ def create_queue(
     lock_duration: timedelta | None = None,
     max_attempts: int = 10,
     tenant: str = "",
+    *,
+    schema: str | None = None,
+    options: PoolOptions | None = None,
+    store_retry_budget: timedelta | None = None,
 ) -> Queue:
     """
     Create a message queue based on the connection string.
@@ -107,7 +119,12 @@ def create_queue(
         connection_string: Database connection URL
         table_name: Name of the queue table
         lock_duration: How long to lock messages during processing
-        max_attempts: Maximum retry attempts before dropping message
+        max_attempts: Deliveries before a message moves to the dead-letter queue
+        tenant: The tenant this queue serves ('' in single-tenant mode)
+        schema: PostgreSQL schema holding the queue tables (default search_path)
+        options: PostgreSQL pool options
+        store_retry_budget: How long a message redelivered for a store outage stays
+            deliverable past max_attempts (default 30 minutes)
 
     Returns:
         Queue: PostgreSQL or SQLite queue instance
@@ -121,6 +138,7 @@ def create_queue(
     """
     backend = detect_backend(connection_string)
     lock_duration = lock_duration or timedelta(minutes=5)
+    budget: dict[str, timedelta] = {} if store_retry_budget is None else {"store_retry_budget": store_retry_budget}
 
     if backend == "sqlite":
         from stabilize.queue.sqlite import SqliteQueue
@@ -131,6 +149,7 @@ def create_queue(
             lock_duration=lock_duration,
             max_attempts=max_attempts,
             tenant=tenant,
+            **budget,
         )
     else:
         from stabilize.queue import PostgresQueue
@@ -141,4 +160,7 @@ def create_queue(
             lock_duration=lock_duration,
             max_attempts=max_attempts,
             tenant=tenant,
+            schema=schema,
+            options=options,
+            **budget,
         )

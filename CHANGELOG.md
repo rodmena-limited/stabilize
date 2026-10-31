@@ -199,6 +199,11 @@ host's own migretti history, now upgrade with no change to the command.
   cannot express is stored with no digest and a warning. `WorkflowCriteria.pipeline_config_version`
   filters the three listings; `WorkflowStore.supported_workflow_criteria()` names the honoured
   fields.
+- **Listing cursors.** `WorkflowCriteria.after` continues a listing below the opaque cursor
+  `WorkflowCriteria.cursor_after(workflow)`; `include_unstarted=True` keeps runs with no
+  `start_time` inside a time window. `create_repository(..., schema=, options=)` and
+  `create_queue(..., schema=, options=, store_retry_budget=)` reach the PostgreSQL classes'
+  arguments.
 - **`stabilize_updated_at`** on the three execution tables and **`created_at_ms`** on
   `pipeline_executions`, added by migration `01M68FGEZVQR6KPAMW6P5N8B0E_recovery_activity.sql`
   on PostgreSQL and SQLite migration 8, with the trigger function
@@ -292,6 +297,19 @@ host's own migretti history, now upgrade with no change to the command.
   at or past `max_attempts` to the dead-letter queue only once that budget is spent, with the
   cause `store_unavailable_budget_exhausted`, and the dead-letter row keeps both counters. A
   failure that is not a store outage closes the budget and the attempt rule applies again.
+- **Stages load in id order (B33).** `retrieve`, the related-stage loads of `retrieve_stage`,
+  and the upstream, downstream and synthetic lookups had no `ORDER BY`, so an OR-split's
+  fallback branch and the order initial stages were pushed depended on heap order on
+  PostgreSQL. Every stage list is now ordered by id on both backends.
+- **Workflow listings order and page the same on both backends (B35).** PostgreSQL put runs
+  with no `start_time` first and SQLite last, ties had no order, and only the first page was
+  reachable. The order is now `start_time DESC NULLS LAST, id DESC` everywhere, with a keyset
+  cursor for the next page.
+- **Time windows exclude the unstarted (A17).** A run with no `start_time` counted as inside
+  every window. It is now outside unless `include_unstarted=True` asks for it.
+- **The factories tell the truth (B39).** `create_repository` pointed at a `stabilize migrate`
+  command that does not exist, and `create_queue` said messages past `max_attempts` are
+  dropped. They go to the dead-letter queue.
 - **Recovery ages a workflow by its activity, not by its start (B21).** A run started 30
   hours ago whose task row changed five minutes ago was never recovered, because the only
   clock was `start_time`. `pipeline_executions`, `stage_executions` and `task_executions`

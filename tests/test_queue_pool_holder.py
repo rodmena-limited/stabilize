@@ -31,7 +31,7 @@ def manager(monkeypatch: pytest.MonkeyPatch):
     conn_mod.SingletonMeta._instances.pop(conn_mod.ConnectionManager, None)
 
 
-DSN = "postgresql://u:p@localhost:5432/db"
+DSN = "postgresql://u:p@localhost:1/db"
 
 
 def test_the_holder_table_can_be_read(manager) -> None:

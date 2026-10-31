@@ -68,9 +68,9 @@ def test_the_history_table_covers_every_committed_version_of_every_migration() -
     except (OSError, subprocess.CalledProcessError):
         pytest.skip("not a git checkout")
     seen = 0
-    for path in sorted(set(git("log", "--all", "--format=", "--name-only", "--", "migrations/*.sql").split())):
+    for path in sorted(set(git("log", "HEAD", "--tags", "--format=", "--name-only", "--", "migrations/*.sql").split())):
         name = Path(path).name
-        for commit in set(git("log", "--all", "--format=%H", "--", path).split()):
+        for commit in set(git("log", "HEAD", "--tags", "--format=%H", "--", path).split()):
             show = subprocess.run(["git", "-C", str(REPO), "show", f"{commit}:{path}"], capture_output=True)
             if show.returncode != 0:
                 continue

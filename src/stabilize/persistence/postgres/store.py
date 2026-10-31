@@ -201,7 +201,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Postg
 
                 cur.execute(
                     f"SELECT {_STAGE} FROM stage_executions "
-                    "WHERE execution_id = %(execution_id)s AND stabilize_tenant = %(tenant)s",
+                    "WHERE execution_id = %(execution_id)s AND stabilize_tenant = %(tenant)s ORDER BY id",
                     {"execution_id": execution_id, "tenant": self.tenant},
                 )
 
@@ -414,6 +414,7 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Postg
                         WHERE execution_id = %(execution_id)s
                         AND (ref_id = ANY(%(requisites)s) OR parent_stage_id = %(stage_id)s)
                         AND stabilize_tenant = %(tenant)s
+                        ORDER BY id
                         """,
                         {
                             "execution_id": execution.id,

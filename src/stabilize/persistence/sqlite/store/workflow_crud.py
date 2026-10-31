@@ -130,6 +130,7 @@ class SqliteWorkflowCrudMixin:
             f"""
             SELECT {_STAGE} FROM stage_executions
             WHERE execution_id = :execution_id AND stabilize_tenant = :tenant
+            ORDER BY id
             """,
             {"execution_id": execution_id, "tenant": self.tenant},
         )
