@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterable
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,61 @@ class LogMetricsProvider(MetricsProvider):
 
     def histogram(self, name: str, value: float, tags: dict[str, str] | None = None) -> None:
         logger.debug("METRIC HIST %s: %s tags=%s", name, value, tags)
+
+
+class OpenTelemetryMetricsProvider(MetricsProvider):
+    """Counters, histograms and gauges on an OpenTelemetry meter named ``stabilize``.
+
+    Instruments are created on first use, one per metric name. Values go to whatever
+    MeterProvider the application configured (the global one unless *meter_provider*
+    is given), so stabilize's metrics leave through the application's exporter.
+    """
+
+    def __init__(self, meter_provider: Any | None = None) -> None:
+        from opentelemetry import metrics as otel
+
+        source = meter_provider if meter_provider is not None else otel.get_meter_provider()
+        self._meter = source.get_meter("stabilize")
+        self._counters: dict[str, Any] = {}
+        self._histograms: dict[str, Any] = {}
+        self._gauges: dict[str, Any] = {}
+        self._gauge_values: dict[str, dict[tuple[tuple[str, str], ...], float]] = {}
+
+    def increment(self, name: str, value: float = 1.0, tags: dict[str, str] | None = None) -> None:
+        counter = self._counters.get(name)
+        if counter is None:
+            counter = self._counters[name] = self._meter.create_counter(name)
+        counter.add(value, attributes=dict(tags or {}))
+
+    def histogram(self, name: str, value: float, tags: dict[str, str] | None = None) -> None:
+        histogram = self._histograms.get(name)
+        if histogram is None:
+            histogram = self._histograms[name] = self._meter.create_histogram(name)
+        histogram.record(value, attributes=dict(tags or {}))
+
+    def gauge(self, name: str, value: float, tags: dict[str, str] | None = None) -> None:
+        attributes = dict(tags or {})
+        gauge = self._gauges.get(name)
+        if gauge is None:
+            create = getattr(self._meter, "create_gauge", None)
+            if create is not None:
+                gauge = self._gauges[name] = create(name)
+            else:
+                self._gauge_values[name] = {}
+                gauge = self._gauges[name] = self._meter.create_observable_gauge(name, callbacks=[self._observe(name)])
+        if hasattr(gauge, "set"):
+            gauge.set(value, attributes=attributes)
+        else:
+            self._gauge_values[name][tuple(sorted(attributes.items()))] = value
+
+    def _observe(self, name: str) -> Callable[[Any], Iterable[Any]]:
+        from opentelemetry.metrics import Observation
+
+        def callback(options: Any) -> Iterable[Any]:
+            for key, value in self._gauge_values.get(name, {}).items():
+                yield Observation(value, dict(key))
+
+        return callback
 
 
 class NoOpMetricsProvider(MetricsProvider):
@@ -102,31 +158,39 @@ def configure_metrics() -> None:
         return
 
     try:
-        # Check for OpenTelemetry
         import opentelemetry.metrics  # noqa: F401
-
-        # We could implement OTel provider here, but for now we'll stick to simple
-        # interfaces. A full OTel implementation would be a separate class.
-        # For this "start fixing" phase, logging or no-op is sufficient default.
-        pass
     except ImportError:
-        pass
+        set_metrics_provider(NoOpMetricsProvider())
+        return
+    set_metrics_provider(OpenTelemetryMetricsProvider())
+    logger.info("Using OpenTelemetryMetricsProvider")
 
 
 # Convenience wrappers
+def _tags(tags: dict[str, Any]) -> dict[str, str]:
+    """String tags, plus the bound tenant when there is one."""
+    from stabilize.persistence.tenancy import current_tenant
+
+    labelled = {k: str(v) for k, v in tags.items()}
+    tenant = current_tenant()
+    if tenant:
+        labelled.setdefault("tenant", tenant)
+    return labelled
+
+
 def increment(name: str, value: float = 1.0, **tags: Any) -> None:
     """Increment metric with tags as kwargs."""
-    _provider.increment(name, value, {k: str(v) for k, v in tags.items()})
+    _provider.increment(name, value, _tags(tags))
 
 
 def gauge(name: str, value: float, **tags: Any) -> None:
     """Set gauge with tags as kwargs."""
-    _provider.gauge(name, value, {k: str(v) for k, v in tags.items()})
+    _provider.gauge(name, value, _tags(tags))
 
 
 def histogram(name: str, value: float, **tags: Any) -> None:
     """Record histogram with tags as kwargs."""
-    _provider.histogram(name, value, {k: str(v) for k, v in tags.items()})
+    _provider.histogram(name, value, _tags(tags))
 
 
 class Timer:

@@ -207,6 +207,13 @@ host's own migretti history, now upgrade with no change to the command.
 - **`WorkflowStore.claim_message()`** records a processed message in one statement and tells
   the caller whether it was the one that inserted it. `MultiInstanceConfig.instance_type` names
   the type dynamic instances are created with.
+- **Metrics that exist.** `configure_metrics()` installs `OpenTelemetryMetricsProvider` when
+  OpenTelemetry is importable (meter `stabilize`, the application's MeterProvider). The engine
+  emits `workflow_count`, `workflow_duration_seconds`, `stage_duration_seconds` and
+  `task_duration_seconds`; the processor samples `queue_depth`, `queue_lag_seconds` and
+  `active_workflows` every `metrics_sample_interval_seconds` (30 by default) through
+  `QueueProcessor.sample_metrics()`, `Queue.oldest_ready_age_seconds()` and
+  `WorkflowStore.count_active_workflows()`. A bound tenant becomes the `tenant` tag.
 - **`stabilize_updated_at`** on the three execution tables and **`created_at_ms`** on
   `pipeline_executions`, added by migration `01M68FGEZVQR6KPAMW6P5N8B0E_recovery_activity.sql`
   on PostgreSQL and SQLite migration 8, with the trigger function
@@ -329,6 +336,10 @@ host's own migretti history, now upgrade with no change to the command.
 - **Deduplication has an atomic claim (B44).** `is_message_processed()` followed by
   `mark_message_processed()` let two workers both pass the check. `claim_message()` is the
   one-statement form. The known-bug test that documented the race now pins the fix.
+- **`configure_metrics()` did nothing and the engine emitted one metric of seven (B45).** The
+  module's docstring promised seven; the code emitted `task_execution_seconds` and installed no
+  provider. The seven are emitted under the documented names and OpenTelemetry carries them.
+  `task_execution_seconds` is gone; nothing could have consumed it.
 - **Recovery ages a workflow by its activity, not by its start (B21).** A run started 30
   hours ago whose task row changed five minutes ago was never recovered, because the only
   clock was `start_time`. `pipeline_executions`, `stage_executions` and `task_executions`

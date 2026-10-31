@@ -181,6 +181,17 @@ class SqliteWorkflowStore(
 
     # ========== Message Deduplication ==========
 
+    def count_active_workflows(self) -> int:
+        row = (
+            self._get_connection()
+            .execute(
+                "SELECT count(*) FROM pipeline_executions WHERE status = 'RUNNING' AND stabilize_tenant = :tenant",
+                {"tenant": self.tenant},
+            )
+            .fetchone()
+        )
+        return int(row[0]) if row else 0
+
     def is_message_processed(self, message_id: str) -> bool:
         """Check if a message has already been processed."""
         return _is_message_processed(self._get_connection(), message_id, self.tenant)

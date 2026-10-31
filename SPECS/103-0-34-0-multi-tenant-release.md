@@ -341,7 +341,18 @@ Synthesis notes recorded while building 9c:
 - `claim_message` is the primitive the processor's post-handler fallback now uses; the handlers' transactional marks (rule 7) were already atomic, which is why the race the strict xfail described could no longer be shown through the engine. The test now pins the store-level contract directly.
 - The SQLite demonstration test had been passing its helpers two arguments where they take a tenant; its threads raised `TypeError` into the warnings summary of every suite. They now pass `""`.
 
-### WI-9 slices 9d … WI-11
+### WI-9 slice 9d: the seven named metrics (done)
+- `stabilize.metrics.configure_metrics()` shall install `OpenTelemetryMetricsProvider` when `opentelemetry` imports (counters, histograms and gauges on the meter `stabilize`, one instrument per metric name, on the application's MeterProvider), `LogMetricsProvider` under `STABILIZE_LOG_METRICS`, and the no-op provider otherwise (A22, B45).
+- The engine shall emit `workflow_count` (counter, when a workflow starts running, tag `application`), `workflow_duration_seconds` and `stage_duration_seconds` (histograms at completion, tags `application`/`stage_type` and `status`), `task_duration_seconds` (histogram around each task execution, tags `task_type` and `task_name`; the 0.33 name `task_execution_seconds` goes), and the processor shall sample `queue_depth`, `queue_lag_seconds` and `active_workflows` (gauges) every `QueueProcessorConfig.metrics_sample_interval_seconds` (30 by default, 0 disables) through `QueueProcessor.sample_metrics()`, `Queue.oldest_ready_age_seconds()` and `WorkflowStore.count_active_workflows()`.
+- Every metric shall carry the tag `tenant` when a non-empty tenant is bound, and no tenant tag otherwise.
+
+Synthesis notes recorded while building 9d:
+- `OpenTelemetryMetricsProvider` takes the application's `MeterProvider` (the global one unless given), so stabilize never configures an exporter of its own; the provider test records through the SDK's `InMemoryMetricReader`, which is the real counterparty, not a stand-in.
+- The three gauges are sampled, not maintained by deltas: a gauge kept by increments drifts across processes and restarts. `count_active_workflows()` is one indexed count (`idx_executions_tenant_status`), `oldest_ready_age_seconds()` one aggregate over deliverable rows, both every 30 seconds by default.
+- `workflow_count` is incremented in `start_running`, so a buffered workflow counts when it starts running, not when it is stored; the metric documents itself as "total workflows started".
+- The tenant tag is added by the module-level wrappers from `current_tenant()`, so a provider never has to know about tenancy and a handler never passes it.
+
+### WI-9 slices 9e … WI-11
 Specified when each item starts; the plan file holds the design.
 
 ### WI-2 slice 2: rule 1 column lists (done)

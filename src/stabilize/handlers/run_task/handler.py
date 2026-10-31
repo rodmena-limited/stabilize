@@ -359,7 +359,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 if result is None:
                     timeout = self.timeout_manager.get_task_timeout(stage, task)
                     with Timer(
-                        "task_execution_seconds",
+                        "task_duration_seconds",
                         task_type=message.task_type,
                         task_name=task_model.name,
                     ):

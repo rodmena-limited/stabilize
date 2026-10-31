@@ -401,6 +401,20 @@ class SqliteQueue(SqliteDLQMixin, Queue):
             return None
         return max(0.0, float(row[0]))
 
+    def oldest_ready_age_seconds(self) -> float | None:
+        conn = self._get_connection()
+        now = datetime.now(UTC).isoformat()
+        row = conn.execute(
+            f"SELECT (julianday(:now) - MIN(julianday(deliver_at))) * 86400.0 FROM {self.table_name} "
+            "WHERE stabilize_tenant = :tenant AND julianday(deliver_at) <= julianday(:now) "
+            "AND (locked_until IS NULL OR julianday(locked_until) < julianday(:now)) "
+            f"AND {_DELIVERABLE}",
+            {"now": now, "tenant": self.tenant, "max_attempts": self.max_attempts, "budget_days": self._budget_days()},
+        ).fetchone()
+        if not row or row[0] is None:
+            return None
+        return max(0.0, float(row[0]))
+
     def clear(self) -> None:
         """Clear all messages from the queue."""
         conn = self._get_connection()

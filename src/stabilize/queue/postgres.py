@@ -411,6 +411,25 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
         wait = row["wait"] if row else None
         return None if wait is None else max(0.0, float(wait))
 
+    def oldest_ready_age_seconds(self) -> float | None:
+        with self._borrow() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT EXTRACT(EPOCH FROM (NOW() - MIN(deliver_at))) AS age FROM {self.table_name} "
+                    "WHERE stabilize_tenant = %(tenant)s AND deliver_at <= NOW() "
+                    "AND (locked_until IS NULL OR locked_until < NOW()) "
+                    f"AND {_DELIVERABLE}",
+                    {
+                        "tenant": self.tenant,
+                        "max_attempts": self.max_attempts,
+                        "budget": self.store_retry_budget.total_seconds(),
+                    },
+                )
+                row = cur.fetchone()
+            conn.commit()
+        age = row["age"] if row else None
+        return None if age is None else max(0.0, float(age))
+
     def clear(self) -> None:
         """Clear all messages from the queue."""
         with self._borrow() as conn:

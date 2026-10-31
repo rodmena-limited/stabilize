@@ -383,6 +383,24 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
                 break
             self.run_recovery()
 
+    def sample_metrics(self) -> None:
+        """Record queue_depth, queue_lag_seconds and active_workflows as gauges.
+
+        A store that cannot count active workflows is skipped.
+        """
+        from stabilize import metrics
+
+        try:
+            metrics.gauge("queue_depth", float(self.queue.size()))
+            age = self.queue.oldest_ready_age_seconds()
+            metrics.gauge("queue_lag_seconds", float(age or 0.0))
+            if self._store is not None:
+                metrics.gauge("active_workflows", float(self._store.count_active_workflows()))
+        except NotImplementedError:
+            logger.debug("metrics sample skipped: the store does not count active workflows")
+        except Exception as e:
+            logger.warning("metrics sample failed: %s", e)
+
     def _poll_loop(self) -> None:
         """Main polling loop.
 
@@ -393,6 +411,8 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
         poll_interval = self.config.poll_frequency_ms / 1000.0
         dlq_interval = getattr(self.config, "dlq_check_interval_seconds", 0.0)
         last_dlq_check = time.monotonic()
+        sample_interval = getattr(self.config, "metrics_sample_interval_seconds", 0.0)
+        last_sample = time.monotonic()
 
         while self._running:
             try:
@@ -403,6 +423,9 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
                 if dlq_interval > 0 and time.monotonic() - last_dlq_check >= dlq_interval:
                     last_dlq_check = time.monotonic()
                     self._check_dlq()
+                if sample_interval > 0 and time.monotonic() - last_sample >= sample_interval:
+                    last_sample = time.monotonic()
+                    self.sample_metrics()
 
                 # Hold lock while checking stopping flag AND polling to prevent race
                 # condition where a message could be submitted after stop is requested

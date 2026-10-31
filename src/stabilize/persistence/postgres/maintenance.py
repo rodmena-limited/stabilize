@@ -38,6 +38,17 @@ class PostgresMaintenanceMixin:
     _engine: Any
     tenant: str
 
+    def count_active_workflows(self) -> int:
+        with self._engine.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT count(*) AS n FROM pipeline_executions "
+                    "WHERE status = 'RUNNING' AND stabilize_tenant = %(tenant)s",
+                    {"tenant": self._engine.tenant},
+                )
+                row = cur.fetchone()
+        return int(row["n"]) if row else 0
+
     def is_message_processed(self, message_id: str) -> bool:
         """Check if a message has already been processed."""
         return _is_message_processed(self._engine, message_id)

@@ -14,6 +14,7 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
+from stabilize import metrics
 from stabilize.errors import is_store_unavailable, is_transient
 from stabilize.errors.delivery import DuplicateDeliveryError
 from stabilize.handlers.complete_stage.deferred import CompleteStageDeferredMixin
@@ -244,6 +245,13 @@ class CompleteStageHandler(CompleteStageDeferredMixin, CompleteStageFanOutMixin,
                     return
                 self.set_stage_status(stage, status)
                 stage.end_time = self.current_time_millis()
+                if stage.start_time is not None:
+                    metrics.histogram(
+                        "stage_duration_seconds",
+                        (stage.end_time - stage.start_time) / 1000.0,
+                        stage_type=stage.type,
+                        status=status.name,
+                    )
 
                 settled["stage"] = stage
 

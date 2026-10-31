@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from stabilize import metrics
 from stabilize.models.status import WorkflowStatus
 from stabilize.persistence.store import WorkflowCriteria
 from stabilize.queue.messages import StartStage
@@ -49,6 +50,7 @@ def limits_concurrency(execution: Workflow) -> bool:
 def start_running(
     handler: Any, txn: StoreTransaction, execution: Workflow, initial_stages: list[StageExecution]
 ) -> None:
+    metrics.increment("workflow_count", application=execution.application)
     handler.set_workflow_status(execution, WorkflowStatus.RUNNING)
     execution.start_time = handler.current_time_millis()
     execution.queue_table = execution.queue_table or queue_table_name(handler.queue)

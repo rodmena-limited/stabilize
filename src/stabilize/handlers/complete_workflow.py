@@ -11,6 +11,7 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
+from stabilize import metrics
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.models.status import CONTINUABLE_STATUSES, WorkflowStatus
 from stabilize.queue.messages import (
@@ -101,6 +102,13 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
             # Update execution status
             self.set_workflow_status(execution, status)
             execution.end_time = self.current_time_millis()
+            if execution.start_time is not None:
+                metrics.histogram(
+                    "workflow_duration_seconds",
+                    (execution.end_time - execution.start_time) / 1000.0,
+                    application=execution.application,
+                    status=status.name,
+                )
 
             logger.info("Execution %s completed with status %s", execution.id, status)
 

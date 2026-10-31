@@ -133,6 +133,10 @@ class Queue(ABC):
         """Seconds until the earliest message this consumer can poll; 0 when one is ready, None when none is pending."""
         return 0.0 if self.size() > 0 else None
 
+    def oldest_ready_age_seconds(self) -> float | None:
+        """Seconds the oldest message this consumer could poll right now has been waiting; None when none is ready."""
+        return None
+
     @abstractmethod
     def clear(self) -> None:
         """Clear all messages from the queue."""

@@ -87,6 +87,8 @@ class QueueProcessorConfig:
     recovery_application: str | None = None
     # Only recover workflows started within this many hours.
     recovery_max_age_hours: float = 24.0
+    # How often the poll loop samples queue_depth, queue_lag_seconds and active_workflows; 0 disables.
+    metrics_sample_interval_seconds: float = 30.0
 
     @classmethod
     def from_handler_config(cls, handler_config: HandlerConfig | None = None) -> QueueProcessorConfig:

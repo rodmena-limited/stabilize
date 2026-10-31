@@ -391,6 +391,31 @@ Recovery automatically:
    gets a ``SignalStage`` naming that row. A signal buffered before a crash is therefore
    delivered after it. The handler drops the message if the row was consumed meanwhile.
 
+Metrics
+~~~~~~~
+
+``stabilize.metrics.configure_metrics()`` picks the provider: OpenTelemetry when the
+``opentelemetry`` package imports (a meter named ``stabilize`` on the application's
+``MeterProvider``, so the values leave through the application's exporter), a logging provider
+when ``STABILIZE_LOG_METRICS`` is set, and a no-op otherwise. The engine emits seven metrics.
+
+=========================== ========= ======================================================
+Name                        Kind      When, and tags
+=========================== ========= ======================================================
+workflow_count              counter   a workflow starts running (``application``)
+workflow_duration_seconds   histogram a workflow completes (``application``, ``status``)
+stage_duration_seconds      histogram a stage completes (``stage_type``, ``status``)
+task_duration_seconds       histogram around each task execution (``task_type``, ``task_name``)
+active_workflows            gauge     sampled: RUNNING workflows of the processor's tenant
+queue_depth                 gauge     sampled: messages in the processor's queue table
+queue_lag_seconds           gauge     sampled: age of the oldest message ready to be polled
+=========================== ========= ======================================================
+
+The processor's poll loop samples the three gauges every
+``QueueProcessorConfig.metrics_sample_interval_seconds`` (30 by default, 0 turns the sampling
+off). ``QueueProcessor.sample_metrics()`` samples them on demand. When a tenant is bound, every
+metric carries it as the ``tenant`` tag. In single-tenant mode there is no tenant tag.
+
 Automatic recovery (opt-in)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
