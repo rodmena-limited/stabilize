@@ -357,6 +357,23 @@ host's own migretti history, now upgrade with no change to the command.
   dead-letter crash tests skipped PostgreSQL and asserted a hand-written rollback on SQLite. They
   now fail the commit through the queue API on both backends. The generated-DSN redaction test
   skipped 27 of its 40 shapes every run. It is parametrised with the checkable ones only.
+- **A durable subscription no longer loses the rest of a full batch (B07).** On PostgreSQL the
+  commit-ordered poll moved the cursor to the watermark after each batch. A poll that hit
+  `batch_size` therefore skipped the events that had not fitted. The position is now the pair
+  `(commit id, sequence)` of the last delivered event, in the new `last_commit_sequence` column.
+  `get_events_since_committed` takes `after_sequence` and returns the next pair.
+- **`start_from` is honoured under commit order.** A subscription created at `"latest"` on
+  PostgreSQL, or at any position on SQLite, started its commit cursor at zero and replayed the
+  whole store on its first poll. A subscription saved by an earlier release with a sequence
+  position only is given a commit position from that sequence when it is loaded.
+- **A disabled subscription stays disabled across a restart.** The flag lived in memory. A
+  restart resumed a handler that had failed ten times. It is persisted in the new `enabled`
+  column, and `SubscriptionManager.enable_subscription(id)` turns it back on.
+- **Events can be purged without stranding a subscriber.** `EventStore.purge_events` and
+  `stabilize purge-events` delete events below a sequence or before a time in batches. They
+  refuse with `SubscriptionBehindError` while an enabled subscription still has undelivered
+  events in the bound. Hosts that own their event-store DDL add `enabled BOOLEAN NOT NULL DEFAULT TRUE` and
+  `last_commit_sequence BIGINT NOT NULL DEFAULT 0` to `event_subscriptions`.
 - **Recovery ages a workflow by its activity, not by its start (B21).** A run started 30
   hours ago whose task row changed five minutes ago was never recovered, because the only
   clock was `start_time`. `pipeline_executions`, `stage_executions` and `task_executions`

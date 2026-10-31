@@ -386,6 +386,23 @@ Synthesis notes recorded while building 9g:
 - The HTTP certification test uses `allow_private_urls` on its stage because the SSRF guard blocks loopback addresses by design; the flag is per stage and documented, so the test does not weaken the guard for anything else.
 - The redaction shapes are filtered by libpq at import, so the parametrisation follows the installed libpq; the known-positive count stops a libpq that echoes nothing from turning the test into forty passes that check nothing.
 
+### WI-9 slice 9h: durable subscriptions (done)
+- When a commit-ordered poll returns a full batch, the subscription cursor shall move to the last delivered event's `(commit_xid, sequence)` and never to the watermark, so the next poll continues with the events that did not fit; when the batch is short, the cursor shall move to `(watermark, 0)` (B07).
+- `get_events_since_committed(cursor, limit, after_sequence)` shall return `(events, next_cursor, next_sequence)` on both backends; `event_subscriptions` gains `last_commit_sequence BIGINT NOT NULL DEFAULT 0` and `enabled BOOLEAN NOT NULL DEFAULT TRUE` (PostgreSQL migration, `setup_ddl`, SQLite column fill-in, the column catalog).
+- When a subscription is created with `start_from="latest"`, the engine shall set its commit cursor to the current watermark so no stored event is replayed; with `"beginning"` to `("0", 0)`; with a sequence N to the smallest commit id among the events after N, so every event after N is delivered and none is lost (events at or before N may be delivered again).
+- When a subscription is loaded whose commit cursor is `'0'` while its `last_sequence` is above zero, the engine shall derive the commit cursor from `last_sequence` the same way and persist it, so a subscription written by an earlier release resumes where it was.
+- When a subscription is disabled after `max_errors` failures, the engine shall persist `enabled = false`; a reload shall find it disabled; `SubscriptionManager.enable_subscription(id)` shall re-enable it, reset its error count and persist that; `get_subscription_status` shall report `last_commit_cursor` and `last_commit_sequence`.
+- `EventStore.purge_events(before_sequence=, before=, ignore_subscriptions=False, batch_size=10000)` shall delete this tenant's events matching the bound in batches and return the count; it shall refuse with `SubscriptionBehindError` naming each enabled subscription that still has undelivered events inside the bound, unless `ignore_subscriptions` is set; a call with neither bound shall raise `ValueError`.
+- `stabilize purge-events --db-url … (--before-sequence N | --older-than-days D) [--ignore-subscriptions] [--dry-run] [--batch-size] [--tenant | --all-tenants]` shall count on `--dry-run` and otherwise purge, printing the count, and shall exit non-zero when a subscription is behind or when no bound is given.
+
+Synthesis notes recorded while building 9h:
+- The position after a short batch is `(watermark, 0)`, and the row comparison `(commit id, sequence) > (watermark, 0)` admits the same rows as the old `commit id >= watermark`, so a cursor written by 0.33.x reads unchanged; the new column defaults to 0 for that reason, and no data migration is needed.
+- A sequence start maps to the smallest commit id among the events after that sequence rather than to the commit id of the event at it. The event at the sequence may have committed late with a higher id than a later event; starting at the minimum delivers every later event and at worst repeats one or two earlier ones, which is the at-least-once side of the contract.
+- The derivation for a subscription saved without a commit position runs when it is loaded, not in a migration, so it covers SQLite files and PostgreSQL rows alike and runs once per subscription.
+- The purge check on PostgreSQL compares each enabled subscription's pair against the events in the bound with the same row comparison the poll uses, so "behind" means exactly "the poll would still return one of these rows". On SQLite it uses the largest of the three stored positions, which are equal after any poll and differ only for a subscription saved by an earlier release.
+- The purge commits per batch so a long purge holds row locks for one batch at a time; the subscription check runs once before the first batch.
+- The `make type-check` target runs the `mypy` on PATH, which lacks the venv's psycopg stubs and reports 12 pre-existing errors in files this slice does not touch; `.venv/bin/mypy src/stabilize` is clean. Not changed here.
+
 ### WI-10 … WI-11
 Specified when each item starts; the plan file holds the design.
 

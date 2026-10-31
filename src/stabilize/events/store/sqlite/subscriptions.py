@@ -116,6 +116,8 @@ class SqliteSubscriptionsMixin:
             "last_sequence": row["last_sequence"],
             "webhook_url": row["webhook_url"],
             "last_commit_cursor": _row_value(row, "last_commit_cursor"),
+            "enabled": _row_value(row, "enabled", "1") not in ("0", "False", "false"),
+            "last_commit_sequence": int(_row_value(row, "last_commit_sequence")),
         }
 
     def update_subscription_cursor(
@@ -123,8 +125,9 @@ class SqliteSubscriptionsMixin:
         subscription_id: str,
         last_sequence: int,
         last_commit_cursor: str,
+        last_commit_sequence: int = 0,
     ) -> None:
-        """Persist both delivery positions for a subscription."""
+        """Persist the delivery positions for a subscription."""
         subscription_id = qualify(self.tenant, subscription_id)
         conn = self._get_connection()
 
@@ -133,10 +136,25 @@ class SqliteSubscriptionsMixin:
             UPDATE event_subscriptions
             SET last_sequence = ?,
                 last_commit_cursor = ?,
+                last_commit_sequence = ?,
                 updated_at = datetime('now', 'utc')
             WHERE id = ? AND stabilize_tenant = ?
             """,
-            (last_sequence, last_commit_cursor, subscription_id, self.tenant),
+            (last_sequence, last_commit_cursor, int(last_commit_sequence or 0), subscription_id, self.tenant),
+        )
+        conn.commit()
+
+    def update_subscription_enabled(self, subscription_id: str, enabled: bool) -> None:
+        """Persist whether a subscription is delivered to."""
+        subscription_id = qualify(self.tenant, subscription_id)
+        conn = self._get_connection()
+        conn.execute(
+            """
+            UPDATE event_subscriptions
+            SET enabled = ?, updated_at = datetime('now', 'utc')
+            WHERE id = ? AND stabilize_tenant = ?
+            """,
+            (1 if enabled else 0, subscription_id, self.tenant),
         )
         conn.commit()
 

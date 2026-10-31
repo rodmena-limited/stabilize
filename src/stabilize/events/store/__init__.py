@@ -6,12 +6,14 @@ querying by entity, workflow, time range, and event type.
 """
 
 from stabilize.events.store.interface import AppendResult, EventQuery, EventStore
+from stabilize.events.store.retention import SubscriptionBehindError
 from stabilize.events.store.sqlite import SqliteEventStore
 
 __all__ = [
     "EventStore",
     "EventQuery",
     "AppendResult",
+    "SubscriptionBehindError",
     "SqliteEventStore",
 ]
 

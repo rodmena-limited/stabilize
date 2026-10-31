@@ -9,10 +9,11 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EventType, parse_event_type
 from stabilize.events.store.subscription_names import qualify, unqualify
-from stabilize.persistence.columns import select_list
+from stabilize.persistence.columns import columns, select_list
 from stabilize.persistence.tenancy import refuse_foreign_row
 
 _SUBSCRIPTIONS = select_list("event_subscriptions", "postgres")
+_SUBSCRIPTION_COLUMNS = columns("event_subscriptions", "postgres")
 
 if TYPE_CHECKING:
     from psycopg import Connection
@@ -92,16 +93,7 @@ class PostgresSubscriptionsMixin:
                 if row is None:
                     return None
 
-                if isinstance(row, dict):
-                    data = row
-                else:
-                    data = {
-                        "id": row[0],
-                        "event_types": row[1],
-                        "entity_filter": row[2],
-                        "last_sequence": row[3],
-                        "webhook_url": row[4],
-                    }
+                data = row if isinstance(row, dict) else dict(zip(_SUBSCRIPTION_COLUMNS, row, strict=True))
 
                 event_types = None
                 if data["event_types"]:
@@ -121,6 +113,8 @@ class PostgresSubscriptionsMixin:
                     "last_sequence": data["last_sequence"],
                     "webhook_url": data["webhook_url"],
                     "last_commit_cursor": data.get("last_commit_cursor", "0"),
+                    "enabled": bool(data.get("enabled", True)),
+                    "last_commit_sequence": int(data.get("last_commit_sequence") or 0),
                 }
 
     def update_subscription_sequence(self, subscription_id: str, last_sequence: int) -> None:
@@ -143,8 +137,9 @@ class PostgresSubscriptionsMixin:
         subscription_id: str,
         last_sequence: int,
         last_commit_cursor: str,
+        last_commit_sequence: int = 0,
     ) -> None:
-        """Persist both delivery positions for a subscription."""
+        """Persist the delivery positions for a subscription."""
         subscription_id = qualify(self.tenant, subscription_id)
         with self._borrow() as conn:
             with conn.cursor() as cur:
@@ -153,6 +148,7 @@ class PostgresSubscriptionsMixin:
                     UPDATE event_subscriptions
                     SET last_sequence = %(last_sequence)s,
                         last_commit_cursor = %(last_commit_cursor)s,
+                        last_commit_sequence = %(last_commit_sequence)s,
                         updated_at = NOW()
                     WHERE id = %(id)s AND stabilize_tenant = %(tenant)s
                     """,
@@ -160,8 +156,24 @@ class PostgresSubscriptionsMixin:
                         "id": subscription_id,
                         "last_sequence": last_sequence,
                         "last_commit_cursor": last_commit_cursor,
+                        "last_commit_sequence": int(last_commit_sequence or 0),
                         "tenant": self.tenant,
                     },
+                )
+            conn.commit()
+
+    def update_subscription_enabled(self, subscription_id: str, enabled: bool) -> None:
+        """Persist whether a subscription is delivered to."""
+        subscription_id = qualify(self.tenant, subscription_id)
+        with self._borrow() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE event_subscriptions
+                    SET enabled = %(enabled)s, updated_at = NOW()
+                    WHERE id = %(id)s AND stabilize_tenant = %(tenant)s
+                    """,
+                    {"id": subscription_id, "enabled": bool(enabled), "tenant": self.tenant},
                 )
             conn.commit()
 

@@ -16,6 +16,7 @@ from typing import Any
 
 from stabilize.events.store.interface import EventStore
 from stabilize.events.store.postgres.events import PostgresEventsMixin
+from stabilize.events.store.postgres.retention import PostgresRetentionMixin
 from stabilize.events.store.postgres.schema import (
     EVENTS_COMMIT_XID_MIGRATION,
     EVENTS_SCHEMA,
@@ -71,6 +72,7 @@ class PostgresEventStore(
     PostgresEventsMixin,
     PostgresSnapshotsMixin,
     PostgresSubscriptionsMixin,
+    PostgresRetentionMixin,
     EventStore,
 ):
     """

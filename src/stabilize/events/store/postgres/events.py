@@ -240,8 +240,9 @@ class PostgresEventsMixin:
         self,
         cursor: str,
         limit: int = 1000,
-    ) -> tuple[list[Event], str]:
-        """Get committed events after `cursor`, ordered by commit, with the next cursor.
+        after_sequence: int = 0,
+    ) -> tuple[list[Event], str, int]:
+        """Committed events after the position `(cursor, after_sequence)` in commit order, with the next position.
 
         `sequence` is assigned at INSERT and not at COMMIT, so a cursor that
         advances by sequence can step over an event whose transaction had not
@@ -249,30 +250,44 @@ class PostgresEventsMixin:
         transaction id still in progress, so nothing below it can commit later:
         it is a monotone, gap-free frontier.
 
-        Events written before the commit_xid column exists carry NULL and are
-        coalesced to '0'::xid8, which keeps them deliverable.
+        A full batch leaves the position on its last event, so the next call
+        continues with the events that did not fit; a short batch moves it to
+        the watermark. Events written before the commit_xid column exists carry
+        NULL and are coalesced to '0'::xid8, which keeps them deliverable.
         """
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT pg_snapshot_xmin(pg_current_snapshot())::text AS wm")
                 row = cur.fetchone()
                 if row is None:
-                    return [], cursor or "0"
+                    return [], cursor or "0", int(after_sequence or 0)
                 watermark = str(row["wm"] if isinstance(row, dict) else row[0])
 
                 cur.execute(
                     f"""
                     SELECT {_EVENTS} FROM events
-                    WHERE coalesce(commit_xid, '0'::xid8) >= %(cursor)s::xid8
-                      AND coalesce(commit_xid, '0'::xid8) < %(watermark)s::xid8 AND stabilize_tenant = %(tenant)s
+                    WHERE stabilize_tenant = %(tenant)s
+                      AND (coalesce(commit_xid, '0'::xid8), sequence) > (%(cursor)s::xid8, %(after)s::bigint)
+                      AND coalesce(commit_xid, '0'::xid8) < %(watermark)s::xid8
                     ORDER BY coalesce(commit_xid, '0'::xid8) ASC, sequence ASC
                     LIMIT %(limit)s
                     """,
-                    {"cursor": cursor or "0", "watermark": watermark, "limit": limit, "tenant": self.tenant},
+                    {
+                        "cursor": cursor or "0",
+                        "after": int(after_sequence or 0),
+                        "watermark": watermark,
+                        "limit": limit,
+                        "tenant": self.tenant,
+                    },
                 )
-                events = [self._row_to_event(row) for row in cur.fetchall()]
+                rows = cur.fetchall()
+                events = [self._row_to_event(row) for row in rows]
 
-        return events, watermark
+        if rows and len(rows) >= limit:
+            last = rows[-1]
+            last_xid = last["commit_xid"] if isinstance(last, dict) else None
+            return events, str(last_xid if last_xid is not None else "0"), events[-1].sequence
+        return events, watermark, 0
 
     def get_event_by_id(self, event_id: str) -> Event | None:
         """Get a single event by its ID."""

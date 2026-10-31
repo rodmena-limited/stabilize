@@ -14,6 +14,7 @@ from typing import Any
 
 from stabilize.events.store.interface import EventStore
 from stabilize.events.store.sqlite.events import SqliteEventStoreMixin
+from stabilize.events.store.sqlite.retention import SqliteRetentionMixin
 from stabilize.events.store.sqlite.schema import (
     EVENTS_SCHEMA,
     SNAPSHOTS_SCHEMA,
@@ -31,6 +32,7 @@ class SqliteEventStore(
     SqliteEventStoreMixin,
     SqliteSnapshotsMixin,
     SqliteSubscriptionsMixin,
+    SqliteRetentionMixin,
     EventStore,
 ):
     """
@@ -67,6 +69,7 @@ class SqliteEventStore(
             self._create_tables()
         conn = self._get_connection()
         if engine_shaped_tables(conn):
+            self._add_missing_columns(conn)
             ensure_tenant_schema(conn)
             check_mode_admits(read_mode(conn), self.tenant)
             check_sqlite_tables(conn, ["events", "snapshots", "event_subscriptions"], read_mode(conn))
@@ -93,7 +96,14 @@ class SqliteEventStore(
         schema addition never reaches a database that already exists.
         """
         existing = {row[1] for row in conn.execute("PRAGMA table_info(event_subscriptions)")}
-        if "last_commit_cursor" not in existing:
-            conn.execute("ALTER TABLE event_subscriptions ADD COLUMN last_commit_cursor TEXT DEFAULT '0'")
-            conn.commit()
+        if not existing:
+            return
+        additions = (
+            ("last_commit_cursor", "TEXT DEFAULT '0'"),
+            ("enabled", "INTEGER NOT NULL DEFAULT 1"),
+            ("last_commit_sequence", "INTEGER NOT NULL DEFAULT 0"),
+        )
+        for name, declaration in additions:
+            if name not in existing:
+                conn.execute(f"ALTER TABLE event_subscriptions ADD COLUMN {name} {declaration}")
         conn.commit()

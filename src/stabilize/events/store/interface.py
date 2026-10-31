@@ -205,6 +205,18 @@ class EventStore(ABC):
             pass
         return None
 
+    def purge_events(
+        self,
+        *,
+        before_sequence: int | None = None,
+        before: datetime | None = None,
+        ignore_subscriptions: bool = False,
+        batch_size: int = 10_000,
+        dry_run: bool = False,
+    ) -> int:
+        """Delete events inside the bound; refuse while an enabled subscription has not delivered them."""
+        raise NotImplementedError(f"{type(self).__name__} does not implement purge_events")
+
     def count_events(self, query: EventQuery | None = None) -> int:
         """
         Count events matching query.

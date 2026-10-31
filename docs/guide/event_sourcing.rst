@@ -326,6 +326,78 @@ delivery. Requires PostgreSQL 13 or newer; below that the engine keeps the
 sequence cursor and logs a warning naming the loss mode. SQLite is unaffected —
 its write lock has always made commit order equal sequence order.
 
+The position is the pair ``(commit id, sequence)`` of the last event delivered,
+stored in ``event_subscriptions.last_commit_cursor`` and ``last_commit_sequence``.
+A poll that fills its batch leaves the position on the batch's last event, and
+the next poll carries on from there. Releases before 0.34.0 moved the position to
+the watermark after each poll. A full batch therefore lost the events that had
+not fitted in it.
+
+Durable subscriptions
+---------------------
+
+``SubscriptionManager`` polls the store and calls a handler per event. A
+subscription's position survives restarts. Load it by id to carry on.
+
+.. code-block:: python
+
+   from stabilize.events import SubscriptionManager
+
+   manager = SubscriptionManager(event_store, poll_interval=1.0, batch_size=100)
+   manager.create_subscription("billing", handler, start_from="latest")
+   manager.start()
+
+   # after a restart
+   manager = SubscriptionManager(event_store)
+   manager.load_subscription("billing", handler)
+   manager.start()
+
+``start_from`` is ``"latest"`` (events committed after the subscription was
+created), ``"beginning"``, or a sequence number as a string, which delivers the
+events after that sequence. Under commit order a sequence start can deliver an
+event at or before that sequence a second time when its transaction committed
+late. No event after the sequence is missed. A subscription saved by an earlier
+release with only a sequence position is given a commit position from that
+sequence the first time it is loaded.
+
+A handler that raises is retried on the next poll with the same batch. After
+``max_errors`` consecutive failures (10 by default) the subscription is disabled.
+The flag is stored with the subscription, which stops a restart from resuming a
+handler that was failing. ``enable_subscription(id)`` turns it back on and clears
+the error count. ``get_subscription_status(id)`` reports ``enabled``,
+``error_count``, the position and the lag.
+
+Purging events
+--------------
+
+``EventStore.purge_events`` deletes a tenant's events below a sequence or before
+a time, in batches of 10,000 rows:
+
+.. code-block:: python
+
+   from stabilize.events import SubscriptionBehindError
+
+   try:
+       deleted = event_store.purge_events(before=datetime.now(UTC) - timedelta(days=90))
+   except SubscriptionBehindError as exc:
+       print(exc.subscriptions)
+
+It refuses while an enabled durable subscription still has undelivered events
+inside the bound, naming the subscriptions, because the purge would make them
+skip those events. Let the subscription catch up, disable or delete it, or
+pass ``ignore_subscriptions=True``. ``dry_run=True`` returns the count without
+deleting. A workflow whose events are purged replays from its snapshot if one
+exists and from the remaining events otherwise.
+
+The same operation is ``stabilize purge-events``::
+
+    stabilize purge-events --db-url postgres://... --older-than-days 90 --dry-run
+    stabilize purge-events --db-url postgres://... --older-than-days 90
+    stabilize purge-events --db-url postgres://... --before-sequence 500000 --ignore-subscriptions
+
+It takes ``--tenant`` or ``--all-tenants`` in tenancy mode and exits non-zero
+when a subscription is behind.
+
 **Transactionality.** Events are appended inside the same transaction that
 commits the state they describe, so a rollback cannot leave a phantom event
 behind. The exception is an event store on a *different* database from the

@@ -227,21 +227,24 @@ class SqliteEventStoreMixin:
         self,
         cursor: str,
         limit: int = 1000,
-    ) -> tuple[list[Event], str]:
-        """Get committed events after `cursor`, with the next cursor.
+        after_sequence: int = 0,
+    ) -> tuple[list[Event], str, int]:
+        """Events after the position, with the next position.
 
         SQLite serialises commits behind its write lock, so commit order is
         sequence order and the sequence cursor is already gap-free. This exists
-        so subscription code can use one call on both backends.
+        so subscription code can use one call on both backends; both parts of
+        the position carry the sequence.
         """
         try:
             start = int(cursor or 0)
         except (TypeError, ValueError):
             start = 0
+        start = max(start, int(after_sequence or 0))
 
         events = self.get_events_since(start, limit=limit)
-        next_cursor = str(events[-1].sequence) if events else str(start)
-        return events, next_cursor
+        last = events[-1].sequence if events else start
+        return events, str(last), last
 
     def supports_commit_cursor(self) -> bool:
         """SQLite commit order equals sequence order, so this is always safe."""

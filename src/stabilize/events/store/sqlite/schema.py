@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS event_subscriptions (
     webhook_url TEXT,
     created_at TEXT DEFAULT (datetime('now', 'utc')),
     updated_at TEXT DEFAULT (datetime('now', 'utc')),
-    last_commit_cursor TEXT DEFAULT '0'
+    last_commit_cursor TEXT DEFAULT '0',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_commit_sequence INTEGER NOT NULL DEFAULT 0
 );
 """

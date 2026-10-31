@@ -92,6 +92,7 @@ from stabilize.events.store import (
 )
 
 # Subscriptions
+from stabilize.events.store.retention import SubscriptionBehindError
 from stabilize.events.subscriptions import DurableSubscription, SubscriptionManager
 
 __all__ = [
@@ -126,6 +127,7 @@ __all__ = [
     "EventQuery",
     "AppendResult",
     "SqliteEventStore",
+    "SubscriptionBehindError",
     # Projections
     "Projection",
     "TimelineEntry",

@@ -42,6 +42,7 @@ class DurableSubscription:
     error_count: int = 0
     max_errors: int = 10
     last_commit_cursor: str = "0"
+    last_commit_sequence: int = 0
 
     def matches(self, event: Event) -> bool:
         """Check if this subscription should receive the event."""
@@ -120,13 +121,13 @@ class SubscriptionManager:
             start_from: "latest" (current position), "beginning" (sequence 0),
                        or a sequence number string.
         """
-        # Determine starting position
         if start_from == "latest":
             last_sequence = self._event_store.get_current_sequence()
         elif start_from == "beginning":
             last_sequence = 0
         else:
             last_sequence = int(start_from)
+        cursor, commit_sequence = self._commit_position(start_from, last_sequence)
 
         subscription = DurableSubscription(
             id=subscription_id,
@@ -135,6 +136,8 @@ class SubscriptionManager:
             entity_filter=entity_filter,
             last_sequence=last_sequence,
             webhook_url=webhook_url,
+            last_commit_cursor=cursor,
+            last_commit_sequence=commit_sequence,
         )
 
         with self._lock:
@@ -150,11 +153,30 @@ class SubscriptionManager:
                 webhook_url=webhook_url,
             )
 
+        self._persist_position(subscription)
+
         logger.info(
             "Created subscription %s starting from sequence %d",
             subscription_id,
             last_sequence,
         )
+
+    def _commit_position(self, start_from: str, last_sequence: int) -> tuple[str, int]:
+        """The commit-order position matching a start point, when the store delivers in commit order."""
+        if not self._uses_commit_cursor():
+            return "0", 0
+        if start_from == "beginning" or last_sequence <= 0:
+            return "0", 0
+        if start_from == "latest":
+            current = getattr(self._event_store, "current_commit_cursor", None)
+            if callable(current):
+                cursor, sequence = current()
+                return str(cursor), int(sequence)
+        for_sequence = getattr(self._event_store, "commit_cursor_for_sequence", None)
+        if callable(for_sequence):
+            cursor, sequence = for_sequence(last_sequence)
+            return str(cursor), int(sequence)
+        return "0", 0
 
     def delete_subscription(self, subscription_id: str) -> bool:
         """
@@ -205,8 +227,16 @@ class SubscriptionManager:
             entity_filter=data.get("entity_filter"),
             last_sequence=data.get("last_sequence", 0),
             webhook_url=data.get("webhook_url"),
+            enabled=bool(data.get("enabled", True)),
             last_commit_cursor=str(data.get("last_commit_cursor") or "0"),
+            last_commit_sequence=int(data.get("last_commit_sequence") or 0),
         )
+        if subscription.last_commit_cursor == "0" and subscription.last_commit_sequence == 0:
+            if subscription.last_sequence > 0:
+                cursor, sequence = self._commit_position("sequence", subscription.last_sequence)
+                subscription.last_commit_cursor = cursor
+                subscription.last_commit_sequence = sequence
+                self._persist_position(subscription)
 
         with self._lock:
             self._subscriptions[subscription_id] = subscription
@@ -265,9 +295,9 @@ class SubscriptionManager:
                 )
                 subscription.error_count += 1
 
-                # Disable subscription if too many errors
                 if subscription.error_count >= subscription.max_errors:
                     subscription.enabled = False
+                    self._persist_enabled(subscription)
                     logger.error(
                         "Subscription %s disabled after %d errors",
                         subscription.id,
@@ -286,10 +316,13 @@ class SubscriptionManager:
         commit_ordered = self._uses_commit_cursor()
         next_cursor = subscription.last_commit_cursor
 
+        next_sequence = subscription.last_commit_sequence
+
         if commit_ordered:
-            events, next_cursor = getattr(self._event_store, "get_events_since_committed")(
+            events, next_cursor, next_sequence = getattr(self._event_store, "get_events_since_committed")(
                 subscription.last_commit_cursor,
                 limit=self._batch_size,
+                after_sequence=subscription.last_commit_sequence,
             )
         else:
             events = self._event_store.get_events_since(
@@ -298,10 +331,13 @@ class SubscriptionManager:
             )
 
         if not events:
-            if commit_ordered and next_cursor != subscription.last_commit_cursor:
-                # Nothing to deliver, but the frontier moved; persisting it stops
-                # the same empty range being re-scanned forever.
+            moved = (next_cursor, next_sequence) != (
+                subscription.last_commit_cursor,
+                subscription.last_commit_sequence,
+            )
+            if commit_ordered and moved:
                 subscription.last_commit_cursor = next_cursor
+                subscription.last_commit_sequence = next_sequence
                 self._persist_position(subscription)
             return
 
@@ -327,7 +363,8 @@ class SubscriptionManager:
         subscription.last_sequence = processed_sequence
         if commit_ordered:
             subscription.last_commit_cursor = next_cursor
-        subscription.error_count = 0  # Reset on success
+            subscription.last_commit_sequence = next_sequence
+        subscription.error_count = 0
 
         self._persist_position(subscription)
 
@@ -339,6 +376,7 @@ class SubscriptionManager:
                 subscription.id,
                 subscription.last_sequence,
                 subscription.last_commit_cursor,
+                subscription.last_commit_sequence,
             )
             return
         if hasattr(self._event_store, "update_subscription_sequence"):
@@ -346,6 +384,23 @@ class SubscriptionManager:
                 subscription.id,
                 subscription.last_sequence,
             )
+
+    def _persist_enabled(self, subscription: DurableSubscription) -> None:
+        update_enabled = getattr(self._event_store, "update_subscription_enabled", None)
+        if callable(update_enabled):
+            update_enabled(subscription.id, subscription.enabled)
+
+    def enable_subscription(self, subscription_id: str) -> bool:
+        """Deliver to a subscription again after it was disabled; persisted with the subscription."""
+        with self._lock:
+            subscription = self._subscriptions.get(subscription_id)
+        if subscription is None:
+            return False
+        subscription.enabled = True
+        subscription.error_count = 0
+        self._persist_enabled(subscription)
+        logger.info("Subscription %s enabled", subscription_id)
+        return True
 
     def process_once(self) -> int:
         """
@@ -389,6 +444,8 @@ class SubscriptionManager:
             "id": subscription.id,
             "enabled": subscription.enabled,
             "last_sequence": subscription.last_sequence,
+            "last_commit_cursor": subscription.last_commit_cursor,
+            "last_commit_sequence": subscription.last_commit_sequence,
             "current_sequence": current_sequence,
             "lag": current_sequence - subscription.last_sequence,
             "error_count": subscription.error_count,

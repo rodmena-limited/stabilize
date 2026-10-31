@@ -23,14 +23,14 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _backends import skip  # noqa: E402
-
 import logging
 import os
 import subprocess
 import sys
 import time
 import uuid
+
+from _backends import skip  # noqa: E402
 
 logging.basicConfig(level=logging.CRITICAL)
 
@@ -119,20 +119,20 @@ def main() -> int:
             legacy_cursor = max(legacy_cursor, event.sequence)
 
         delivered: list[str] = []
-        cursor = "0"
+        cursor, after = "0", 0
 
-        events, cursor = store.get_events_since_committed(cursor, limit=100)
+        events, cursor, after = store.get_events_since_committed(cursor, limit=100, after_sequence=after)
         delivered += [e.workflow_id for e in events]
         print(f"poll #1 delivers {[e.workflow_id for e in events]}")
 
         slow.commit()
         slow.close()
 
-        events, cursor = store.get_events_since_committed(cursor, limit=100)
+        events, cursor, after = store.get_events_since_committed(cursor, limit=100, after_sequence=after)
         delivered += [e.workflow_id for e in events]
         print(f"poll #2 delivers {[e.workflow_id for e in events]}")
 
-        events, cursor = store.get_events_since_committed(cursor, limit=100)
+        events, cursor, after = store.get_events_since_committed(cursor, limit=100, after_sequence=after)
         delivered += [e.workflow_id for e in events]
         print(f"poll #3 delivers {[e.workflow_id for e in events]}")
 

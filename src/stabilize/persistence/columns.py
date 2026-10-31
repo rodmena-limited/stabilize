@@ -174,6 +174,8 @@ EVENT_SUBSCRIPTIONS: tuple[str, ...] = (
     "created_at",
     "updated_at",
     "last_commit_cursor",
+    "enabled",
+    "last_commit_sequence",
     TENANT_COLUMN,
 )
 

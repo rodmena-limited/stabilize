@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS event_subscriptions (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     last_commit_cursor TEXT DEFAULT '0',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    last_commit_sequence BIGINT NOT NULL DEFAULT 0,
     stabilize_tenant TEXT NOT NULL DEFAULT ''
 );
 """
@@ -98,6 +100,8 @@ EVENTS_COMMIT_XID_MIGRATION = (
 # persists it whether or not commit-ordered delivery is available.
 SUBSCRIPTIONS_CURSOR_MIGRATION = (
     "ALTER TABLE event_subscriptions ADD COLUMN IF NOT EXISTS last_commit_cursor TEXT DEFAULT '0'",
+    "ALTER TABLE event_subscriptions ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE",
+    "ALTER TABLE event_subscriptions ADD COLUMN IF NOT EXISTS last_commit_sequence BIGINT NOT NULL DEFAULT 0",
 )
 
 # xid8, pg_current_xact_id() and pg_snapshot_xmin() are PostgreSQL 13+.
@@ -109,6 +113,8 @@ REQUIRED_TABLES = ("events", "snapshots", "event_subscriptions")
 REQUIRED_COLUMNS = (
     ("events", "commit_xid"),
     ("event_subscriptions", "last_commit_cursor"),
+    ("event_subscriptions", "enabled"),
+    ("event_subscriptions", "last_commit_sequence"),
 )
 
 SETUP_DDL = "\n".join(

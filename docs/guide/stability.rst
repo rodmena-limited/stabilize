@@ -74,6 +74,10 @@ they are stated as measured, not as aspirations.
   ``prune-processed`` reads the queue tables from ``--db-url`` unless
   ``--queue-db-url`` is given; when the queue is in another database it must be
   given.
+* **Event purge keeps subscriptions whole**: ``stabilize purge-events`` and
+  ``EventStore.purge_events`` refuse while an enabled durable subscription still
+  has undelivered events inside the bound. Pass ``--ignore-subscriptions`` to
+  purge anyway.
 
 Several queue tables in one store
 ---------------------------------

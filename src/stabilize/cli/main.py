@@ -199,7 +199,13 @@ def main() -> None:
         help="Restrict to stages in this status (repeatable, e.g. --status SUCCEEDED)",
     )
 
-    from stabilize.cli.maintenance_commands import PRUNE_PROCESSED_HELP, prune_processed, purge_workflows
+    from stabilize.cli.maintenance_commands import (
+        PRUNE_PROCESSED_HELP,
+        PURGE_EVENTS_HELP,
+        prune_processed,
+        purge_events,
+        purge_workflows,
+    )
 
     processed_parser = subparsers.add_parser(
         "prune-processed", help="Delete old processed-message records in batches", description=PRUNE_PROCESSED_HELP
@@ -237,6 +243,22 @@ def main() -> None:
     purge_parser.add_argument("--queue-table", default="queue_messages", help="Queue table whose DLQ is purged too")
     purge_parser.add_argument("--batch-size", type=int, default=500)
     purge_parser.add_argument("--dry-run", action="store_true", help="Count without deleting")
+
+    events_parser = subparsers.add_parser(
+        "purge-events",
+        help="Delete old event-store rows, refusing while a durable subscription is behind",
+        description=PURGE_EVENTS_HELP,
+    )
+    events_parser.add_argument("--tenant", help="Work on one tenant (required in tenancy mode unless --all-tenants)")
+    events_parser.add_argument("--all-tenants", action="store_true", help="Work on every tenant that has rows")
+    events_parser.add_argument("--db-url", help="Database URL (postgres://... or sqlite:///...)")
+    events_parser.add_argument("--before-sequence", type=int, default=None, help="Delete events below this sequence")
+    events_parser.add_argument("--older-than-days", type=float, default=None, help="Delete events older than this")
+    events_parser.add_argument(
+        "--ignore-subscriptions", action="store_true", help="Purge even if a subscription is behind"
+    )
+    events_parser.add_argument("--batch-size", type=int, default=10000)
+    events_parser.add_argument("--dry-run", action="store_true", help="Count without deleting")
 
     args = parser.parse_args()
 
@@ -318,6 +340,17 @@ def main() -> None:
             args.queue_table,
             args.batch_size,
             args.dry_run,
+            tenant=args.tenant,
+            all_tenants=args.all_tenants,
+        )
+    elif args.command == "purge-events":
+        purge_events(
+            args.db_url,
+            args.before_sequence,
+            args.older_than_days,
+            args.ignore_subscriptions,
+            args.dry_run,
+            args.batch_size,
             tenant=args.tenant,
             all_tenants=args.all_tenants,
         )

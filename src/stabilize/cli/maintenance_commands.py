@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import time
+from typing import Any
 
 PRUNE_PROCESSED_HELP = (
     "Delete processed_messages records older than --older-than-hours that belong to the messages of "
@@ -145,3 +146,84 @@ def _purge_workflows_for(
             close = getattr(resource, "close", None)
             if callable(close):
                 close()
+
+
+PURGE_EVENTS_HELP = (
+    "Delete event-store rows below a sequence or before a time, in batches. Refuses while an enabled "
+    "durable subscription still has undelivered events inside the bound, unless --ignore-subscriptions is given."
+)
+
+
+def purge_events(
+    db_url: str | None,
+    before_sequence: int | None,
+    older_than_days: float | None,
+    ignore_subscriptions: bool,
+    dry_run: bool,
+    batch_size: int,
+    tenant: str | None = None,
+    all_tenants: bool = False,
+) -> None:
+    from stabilize.cli.commands import resolve_cli_tenant, schema_mode, tenants_in
+
+    if before_sequence is None and older_than_days is None:
+        raise SystemExit("purge-events needs --before-sequence or --older-than-days")
+    url = _require(db_url)
+    watched = resolve_cli_tenant(schema_mode(url), tenant, all_tenants)
+    targets = tenants_in(url) if watched is None else [watched]
+    if not targets:
+        print("No tenant has rows; nothing to do")
+        return
+    before = None
+    if older_than_days is not None:
+        from datetime import UTC, datetime, timedelta
+
+        before = datetime.now(UTC) - timedelta(days=older_than_days)
+    for one in targets:
+        _purge_events_for(url, one, before_sequence, before, ignore_subscriptions, dry_run, batch_size)
+
+
+def _event_store(url: str, tenant: str) -> Any:
+    if url.startswith("sqlite"):
+        from stabilize.events.store.sqlite.store import SqliteEventStore
+
+        return SqliteEventStore(url, create_tables=False, tenant=tenant)
+    from stabilize.events.store.postgres.store import PostgresEventStore
+
+    return PostgresEventStore(url, create_tables=False, tenant=tenant)
+
+
+def _purge_events_for(
+    url: str,
+    tenant: str,
+    before_sequence: int | None,
+    before: Any,
+    ignore_subscriptions: bool,
+    dry_run: bool,
+    batch_size: int,
+) -> None:
+    from stabilize.events.store.retention import SubscriptionBehindError, describe_bound
+
+    store = _event_store(url, tenant)
+    label = f" for tenant {tenant}" if tenant else ""
+    try:
+        try:
+            count = store.purge_events(
+                before_sequence=before_sequence,
+                before=before,
+                ignore_subscriptions=ignore_subscriptions,
+                batch_size=batch_size,
+                dry_run=dry_run,
+            )
+        except SubscriptionBehindError as exc:
+            raise SystemExit(f"Refused{label}: {exc}") from exc
+        bound = describe_bound(before_sequence, before)
+        if dry_run:
+            print(f"{count} event(s) {bound}{label}")
+            print("Re-run without --dry-run to delete them")
+        else:
+            print(f"Purged {count} event(s) {bound}{label}")
+    finally:
+        close = getattr(store, "close", None)
+        if callable(close):
+            close()
