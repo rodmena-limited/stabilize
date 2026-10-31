@@ -160,21 +160,36 @@ def _generated_malformed() -> list[str]:
     return shapes
 
 
-@pytest.mark.parametrize("dsn", _generated_malformed())
-def test_no_generated_malformed_dsn_echoes_the_password(manager: Any, dsn: str) -> None:
+PIECES = ["Zq7SentinelPw9xK", "Zq7Sentinel", "Pw9xK"]
+
+
+def _checkable(shapes: list[str]) -> list[str]:
+    """The shapes libpq refuses with an error echoing part of the password: the only checkable ones."""
     import psycopg
     from psycopg.conninfo import conninfo_to_dict
 
-    pieces = ["Zq7SentinelPw9xK", "Zq7Sentinel", "Pw9xK"]
-    try:
-        conninfo_to_dict(dsn)
-    except psycopg.ProgrammingError as raw:
-        raw_text = str(raw)
-    else:
-        pytest.skip("libpq parses this shape; nothing is echoed")
-    if not any(p in raw_text for p in pieces):
-        pytest.skip("libpq's own error carries no part of the password for this shape")
+    checkable = []
+    for dsn in shapes:
+        try:
+            conninfo_to_dict(dsn)
+        except psycopg.ProgrammingError as raw:
+            if any(p in str(raw) for p in PIECES):
+                checkable.append(dsn)
+    return checkable
 
+
+CHECKABLE_SHAPES = _checkable(_generated_malformed())
+
+
+def test_enough_generated_shapes_are_checkable() -> None:
+    assert len(CHECKABLE_SHAPES) >= 20, (
+        f"only {len(CHECKABLE_SHAPES)} generated shapes make libpq echo the password; the redaction check is thin"
+    )
+
+
+@pytest.mark.parametrize("dsn", CHECKABLE_SHAPES)
+def test_no_generated_malformed_dsn_echoes_the_password(manager: Any, dsn: str) -> None:
+    pieces = PIECES
     with pytest.raises(ValueError) as raised:
         manager.get_postgres_pool(dsn)
     message = str(raised.value)

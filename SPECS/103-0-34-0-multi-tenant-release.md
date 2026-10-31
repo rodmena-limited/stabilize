@@ -376,7 +376,17 @@ Synthesis notes recorded while building 9f:
 - The gate-stamp test builds a small tree and touches one tracked file at a time; `pyproject.toml` and a source file are known positives that already changed the stamp before this slice.
 - The first green run failed 27 tests with `NotImplementedError`: the saving mixin's placeholder methods (`retry_on_concurrency_error`, `current_time_millis`) came before `StabilizeHandler` in the handler's base list and shadowed the real ones. The mixin now follows the base class, and a check across every engine class confirms no mixin placeholder resolves ahead of a concrete method.
 
-### WI-9 slice 9g … WI-11
+### WI-9 slice 9g: tests that could not fail (done)
+- The certification test for cross-task-type propagation (`test_05_mixed_task_types`) shall run against an HTTP server started on the loopback interface by the test, with `allow_private_urls` on the HTTP stage, instead of skipping whenever `CERT_NETWORK_TESTS` is unset (A25, B59).
+- The dead-letter atomicity tests for a crash before commit (`move_to_dlq`, `replay_dlq`) shall run on both backends through the queue API with a connection whose commit fails, and shall find the queue row kept and the dead-letter row absent (and the reverse for replay), instead of skipping PostgreSQL and asserting a hand-written rollback on SQLite (A26, B59).
+- The generated malformed-DSN redaction test shall be parametrised only with shapes libpq refuses while echoing part of the password, computed at import, with a known-positive asserting at least 20 such shapes; the 27 always-skipping ids leave the red-proof allowlist (B59).
+
+Synthesis notes recorded while building 9g:
+- These are test changes, so "red before green" takes its other form here: each check now goes green on a run where it could not before (it skipped), which is what lets it go red when the behaviour breaks. The crash tests fail the commit through a connection proxy, and on SQLite the thread-local connection is rolled back before the API is read, which is what a dead process leaves behind.
+- The HTTP certification test uses `allow_private_urls` on its stage because the SSRF guard blocks loopback addresses by design; the flag is per stage and documented, so the test does not weaken the guard for anything else.
+- The redaction shapes are filtered by libpq at import, so the parametrisation follows the installed libpq; the known-positive count stops a libpq that echoes nothing from turning the test into forty passes that check nothing.
+
+### WI-10 … WI-11
 Specified when each item starts; the plan file holds the design.
 
 ### WI-2 slice 2: rule 1 column lists (done)

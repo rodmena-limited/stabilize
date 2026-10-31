@@ -11,7 +11,9 @@ This module verifies that DLQ operations are atomic:
 """
 
 import threading
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from datetime import timedelta
 from typing import Any
 
@@ -20,6 +22,46 @@ import pytest
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue import Queue
 from stabilize.queue.messages import StartWorkflow
+
+
+class _NoCommit:
+    """A connection whose commit fails, standing in for a process that dies before it commits."""
+
+    def __init__(self, conn: Any) -> None:
+        self._conn = conn
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
+
+    def commit(self) -> None:
+        raise ConnectionError("simulated crash before commit")
+
+
+@contextmanager
+def _crash_before_commit(queue: Any, backend: str) -> Iterator[None]:
+    if backend == "postgres":
+        engine = queue._engine
+        original = engine.connection
+
+        @contextmanager
+        def crashing() -> Iterator[Any]:
+            with original() as conn:
+                yield _NoCommit(conn)
+
+        engine.connection = crashing
+        try:
+            yield
+        finally:
+            engine.connection = original
+        return
+    real = queue._get_connection()
+    original_get = queue._get_connection
+    queue._get_connection = lambda: _NoCommit(real)
+    try:
+        yield
+    finally:
+        queue._get_connection = original_get
+        real.rollback()
 
 
 class TestDLQAtomicity:
@@ -52,72 +94,22 @@ class TestDLQAtomicity:
         # Verify message is NOT in main queue
         assert queue.size() == 0
 
-    def test_move_to_dlq_is_atomic_on_crash(self, tmp_path: Any, backend: str) -> None:
-        """Verify crash before commit rolls back both INSERT and DELETE — no partial state."""
-        if backend == "postgres":
-            pytest.skip("This test uses SQLite-specific mocking")
-
-        from stabilize.persistence.sqlite import SqliteWorkflowStore
-        from stabilize.queue.sqlite import SqliteQueue
-
-        db_path = tmp_path / "dlq_crash_test.db"
-        connection_string = f"sqlite:///{db_path}"
-
-        store = SqliteWorkflowStore(connection_string, create_tables=True)
-        test_queue = SqliteQueue(connection_string)
-        test_queue._create_table()
-
-        msg = StartWorkflow(execution_type="PIPELINE", execution_id="crash-test")
-        test_queue.push(msg)
-        polled = test_queue.poll_one()
-        assert polled is not None
-        msg_queue_id = int(polled.message_id)  # type: ignore
-
-        from stabilize.persistence.connection import get_connection_manager
-
-        real_conn = get_connection_manager().get_sqlite_connection(connection_string)
-
-        try:
-            row = real_conn.execute(
-                "SELECT id, message_id, message_type, payload, attempts, created_at FROM queue_messages WHERE id = ?",
-                (msg_queue_id,),
-            ).fetchone()
-            assert row is not None
-
-            real_conn.execute(
-                """INSERT INTO queue_messages_dlq (
-                    original_id, message_id, message_type, payload,
-                    attempts, error, last_error_at, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, datetime('now', 'utc'), ?)""",
-                (
-                    row["id"],
-                    row["message_id"],
-                    row["message_type"],
-                    row["payload"],
-                    row["attempts"],
-                    "Simulated crash test",
-                    row["created_at"],
-                ),
-            )
-            real_conn.execute("DELETE FROM queue_messages WHERE id = ?", (msg_queue_id,))
-
-            # Simulate crash BEFORE commit — rollback instead
-            real_conn.rollback()
-
-            # Verify atomicity: message stays in main queue only, DLQ is empty
-            dlq_count = real_conn.execute(
-                "SELECT COUNT(*) FROM queue_messages_dlq WHERE original_id = ?", (msg_queue_id,)
-            ).fetchone()[0]
-            main_count = real_conn.execute(
-                "SELECT COUNT(*) FROM queue_messages WHERE id = ?", (msg_queue_id,)
-            ).fetchone()[0]
-
-            assert dlq_count == 0, "DLQ should be empty after rollback"
-            assert main_count == 1, "Message should remain in main queue after rollback"
-
-        finally:
-            store.close()
-            test_queue.close()
+    def test_move_to_dlq_is_atomic_on_crash(
+        self, file_repository: WorkflowStore, file_queue: Queue, backend: str
+    ) -> None:
+        """A crash before the commit leaves the message in the queue and nothing in the DLQ, on both backends."""
+        queue = file_queue
+        queue.clear()
+        queue.clear_dlq()
+        queue.push(StartWorkflow(execution_type="PIPELINE", execution_id="01M68T00000000000000000001"))
+        polled = queue.poll_one()
+        assert polled is not None and polled.message_id is not None
+        with _crash_before_commit(queue, backend):
+            with pytest.raises(ConnectionError):
+                queue.move_to_dlq(polled.message_id, "Simulated crash test")
+        assert queue.dlq_size() == 0, "the dead-letter insert survived a crash before commit"
+        assert queue.size() == 1, "the queue row was deleted by a transaction that never committed"
+        queue.clear()
 
     def test_concurrent_move_to_dlq_same_message(
         self, file_repository: WorkflowStore, file_queue: Queue, backend: str
@@ -167,63 +159,24 @@ class TestDLQAtomicity:
 
         assert queue.size() == 0
 
-    def test_replay_dlq_is_atomic_on_crash(self, tmp_path: Any, backend: str) -> None:
-        """Verify replay_dlq rollback on crash leaves message only in DLQ."""
-        if backend == "postgres":
-            pytest.skip("This test uses SQLite-specific implementation")
-
-        from stabilize.persistence.sqlite import SqliteWorkflowStore
-        from stabilize.queue.sqlite import SqliteQueue
-
-        db_path = tmp_path / "replay_crash_test.db"
-        connection_string = f"sqlite:///{db_path}"
-
-        store = SqliteWorkflowStore(connection_string, create_tables=True)
-        test_queue = SqliteQueue(connection_string)
-        test_queue._create_table()
-
-        msg = StartWorkflow(execution_type="PIPELINE", execution_id="replay-crash-test")
-        test_queue.push(msg)
-        polled = test_queue.poll_one()
-        assert polled is not None
-        test_queue.move_to_dlq(int(polled.message_id), "Initial error")  # type: ignore
-
-        dlq_entries = test_queue.list_dlq()
-        assert len(dlq_entries) >= 1
-        dlq_id = dlq_entries[0]["id"]
-
-        from stabilize.persistence.connection import get_connection_manager
-
-        real_conn = get_connection_manager().get_sqlite_connection(connection_string)
-
-        try:
-            row = real_conn.execute("SELECT * FROM queue_messages_dlq WHERE id = ?", (dlq_id,)).fetchone()
-            assert row is not None
-
-            real_conn.execute(
-                """INSERT INTO queue_messages (
-                    message_id, message_type, payload, deliver_at, attempts
-                ) VALUES (?, ?, ?, datetime('now', 'utc'), 0)""",
-                (row["message_id"] + "-replay", row["message_type"], row["payload"]),
-            )
-            real_conn.execute("DELETE FROM queue_messages_dlq WHERE id = ?", (dlq_id,))
-
-            # Simulate crash BEFORE commit — rollback
-            real_conn.rollback()
-
-            dlq_count = real_conn.execute("SELECT COUNT(*) FROM queue_messages_dlq WHERE id = ?", (dlq_id,)).fetchone()[
-                0
-            ]
-            main_count = real_conn.execute(
-                "SELECT COUNT(*) FROM queue_messages WHERE message_id LIKE '%replay%'"
-            ).fetchone()[0]
-
-            assert dlq_count == 1, "Message should remain in DLQ after rollback"
-            assert main_count == 0, "Main queue should be empty after rollback"
-
-        finally:
-            store.close()
-            test_queue.close()
+    def test_replay_dlq_is_atomic_on_crash(
+        self, file_repository: WorkflowStore, file_queue: Queue, backend: str
+    ) -> None:
+        """A crash before the commit of a replay leaves the message in the DLQ and nothing in the queue."""
+        queue = file_queue
+        queue.clear()
+        queue.clear_dlq()
+        queue.push(StartWorkflow(execution_type="PIPELINE", execution_id="01M68T00000000000000000002"))
+        polled = queue.poll_one()
+        assert polled is not None and polled.message_id is not None
+        queue.move_to_dlq(polled.message_id, "Initial error")
+        [entry] = queue.list_dlq()
+        with _crash_before_commit(queue, backend):
+            with pytest.raises(ConnectionError):
+                queue.replay_dlq(entry["id"])
+        assert queue.dlq_size() == 1, "the dead-letter row was deleted by a replay that never committed"
+        assert queue.size() == 0, "the replayed row survived a crash before commit"
+        queue.clear_dlq()
 
     def test_dlq_operations_under_load(self, file_repository: WorkflowStore, file_queue: Queue, backend: str) -> None:
         """

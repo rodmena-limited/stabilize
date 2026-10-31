@@ -350,8 +350,13 @@ host's own migretti history, now upgrade with no change to the command.
 - **The gate stamp covers the migrations (B53).** `scripts/gate_stamp.py` hashed the sources and
   tests only, so an edited migration, allowlist, probe or example kept a valid stamp and
   `release.py --skip-tests` skipped the tests. It now hashes those too.
-- **The redaction probe no longer calls ticket #17 open (B63).** It was closed as won't-do; the
+- **The redaction probe no longer calls ticket #17 open (B63).** It was closed as won't-do. The
   probe says so and names the behaviour a recorded limitation.
+- **Tests that could not fail now can (B59).** The mixed-task certification test skipped without
+  network access and ran against httpbin.org with it. It now starts its own HTTP server. The
+  dead-letter crash tests skipped PostgreSQL and asserted a hand-written rollback on SQLite. They
+  now fail the commit through the queue API on both backends. The generated-DSN redaction test
+  skipped 27 of its 40 shapes every run. It is parametrised with the checkable ones only.
 - **Recovery ages a workflow by its activity, not by its start (B21).** A run started 30
   hours ago whose task row changed five minutes ago was never recovered, because the only
   clock was `start_time`. `pipeline_executions`, `stage_executions` and `task_executions`

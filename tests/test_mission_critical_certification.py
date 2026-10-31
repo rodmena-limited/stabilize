@@ -19,15 +19,11 @@ Run a specific tier:
 
 from __future__ import annotations
 
-import os
-
-import pytest
-
 from stabilize import (
     Workflow,
     WorkflowStatus,
 )
-from tests.certification_support import _get_stage, _http_stage, _make_infra, _run, _shell_stage
+from tests.certification_support import _get_stage, _http_stage, _make_infra, _run, _shell_stage, local_json_server
 
 # ===========================================================================
 # TIER 1: Core Correctness
@@ -145,12 +141,12 @@ class TestTier1CoreCorrectness:
         assert last.outputs.get("stdout") == "STEP_10"
         assert last.outputs.get("returncode") == 0
 
-    @pytest.mark.skipif(
-        not os.environ.get("CERT_NETWORK_TESTS"),
-        reason="Network tests disabled (set CERT_NETWORK_TESTS=1)",
-    )
     def test_05_mixed_task_types(self):
-        """Shell_A→HTTP_B→Shell_C: cross-task-type output propagation."""
+        """Shell_A→HTTP_B→Shell_C: cross-task-type output propagation, against a local HTTP server."""
+        with local_json_server() as base:
+            self._run_mixed_task_types(base)
+
+    def _run_mixed_task_types(self, base: str) -> None:
         store, queue, proc, orch, _ = _make_infra()
 
         workflow = Workflow.create(
@@ -161,9 +157,9 @@ class TestTier1CoreCorrectness:
                 _http_stage(
                     "B",
                     "HTTP Get",
-                    "https://httpbin.org/get",
+                    f"{base}/get",
                     deps={"A"},
-                    extra_context={"parse_json": True},
+                    extra_context={"parse_json": True, "allow_private_urls": True},
                 ),
                 _shell_stage("C", "Shell End", "echo DONE", deps={"B"}),
             ],
