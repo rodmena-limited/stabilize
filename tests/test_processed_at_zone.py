@@ -57,14 +57,15 @@ def test_mg_up_refuses_a_foreign_writer_zone_unless_told_which_to_assume(
 ) -> None:
     role = f"writer_tokyo_{uuid.uuid4().hex[:6]}"
     with scratch_database(postgres_container, "mgzone") as url:
-        before = [(path.name, path.read_text()) for path in SHIPPED if path.name != PROCESSED_AT_FILE]
+        before = [(path.name, path.read_text()) for path in SHIPPED if path.name < PROCESSED_AT_FILE]
         project = stage(tmp_path, before)
         applied = mg(project, url, "apply", "--yes")
         assert applied.returncode == 0, output(applied)
         with psycopg.connect(url, autocommit=True) as conn:
             assert _column_type(url) == "timestamp without time zone"
             conn.execute(f'CREATE ROLE "{role}"')
-            conn.execute(f"ALTER ROLE \"{role}\" SET TimeZone = 'Asia/Tokyo'")
+            database = conn.info.dbname
+            conn.execute(f"ALTER ROLE \"{role}\" IN DATABASE \"{database}\" SET TimeZone = 'Asia/Tokyo'")
             conn.execute(
                 "INSERT INTO processed_messages "
                 "(message_id, processed_at, handler_type, execution_id, stabilize_tenant) "

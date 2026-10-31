@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 
 from stabilize.persistence.borrow_hook import borrow_hook_pool_class, engine_connection_class
+from stabilize.persistence.floors import require_sqlite_floor
 from stabilize.persistence.pool_options import DEFAULT_POOL_OPTIONS, PoolOptions
 
 
@@ -203,6 +204,7 @@ class ConnectionManager(metaclass=SingletonMeta):
         connections: dict[str, sqlite3.Connection] = self._sqlite_local.connections
 
         if db_path not in connections or connections[db_path] is None:
+            require_sqlite_floor()
             conn = sqlite3.connect(
                 db_path,
                 timeout=30,

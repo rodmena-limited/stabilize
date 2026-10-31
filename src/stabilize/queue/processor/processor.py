@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from stabilize.persistence.committed_marks import DeliveryDefect
+from stabilize.persistence.floors import refuse_free_threaded
 from stabilize.persistence.tenancy import TenancyModeChanged, TenantError, require_same_tenant
 from stabilize.queue import Queue
 from stabilize.queue.dedup import BloomDeduplicator
@@ -89,6 +90,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
             bulkhead_manager: Optional bulkhead manager for RunTaskHandler concurrency control.
             circuit_factory: Optional circuit breaker factory for workflow-level circuit breaking.
         """
+        refuse_free_threaded()
         require_same_tenant(queue=queue, store=store)
         self.queue = queue
         self._sync_lease_warned = False

@@ -40,6 +40,12 @@ class _CountingStore:
     def mark_message_processed(self, message_id: str, handler_type: Any = None, execution_id: Any = None) -> None:
         self.marked.append(message_id)
 
+    def claim_message(self, message_id: str, handler_type: Any = None, execution_id: Any = None) -> bool:
+        if message_id in self.marked:
+            return False
+        self.marked.append(message_id)
+        return True
+
 
 class _Handler:
     message_type = StartWorkflow

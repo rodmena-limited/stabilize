@@ -24,12 +24,13 @@ def session_timezone(conn: Any) -> str:
 
 
 def writer_timezones(conn: Any) -> dict[str, str]:
-    """Every TimeZone a role or database setting pins, labelled by what pins it."""
+    """Every TimeZone a role or database setting pins for this database, labelled by what pins it."""
     rows = conn.execute(
         "SELECT COALESCE(r.rolname, ''), COALESCE(d.datname, ''), s.setconfig "
         "FROM pg_db_role_setting s "
         "LEFT JOIN pg_roles r ON r.oid = s.setrole "
-        "LEFT JOIN pg_database d ON d.oid = s.setdatabase"
+        "LEFT JOIN pg_database d ON d.oid = s.setdatabase "
+        "WHERE s.setdatabase = 0 OR d.datname = current_database()"
     ).fetchall()
     zones: dict[str, str] = {}
     for rolname, datname, setconfig in rows:

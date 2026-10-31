@@ -463,8 +463,27 @@ Synthesis notes recorded while building 10c:
 - The re-baseline runs on the base commit's sources through `git show`, so the ledger is rewritten once and later runs append stable keys.
 - The probe run of 10b found five probes written against 0.33 behaviour; all five are changes 0.34 made on purpose (A11 builder refusal, B21 activity window, the `stabilize_tenancy` grant, B65 schema naming), so the probes changed and the engine did not.
 
-### WI-11
-Specified when it starts; the plan file holds the design.
+### WI-11: the contract, the behaviour-change record and the release (done, release steps recorded below)
+- When a SQLite connection is opened, the engine shall refuse a library older than 3.35.0, naming the version found and the floor (B61); when a `QueueProcessor` is built on a free-threaded interpreter with the GIL disabled, it shall refuse, naming the build (B61).
+- `docs/guide/stability.rst` shall state the public API as of 0.34.0 (including `PoolOptions.tenant_setting` and `audit_key`, `QueueProcessorConfig`, `WorkflowCriteria`, `StageCriteria`, `PostgresEventStore`, the `STABILIZE_*` variables, `TimerTask`, tenancy mode and `stabilize_tenant`, `Workflow.tenant`, `current_tenant()`, `TaskResult.scheduled_time`, the dead-letter entry keys), what "additive or widening" means for migrations and the one exception (`processed_at`), the deprecations and their removal release, the floors (Python 3.11 to 3.14 tested and 3.15 by bracketing, PostgreSQL 14 with the drop policy, SQLite 3.35, no free-threaded builds), the PgBouncer position, the clocks, thread and process safety, the isolation guarantee, the at-least-once cases, the one-way tenancy enable while data exists, and the drained-queue rollback condition.
+- `CHANGELOG.md` shall carry a "Behaviour changes since 0.33.0" section listing each change with what to do about it and the test that pins it.
+- The release commit shall set the version to 0.34.0 and the changelog date; the wheel shall be built from `git archive` of that commit with `SOURCE_DATE_EPOCH` set; the upload, the merge to `main` and the announcement happen after the gate under the recorded release steps.
+- Before the gate: one full run of `tests/` and `golden_standard_tests/` on both backends, lint and the type check, the probes and the examples runner.
+
+Synthesis notes recorded while building WI-11:
+- The floors are checked where they bite rather than at import: SQLite when the first connection opens (`persistence/floors.py::require_sqlite_floor`), the interpreter when a processor is built (`refuse_free_threaded`); importing the package to read a model stays possible on either.
+- The PostgreSQL floor in the contract is 14, the recommendation under D6; the director has not confirmed it. If the decision differs, the two sentences under "Floors" change and nothing else.
+- The behaviour-change section names a pinning test per entry; the names were taken from the test files that reference each behaviour (grep over `tests/`), not from memory.
+- The contract's PgBouncer position (session mode supported; transaction mode with PgBouncer 1.21+ `max_prepared_statements` or `prepare_threshold=None`, plus `server_reset_query_always`) answers B60 in prose; no code handles it, by decision.
+
+Release steps (after the gate, in this order):
+1. Release commit: `version = "0.34.0"` in `pyproject.toml` and `__version__` in `src/stabilize/__init__.py`; `## [0.34.0] - <date>` in the changelog.
+2. Wheel and sdist from `git archive <sha>` into a clean directory, `SOURCE_DATE_EPOCH` = the commit's timestamp, `uv build --no-build-isolation` (hatchling pinned); sha256 of both recorded in the ticket.
+3. Upload under infra-manager's approved step; then `git tag 0.34.0 <sha>`.
+4. `git fetch origin && git merge-base --is-ancestor origin/main <sha> && git push origin <sha>:refs/heads/main` and the tag.
+5. Smoke install from PyPI in a fresh venv outside the tree: `stabilize --version`, `python -c "import stabilize"`.
+6. Remove the throwaway PostgreSQL container and tell infra-manager (thread 01M67DJXDXJDF34T884YRZ45N4); the Casebound answer and the announcement (`>=0.34.0,<2`) after publication.
+
 
 ### WI-2 slice 2: rule 1 column lists (done)
 - `stabilize.persistence.columns` shall hold one column tuple per engine table, ending in `stabilize_tenant`; `columns(table, backend)` shall equal the catalog of that table on that backend (set equality; PostgreSQL `events` adds `commit_xid`, SQLite `queue_messages` adds `version`), checked live on both backends.

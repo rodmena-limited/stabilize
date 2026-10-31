@@ -638,6 +638,76 @@ host's own migretti history, now upgrade with no change to the command.
   always used a pool of its own and `on_borrow` never ran for event writes. Pass the
   workflow store's `PoolOptions` to share its pool.
 
+### Behaviour changes since 0.33.0
+
+Each entry says what changed, what to do about it, and the test that pins it.
+
+- **Time windows exclude unstarted workflows (A17).** `WorkflowCriteria.start_time_after/before`
+  no longer match a NULL `start_time`. Pass `include_unstarted=True` for the old result.
+  `tests/test_persistence_hygiene.py`.
+- **Listings order by `start_time DESC NULLS LAST, id DESC` on both backends (A16)**, with an
+  opaque cursor in `WorkflowCriteria.after`. Page 1 of a listing may differ from 0.33 when start
+  times tie. `tests/test_persistence_hygiene.py`.
+- **Stages load in id order on both backends (A1, B33).** OR-split fallback and initial pushes are
+  deterministic. `tests/test_persistence_hygiene.py`.
+- **A store outage redelivers instead of ending the stage (B02, WI-7).** Handlers re-raise store
+  errors. Messages retry under `store_retry_budget` (30 minutes) before the dead-letter queue.
+  Deadlock, serialisation, lock-timeout and connection-refused errors in tasks are transient.
+  `tests/test_store_errors.py`, `tests/test_redelivery_budget.py`.
+- **Deferred-choice losers end SKIPPED, never CANCELED (B12)**, in both claim modes, and a group
+  can decide on completion with `deferredChoiceClaim = "on_complete"` (B13). A workflow that
+  relied on CANCELED losers halting a join now completes through the winner.
+  `tests/test_deferred_choice.py`, `tests/test_mutex_deferred_choice_race.py`.
+- **SUSPENDED and PAUSED tasks are cancelled with their hooks (B27)**, and a TERMINAL or CANCELED
+  workflow cancels its live stages recursively, synthetic children included (B26).
+  `tests/test_audit_task_hooks.py`, `tests/test_deferred_choice.py`.
+- **Recovery ages a workflow by activity, not by start (B21).** A workflow with no activity for
+  `recovery_max_age_hours` is reported `stale`. One that started earlier but changed recently is
+  recovered. Raise the window if long-quiet workflows must be recovered.
+  `tests/test_recovery_window.py`, `audit/evaluations/probe_recovery_examines_all.py`.
+- **BUFFERED workflows are woken only when a slot is free and nothing is queued (B20)**, and a
+  buffered workflow keeps its `queue_table` (B18). `tests/test_audit_concurrency_limit.py`.
+- **`WaitTask` is built on `TimerTask` (B22)**: no 24-hour cap, one poll per due time, and a loop's
+  second pass waits again. The `waitedSeconds` output is still written. `tests/test_durable_timers.py`.
+- **`scheduled_time` is written on every stage update (B36)** and set from
+  `TaskResult.scheduled_time`. `tests/test_durable_timers.py`.
+- **Resets clear claims, engine keys, signals and queued messages, and raise the task generation
+  (B09, B10, B11, B24, B25).** A result from an earlier generation is dropped. A loop re-entering a
+  deferred choice is decided by that round's events. `tests/test_generation_fence.py`.
+- **A dynamic multi-instance stage needs a registered builder (A11, B37).** `create_dynamic`
+  refuses an unregistered `instance_type`. An `AddMultiInstance` whose builder is missing is
+  refused and recorded in the parent's context. `tests/test_dynamic_multi_instance.py`.
+- **`--tenant` or `--all-tenants` is required in tenancy mode** on monitor, prune-processed,
+  purge-workflows and purge-events. `tests/test_tenant_cli_scope.py`.
+- **`processed_messages.processed_at` is `TIMESTAMPTZ` (A15, B40).** `mg-up` compares the server's
+  zone with the writers' and refuses with `--assume-writer-timezone` when they differ. Run
+  `stabilize prune-processed` first. `tests/test_processed_at_zone.py`.
+- **Five event types are emitted (A20, B42)** and events carry `schema_version` 2. Subscribers
+  without an `event_types` filter receive `status.changed`, `context.updated`, `outputs.updated`,
+  `workflow.paused` and `workflow.resumed`. `record_context_updated` and `record_outputs_updated`
+  take the changed values and store their names. `tests/test_emitted_events.py`.
+- **A durable subscription's cursor survives a full batch (B07).** `start_from` is honoured and
+  `enabled` is persisted. `tests/test_subscription_cursor.py`.
+- **`run_recovery(strict=True)` raises** instead of swallowing errors. `QueueProcessorConfig`
+  carries the `STABILIZE_RECOVERY_*` settings (B46). `tests/test_audit_recovery_completeness.py`.
+- **`process_all` returns when nothing is due (B14)** instead of spinning until its timeout, and
+  **`process_one` runs under the lock heartbeat (B15)**. `tests/test_branch_pruning.py`,
+  `tests/test_sync_lease_guard.py`.
+- **Explicit column lists (rule 1).** A column a host added to an engine table is no longer in a
+  converter's row. `tests/test_engine_columns.py`.
+- **`Workflow.tenant` is in `to_dict()`.** `tests/test_tenant_api.py`.
+- **`Orchestrator.get_instance()` warns and is refused in tenancy mode.** `tests/test_tenant_api.py`.
+- **`SubWorkflowTask` child ids are derived from the parent task, tenant and generation (B23)**,
+  so a crash between store and start does not create a second child, and a loop's second pass gets
+  a new child. `tests/test_sub_workflow.py`.
+- **Connections in autocommit mode are refused by the engine**, as are `connect_kwargs` with
+  `autocommit`. The docs no longer recommend it. `tests/test_audit_retention.py`.
+- **`TaskResult.merge_outputs` keeps every field (B28)**, `target_stage_ref_id` included.
+  `tests/test_durable_timers.py`.
+- **python-ulid floor 3.2 (B34)** for monotonic ids.
+- **The SQLite floor is 3.35 and a free-threaded interpreter is refused (B61).**
+  `tests/test_floors.py`.
+
 ### Changed
 
 - `QueueProcessor`'s submission path and the `CompleteStage` fan-out live in their own
