@@ -255,6 +255,7 @@ STORE_OPERATIONS: dict[str, Any] = {
     "cancel": lambda s: s.cancel(SOME_ID, "me", "why"),
     "is_message_processed": lambda s: s.is_message_processed("m"),
     "mark_message_processed": lambda s: s.mark_message_processed("m", "h", SOME_ID),
+    "claim_message": lambda s: s.claim_message("m2", "h", SOME_ID),
     "cleanup_old_processed_messages": lambda s: s.cleanup_old_processed_messages(),
     "cleanup_completed_stage_claims": lambda s: s.cleanup_completed_stage_claims(),
     "cleanup_buffered_signals": lambda s: s.cleanup_buffered_signals(),

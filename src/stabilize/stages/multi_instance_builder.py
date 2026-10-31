@@ -247,29 +247,41 @@ class MultiInstanceBuilder:
         Returns:
             List of initially created stages (more can be added later)
         """
+        kind = instance_type or parent_stage.type
+        require_instance_builder(kind, parent_stage.ref_id)
         parent_stage.mi_config = MultiInstanceConfig(
             count=initial_count,
             allow_dynamic=True,
             sync_on_complete=True,
+            instance_type=kind,
         )
         parent_stage.context["_mi_instance_count"] = initial_count
-
         if initial_count > 0:
             stages = MultiInstanceBuilder.create_fixed(
                 parent_stage=parent_stage,
                 count=initial_count,
-                instance_type=instance_type,
+                instance_type=kind,
                 instance_name_prefix=instance_name_prefix,
                 sync_on_complete=True,
             )
-            # create_fixed replaces mi_config wholesale and does not know about
-            # dynamic growth, so allow_dynamic reverted to False here and every
-            # later AddMultiInstance was refused at WARNING. Restore it.
             parent_stage.mi_config = MultiInstanceConfig(
                 count=initial_count,
                 allow_dynamic=True,
                 sync_on_complete=True,
+                instance_type=kind,
             )
             return stages
-
         return []
+
+
+def require_instance_builder(instance_type: str, parent_ref_id: str) -> None:
+    """Refuse a dynamic multi-instance stage whose instances would have no tasks."""
+    from stabilize.stages.builder import get_default_factory
+
+    if get_default_factory().has(instance_type):
+        return
+    raise ValueError(
+        f"dynamic multi-instance stage {parent_ref_id!r}: no StageDefinitionBuilder is registered for "
+        f"instance type {instance_type!r}, so every added instance would complete having run nothing. "
+        "Register one with stabilize.stages.builder.register_builder() before building the workflow."
+    )

@@ -673,6 +673,13 @@ Instances can be added during execution via ``AddMultiInstance`` messages:
         instance_context={"item": "new_item"},
     ))
 
+An added instance has no tasks of its own. It takes the ``instance_type`` given to
+``create_dynamic`` (the parent's type when none is given), and the ``StageDefinitionBuilder``
+registered for that type builds its tasks when it starts. ``create_dynamic`` refuses a type
+with no registered builder. An ``AddMultiInstance`` for a type whose builder is missing in the
+running process is refused as well. No instance is created, the parent's context records
+``_mi_dynamic_refused``, and the message is acknowledged.
+
 N-of-M with Multiple Instances (WCP-34)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -85,6 +85,25 @@ class AddMultiInstanceHandler(StabilizeHandler[AddMultiInstance]):
                 return
 
             # Track instance count
+            instance_type = stage.mi_config.instance_type or stage.type
+            from stabilize.stages.builder import get_default_factory
+
+            if not get_default_factory().has(instance_type):
+                logger.error(
+                    "AddMultiInstance for stage %s refused: no StageDefinitionBuilder is registered for instance "
+                    "type %r, so the instance would complete having run nothing",
+                    stage.name,
+                    instance_type,
+                )
+                stage.context["_mi_dynamic_refused"] = {
+                    "instance_type": instance_type,
+                    "reason": "no StageDefinitionBuilder registered for the instance type",
+                }
+                with self.repository.transaction(self.queue) as txn:
+                    txn.store_stage(stage)
+                    self.mark_in(txn, message, "AddMultiInstance")
+                return
+
             instance_count = stage.context.get("_mi_instance_count", 0)
             instance_count += 1
             stage.context["_mi_instance_count"] = instance_count
@@ -96,7 +115,7 @@ class AddMultiInstanceHandler(StabilizeHandler[AddMultiInstance]):
             instance_context["_mi_instance_index"] = instance_count
 
             new_instance = StageExec.create(
-                type=stage.type,
+                type=instance_type,
                 name=f"{stage.name} [instance {instance_count}]",
                 ref_id=instance_ref_id,
                 context=instance_context,

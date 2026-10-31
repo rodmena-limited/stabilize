@@ -164,6 +164,17 @@ def mark_message_processed(
     execution_id: str | None = None,
 ) -> None:
     """Mark a message as successfully processed."""
+    claim_message(conn, message_id, tenant, handler_type, execution_id)
+
+
+def claim_message(
+    conn: sqlite3.Connection,
+    message_id: str,
+    tenant: str,
+    handler_type: str | None = None,
+    execution_id: str | None = None,
+) -> bool:
+    """Mark a message as successfully processed."""
     cursor = conn.execute(
         """
         INSERT OR IGNORE INTO processed_messages (
@@ -186,6 +197,7 @@ def mark_message_processed(
         ).fetchone()
         refuse_foreign_row("processed_messages", message_id, held[0] if held else None, tenant)
     conn.commit()
+    return cursor.rowcount == 1
 
 
 SQLITE_RETENTION_BATCH = 2_000

@@ -144,6 +144,16 @@ def mark_message_processed(
     execution_id: str | None = None,
 ) -> None:
     """Mark a message as successfully processed."""
+    claim_message(engine, message_id, handler_type, execution_id)
+
+
+def claim_message(
+    engine: Any,
+    message_id: str,
+    handler_type: str | None = None,
+    execution_id: str | None = None,
+) -> bool:
+    """Insert the processed-message row; True only when this call inserted it."""
     with engine.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -162,7 +172,8 @@ def mark_message_processed(
                     "tenant": engine.tenant,
                 },
             )
-            if cur.rowcount == 0:
+            inserted = bool(cur.rowcount == 1)
+            if not inserted:
                 cur.execute(
                     "SELECT stabilize_tenant AS owner FROM processed_messages WHERE message_id = %(message_id)s",
                     {"message_id": message_id},
@@ -170,6 +181,7 @@ def mark_message_processed(
                 owner = cur.fetchone()
                 refuse_foreign_row("processed_messages", message_id, owner["owner"] if owner else None, engine.tenant)
         conn.commit()
+    return inserted
 
 
 PG_RETENTION_BATCH = 10_000

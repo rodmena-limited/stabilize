@@ -331,7 +331,17 @@ Synthesis notes recorded while building 9b:
 - The refusal test builds the pre-conversion schema with migretti from the shipped files minus the new one, so it needs no old runner; it pins the read of a naive `2026-01-01 12:00:00` as 03:00 UTC under Asia/Tokyo.
 - `mg-up` gained no `--through` flag in WI-2; the plan's mention of it stays unimplemented and is not needed for this slice.
 
-### WI-9 slices 9c … WI-11
+### WI-9 slice 9c: dynamic instances run something, and dedup claims atomically (done)
+- `MultiInstanceConfig.instance_type` shall name the stage type dynamic instances are created with (the `instance_type` given to `create_dynamic`, else the parent's type); `create_dynamic` shall refuse with `ValueError` naming the type and `register_builder()` when no `StageDefinitionBuilder` is registered for it, and `AddMultiInstanceHandler` shall create instances of that type, or, when the builder is gone at run time, refuse: record `_mi_dynamic_refused` on the parent, add no instance and mark the message processed (A11, B37).
+- `WorkflowStore.claim_message(message_id, handler_type, execution_id)` shall insert the processed-message row in one statement and return True only for the caller that inserted it, on both backends; the processor's fallback mark shall use it; the strict known-bug dedup race test shall become a passing pin of that contract (A21, B44).
+
+Synthesis notes recorded while building 9c:
+- The existing crash test for dynamic instances registered a builder named `miinstance` and passed `instance_type="miinstance"` to `create_dynamic`, yet every added instance was created with the parent's type and no tasks: the handler never read the instance type, and `MultiInstanceConfig` had nowhere to keep it. `instance_type` is now a field of the config (serialised with it), so a stage loaded from the store still knows what to create.
+- The refusal lives in two places on purpose: `create_dynamic` refuses at build time, when the author can still fix the registration, and the handler refuses at run time, because a builder is process-local and a workflow stored by one process can be driven by another. The run-time refusal records `_mi_dynamic_refused` (an engine key) and marks the message, so it is visible and not redelivered.
+- `claim_message` is the primitive the processor's post-handler fallback now uses; the handlers' transactional marks (rule 7) were already atomic, which is why the race the strict xfail described could no longer be shown through the engine. The test now pins the store-level contract directly.
+- The SQLite demonstration test had been passing its helpers two arguments where they take a tenant; its threads raised `TypeError` into the warnings summary of every suite. They now pass `""`.
+
+### WI-9 slices 9d … WI-11
 Specified when each item starts; the plan file holds the design.
 
 ### WI-2 slice 2: rule 1 column lists (done)

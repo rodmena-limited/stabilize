@@ -194,6 +194,16 @@ class SqliteWorkflowStore(
         """Mark a message as successfully processed."""
         _mark_message_processed(self._get_connection(), message_id, self.tenant, handler_type, execution_id)
 
+    def claim_message(
+        self,
+        message_id: str,
+        handler_type: str | None = None,
+        execution_id: str | None = None,
+    ) -> bool:
+        from stabilize.persistence.sqlite.operations import claim_message as _claim_message
+
+        return _claim_message(self._get_connection(), message_id, self.tenant, handler_type, execution_id)
+
     def cleanup_old_processed_messages(
         self,
         max_age_hours: float = 24.0,

@@ -28,6 +28,8 @@ class MultiInstanceConfig:
         collection_from_context: Context key holding items to iterate over.
         join_threshold: If set, continue after this many complete (N-of-M).
         cancel_remaining: Cancel remaining instances after threshold reached.
+        instance_type: The stage type dynamic instances are created with; a
+            StageDefinitionBuilder registered for it supplies their tasks.
     """
 
     count: int = 0
@@ -37,6 +39,7 @@ class MultiInstanceConfig:
     collection_from_context: str = ""
     join_threshold: int = 0
     cancel_remaining: bool = False
+    instance_type: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
@@ -48,6 +51,7 @@ class MultiInstanceConfig:
             "collection_from_context": self.collection_from_context,
             "join_threshold": self.join_threshold,
             "cancel_remaining": self.cancel_remaining,
+            "instance_type": self.instance_type,
         }
 
     @classmethod
@@ -61,4 +65,5 @@ class MultiInstanceConfig:
             collection_from_context=data.get("collection_from_context", ""),
             join_threshold=data.get("join_threshold", 0),
             cancel_remaining=data.get("cancel_remaining", False),
+            instance_type=str(data.get("instance_type", "") or ""),
         )

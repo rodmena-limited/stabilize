@@ -204,6 +204,9 @@ host's own migretti history, now upgrade with no change to the command.
   `start_time` inside a time window. `create_repository(..., schema=, options=)` and
   `create_queue(..., schema=, options=, store_retry_budget=)` reach the PostgreSQL classes'
   arguments.
+- **`WorkflowStore.claim_message()`** records a processed message in one statement and tells
+  the caller whether it was the one that inserted it. `MultiInstanceConfig.instance_type` names
+  the type dynamic instances are created with.
 - **`stabilize_updated_at`** on the three execution tables and **`created_at_ms`** on
   `pipeline_executions`, added by migration `01M68FGEZVQR6KPAMW6P5N8B0E_recovery_activity.sql`
   on PostgreSQL and SQLite migration 8, with the trigger function
@@ -317,6 +320,15 @@ host's own migretti history, now upgrade with no change to the command.
   change is pending, refuses when a role or database setting names another zone unless
   `--assume-writer-timezone <zone>` says which one the engine's processes wrote in. This is the
   one type change in 0.34 and the named exception to "additive or widening".
+- **A dynamic multi-instance stage without a builder is refused (B37).** `create_dynamic`
+  accepted an instance type nobody had registered a `StageDefinitionBuilder` for, and
+  `AddMultiInstance` created every instance with the parent's type and no tasks, so each one
+  completed having run nothing. `create_dynamic` now refuses such a type up front, the handler
+  creates instances of the configured type, and an instance type whose builder is missing at
+  run time is refused with `_mi_dynamic_refused` recorded on the parent.
+- **Deduplication has an atomic claim (B44).** `is_message_processed()` followed by
+  `mark_message_processed()` let two workers both pass the check. `claim_message()` is the
+  one-statement form. The known-bug test that documented the race now pins the fix.
 - **Recovery ages a workflow by its activity, not by its start (B21).** A run started 30
   hours ago whose task row changed five minutes ago was never recovered, because the only
   clock was `start_time`. `pipeline_executions`, `stage_executions` and `task_executions`

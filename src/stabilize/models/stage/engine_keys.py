@@ -58,6 +58,7 @@ CONTROL_FLOW_KEYS = frozenset(
         "_jump_count",
         "_jump_history",
         "_jump_outputs",
+        "_mi_dynamic_refused",
         "_max_jumps",
         "_max_recursion_depth",
         "_mi_instance_count",

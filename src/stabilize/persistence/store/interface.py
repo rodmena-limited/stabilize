@@ -346,6 +346,19 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, ABC):
         # Default implementation: no deduplication (always returns False)
         return False
 
+    def claim_message(
+        self,
+        message_id: str,
+        handler_type: str | None = None,
+        execution_id: str | None = None,
+    ) -> bool:
+        """Record *message_id* as processed in one statement; True only for the caller that inserted it.
+
+        Two workers racing on the same id get one True and one False, which is the
+        check-and-mark that is_message_processed() followed by mark_message_processed() is not.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not claim messages")
+
     def cleanup_completed_stage_claims(self) -> int:
         """
         Delete stage claims of executions in terminal states.

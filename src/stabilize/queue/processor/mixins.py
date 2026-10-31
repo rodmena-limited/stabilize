@@ -191,7 +191,7 @@ class QueueProcessorMixin:
             dedup.mark_seen(message_id)
 
             if self._store is not None and not consume_committed(message_id):
-                self._store.mark_message_processed(
+                self._store.claim_message(
                     message_id=message_id,
                     handler_type=get_message_type_name(message),
                     execution_id=execution_id,

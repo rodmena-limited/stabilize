@@ -51,6 +51,16 @@ class PostgresMaintenanceMixin:
         """Mark a message as successfully processed."""
         _mark_message_processed(self._engine, message_id, handler_type, execution_id)
 
+    def claim_message(
+        self,
+        message_id: str,
+        handler_type: str | None = None,
+        execution_id: str | None = None,
+    ) -> bool:
+        from stabilize.persistence.postgres.operations import claim_message as _claim_message
+
+        return _claim_message(self._engine, message_id, handler_type, execution_id)
+
     def cleanup_old_processed_messages(
         self,
         max_age_hours: float = 24.0,

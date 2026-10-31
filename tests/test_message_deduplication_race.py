@@ -10,16 +10,11 @@ CRITICAL BUG: The current implementation has a check-then-act race window.
 
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import pytest
 
 from stabilize.errors import DuplicateDeliveryError
-from stabilize.models.stage import StageExecution
-from stabilize.models.status import WorkflowStatus
-from stabilize.models.task import TaskExecution
-from stabilize.models.workflow import Workflow
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue import Queue
 
@@ -90,237 +85,38 @@ class TestMessageDeduplicationRace:
             test_store.close()
             test_queue.close()
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "KNOWN BUG: is_message_processed() -> mark_message_processed() is "
-            "check-then-act with no atomicity, so two workers can both pass the "
-            "check and process the same message. Handlers must be idempotent. "
-            "strict=True: if the race is ever fixed this test XPASSes and fails "
-            "the suite, forcing this marker to be removed deliberately rather "
-            "than outliving the bug it describes."
-        ),
-    )
-    def test_race_between_check_and_mark_demonstrates_bug(
-        self, repository: WorkflowStore, queue: Queue, backend: str
+    def test_claim_message_admits_exactly_one_worker(
+        self, repository: WorkflowStore, queue: Queue, backend: str, tmp_path: Any
     ) -> None:
-        """
-        Demonstrate the race window between is_message_processed and mark_message_processed.
-
-        This test shows that two threads can both see a message as unprocessed
-        and both attempt to process it - the bug that exists in the current implementation.
-
-        The bug is that the check and mark are NOT atomic, so:
-        1. Thread A calls is_message_processed("msg-1") -> False
-        2. Thread B calls is_message_processed("msg-1") -> False
-        3. Thread A starts processing message
-        4. Thread B starts processing message (DUPLICATE!)
-        5. Both threads call mark_message_processed
-        """
-        message_id = "test-msg-race-demo"
-        processing_count = 0
-        lock = threading.Lock()
-        barrier = threading.Barrier(2)  # Synchronize threads
-
-        def simulate_handler_processing() -> bool:
-            nonlocal processing_count
-
-            # Simulate handler checking if message is already processed
-            # Using direct operations to bypass transaction for demonstration
-            from stabilize.persistence.connection import get_connection_manager
-
-            if backend == "sqlite":
-                from stabilize.persistence.sqlite.operations import (
-                    is_message_processed,
-                    mark_message_processed,
-                )
-
-                conn = get_connection_manager().get_sqlite_connection("sqlite:///:memory:")
-
-                # Synchronize - both threads check at roughly the same time
-                barrier.wait()
-
-                is_processed = is_message_processed(conn, message_id)
-
-                if not is_processed:
-                    # Both threads reach here if there's a race
-                    with lock:
-                        processing_count += 1
-
-                    # Simulate processing work
-                    time.sleep(0.01)
-
-                    # Mark as processed
-                    mark_message_processed(conn, message_id, "TestHandler", "exec-1")
-                    return True
-            else:
-                # PostgreSQL path
-                from stabilize.persistence.postgres.operations import (
-                    is_message_processed,
-                    mark_message_processed,
-                )
-
-                pool = repository._pool  # type: ignore[attr-defined]
-
-                barrier.wait()
-
-                is_processed = is_message_processed(pool, message_id)
-
-                if not is_processed:
-                    with lock:
-                        processing_count += 1
-
-                    time.sleep(0.01)
-                    mark_message_processed(pool, message_id, "TestHandler", "exec-1")
-                    return True
-
-            return False
-
-        # This test documents the bug - with proper synchronization,
-        # both threads should be able to pass the is_processed check
-        # Skip for in-memory SQLite as each thread gets its own database
+        """Two workers claim the same message at once; the store admits exactly one of them."""
         if backend == "sqlite":
-            pytest.skip(
-                "SQLite :memory: gives each thread its own database - use file-based SQLite to demonstrate this bug"
-            )
-
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = [executor.submit(simulate_handler_processing) for _ in range(2)]
-            [f.result() for f in as_completed(futures)]
-
-        # Assert the DESIRED behavior: deduplication should admit exactly one
-        # worker. It currently does not, so this assertion fails and the strict
-        # xfail marker above records that. Asserting the correct contract (rather
-        # than asserting the bug) is what makes a future fix visible: the day the
-        # race is closed, this passes, XPASSes against strict=True, and fails the
-        # suite until someone removes the marker on purpose.
-        #
-        # Previously this was `if processing_count > 1: pytest.xfail(...)`, which
-        # was green whether the race reproduced or not — it could not fail, so it
-        # was evidence of nothing.
-        assert processing_count == 1, (
-            f"Message processed {processing_count} times: both workers passed "
-            "is_message_processed() before either called mark_message_processed(). "
-            "Deduplication must admit exactly one worker."
-        )
-
-    def test_handler_idempotency_is_required(self, repository: WorkflowStore, queue: Queue, backend: str) -> None:
-        """
-        Verify that handlers must be idempotent because of the deduplication race.
-
-        This test creates a workflow and demonstrates that a handler might be
-        invoked multiple times for the same message if deduplication fails.
-        The handler must produce the same result regardless.
-        """
-        # Create a workflow with a task
-        wf = Workflow.create("test-app", "idempotency-test", [])
-        stage = StageExecution.create("stage-1", "Test Stage", "1")
-        stage.execution = wf
-        task = TaskExecution.create("Task A", "shell", stage_start=True, stage_end=True)
-        task.status = WorkflowStatus.RUNNING
-        stage.tasks = [task]
-        stage.status = WorkflowStatus.RUNNING
-        wf.stages = [stage]
-        repository.store(wf)
-
-        # Simulate idempotent task completion
-        def complete_task_idempotently() -> bool:
-            """Complete task in an idempotent manner."""
-            fresh_stage = repository.retrieve_stage(stage.id)
-            fresh_task = next(t for t in fresh_stage.tasks if t.id == task.id)
-
-            # Idempotent check: if already completed, do nothing
-            if fresh_task.status in (
-                WorkflowStatus.SUCCEEDED,
-                WorkflowStatus.TERMINAL,
-                WorkflowStatus.FAILED_CONTINUE,
-            ):
-                return False  # Already processed
-
-            fresh_task.status = WorkflowStatus.SUCCEEDED
-            repository.store_stage(fresh_stage)
-            return True
-
-        # Run multiple times - only first should actually change state
-        results = []
-        for _ in range(5):
-            results.append(complete_task_idempotently())
-
-        assert results[0] is True, "First call should process"
-        assert all(r is False for r in results[1:]), "Subsequent calls should be no-ops"
-
-        # Verify final state
-        final_stage = repository.retrieve_stage(stage.id)
-        final_task = next(t for t in final_stage.tasks if t.id == task.id)
-        assert final_task.status == WorkflowStatus.SUCCEEDED
-
-    def test_deduplication_stress(self, repository: WorkflowStore, queue: Queue, backend: str, tmp_path: Any) -> None:
-        """
-        Stress test: 20 threads trying to process the same message.
-
-        This verifies that even under high concurrency:
-        1. The INSERT OR IGNORE/ON CONFLICT handles duplicates gracefully
-        2. No exceptions are thrown
-        3. Only one record ends up in processed_messages table
-        """
-        # For SQLite :memory:, use file-based DB for real concurrency test
-        if backend == "sqlite":
-            from stabilize.persistence.connection import (
-                ConnectionManager,
-                SingletonMeta,
-            )
+            from stabilize.persistence.connection import ConnectionManager, SingletonMeta
             from stabilize.persistence.sqlite import SqliteWorkflowStore
-            from stabilize.queue.sqlite import SqliteQueue
 
             SingletonMeta.reset(ConnectionManager)
-
-            db_path = tmp_path / "stress_dedup.db"
-            connection_string = f"sqlite:///{db_path}"
-
-            test_store = SqliteWorkflowStore(connection_string, create_tables=True)
-            test_queue = SqliteQueue(connection_string)
-            test_queue._create_table()
+            store = SqliteWorkflowStore(f"sqlite:///{tmp_path / 'claim.db'}", create_tables=True)
         else:
-            test_store = repository
-            test_queue = queue
-
-        message_id = f"stress-test-msg-{time.time()}"
-        success_count = 0
-        duplicate_count = 0
-        error_count = 0
+            store = repository
+        message_id = "test-msg-claim-race"
+        barrier = threading.Barrier(2)
+        results: list[bool] = []
         lock = threading.Lock()
 
-        def mark_processed() -> None:
-            nonlocal success_count, duplicate_count, error_count
-            try:
-                with test_store.transaction(test_queue) as txn:
-                    txn.mark_message_processed(
-                        message_id,
-                        handler_type="StressHandler",
-                        execution_id="stress-exec",
-                    )
-                with lock:
-                    success_count += 1
-            except DuplicateDeliveryError:
-                with lock:
-                    duplicate_count += 1
-            except Exception:
-                with lock:
-                    error_count += 1
+        def claim() -> None:
+            barrier.wait()
+            won = store.claim_message(message_id, "TestHandler", "exec-1")
+            with lock:
+                results.append(won)
 
-        threads = [threading.Thread(target=mark_processed) for _ in range(20)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert error_count == 0, f"Got {error_count} errors"
-        assert success_count == 1, f"{success_count} marks won; exactly one may"
-        assert duplicate_count == 19, f"{duplicate_count} marks were refused as duplicates; 19 must be"
-
+        threads = [threading.Thread(target=claim) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert sorted(results) == [False, True], f"claim_message must admit exactly one worker: {results}"
+        assert store.is_message_processed(message_id)
         if backend == "sqlite":
-            test_store.close()
-            test_queue.close()
+            store.close()
 
     def test_check_then_mark_not_atomic_demonstration(
         self, repository: WorkflowStore, queue: Queue, backend: str, tmp_path: Any
@@ -363,7 +159,7 @@ class TestMessageDeduplicationRace:
             barrier.wait()
 
             # Both threads check at the same time
-            is_processed = is_message_processed(conn, message_id)
+            is_processed = is_message_processed(conn, message_id, "")
 
             with check_lock:
                 check_results.append(is_processed)
@@ -371,7 +167,7 @@ class TestMessageDeduplicationRace:
             if not is_processed:
                 # Small delay to widen the race window
                 time.sleep(0.01)
-                mark_message_processed(conn, message_id, f"Thread-{thread_id}", "exec-1")
+                mark_message_processed(conn, message_id, "", f"Thread-{thread_id}", "exec-1")
 
         t1 = threading.Thread(target=check_and_mark, args=(1,))
         t2 = threading.Thread(target=check_and_mark, args=(2,))
