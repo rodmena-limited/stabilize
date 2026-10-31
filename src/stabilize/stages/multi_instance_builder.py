@@ -61,7 +61,7 @@ class MultiInstanceBuilder:
             instance_name_prefix: Prefix for instance stage names
             sync_on_complete: Whether to synchronize (WCP-12=False, WCP-13=True)
             join_threshold: N-of-M threshold (0 = all must complete)
-            cancel_remaining: Cancel remaining after threshold reached
+            cancel_remaining: Deprecated and refused; True raises NotImplementedError. Removed in 2.0.
             instance_contexts: Per-instance context overrides
 
         Returns:
@@ -156,7 +156,7 @@ class MultiInstanceBuilder:
             instance_name_prefix: Prefix for instance stage names
             sync_on_complete: Whether to synchronize
             join_threshold: N-of-M threshold
-            cancel_remaining: Cancel remaining after threshold
+            cancel_remaining: Deprecated and refused; True raises NotImplementedError. Removed in 2.0.
 
         Returns:
             List of created stages

@@ -374,6 +374,27 @@ host's own migretti history, now upgrade with no change to the command.
   refuse with `SubscriptionBehindError` while an enabled subscription still has undelivered
   events in the bound. Hosts that own their event-store DDL add `enabled BOOLEAN NOT NULL DEFAULT TRUE` and
   `last_commit_sequence BIGINT NOT NULL DEFAULT 0` to `event_subscriptions`.
+- **The documented events are emitted (A20, B42).** `workflow.paused` and `workflow.resumed` are
+  recorded in the transaction that writes the status, from `WorkflowStore.pause` and `resume`, the
+  orchestrator's `unpause` and the `ResumeStage` handler. `status.changed` is recorded for every stage
+  and workflow transition a handler makes, in the transaction that stores it. `context.updated` and
+  `outputs.updated` are recorded per task result with the changed key names and, under an audit key
+  (`PoolOptions.audit_key` or `STABILIZE_AUDIT_KEY`), an HMAC digest per value. The values themselves
+  are not stored. Events now carry `schema_version` 2. The migrator upcasts version 1 on read. A build
+  older than 0.34.0 skips version-2 events in replay. The event-sourcing guide's table of
+  "not yet emitted" types is gone.
+- **`EventRecorder.record_context_updated` and `record_outputs_updated` take the changed values and
+  store their names.** Both and `record_status_change` accept `held=True` to append in the store
+  transaction that next opens on the thread, and then return `None`. `record_workflow_paused` and
+  `record_workflow_resumed` also accept a `workflow_id` with the paused details.
+- **`WorkflowStream` passes only its tenant's live events.** It takes `tenant=`, defaulting to its
+  event store's tenant, else the tenant bound to the calling thread.
+- **The deferred-choice example decides on completion (A18).** The "agent or escalation timer"
+  example in the flow-control guide ran under the default `on_start`, under which the timer wins the
+  moment it starts. It now sets `deferredChoiceClaim` to `on_complete`.
+- **`cancel_remaining` is documented as deprecated and refused (A19, B43).** The guide showed
+  `cancel_remaining=True` as working. The builder refuses it. The example, the builder and the model
+  docstrings say so. The parameter is removed in 2.0.
 - **Recovery ages a workflow by its activity, not by its start (B21).** A run started 30
   hours ago whose task row changed five minutes ago was never recovered, because the only
   clock was `start_time`. `pipeline_executions`, `stage_executions` and `task_executions`

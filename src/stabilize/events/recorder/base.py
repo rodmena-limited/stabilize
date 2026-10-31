@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import Event
 from stabilize.events.bus import get_event_bus
-from stabilize.events.txn_scope import current_scope
+from stabilize.events.recorder.digests import resolve_audit_key
+from stabilize.events.txn_scope import current_scope, hold_until_transaction
 
 if TYPE_CHECKING:
     from stabilize.events.store.interface import EventStore
@@ -32,6 +33,7 @@ class EventRecorderBase:
         self,
         event_store: EventStore,
         publish_to_bus: bool = True,
+        audit_key: bytes | None = None,
     ) -> None:
         """
         Initialize the event recorder.
@@ -39,10 +41,21 @@ class EventRecorderBase:
         Args:
             event_store: Store for persisting events.
             publish_to_bus: Whether to also publish events to the bus.
+            audit_key: Key for the value digests on context and outputs events;
+                defaults to the event store's, then to STABILIZE_AUDIT_KEY.
         """
         self._event_store = event_store
         self._publish_to_bus = publish_to_bus
         self._lock = threading.Lock()
+        self._audit_key = resolve_audit_key(audit_key, event_store)
+
+    @property
+    def audit_key(self) -> bytes | None:
+        return self._audit_key
+
+    def _record_held(self, event: Event) -> None:
+        """Append *event* inside the open store transaction, or inside the next one this thread opens."""
+        hold_until_transaction(lambda: self._record(event))
 
     def _record(
         self,

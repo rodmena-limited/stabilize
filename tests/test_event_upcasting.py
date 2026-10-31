@@ -113,15 +113,14 @@ class TestReplayUpcasting:
 class TestMigrateSemantics:
     def test_strict_raises_when_path_missing(self) -> None:
         migrator = get_event_migrator()
-        event = _completed_event(1, {"status": "X"}, schema_version=1)
+        event = _completed_event(1, {"status": "X"}, schema_version=2)
         with pytest.raises(ValueError):
-            migrator.migrate(event, target_version=2, strict=True)
+            migrator.migrate(event, target_version=3, strict=True)
 
     def test_lenient_returns_partial(self) -> None:
         migrator = get_event_migrator()
-        event = _completed_event(1, {"status": "X"}, schema_version=1)
-        # No path registered; lenient returns the event unchanged.
-        result = migrator.migrate(event, target_version=2, strict=False)
+        event = _completed_event(1, {"status": "X"}, schema_version=2)
+        result = migrator.migrate(event, target_version=3, strict=False)
         assert result is event
 
     def test_same_version_is_noop(self) -> None:

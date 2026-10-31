@@ -255,13 +255,19 @@ workflow completes through the winner's path.
     StageExecution(
         ref_id="agent_contact",
         deferred_choice_group="complaint_response",
+        context={"deferredChoiceClaim": "on_complete"},
         ...
     ),
     StageExecution(
         ref_id="escalate_to_manager",
+        type="timer",
         deferred_choice_group="complaint_response",
+        context={"deferredChoiceClaim": "on_complete", "duration_seconds": 1800},
         ...
     ),
+
+The timer must not win the moment it starts, which is what the default would
+give it. This group therefore decides on completion.
 
 ``deferredChoiceClaim`` on each member's context says when the group is decided.
 
@@ -690,8 +696,13 @@ N-of-M with Multiple Instances (WCP-34)
         parent_stage=parent,
         count=5,
         join_threshold=3,
-        cancel_remaining=True,  # Cancel remaining after threshold
     )
+
+The two instances past the threshold finish on their own. ``cancel_remaining``
+is accepted for compatibility and refused when set. Every instance is
+dispatched when the parent completes, and by the time the threshold is reached
+the remaining instances are already running. The parameter is deprecated and
+is removed in 2.0.
 
 
 Synthetic Stages

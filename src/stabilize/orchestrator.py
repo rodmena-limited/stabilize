@@ -217,7 +217,15 @@ class Orchestrator:
         else:
             message = CompleteWorkflow(execution_type=execution.type.value, execution_id=execution.id)
         txn.update_workflow_status(execution)
+        self._record_resumed(execution)
         txn.push_message(message)
+
+    def _record_resumed(self, execution: Workflow) -> None:
+        from stabilize.events.recorder.instance import record_workflow_resumed_for
+
+        record_workflow_resumed_for(
+            getattr(self.store, "tenant", "") or "", execution.id, execution.paused, "Orchestrator.unpause"
+        )
 
     def _unpause_locked(self, txn: StoreTransaction, execution: Workflow) -> None:
         from stabilize.persistence.store.transaction import workflow_control_key
@@ -232,6 +240,7 @@ class Orchestrator:
         if status == WorkflowStatus.PAUSED.name:
             execution.resume()
             txn.update_workflow_status(execution)
+            self._record_resumed(execution)
         for stage_id in paused:
             txn.push_message(
                 ResumeStage(execution_type=execution.type.value, execution_id=execution.id, stage_id=stage_id)

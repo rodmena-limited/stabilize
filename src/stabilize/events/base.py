@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
@@ -30,7 +30,7 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 
 class EventType(Enum):
@@ -443,7 +443,22 @@ def get_event_migrator() -> EventMigrator:
     global _event_migrator
     if _event_migrator is None:
         _event_migrator = EventMigrator()
+        register_default_migrations(_event_migrator)
     return _event_migrator
+
+
+def register_default_migrations(migrator: EventMigrator) -> None:
+    """The steps between the schema versions this engine has written."""
+
+    @migrator.register(from_version=1, to_version=2)
+    def _v1_to_v2(event: Event) -> Event:
+        data = event.data
+        if event.event_type in (EventType.CONTEXT_UPDATED, EventType.OUTPUTS_UPDATED) and "changed_keys" not in data:
+            key = "context" if event.event_type is EventType.CONTEXT_UPDATED else "outputs"
+            values = data.get(key)
+            if isinstance(values, dict):
+                data = {"changed_keys": sorted(str(name) for name in values), **data}
+        return replace(event, data=data, schema_version=2)
 
 
 def reset_event_migrator() -> None:

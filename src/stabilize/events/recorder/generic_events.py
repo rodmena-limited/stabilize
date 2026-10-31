@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EntityType, Event, EventType
 from stabilize.events.recorder.context import get_event_metadata
+from stabilize.events.recorder.digests import change_payload
 
 if TYPE_CHECKING:
     from stabilize.models.status import WorkflowStatus
@@ -20,8 +21,11 @@ class GenericEventsMixin:
     """Mixin providing generic event recording methods."""
 
     if TYPE_CHECKING:
+        _audit_key: bytes | None
 
         def _record(self, event: Event, connection: Any | None = None) -> Event: ...
+
+        def _record_held(self, event: Event) -> None: ...
 
     def record_status_change(
         self,
@@ -33,8 +37,9 @@ class GenericEventsMixin:
         version: int = 1,
         connection: Any | None = None,
         source_handler: str | None = None,
-    ) -> Event:
-        """Record a generic status change event."""
+        held: bool = False,
+    ) -> Event | None:
+        """Record a status transition; with *held*, inside the store transaction that next opens on this thread."""
         event = Event(
             event_type=EventType.STATUS_CHANGED,
             entity_type=entity_type,
@@ -47,6 +52,9 @@ class GenericEventsMixin:
             },
             metadata=get_event_metadata(source_handler),
         )
+        if held:
+            self._record_held(event)
+            return None
         return self._record(event, connection)
 
     def record_context_updated(
@@ -54,21 +62,25 @@ class GenericEventsMixin:
         entity_type: EntityType,
         entity_id: str,
         workflow_id: str,
-        context: dict[str, Any],
+        changed: dict[str, Any],
         version: int = 1,
         connection: Any | None = None,
         source_handler: str | None = None,
-    ) -> Event:
-        """Record a context update event."""
+        held: bool = False,
+    ) -> Event | None:
+        """Record which context keys changed; values are never stored, only their digests under an audit key."""
         event = Event(
             event_type=EventType.CONTEXT_UPDATED,
             entity_type=entity_type,
             entity_id=entity_id,
             workflow_id=workflow_id,
             version=version,
-            data={"context": context},
+            data=change_payload(changed, self._audit_key),
             metadata=get_event_metadata(source_handler),
         )
+        if held:
+            self._record_held(event)
+            return None
         return self._record(event, connection)
 
     def record_outputs_updated(
@@ -76,21 +88,25 @@ class GenericEventsMixin:
         entity_type: EntityType,
         entity_id: str,
         workflow_id: str,
-        outputs: dict[str, Any],
+        changed: dict[str, Any],
         version: int = 1,
         connection: Any | None = None,
         source_handler: str | None = None,
-    ) -> Event:
-        """Record an outputs update event."""
+        held: bool = False,
+    ) -> Event | None:
+        """Record which output keys changed; values are never stored, only their digests under an audit key."""
         event = Event(
             event_type=EventType.OUTPUTS_UPDATED,
             entity_type=entity_type,
             entity_id=entity_id,
             workflow_id=workflow_id,
             version=version,
-            data={"outputs": outputs},
+            data=change_payload(changed, self._audit_key),
             metadata=get_event_metadata(source_handler),
         )
+        if held:
+            self._record_held(event)
+            return None
         return self._record(event, connection)
 
     def record_jump_executed(

@@ -316,6 +316,7 @@ class ResumeStageHandler(StabilizeHandler[ResumeStage], _ControlHandler):
                 txn.store_stage(stage)
                 if execution_changed:
                     txn.update_workflow_status(execution)
+                    self.record_workflow_resumed(execution, "ResumeStage")
                 if message.message_id:
                     txn.mark_message_processed(
                         message_id=message.message_id,

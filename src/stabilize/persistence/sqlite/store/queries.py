@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Iterator
+from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Any
 
 from stabilize.persistence.columns import select_list
@@ -50,6 +51,8 @@ class SqliteQueriesMixin:
         def _get_connection(self) -> sqlite3.Connection: ...
 
         def retrieve(self, execution_id: str) -> Workflow: ...
+
+        def transaction(self, queue: Any | None = None) -> AbstractContextManager[Any]: ...
 
     def get_upstream_stages(
         self,
@@ -170,12 +173,24 @@ class SqliteQueriesMixin:
             yield self.retrieve(row["id"])
 
     def pause(self, execution_id: str, paused_by: str) -> None:
-        """Pause an execution."""
-        pause_execution(self._get_connection(), execution_id, paused_by, self.tenant)
+        """Pause an execution, recording workflow.paused in the same transaction."""
+        from stabilize.events.recorder.instance import record_workflow_paused_for
+        from stabilize.events.txn_scope import scope_connection
+
+        with self.transaction():
+            paused = pause_execution(scope_connection(), execution_id, paused_by, self.tenant)
+            if paused is not None:
+                record_workflow_paused_for(self.tenant, execution_id, paused)
 
     def resume(self, execution_id: str) -> None:
-        """Resume a paused execution."""
-        resume_execution(self._get_connection(), execution_id, self.tenant)
+        """Resume a paused execution, recording workflow.resumed in the same transaction."""
+        from stabilize.events.recorder.instance import record_workflow_resumed_for
+        from stabilize.events.txn_scope import scope_connection
+
+        with self.transaction():
+            paused = resume_execution(scope_connection(), execution_id, self.tenant)
+            if paused is not None:
+                record_workflow_resumed_for(self.tenant, execution_id, paused, "WorkflowStore.resume")
 
     def cancel(
         self,

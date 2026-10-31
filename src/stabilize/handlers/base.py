@@ -18,6 +18,7 @@ from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
 from resilient_circuit.exceptions import RetryLimitReached
 
 from stabilize.errors import ConcurrencyError
+from stabilize.events.txn_scope import held_snapshot, restore_held
 from stabilize.handlers.event_recording import EventRecordingMixin
 from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus, validate_transition
@@ -356,8 +357,11 @@ class StabilizeHandler(EventRecordingMixin, MessageHandler[M], ABC):
             should_handle=lambda e: isinstance(e, ConcurrencyError),
         )
 
+        base = held_snapshot()
+
         @retry_policy
         def with_retry() -> None:
+            restore_held(base)
             func()
 
         try:
@@ -391,6 +395,7 @@ class StabilizeHandler(EventRecordingMixin, MessageHandler[M], ABC):
         Raises:
             InvalidStateTransitionError: If the transition is not allowed
         """
+        old_status = stage.status
         validate_transition(
             stage.status,
             new_status,
@@ -400,6 +405,7 @@ class StabilizeHandler(EventRecordingMixin, MessageHandler[M], ABC):
         stage.status = new_status
         if new_status.is_complete:
             drop_context_signals(stage, new_status)
+        self.record_status_transition("stage", stage.id, _workflow_id_of(stage), old_status, new_status, stage.version)
 
     def set_task_status(
         self,
@@ -441,6 +447,7 @@ class StabilizeHandler(EventRecordingMixin, MessageHandler[M], ABC):
         Raises:
             InvalidStateTransitionError: If the transition is not allowed
         """
+        old_status = workflow.status
         validate_transition(
             workflow.status,
             new_status,
@@ -448,3 +455,12 @@ class StabilizeHandler(EventRecordingMixin, MessageHandler[M], ABC):
             entity_id=workflow.id,
         )
         workflow.status = new_status
+        version = workflow.stages[0].version if workflow.stages else 1
+        self.record_status_transition("workflow", workflow.id, workflow.id, old_status, new_status, version)
+
+
+def _workflow_id_of(stage: StageExecution) -> str:
+    try:
+        return stage.execution.id
+    except ValueError:
+        return ""

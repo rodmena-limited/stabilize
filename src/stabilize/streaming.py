@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EntityType, Event, EventType
 from stabilize.events.bus import SubscriptionMode, get_event_bus
+from stabilize.persistence.tenancy import current_tenant
 
 if TYPE_CHECKING:
     from stabilize.events.recorder import EventRecorder
@@ -124,15 +125,25 @@ class WorkflowStream:
         execution_id: str,
         event_store: EventStore | None = None,
         subscription_id: str | None = None,
+        tenant: str | None = None,
     ) -> None:
         """Args:
         execution_id: Workflow to stream.
         event_store: Optional durable store for replaying history. Required
             for :meth:`replay`; live streaming works without it.
         subscription_id: Bus subscription id (defaults to a per-instance id).
+        tenant: The workflow's tenant; live events of another tenant are not
+            passed. Defaults to the event store's tenant, else the tenant bound
+            to the calling thread.
         """
         self.execution_id = execution_id
         self._event_store = event_store
+        if tenant is not None:
+            self._tenant = tenant
+        elif event_store is not None:
+            self._tenant = getattr(event_store, "tenant", "") or ""
+        else:
+            self._tenant = current_tenant()
         self._sub_id = subscription_id or f"stream-{id(self)}-{execution_id}"
         self._subscribed = False
 
@@ -155,7 +166,7 @@ class WorkflowStream:
         bus = get_event_bus()
 
         def _handler(event: Event) -> None:
-            if event.workflow_id == self.execution_id:
+            if event.workflow_id == self.execution_id and (event.tenant or "") == self._tenant:
                 callback(StreamItem.from_event(event, source="live"))
 
         bus.subscribe(self._sub_id, _handler, workflow_filter=self.execution_id, mode=mode)
@@ -175,7 +186,7 @@ class WorkflowStream:
         bus = get_event_bus()
 
         def _handler(event: Event) -> None:
-            if event.workflow_id == self.execution_id:
+            if event.workflow_id == self.execution_id and (event.tenant or "") == self._tenant:
                 live_q.put(event)
 
         bus.subscribe(self._sub_id, _handler, workflow_filter=self.execution_id, mode=SubscriptionMode.SYNC)

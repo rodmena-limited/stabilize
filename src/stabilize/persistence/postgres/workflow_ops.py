@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from contextlib import AbstractContextManager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.models.workflow import Workflow
 from stabilize.persistence.columns import select_list
@@ -45,6 +45,14 @@ class PostgresWorkflowOpsMixin:
 
     def _borrow(self) -> AbstractContextManager[Any]:
         raise NotImplementedError
+
+    if TYPE_CHECKING:
+
+        def transaction(self, queue: Any | None = None) -> AbstractContextManager[Any]: ...
+
+    if TYPE_CHECKING:
+
+        def transaction(self, queue: Any | None = None) -> AbstractContextManager[Any]: ...
 
     def recovery_candidate_ids(self, queue_table: str | None, after_id: str | None, limit: int) -> list[str]:
         """Ids of this tenant's live workflows on *queue_table*, keyset-paged by id; the default table owns NULL."""
@@ -150,12 +158,24 @@ class PostgresWorkflowOpsMixin:
         return _get_all_pending_workflows(self._engine, criteria, self.retrieve)
 
     def pause(self, execution_id: str, paused_by: str) -> None:
-        """Pause an execution."""
-        pause_execution(self._engine, execution_id, paused_by)
+        """Pause an execution, recording workflow.paused in the same transaction."""
+        from stabilize.events.recorder.instance import record_workflow_paused_for
+        from stabilize.events.txn_scope import scope_connection
+
+        with self.transaction():
+            paused = pause_execution(scope_connection(), execution_id, paused_by, self.tenant)
+            if paused is not None:
+                record_workflow_paused_for(self.tenant, execution_id, paused)
 
     def resume(self, execution_id: str) -> None:
-        """Resume a paused execution."""
-        resume_execution(self._engine, execution_id)
+        """Resume a paused execution, recording workflow.resumed in the same transaction."""
+        from stabilize.events.recorder.instance import record_workflow_resumed_for
+        from stabilize.events.txn_scope import scope_connection
+
+        with self.transaction():
+            paused = resume_execution(scope_connection(), execution_id, self.tenant)
+            if paused is not None:
+                record_workflow_resumed_for(self.tenant, execution_id, paused, "WorkflowStore.resume")
 
     def cancel(self, execution_id: str, canceled_by: str, reason: str) -> None:
         """Cancel an execution."""

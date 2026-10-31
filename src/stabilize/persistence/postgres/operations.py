@@ -19,70 +19,84 @@ from stabilize.queue.message_ids import owner_prefix
 logger = logging.getLogger(__name__)
 
 
-def pause_execution(engine: Any, execution_id: str, paused_by: str) -> None:
-    """Pause an execution."""
+def _paused_from(row: Any) -> PausedDetails | None:
+    if row is None:
+        return None
+    value = row["paused"] if isinstance(row, dict) else row[0]
+    if isinstance(value, str):
+        value = json.loads(value)
+    if not isinstance(value, dict):
+        return None
+    return PausedDetails(
+        paused_by=value.get("paused_by", ""),
+        pause_time=value.get("pause_time"),
+        resume_time=value.get("resume_time"),
+        paused_ms=value.get("paused_ms") or 0,
+    )
+
+
+def pause_execution(conn: Any, execution_id: str, paused_by: str, tenant: str) -> PausedDetails | None:
+    """Pause an execution on *conn*; the caller commits. Returns the details, or None when no row changed."""
     paused = PausedDetails(
         paused_by=paused_by,
         pause_time=int(time.time() * 1000),
     )
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE pipeline_executions SET
+                status = %(status)s,
+                paused = %(paused)s::jsonb
+            WHERE id = %(id)s AND status = ANY(%(pausable)s) AND stabilize_tenant = %(tenant)s
+            RETURNING paused
+            """,
+            {
+                "id": execution_id,
+                "tenant": tenant,
+                "pausable": [s.name for s in PAUSABLE],
+                "status": WorkflowStatus.PAUSED.name,
+                "paused": json.dumps(paused_to_dict(paused)),
+            },
+        )
+        return _paused_from(cur.fetchone())
 
-    with engine.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE pipeline_executions SET
-                    status = %(status)s,
-                    paused = %(paused)s::jsonb
-                WHERE id = %(id)s AND status = ANY(%(pausable)s) AND stabilize_tenant = %(tenant)s
-                """,
-                {
-                    "id": execution_id,
-                    "tenant": engine.tenant,
-                    "pausable": [s.name for s in PAUSABLE],
-                    "status": WorkflowStatus.PAUSED.name,
-                    "paused": json.dumps(paused_to_dict(paused)),
-                },
-            )
-        conn.commit()
 
-
-def resume_execution(engine: Any, execution_id: str) -> None:
-    """Resume a paused execution.
-
-    Uses atomic UPDATE with status check to prevent race conditions.
-    """
+def resume_execution(conn: Any, execution_id: str, tenant: str) -> PausedDetails | None:
+    """Resume a paused execution on *conn*; the caller commits. Returns the details, or None when no row changed."""
     current_time = int(time.time() * 1000)
 
-    with engine.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE pipeline_executions SET
-                    status = %(status)s,
-                    paused = CASE
-                        WHEN paused IS NOT NULL THEN
-                            jsonb_set(
-                                jsonb_set(paused, '{resume_time}', to_jsonb(%(resume_time)s)),
-                                '{paused_ms}',
-                                to_jsonb(%(resume_time)s - (paused->>'pause_time')::bigint)
-                            )
-                        ELSE NULL
-                    END
-                WHERE id = %(id)s AND status = 'PAUSED' AND stabilize_tenant = %(tenant)s
-                """,
-                {
-                    "id": execution_id,
-                    "tenant": engine.tenant,
-                    "status": WorkflowStatus.RUNNING.name,
-                    "resume_time": current_time,
-                },
-            )
-            if cur.rowcount == 0:
-                logger.warning(
-                    "Resume had no effect for execution %s - not in PAUSED status",
-                    execution_id,
-                )
-        conn.commit()
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE pipeline_executions SET
+                status = %(status)s,
+                paused = CASE
+                    WHEN paused IS NOT NULL THEN
+                        jsonb_set(
+                            jsonb_set(paused, '{resume_time}', to_jsonb(%(resume_time)s)),
+                            '{paused_ms}',
+                            to_jsonb(%(resume_time)s - (paused->>'pause_time')::bigint)
+                        )
+                    ELSE NULL
+                END
+            WHERE id = %(id)s AND status = 'PAUSED' AND stabilize_tenant = %(tenant)s
+            RETURNING paused
+            """,
+            {
+                "id": execution_id,
+                "tenant": tenant,
+                "status": WorkflowStatus.RUNNING.name,
+                "resume_time": current_time,
+            },
+        )
+        row = cur.fetchone()
+    if row is None:
+        logger.warning(
+            "Resume had no effect for execution %s - not in PAUSED status",
+            execution_id,
+        )
+        return None
+    return _paused_from(row) or PausedDetails(resume_time=current_time)
 
 
 def cancel_execution(engine: Any, execution_id: str, canceled_by: str, reason: str) -> None:

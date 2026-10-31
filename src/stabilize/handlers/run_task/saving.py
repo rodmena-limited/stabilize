@@ -63,6 +63,7 @@ class RunTaskSavingMixin:
     txn_helper: Any
     task_registry: Any
     _task_backoff: Any
+    event_recorder: Any
 
     def retry_on_concurrency_error(self, func: Any, context: str = "operation") -> None:
         raise NotImplementedError
@@ -72,6 +73,34 @@ class RunTaskSavingMixin:
 
     def _save_result(self, task_model: TaskExecution, result: TaskResult, message: RunTask) -> None:
         save_or_hold(self, task_model, result, message)
+
+    def _record_result_changes(self, stage: StageExecution, result: TaskResult, message: RunTask) -> None:
+        """context.updated and outputs.updated for the keys a result changes, held for the result's transaction."""
+        recorder = self.event_recorder
+        if recorder is None:
+            return
+        from stabilize.events.base import EntityType
+
+        if isinstance(result.context, dict) and result.context:
+            recorder.record_context_updated(
+                EntityType.STAGE,
+                stage.id,
+                message.execution_id,
+                result.context,
+                version=stage.version,
+                source_handler="RunTask",
+                held=True,
+            )
+        if isinstance(result.outputs, dict) and result.outputs:
+            recorder.record_outputs_updated(
+                EntityType.STAGE,
+                stage.id,
+                message.execution_id,
+                result.outputs,
+                version=stage.version,
+                source_handler="RunTask",
+                held=True,
+            )
 
     def _process_result_safely(
         self,
@@ -112,6 +141,7 @@ class RunTaskSavingMixin:
                 self.txn_helper.execute_atomic(source_message=message, handler_name="RunTask")
                 return
 
+            self._record_result_changes(stage, result, message)
             process_result(
                 stage,
                 task_model,

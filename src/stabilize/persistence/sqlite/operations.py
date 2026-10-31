@@ -21,24 +21,41 @@ from stabilize.queue.message_ids import owner_prefix
 logger = logging.getLogger(__name__)
 
 
+def _paused_from(row: Any) -> PausedDetails | None:
+    if row is None:
+        return None
+    value = row[0]
+    if isinstance(value, str):
+        value = json.loads(value)
+    if not isinstance(value, dict):
+        return None
+    return PausedDetails(
+        paused_by=value.get("paused_by", ""),
+        pause_time=value.get("pause_time"),
+        resume_time=value.get("resume_time"),
+        paused_ms=value.get("paused_ms") or 0,
+    )
+
+
 def pause_execution(
     conn: sqlite3.Connection,
     execution_id: str,
     paused_by: str,
     tenant: str,
-) -> None:
-    """Pause an execution."""
+) -> PausedDetails | None:
+    """Pause an execution on *conn*; the caller commits. Returns the details, or None when no row changed."""
     paused = PausedDetails(
         paused_by=paused_by,
         pause_time=int(time.time() * 1000),
     )
 
-    conn.execute(
+    row = conn.execute(
         """
         UPDATE pipeline_executions SET
             status = :status,
             paused = :paused
         WHERE id = :id AND status IN ({pausable}) AND stabilize_tenant = :tenant
+        RETURNING paused
         """.format(pausable=", ".join(f"'{s.name}'" for s in PAUSABLE)),
         {
             "id": execution_id,
@@ -46,26 +63,19 @@ def pause_execution(
             "status": WorkflowStatus.PAUSED.name,
             "paused": json.dumps(paused_to_dict(paused)),
         },
-    )
-    conn.commit()
+    ).fetchone()
+    return _paused_from(row)
 
 
 def resume_execution(
     conn: sqlite3.Connection,
     execution_id: str,
     tenant: str,
-) -> None:
-    """Resume a paused execution.
-
-    Uses atomic UPDATE with status check to prevent race conditions.
-    Calculates resume_time and paused_ms atomically in the UPDATE to avoid
-    race conditions between retrieve and update.
-    """
+) -> PausedDetails | None:
+    """Resume a paused execution on *conn*; the caller commits. Returns the details, or None when no row changed."""
     current_time = int(time.time() * 1000)
 
-    # Atomic update: calculate resume_time and paused_ms in the UPDATE itself
-    # This prevents race conditions where paused details could change between read and write
-    cursor = conn.execute(
+    row = conn.execute(
         """
         UPDATE pipeline_executions SET
             status = :status,
@@ -79,6 +89,7 @@ def resume_execution(
                 ELSE NULL
             END
         WHERE id = :id AND status = 'PAUSED' AND stabilize_tenant = :tenant
+        RETURNING paused
         """,
         {
             "id": execution_id,
@@ -86,13 +97,14 @@ def resume_execution(
             "status": WorkflowStatus.RUNNING.name,
             "resume_time": current_time,
         },
-    )
-    conn.commit()
-    if cursor.rowcount == 0:
+    ).fetchone()
+    if row is None:
         logger.warning(
             "Resume had no effect for execution %s - not in PAUSED status",
             execution_id,
         )
+        return None
+    return _paused_from(row) or PausedDetails(resume_time=current_time)
 
 
 def cancel_execution(

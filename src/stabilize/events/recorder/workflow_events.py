@@ -132,38 +132,58 @@ class WorkflowEventsMixin:
 
     def record_workflow_paused(
         self,
-        workflow: Workflow,
+        workflow: Workflow | None = None,
         connection: Any | None = None,
         source_handler: str | None = None,
+        *,
+        workflow_id: str | None = None,
+        paused_by: str | None = None,
+        pause_time: int | None = None,
+        version: int = 1,
     ) -> Event:
-        """Record workflow paused event."""
+        """Record workflow paused event, from the workflow or from its id and paused details."""
+        if workflow is not None:
+            workflow_id = workflow.id
+            version = workflow.stages[0].version if workflow.stages else 1
+            if workflow.paused:
+                paused_by = workflow.paused.paused_by
+                pause_time = workflow.paused.pause_time
+        if workflow_id is None:
+            raise ValueError("record_workflow_paused needs a workflow or a workflow_id")
         event = create_workflow_event(
             event_type=EventType.WORKFLOW_PAUSED,
-            workflow_id=workflow.id,
-            version=workflow.stages[0].version if workflow.stages else 1,
-            data={
-                "paused_by": workflow.paused.paused_by if workflow.paused else None,
-                "pause_time": workflow.paused.pause_time if workflow.paused else None,
-            },
+            workflow_id=workflow_id,
+            version=version,
+            data={"paused_by": paused_by, "pause_time": pause_time},
             metadata=get_event_metadata(source_handler),
         )
         return self._record(event, connection)
 
     def record_workflow_resumed(
         self,
-        workflow: Workflow,
+        workflow: Workflow | None = None,
         connection: Any | None = None,
         source_handler: str | None = None,
+        *,
+        workflow_id: str | None = None,
+        resume_time: int | None = None,
+        paused_ms: int | None = None,
+        version: int = 1,
     ) -> Event:
-        """Record workflow resumed event."""
+        """Record workflow resumed event, from the workflow or from its id and paused details."""
+        if workflow is not None:
+            workflow_id = workflow.id
+            version = workflow.stages[0].version if workflow.stages else 1
+            if workflow.paused:
+                resume_time = workflow.paused.resume_time
+                paused_ms = workflow.paused.paused_ms
+        if workflow_id is None:
+            raise ValueError("record_workflow_resumed needs a workflow or a workflow_id")
         event = create_workflow_event(
             event_type=EventType.WORKFLOW_RESUMED,
-            workflow_id=workflow.id,
-            version=workflow.stages[0].version if workflow.stages else 1,
-            data={
-                "resume_time": workflow.paused.resume_time if workflow.paused else None,
-                "paused_ms": workflow.paused.paused_ms if workflow.paused else None,
-            },
+            workflow_id=workflow_id,
+            version=version,
+            data={"resume_time": resume_time, "paused_ms": paused_ms},
             metadata=get_event_metadata(source_handler),
         )
         return self._record(event, connection)

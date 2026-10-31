@@ -53,7 +53,14 @@ Event Type                 Description
 ``workflow.completed``     Workflow finished successfully
 ``workflow.failed``        Workflow failed
 ``workflow.canceled``      Workflow was canceled
+``workflow.paused``        Workflow was paused through the store
+``workflow.resumed``       A paused workflow was resumed
 =========================  ==========================
+
+``workflow.paused`` carries ``paused_by`` and ``pause_time``. ``workflow.resumed``
+carries ``resume_time`` and ``paused_ms``. Both are recorded in the transaction
+that writes the status, whether the pause came from ``WorkflowStore.pause``, the
+monitor, ``Orchestrator.unpause`` or a ``ResumeStage`` message.
 
 **Stage events:**
 
@@ -99,22 +106,34 @@ of ``self_loop``, ``backward``, ``forward`` or ``restart``. It is what makes a
 loop or a retry visible: without it a workflow that looped forty times replays
 as though it ran once.
 
-**Not yet emitted**
-
-These types exist and replay understands them, but nothing in the engine
-currently records them. They are listed here so their absence from a stream is
-not mistaken for a gap in your workflow:
+**State events:**
 
 =========================  ==========================
-Event Type                 Status
+Event Type                 Description
 =========================  ==========================
-``workflow.paused``        Not emitted — pause is a store call with no recorder
-``workflow.resumed``       Not emitted
-``status.changed``         Not emitted — needs buffering to stay transactional
-``context.updated``        Not emitted
-``outputs.updated``        Not emitted
-``jump.executed``          Dynamic jump was executed
+``status.changed``         A handler moved a stage or a workflow to a new status
+``context.updated``        A task result changed keys of its stage's context
+``outputs.updated``        A task result changed keys of its stage's outputs
 =========================  ==========================
+
+``status.changed`` carries ``old_status`` and ``new_status`` and is recorded in
+the store transaction that writes the new status. A transaction that rolls back
+takes its ``status.changed`` with it. Task transitions are carried by the
+``task.*`` events and are not repeated here.
+
+``context.updated`` and ``outputs.updated`` carry ``changed_keys`` and never the
+values. With an audit key (``PoolOptions.audit_key`` on the event store, else
+``STABILIZE_AUDIT_KEY`` as UTF-8 bytes) they also carry ``digest_alg``
+(``hmac-sha256/stabilize-canonical-json/1``) and ``digests``, the HMAC of each
+value's canonical JSON. A reader holding the key can check a value it was given
+against the log without the log storing it. A value that cannot be encoded has
+``None`` for its digest. ``stage.completed`` carries the stage's outputs as it
+did before.
+
+Events written by 0.34.0 and later carry ``schema_version`` 2. The engine's
+migrator upcasts version-1 events on read and adds ``changed_keys`` to any
+version-1 ``context.updated`` or ``outputs.updated`` event that carried values.
+A build older than 0.34.0 skips version-2 events during replay.
 
 Subscribing to Events
 ---------------------

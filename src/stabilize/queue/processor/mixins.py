@@ -10,6 +10,7 @@ import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from stabilize import metrics
+from stabilize.events.txn_scope import discard_held
 from stabilize.persistence.committed_marks import (
     DEFECT_LIMIT,
     DeliveryDefect,
@@ -180,8 +181,17 @@ class QueueProcessorMixin:
         logger.debug("Handling %s (execution=%s)", get_message_type_name(message), execution_id or "N/A")
 
         clear_committed()
-        with bind_tenant(getattr(self._store, "tenant", "") or ""):
-            handler.handle(message)
+        try:
+            with bind_tenant(getattr(self._store, "tenant", "") or ""):
+                handler.handle(message)
+        finally:
+            leftover = discard_held()
+            if leftover:
+                logger.warning(
+                    "%d event(s) held by %s never reached a store transaction and were dropped",
+                    leftover,
+                    get_message_type_name(message),
+                )
         self._check_delivery(message, message_id)
 
         # Mark message as processed for deduplication

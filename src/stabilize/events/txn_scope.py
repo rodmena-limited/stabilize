@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -50,11 +51,60 @@ def begin_store_transaction(connection: Any, url: str | None) -> None:
         scope.depth += 1
         return
     _local.scope = TxnScope(connection, url)
+    try:
+        _drain_held()
+    except BaseException:
+        _local.scope = None
+        raise
 
 
 def current_scope() -> TxnScope | None:
     """Return the scope bound to the current thread, if any."""
     return getattr(_local, "scope", None)
+
+
+def scope_connection() -> Any:
+    """The connection of the store transaction bound to this thread."""
+    scope = current_scope()
+    if scope is None:
+        raise RuntimeError("no store transaction is bound to this thread")
+    return scope.connection
+
+
+def hold_until_transaction(record: Callable[[], object]) -> None:
+    """Run *record* now inside an open store transaction, else when the next one opens on this thread."""
+    if getattr(_local, "scope", None) is not None:
+        record()
+        return
+    held: list[Callable[[], object]] | None = getattr(_local, "held", None)
+    if held is None:
+        held = []
+        _local.held = held
+    held.append(record)
+
+
+def discard_held() -> int:
+    """Drop the records held for a transaction that never opened; returns how many."""
+    held: list[Callable[[], object]] = getattr(_local, "held", None) or []
+    _local.held = []
+    return len(held)
+
+
+def held_snapshot() -> list[Callable[[], object]]:
+    """The records held on this thread right now, for a retry to start from."""
+    return list(getattr(_local, "held", None) or [])
+
+
+def restore_held(snapshot: list[Callable[[], object]]) -> None:
+    """Make the held records those of *snapshot*: a retried attempt forgets what its failed attempt held."""
+    _local.held = list(snapshot)
+
+
+def _drain_held() -> None:
+    held: list[Callable[[], object]] = getattr(_local, "held", None) or []
+    _local.held = []
+    for record in held:
+        record()
 
 
 def commit_store_transaction() -> None:

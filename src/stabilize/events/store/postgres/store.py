@@ -119,6 +119,7 @@ class PostgresEventStore(
         resolved = with_schema(options, schema, connection_string)
         self._pool = self._manager.get_postgres_pool(connection_string, options=resolved)
         self._tenant_setting = resolved.tenant_setting if resolved is not None else None
+        self.audit_key = resolved.audit_key if resolved is not None else None
         self._mode = ModeReader(postgres_mode)
         self._schema_state: BaseException | bool = False
         self._lock = threading.Lock()

@@ -27,7 +27,7 @@ class MultiInstanceConfig:
         allow_dynamic: Whether new instances can be added during execution.
         collection_from_context: Context key holding items to iterate over.
         join_threshold: If set, continue after this many complete (N-of-M).
-        cancel_remaining: Cancel remaining instances after threshold reached.
+        cancel_remaining: Deprecated and refused by the builder; True raises NotImplementedError. Removed in 2.0.
         instance_type: The stage type dynamic instances are created with; a
             StageDefinitionBuilder registered for it supplies their tasks.
     """
