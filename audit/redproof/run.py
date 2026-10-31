@@ -64,11 +64,30 @@ def worker_pythonpath(ws: Path) -> str:
     return f"{ws / 'src'}:{redproof}" if NO_VENV else redproof
 
 
+def _imports_own_src(ws: Path) -> bool:
+    if not (ws / "src" / "stabilize").exists():
+        return False
+    if not NO_VENV and not (ws / ".venv" / "bin" / "python").exists():
+        return False
+    probe = subprocess.run(
+        [worker_python(ws), "-c", "import stabilize; print(stabilize.__file__)"],
+        cwd="/",
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": worker_pythonpath(ws)},
+    )
+    return probe.returncode == 0 and probe.stdout.strip().startswith(str(ws / "src"))
+
+
 def prepare(out: Path, workers: int, sha: str) -> None:
     for i in range(workers):
         ws = out / f"ws-{i}"
-        if (ws / ".venv").exists() or (NO_VENV and (ws / "src").exists()):
-            continue
+        if ws.exists():
+            if _imports_own_src(ws):
+                log(f"ws-{i} already prepared")
+                continue
+            log(f"ws-{i} is incomplete (a failed earlier prepare); rebuilding it")
+            shutil.rmtree(ws)
         ws.mkdir(parents=True, exist_ok=True)
         if (REPO / ".git").exists():
             archive = subprocess.run(["git", "-C", str(REPO), "archive", sha], check=True, capture_output=True).stdout
