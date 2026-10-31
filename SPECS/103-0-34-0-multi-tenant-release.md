@@ -319,7 +319,19 @@ Synthesis notes recorded while building 9a:
 - `time_window_sql` now excludes NULL `start_time` by default; `include_unstarted=True` restores the 0.33 result for callers that relied on it (recovery does not use the windows).
 - `create_repository`/`create_queue` take the new arguments keyword-only so positional callers keep their meaning.
 
-### WI-9 slices 9b … WI-11
+### WI-9 slice 9b: processed_at carries its zone (done)
+- `processed_messages.processed_at` shall become `TIMESTAMPTZ` by migration `01M68QC4M0YQASJV3NP98564RB_processed_at_timestamptz.sql` with no `USING` clause, so retention comparisons with `NOW()` no longer move with the session zone or daylight saving (A15, B40); the migration is the one named exception to "additive or widening" in the stability contract.
+- `stabilize mg-up` shall print `TimeZone: <zone>` for its session on every run; while that migration is pending it shall read `pg_db_role_setting` and refuse, naming each role or database zone that differs from the session's and the `--assume-writer-timezone` flag, unless the flag names the zone the engine's writers used; with the flag it shall run the migrations with `TimeZone` pinned to that zone so the stored naive values are read as that zone's time; an unknown zone shall be refused before anything runs.
+- The upgrade runbook shall say to run `stabilize prune-processed` before `mg-up` so few rows convert, and own-DDL hosts shall be told to run the `ALTER` under their writers' zone.
+
+Synthesis notes recorded while building 9b:
+- The writers' zone is read from `pg_db_role_setting` (role, database and role-in-database entries); the session's own zone is `SHOW TimeZone`, which already reflects the mg-up role's and database's settings. The server default is therefore not listed separately: a setting that applies to mg-up's own session is not foreign.
+- The pending check is `PROCESSED_AT_MIGRATION_ID not in snapshot.applied` on the staged project, taken before the legacy takeover; a 0.33 database (legacy history or none) is therefore always checked, and a database that already converted never is, so routine `mg-up` runs are not blocked by a foreign role zone.
+- With the flag, the zone is pinned on migretti's connection string (`options=-c TimeZone=<zone>`), so the conversion statement runs under it and nothing else in the schema changes; `--assume-writer-timezone` is validated with `SELECT now() AT TIME ZONE %s` before any lock is taken.
+- The refusal test builds the pre-conversion schema with migretti from the shipped files minus the new one, so it needs no old runner; it pins the read of a naive `2026-01-01 12:00:00` as 03:00 UTC under Asia/Tokyo.
+- `mg-up` gained no `--through` flag in WI-2; the plan's mention of it stays unimplemented and is not needed for this slice.
+
+### WI-9 slices 9c … WI-11
 Specified when each item starts; the plan file holds the design.
 
 ### WI-2 slice 2: rule 1 column lists (done)

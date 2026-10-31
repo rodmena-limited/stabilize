@@ -34,6 +34,14 @@ def main() -> None:
         help="How long to wait for another mg-up on the same database (default 900)",
     )
     up_parser.add_argument(
+        "--assume-writer-timezone",
+        metavar="ZONE",
+        help=(
+            "The TimeZone the engine processes wrote processed_at in; needed once, for the TIMESTAMPTZ "
+            "conversion, when a role or database setting names another zone"
+        ),
+    )
+    up_parser.add_argument(
         "--history-schema",
         metavar="SCHEMA",
         help="Keep stabilize's migretti history in this schema, apart from the target schema's own",
@@ -239,6 +247,7 @@ def main() -> None:
                 lock_timeout=args.lock_timeout,
                 history_schema=args.history_schema,
                 config_path=args.config,
+                assume_writer_timezone=args.assume_writer_timezone,
             )
         except MigrationsNotFoundError as exc:
             print(exc, file=sys.stderr)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +32,12 @@ from stabilize.cli.legacy_history import (
     TakeoverRefusedError,
     check_history,
     plan_takeover,
+)
+from stabilize.cli.migrate_zone import (
+    PROCESSED_AT_MIGRATION_ID,
+    ZoneRefusedError,
+    conversion_timezone,
+    with_timezone,
 )
 from stabilize.cli.migrations import get_migration_files, migration_id, migration_text, migretti_checksum
 from stabilize.redaction import redact_db_url, redact_text
@@ -254,6 +260,7 @@ def mg_up(
     lock_timeout: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
     history_schema: str | None = None,
     config_path: Path | None = None,
+    assume_writer_timezone: str | None = None,
 ) -> None:
     """Apply pending migrations with migretti, first handing over any history migretti does not hold."""
     psycopg = import_psycopg()
@@ -281,12 +288,19 @@ def mg_up(
                     f"its tables are in {run.layout.target}"
                 )
             with runner.staged(run.files) as workdir:
+                state = runner.snapshot(workdir, run.conninfo)
+                pending = (
+                    PROCESSED_AT_MIGRATION_ID in run.shipped_ids and PROCESSED_AT_MIGRATION_ID not in state.applied
+                )
+                zone = conversion_timezone(conn, pending, assume_writer_timezone)
+                if zone is not None:
+                    run = replace(run, conninfo=with_timezone(run.conninfo, zone))
                 _take_over(conn, run, workdir)
                 print("Checking applied migrations against the shipped files: mg verify", flush=True)
                 runner.run(["verify"], workdir, run.conninfo)
                 print("Applying pending migrations: mg apply", flush=True)
                 runner.run(["apply", "--yes"], workdir, run.conninfo)
-    except (TakeoverRefusedError, AdoptionRefusedError) as e:
+    except (TakeoverRefusedError, AdoptionRefusedError, ZoneRefusedError) as e:
         print(f"Error: {e}")
         sys.exit(1)
     except runner.MigrettiFailedError as e:

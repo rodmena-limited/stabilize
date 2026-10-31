@@ -346,6 +346,16 @@ the ``HandlerConfig`` the processor ran with when the workflow started.
 Upgrading to 0.34
 -----------------
 
+Run ``stabilize prune-processed`` before ``mg-up``. One migration rewrites every row of
+``processed_messages``, and the fewer rows there are the shorter the lock. That migration
+changes ``processed_at`` from ``TIMESTAMP`` to ``TIMESTAMPTZ`` without a ``USING`` clause.
+PostgreSQL therefore reads the stored values in the session's zone. ``mg-up`` prints its zone
+(``TimeZone: UTC``) and refuses to convert while a role or database setting names another
+zone, because the engine processes may have written under it. Pass
+``--assume-writer-timezone <zone>`` naming the zone those processes used and the conversion
+runs under it. A host that owns its DDL sets ``TimeZone`` to its writers' zone and then runs
+the same ``ALTER TABLE`` itself.
+
 Stop every engine process first. A 0.33 process kept running across ``mg-up`` fails
 its next read, because the shape of the rows it prepared changed under it. Start the
 processes again only after ``mg-up`` prints OK.

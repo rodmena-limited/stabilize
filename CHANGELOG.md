@@ -310,6 +310,13 @@ host's own migretti history, now upgrade with no change to the command.
 - **The factories tell the truth (B39).** `create_repository` pointed at a `stabilize migrate`
   command that does not exist, and `create_queue` said messages past `max_attempts` are
   dropped. They go to the dead-letter queue.
+- **`processed_messages.processed_at` is `TIMESTAMPTZ` (B40).** It was `TIMESTAMP` compared with
+  `NOW()`, so the retention window moved with the session zone and with daylight saving.
+  Migration `01M68QC4M0YQASJV3NP98564RB_processed_at_timestamptz.sql` changes the type without a `USING` clause,
+  which reads the stored values in the session's zone. `mg-up` prints its zone and, while the
+  change is pending, refuses when a role or database setting names another zone unless
+  `--assume-writer-timezone <zone>` says which one the engine's processes wrote in. This is the
+  one type change in 0.34 and the named exception to "additive or widening".
 - **Recovery ages a workflow by its activity, not by its start (B21).** A run started 30
   hours ago whose task row changed five minutes ago was never recovered, because the only
   clock was `start_time`. `pipeline_executions`, `stage_executions` and `task_executions`
