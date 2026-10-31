@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.34.0] - Unreleased
+## [0.34.0] - 2026-10-31
 
 The multi-tenant release (#103). It also carries everything prepared for 0.33.3, which was
 never published: the fixes for #97, #98 and #99 and the pool features Casebound asked for
