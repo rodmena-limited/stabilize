@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 class PostgresSnapshotsMixin:
     tenant: str
+    _borrow: Any
     """Mixin providing snapshot save and retrieval methods."""
 
     if TYPE_CHECKING:
@@ -37,7 +38,7 @@ class PostgresSnapshotsMixin:
         state: dict[str, Any],
     ) -> None:
         """Save a snapshot of entity state."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 state_json = json.dumps(state, default=str)
                 state_hash = hashlib.sha256(json.dumps(state, sort_keys=True, default=str).encode()).hexdigest()
@@ -87,7 +88,7 @@ class PostgresSnapshotsMixin:
         entity_id: str,
     ) -> dict[str, Any] | None:
         """Get the latest snapshot for an entity."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""

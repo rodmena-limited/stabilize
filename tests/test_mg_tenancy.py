@@ -102,6 +102,7 @@ def test_disable_refuses_a_schema_with_rows(db: str) -> None:
     assert stabilize("mg-up", "--db-url", db).returncode == 0
     assert stabilize("mg-tenancy", "enable", "--db-url", db).returncode == 0
     with psycopg.connect(db, autocommit=True) as conn:
+        conn.execute("SELECT set_config('stabilize.tenant', 'acme', false)")
         conn.execute(
             "INSERT INTO pipeline_executions (id, type, application, status, stabilize_tenant) "
             "VALUES ('01JLIVEPROBE0000000000RUN2', 'PIPELINE', 'app', 'RUNNING', 'acme')"

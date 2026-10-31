@@ -306,3 +306,33 @@ reports whether it has it. Never put a row-level security policy on that table. 
 monitor takes ``--tenant NAME`` or ``--all-tenants``. In tenancy mode one of them is
 required.
 
+The fence
+~~~~~~~~~
+
+In tenancy mode the engine sets the PostgreSQL setting ``stabilize.tenant`` on every
+transaction it runs, with ``set_config(..., true)``, and ``mg-tenancy enable`` installs
+a trigger named ``stabilize_tenant_fence`` on every engine table. The trigger refuses a
+write when the setting is empty (SQLSTATE ``ST001``), when it differs from the row's
+tenant (``ST002``), and when it is ``'*'`` from a role that is not a member of the table
+owner (``ST003``). ``enable`` also adds the constraint ``stabilize_tenant_nonempty`` and
+drops the ``''`` default. After that a 0.33 process or a hand-written insert cannot add
+a row without a tenant. The engine refuses a connection that already carries
+``stabilize.tenant`` from a hook, ``ALTER ROLE`` or ``ALTER DATABASE``, and refuses a
+connection in autocommit mode, because the setting is transaction-local.
+
+Your own writes to engine tables, for example a data fix, run as the table owner with
+``SET LOCAL stabilize.tenant = '*'`` or as the tenant with ``SET LOCAL stabilize.tenant
+= 'acme'``. A policy of your own can reference the same setting:
+
+.. code-block:: sql
+
+    CREATE POLICY tenant_rows ON stage_executions AS RESTRICTIVE
+        USING (stabilize_tenant = current_setting('stabilize.tenant', true)
+               OR (current_setting('stabilize.tenant', true) = '*'
+                   AND stabilize_is_table_owner('stage_executions'::regclass)));
+
+``PoolOptions(tenant_setting="app.current_tenant")`` makes the engine set your own
+setting to the tenant on each transaction as well, for policies written against it.
+``enable`` refuses a schema with ``FORCE ROW LEVEL SECURITY`` on an engine table and a
+database or role that already sets ``stabilize.tenant``.
+

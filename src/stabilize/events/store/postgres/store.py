@@ -10,6 +10,9 @@ from __future__ import annotations
 import logging
 import threading
 import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Any
 
 from stabilize.events.store.interface import EventStore
 from stabilize.events.store.postgres.events import PostgresEventsMixin
@@ -30,7 +33,7 @@ from stabilize.events.store.postgres.snapshots import PostgresSnapshotsMixin
 from stabilize.events.store.postgres.subscriptions import PostgresSubscriptionsMixin
 from stabilize.persistence.connection import get_connection_manager, release_pool_once
 from stabilize.persistence.pool_options import PoolOptions, with_schema
-from stabilize.persistence.tenancy import check_mode_admits, postgres_mode, validate_tenant
+from stabilize.persistence.tenancy import ModeReader, armed, check_mode_admits, postgres_mode, validate_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +108,8 @@ class PostgresEventStore(
         self._manager = get_connection_manager()
         resolved = with_schema(options, schema, connection_string)
         self._pool = self._manager.get_postgres_pool(connection_string, options=resolved)
+        self._tenant_setting = resolved.tenant_setting if resolved is not None else None
+        self._mode = ModeReader(postgres_mode)
         self._lock = threading.Lock()
         self._schema = schema
 
@@ -124,6 +129,12 @@ class PostgresEventStore(
         except BaseException:
             release_pool_once(self, self._manager, self._pool)
             raise
+
+    @contextmanager
+    def _borrow(self) -> Iterator[Any]:
+        """Every engine borrow: the pool's connection, armed for the tenant and admitted against the mode."""
+        with self._pool.connection() as conn, armed(conn, self.tenant, self._tenant_setting, self._mode):
+            yield conn
 
     def _verify_schema(self) -> None:
         """Refuse at construction when the schema is absent or out of date.

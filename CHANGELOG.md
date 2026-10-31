@@ -52,6 +52,19 @@ host's own migretti history, now upgrade with no change to the command.
   tenant owns, raises `TenantMismatchError`.
 - **`stabilize monitor --tenant NAME` and `--all-tenants`.** In tenancy mode one of them
   is required. In single-tenant mode the monitor shows the install's own rows.
+- **The fence.** The engine sets `stabilize.tenant` on every transaction with
+  `set_config(..., true)`, re-arms it after a commit or rollback inside a borrow, refuses
+  a connection that already carries the setting, and refuses autocommit connections.
+  `mg-tenancy enable` installs the trigger `stabilize_tenant_fence` on every engine
+  table (SQLSTATE `ST001` for an unset tenant, `ST002` for a mismatch, `ST003` for `'*'`
+  from a non-owner), the constraint `stabilize_tenant_nonempty`, and drops the `''`
+  default; `disable` removes them. `enable` refuses `FORCE ROW LEVEL SECURITY` on an
+  engine table and a database or role that presets `stabilize.tenant`. With
+  `PoolOptions(tenant_setting=...)` the engine also sets the host's own setting per
+  transaction and refuses a foreign value found on the connection. The arm is one
+  statement that also reads the mode record. In tenancy mode it costs one statement per
+  engine transaction. In single-tenant mode without a `tenant_setting` the engine skips
+  it and re-reads the mode record at most every 5 s.
 
 ### Fixed
 

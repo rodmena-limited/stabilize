@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 class PostgresSubscriptionsMixin:
     tenant: str
+    _borrow: Any
     """Mixin providing durable subscription CRUD methods."""
 
     if TYPE_CHECKING:
@@ -35,7 +36,7 @@ class PostgresSubscriptionsMixin:
         webhook_url: str | None = None,
     ) -> None:
         """Save or update a durable subscription."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 event_types_arr = [et.value for et in event_types] if event_types else None
 
@@ -76,7 +77,7 @@ class PostgresSubscriptionsMixin:
 
     def get_subscription(self, subscription_id: str) -> dict[str, Any] | None:
         """Get a durable subscription by ID."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"SELECT {_SUBSCRIPTIONS} FROM event_subscriptions "
@@ -121,7 +122,7 @@ class PostgresSubscriptionsMixin:
 
     def update_subscription_sequence(self, subscription_id: str, last_sequence: int) -> None:
         """Update the last processed sequence for a subscription."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -140,7 +141,7 @@ class PostgresSubscriptionsMixin:
         last_commit_cursor: str,
     ) -> None:
         """Persist both delivery positions for a subscription."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -161,7 +162,7 @@ class PostgresSubscriptionsMixin:
 
     def delete_subscription(self, subscription_id: str) -> None:
         """Delete a durable subscription."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "DELETE FROM event_subscriptions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
@@ -171,7 +172,7 @@ class PostgresSubscriptionsMixin:
 
     def list_subscriptions(self) -> list[dict[str, Any]]:
         """List all durable subscriptions."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT id, last_sequence FROM event_subscriptions WHERE stabilize_tenant = %(tenant)s",

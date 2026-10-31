@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from psycopg_pool import ConnectionPool
 
 
-from stabilize.persistence.borrow_hook import borrow_hook_pool_class
+from stabilize.persistence.borrow_hook import borrow_hook_pool_class, engine_connection_class
 from stabilize.persistence.pool_options import DEFAULT_POOL_OPTIONS, PoolOptions
 
 
@@ -150,6 +150,7 @@ class ConnectionManager(metaclass=SingletonMeta):
                     "max_size": resolved.max_size,
                     "open": True,
                     "kwargs": kwargs,
+                    "connection_class": engine_connection_class(),
                 }
                 if resolved.acquire_timeout is not None:
                     pool_kwargs["timeout"] = resolved.acquire_timeout

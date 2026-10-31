@@ -71,14 +71,115 @@ def _status(conn: Any, schema: str) -> None:
     print(f"enabled_by: {enabled_by or '-'}")
 
 
-def _flip(conn: Any, wanted: str) -> None:
+FENCE_FUNCTION = """
+CREATE OR REPLACE FUNCTION "{schema}".stabilize_tenant_fence() RETURNS trigger
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog, pg_temp AS $fence$
+DECLARE
+    g text := current_setting('stabilize.tenant', true);
+    owner oid;
+BEGIN
+    IF g IS NULL OR g = '' THEN
+        RAISE EXCEPTION USING ERRCODE = 'ST001',
+            MESSAGE = 'stabilize.tenant is not set on this connection; stabilize 0.34 sets it per transaction';
+    END IF;
+    IF g = '*' THEN
+        SELECT relowner INTO owner FROM pg_class WHERE oid = TG_RELID;
+        IF NOT pg_has_role(current_user, owner, 'MEMBER') THEN
+            RAISE EXCEPTION USING ERRCODE = 'ST003',
+                MESSAGE = 'stabilize.tenant = ''*'' is allowed only to members of the table owner';
+        END IF;
+        IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+        RETURN NEW;
+    END IF;
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.stabilize_tenant IS DISTINCT FROM g THEN
+            RAISE EXCEPTION USING ERRCODE = 'ST002',
+                MESSAGE = 'row tenant ' || coalesce(NEW.stabilize_tenant, '<null>')
+                    || ' does not match stabilize.tenant ' || g;
+        END IF;
+        RETURN NEW;
+    ELSIF TG_OP = 'UPDATE' THEN
+        IF OLD.stabilize_tenant IS DISTINCT FROM g OR NEW.stabilize_tenant IS DISTINCT FROM OLD.stabilize_tenant THEN
+            RAISE EXCEPTION USING ERRCODE = 'ST002',
+                MESSAGE = 'row tenant ' || coalesce(OLD.stabilize_tenant, '<null>') || ' / '
+                    || coalesce(NEW.stabilize_tenant, '<null>') || ' does not match stabilize.tenant ' || g;
+        END IF;
+        RETURN NEW;
+    END IF;
+    IF OLD.stabilize_tenant IS DISTINCT FROM g THEN
+        RAISE EXCEPTION USING ERRCODE = 'ST002',
+            MESSAGE = 'row tenant ' || coalesce(OLD.stabilize_tenant, '<null>')
+                || ' does not match stabilize.tenant ' || g;
+    END IF;
+    RETURN OLD;
+END
+$fence$;
+"""
+
+
+def _refuse_force_rls(conn: Any, schema: str, tables: list[str]) -> None:
+    rows = conn.execute(
+        "SELECT c.relname, coalesce(array_agg(p.policyname) FILTER (WHERE p.policyname IS NOT NULL), '{}') "
+        "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "LEFT JOIN pg_policies p ON p.schemaname = n.nspname AND p.tablename = c.relname "
+        "WHERE n.nspname = %s AND c.relname = ANY(%s) AND c.relforcerowsecurity "
+        "GROUP BY c.relname ORDER BY c.relname",
+        (schema, tables),
+    ).fetchall()
+    if rows:
+        detail = "; ".join(f"{r[0]} (policies: {', '.join(r[1]) or 'none'})" for r in rows)
+        print(
+            f"Error: FORCE ROW LEVEL SECURITY is set on engine tables, and the fence cannot be installed under "
+            f"it: {detail}. Run ALTER TABLE ... NO FORCE ROW LEVEL SECURITY first."
+        )
+        sys.exit(1)
+
+
+def _refuse_preset_guc(conn: Any) -> None:
+    rows = conn.execute(
+        "SELECT coalesce(d.datname, '<all databases>'), coalesce(r.rolname, '<all roles>'), s.cfg "
+        "FROM pg_db_role_setting rs CROSS JOIN LATERAL unnest(rs.setconfig) AS s(cfg) "
+        "LEFT JOIN pg_database d ON d.oid = rs.setdatabase LEFT JOIN pg_roles r ON r.oid = rs.setrole "
+        "WHERE s.cfg LIKE %s",
+        ("stabilize.tenant=%",),
+    ).fetchall()
+    current = conn.execute("SELECT coalesce(current_setting('stabilize.tenant', true), '')").fetchone()[0]
+    if rows or current:
+        where = "; ".join(f"database {r[0]}, role {r[1]}: {r[2]}" for r in rows)
+        if current:
+            where = (where + "; " if where else "") + f"this connection: stabilize.tenant = {current!r}"
+        print(
+            f"Error: stabilize.tenant is already set outside the engine ({where}). The fence requires the "
+            "engine to be the only writer of that setting; RESET it (ALTER DATABASE ... RESET stabilize.tenant, "
+            "ALTER ROLE ... RESET stabilize.tenant) and retry."
+        )
+        sys.exit(1)
+
+
+def _flip(conn: Any, wanted: str, schema: str, tables: list[str]) -> None:
     with conn.transaction():
         if wanted == MODE_TENANCY:
+            conn.execute(FENCE_FUNCTION.format(schema=schema))
+            for table in tables:
+                conn.execute(
+                    f'CREATE TRIGGER stabilize_tenant_fence BEFORE INSERT OR UPDATE OR DELETE ON "{schema}"."{table}" '
+                    f'FOR EACH ROW EXECUTE FUNCTION "{schema}".stabilize_tenant_fence()'
+                )
+                conn.execute(
+                    f'ALTER TABLE "{schema}"."{table}" ADD CONSTRAINT stabilize_tenant_nonempty '
+                    "CHECK (stabilize_tenant <> '')"
+                )
+                conn.execute(f'ALTER TABLE "{schema}"."{table}" ALTER COLUMN stabilize_tenant DROP DEFAULT')
             conn.execute(
                 f"UPDATE {MODE_TABLE} SET mode = %s, enabled_at = now(), enabled_by = current_user WHERE id = 1",
                 (wanted,),
             )
         else:
+            for table in tables:
+                conn.execute(f'DROP TRIGGER IF EXISTS stabilize_tenant_fence ON "{schema}"."{table}"')
+                conn.execute(f'ALTER TABLE "{schema}"."{table}" DROP CONSTRAINT IF EXISTS stabilize_tenant_nonempty')
+                conn.execute(f'ALTER TABLE "{schema}"."{table}" ALTER COLUMN stabilize_tenant SET DEFAULT \'\'')
+            conn.execute(f'DROP FUNCTION IF EXISTS "{schema}".stabilize_tenant_fence()')
             conn.execute(
                 f"UPDATE {MODE_TABLE} SET mode = %s, enabled_at = NULL, enabled_by = NULL WHERE id = 1", (wanted,)
             )
@@ -192,7 +293,8 @@ def mg_tenancy(
             if record[0] == wanted:
                 print(f"OK: schema {target} is already in {wanted} mode; nothing changed")
                 return
-            counts = _row_counts(conn, target, _tables_to_check(conn, target, queue_tables or []))
+            tables = _tables_to_check(conn, target, queue_tables or [])
+            counts = _row_counts(conn, target, tables)
             busy = {table: n for table, n in counts.items() if n}
             if busy:
                 detail = ", ".join(f"{table} ({n} row{'s' if n != 1 else ''})" for table, n in busy.items())
@@ -201,7 +303,10 @@ def mg_tenancy(
                     "Tenancy mode is enabled on a fresh schema; export, recreate and import to convert data."
                 )
                 sys.exit(1)
-            _flip(conn, wanted)
+            if wanted == MODE_TENANCY:
+                _refuse_force_rls(conn, target, tables)
+                _refuse_preset_guc(conn)
+            _flip(conn, wanted, target, tables)
             print(f"OK: schema {target} is now in {wanted} mode. {STOP_RULE}")
     except (TakeoverRefusedError, AdoptionRefusedError, runner.MigrettiFailedError) as e:
         print(f"Error: {e}")

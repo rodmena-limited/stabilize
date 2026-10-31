@@ -20,7 +20,7 @@ from typing import Any
 from stabilize.persistence.borrow import EngineBorrower
 from stabilize.persistence.connection import release_pool_once
 from stabilize.persistence.pool_options import PoolOptions, with_schema
-from stabilize.persistence.tenancy import ModeReader, postgres_mode, validate_tenant
+from stabilize.persistence.tenancy import ModeReader, armed, postgres_mode, validate_tenant
 from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.interface import Queue
 from stabilize.queue.message_ids import delivery_key, own_row_ids, row_id
@@ -89,6 +89,7 @@ class PostgresQueue(Queue):
         self._pool_options = with_schema(options, schema, connection_string)
         self._manager = get_connection_manager()
         self._pool = self._manager.get_postgres_pool(connection_string, options=self._pool_options)
+        self._tenant_setting = self._pool_options.tenant_setting if self._pool_options is not None else None
         self._mode = ModeReader(postgres_mode)
         self._engine = EngineBorrower(self._borrow, self.tenant)
         self._pending: dict[int, dict[str, Any]] = {}
@@ -104,8 +105,7 @@ class PostgresQueue(Queue):
     @contextmanager
     def _borrow(self) -> Iterator[Any]:
         """Every engine borrow: the pool's connection, admitted against the schema's tenancy mode."""
-        with self._pool.connection() as conn:
-            self._mode.admit(conn, self.tenant)
+        with self._pool.connection() as conn, armed(conn, self.tenant, self._tenant_setting, self._mode):
             yield conn
 
     def close(self) -> None:

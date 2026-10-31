@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
 class PostgresEventsMixin:
     tenant: str
+    _borrow: Any
     """Mixin providing event append, query, and retrieval methods."""
 
     if TYPE_CHECKING:
@@ -91,7 +92,7 @@ class PostgresEventsMixin:
             with connection.cursor() as cur:
                 return _do_append(cur)
         else:
-            with self._pool.connection() as conn:
+            with self._borrow() as conn:
                 with conn.cursor() as cur:
                     result = _do_append(cur)
                 conn.commit()
@@ -146,7 +147,7 @@ class PostgresEventsMixin:
 
         sql: Any = " ".join(sql_parts)
 
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, params)
                 for row in cur.fetchall():
@@ -159,7 +160,7 @@ class PostgresEventsMixin:
         from_version: int = 0,
     ) -> list[Event]:
         """Get all events for a specific entity."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -184,7 +185,7 @@ class PostgresEventsMixin:
         from_sequence: int = 0,
     ) -> list[Event]:
         """Get all events for a workflow execution."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -199,7 +200,7 @@ class PostgresEventsMixin:
 
     def get_current_sequence(self) -> int:
         """Get the current (latest) global sequence number."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT MAX(sequence) FROM events WHERE stabilize_tenant = %(tenant)s", {"tenant": self.tenant}
@@ -216,7 +217,7 @@ class PostgresEventsMixin:
         limit: int = 1000,
     ) -> list[Event]:
         """Get events since a sequence number."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -245,7 +246,7 @@ class PostgresEventsMixin:
         Events written before the commit_xid column exists carry NULL and are
         coalesced to '0'::xid8, which keeps them deliverable.
         """
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT pg_snapshot_xmin(pg_current_snapshot())::text AS wm")
                 row = cur.fetchone()
@@ -269,7 +270,7 @@ class PostgresEventsMixin:
 
     def get_event_by_id(self, event_id: str) -> Event | None:
         """Get a single event by its ID."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"SELECT {_EVENTS} FROM events WHERE event_id = %(event_id)s AND stabilize_tenant = %(tenant)s",
@@ -280,7 +281,7 @@ class PostgresEventsMixin:
 
     def count_events(self, query: EventQuery | None = None) -> int:
         """Count events matching query."""
-        with self._pool.connection() as conn:
+        with self._borrow() as conn:
             with conn.cursor() as cur:
                 if query is None:
                     cur.execute(

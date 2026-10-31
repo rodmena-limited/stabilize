@@ -64,6 +64,7 @@ from stabilize.persistence.store.owned_rows import WORKFLOW_OWNED_ROWS
 from stabilize.persistence.task_state import capture, commit_captured, restore_versions, versions
 from stabilize.persistence.tenancy import (
     ModeReader,
+    armed,
     postgres_mode,
     refuse_foreign_row,
     require_same_tenant,
@@ -116,14 +117,14 @@ class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, Workf
         self.schema = schema
         resolved_options = with_schema(options, schema, connection_string)
         self._pool = self._manager.get_postgres_pool(connection_string, options=resolved_options)
+        self._tenant_setting = resolved_options.tenant_setting if resolved_options is not None else None
         self._mode = ModeReader(postgres_mode)
         self._engine = EngineBorrower(self._borrow, self.tenant)
 
     @contextmanager
     def _borrow(self) -> Iterator[Any]:
         """Every engine borrow: the pool's connection, admitted against the schema's tenancy mode."""
-        with self._pool.connection() as conn:
-            self._mode.admit(conn, self.tenant)
+        with self._pool.connection() as conn, armed(conn, self.tenant, self._tenant_setting, self._mode):
             yield conn
 
     def close(self) -> None:

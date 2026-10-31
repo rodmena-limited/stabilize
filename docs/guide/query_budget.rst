@@ -66,3 +66,22 @@ after the task has run, because a cancel or a signal can land while it runs.
   path that does not mark still gets the processor's mark.
 - ``process_all`` counted the queue before every message. It now counts only
   when no message was ready, and still stops only when the queue is empty.
+
+Tenancy mode (0.34.0)
+---------------------
+
+In tenancy mode the engine sets ``stabilize.tenant`` before the first statement of
+every transaction it runs. The arm is one statement, and it also reads the mode record.
+The budget test measured the same workflow in both modes.
+
+=================  ===========  ============
+Statements         single mode  tenancy mode
+=================  ===========  ============
+one stage          87           135
+each extra stage   67           99
+=================  ===========  ============
+
+A one-stage workflow therefore runs 48 engine transactions. Single-tenant installs skip
+the arm while the mode they last read is ``single`` and younger than 5 s. A
+``PoolOptions(tenant_setting=...)`` brings the per-transaction statement back in
+single-tenant mode, because the host's setting has to be set on each transaction.

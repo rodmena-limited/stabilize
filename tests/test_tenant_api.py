@@ -264,9 +264,14 @@ STORE_OPERATIONS: dict[str, Any] = {
     "buffer_signal": lambda s: s.buffer_signal(SOME_ID, "a", "go", {}),
     "pending_signal_count": lambda s: s.pending_signal_count(SOME_ID, "a"),
     "discard_signals": lambda s: s.discard_signals(SOME_ID, "a"),
-    "transaction": lambda s: s.transaction().__enter__(),
+    "transaction": lambda s: _in_transaction(s),
     "lease_acquire": lambda s: _lease(s).acquire("t"),
 }
+
+
+def _in_transaction(store: Any) -> Any:
+    with store.transaction() as txn:
+        return txn.workflow_status(SOME_ID)
 
 
 def _lease(store: Any) -> Any:
