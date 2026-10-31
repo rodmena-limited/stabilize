@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.34.2] - 2026-10-31
+
+### Fixed
+
+- **An unmigrated database is refused with the instruction, not a relation name (#105).** On a
+  database built by a release before 0.34.0, or never migrated, the first statement of every
+  engine transaction failed with psycopg's `relation "stabilize_tenancy" does not exist`. It now
+  raises `TenancyModeError`: "stabilize_tenancy does not exist in this schema; the database was
+  built by a release before 0.34.0 or never migrated: stop every engine process and run stabilize
+  mg-up". `tests/test_mg_up_engine_tables.py`.
+- **The upgrade tests run.** The suite's guard for published old runners asked the CLI for
+  `--version`, a flag no release has, so the ten tests that upgrade databases built by published
+  0.33.1 and 0.32.1 had never run and reported "skipped". The guard now reads the version and the
+  import location from the runner's own interpreter. With `STABILIZE_OLD_RUNNERS` provided those
+  ten tests ran against the published wheels for the first time and found the defect above.
+  `tests/test_gate_hygiene.py`.
+- **The engine checks the bodies of its PostgreSQL functions (#105, Casebound's caveat).** The
+  first-use schema check compared `stabilize_tenant_fence()` and `stabilize_is_table_owner(regclass)`
+  by presence only. It now reads `pg_proc` and refuses, naming the function and the remedy, when the
+  body differs from what mg-tenancy or the tenant_key migration installs, when the function is
+  SECURITY DEFINER, or when it lacks `SET search_path = pg_catalog, pg_temp`. In tenancy mode both
+  functions are required; in single-tenant mode the owner function is checked if present. SQLite is
+  not covered. `tests/test_function_bodies.py`.
+
+### Added
+
+- **`stabilize --version`** prints `stabilize <version>` and exits 0. `tests/test_cli_version.py`.
+
 ## [0.34.1] - 2026-10-31
 
 ### Fixed

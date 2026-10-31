@@ -65,7 +65,7 @@ def test_mg_up_refuses_a_foreign_writer_zone_unless_told_which_to_assume(
             assert _column_type(url) == "timestamp without time zone"
             conn.execute(f'CREATE ROLE "{role}"')
             database = conn.info.dbname
-            conn.execute(f"ALTER ROLE \"{role}\" IN DATABASE \"{database}\" SET TimeZone = 'Asia/Tokyo'")
+            conn.execute(f'ALTER ROLE "{role}" IN DATABASE "{database}" SET TimeZone = \'Asia/Tokyo\'')
             conn.execute(
                 "INSERT INTO processed_messages "
                 "(message_id, processed_at, handler_type, execution_id, stabilize_tenant) "

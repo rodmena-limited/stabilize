@@ -102,26 +102,40 @@ def import_location(python: str, env: dict[str, str]) -> str:
     return result.stdout.strip() or f"<no stabilize: {result.stderr.strip()[:200]}>"
 
 
+def runner_report(python: str, env: dict[str, str]) -> tuple[str, str]:
+    """The version and import location of the stabilize that *python* imports; an empty version means none."""
+    result = subprocess.run(
+        [python, "-c", "import stabilize; print(stabilize.__version__); print(stabilize.__file__)"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd="/",
+        timeout=120,
+    )
+    lines = [line.strip() for line in result.stdout.strip().splitlines()]
+    if result.returncode != 0 or len(lines) < 2 or not re.fullmatch(r"\d+\.\d+\.\d+[A-Za-z0-9.+-]*", lines[0]):
+        return "", f"<no stabilize: {(result.stdout + result.stderr).strip()[:200]}>"
+    return lines[0], lines[1]
+
+
 def assert_own_runner(binary: str) -> str:
     """Confirm once that *binary* is a published stabilize importing its own site-packages, not this checkout."""
     if binary in _own_runners:
         return _own_runners[binary]
     from stabilize import __version__
 
-    env = runner_env()
-    version = subprocess.run([binary, "--version"], capture_output=True, text=True, env=env, timeout=120)
-    printed = (version.stdout + version.stderr).strip()
-    match = re.search(r"\d+\.\d+\.\d+[A-Za-z0-9.+-]*", printed)
-    if version.returncode != 0 or match is None:
-        raise RuntimeError(f"{binary} --version printed no version: {printed[:200]!r}")
-    if match.group(0) == __version__:
-        raise RuntimeError(f"{binary} reports version {__version__}, this checkout's own; it is not a published runner")
     python = Path(binary).parent / "python"
-    where = import_location(str(python), env) if python.exists() else "<no interpreter next to the runner>"
-    if where.startswith(str(REPO / "src")) or where.startswith("<"):
+    if not python.exists():
+        raise RuntimeError(f"{binary} has no interpreter next to it; a published runner lives in its own venv")
+    version, where = runner_report(str(python), runner_env())
+    if not version:
+        raise RuntimeError(f"{python} imports no stabilize: {where}")
+    if version == __version__:
+        raise RuntimeError(f"{binary} reports version {__version__}, this checkout's own; it is not a published runner")
+    if where.startswith(str(REPO / "src")):
         raise RuntimeError(f"{binary} imports stabilize from {where}, not from its own site-packages")
-    _own_runners[binary] = match.group(0)
-    return match.group(0)
+    _own_runners[binary] = version
+    return version
 
 
 def old_stabilize(

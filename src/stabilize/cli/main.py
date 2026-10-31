@@ -6,6 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from stabilize import __version__
 from stabilize.cli.commands import mg_check_grants, mg_status, mg_up, monitor, prompt, prune_signals
 from stabilize.cli.migrations import MigrationsNotFoundError
 from stabilize.cli.queue_table_cli import mg_queue_table
@@ -18,6 +19,7 @@ def main() -> None:
         prog="stabilize",
         description="Stabilize - Workflow Engine CLI",
     )
+    parser.add_argument("--version", action="version", version=f"stabilize {__version__}")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # mg-up command

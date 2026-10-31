@@ -4,13 +4,21 @@ from __future__ import annotations
 
 import os
 import stat
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tests.mg_support import assert_own_runner, import_location, old_stabilize, require_gate_cluster, runner_env
+from tests.mg_support import (
+    assert_own_runner,
+    import_location,
+    old_runner,
+    old_stabilize,
+    require_gate_cluster,
+    runner_env,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -84,32 +92,50 @@ def test_a_planted_pythonpath_is_seen_raw_and_dropped_clean(tmp_path: Path, monk
     assert not clean.startswith(str(planted)), "the planted package survived the cleaned environment"
 
 
-def _shim(tmp_path: Path, name: str, python_prints: str, version: str = "stabilize 0.33.1") -> str:
+def _shim(tmp_path: Path, name: str, location: str, version: str = "0.33.1") -> str:
+    """A runner shaped like a published one: its python reports version and location, its CLI has no --version."""
     bindir = tmp_path / name / "bin"
     bindir.mkdir(parents=True)
     python = bindir / "python"
-    python.write_text(f"#!/bin/sh\nprintf '%s\\n' '{python_prints}'\n")
+    python.write_text(f"#!/bin/sh\nprintf '%s\\n%s\\n' '{version}' '{location}'\n")
     python.chmod(python.stat().st_mode | stat.S_IEXEC)
     binary = bindir / "stabilize"
-    binary.write_text(f"#!/bin/sh\nprintf '%s\\n' '{version}'\n")
+    binary.write_text(
+        '#!/bin/sh\nif [ "$1" = "--version" ]; then\n'
+        "  printf 'stabilize: error: unrecognized arguments: --version\\n' >&2; exit 2\nfi\n"
+        "printf 'ok %s\\n' \"$*\"\n"
+    )
     binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
     return str(binary)
 
 
 def test_an_old_runner_must_import_its_own_stabilize(tmp_path: Path) -> None:
     own = _shim(tmp_path, "own", "/opt/old/lib/python3.12/site-packages/stabilize/__init__.py")
-    assert_own_runner(own)
-    result = old_stabilize(own, "--version")
-    assert result.returncode == 0 and "0.33.1" in result.stdout
+    assert assert_own_runner(own) == "0.33.1"
+    result = old_stabilize(own, "mg-status")
+    assert result.returncode == 0 and "ok mg-status" in result.stdout
 
     checkout = _shim(tmp_path, "checkout", str(REPO / "src" / "stabilize" / "__init__.py"))
     with pytest.raises(RuntimeError, match="imports stabilize from"):
         assert_own_runner(checkout)
     with pytest.raises(RuntimeError, match="imports stabilize from"):
-        old_stabilize(checkout, "--version")
+        old_stabilize(checkout, "mg-status")
 
     from stabilize import __version__
 
-    same = _shim(tmp_path, "same", "/opt/old/site-packages/stabilize/__init__.py", version=f"stabilize {__version__}")
+    same = _shim(tmp_path, "same", "/opt/old/site-packages/stabilize/__init__.py", version=__version__)
     with pytest.raises(RuntimeError, match="version"):
         assert_own_runner(same)
+
+
+def test_the_guard_needs_no_version_flag_because_the_cli_has_none(tmp_path: Path) -> None:
+    own = _shim(tmp_path, "flagless", "/opt/old/lib/python3.12/site-packages/stabilize/__init__.py")
+    probe = subprocess.run([own, "--version"], capture_output=True, text=True)
+    assert probe.returncode == 2 and "unrecognized arguments" in probe.stderr
+    assert assert_own_runner(own) == "0.33.1"
+
+
+def test_a_published_runner_passes_the_guard() -> None:
+    binary = old_runner("0.33.1")
+    assert assert_own_runner(binary) == "0.33.1"
+    assert old_stabilize(binary, "--help").returncode == 0

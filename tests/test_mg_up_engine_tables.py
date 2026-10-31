@@ -136,3 +136,18 @@ def test_task_leasing_on_an_old_database_names_mg_up_and_creates_nothing(db: str
         store.close()
     assert not relation_exists(db, "task_leases"), "task leasing created its own table at runtime"
     assert "stabilize mg-up" in refusal, f"task leasing did not name stabilize mg-up: {refusal!r}"
+
+
+def test_an_unmigrated_database_names_mg_up_from_the_first_statement(db: str) -> None:
+    from stabilize.persistence.postgres import PostgresWorkflowStore
+    from stabilize.persistence.task_lease import TaskLeaseManager
+    from stabilize.persistence.tenancy import TenancyModeError
+
+    store = PostgresWorkflowStore(connection_string=db)
+    try:
+        with pytest.raises(TenancyModeError, match="stabilize mg-up") as refusal:
+            TaskLeaseManager(store, owner="worker-a")
+    finally:
+        store.close()
+    assert "stabilize_tenancy" in str(refusal.value)
+    assert not relation_exists(db, "stabilize_tenancy"), "the engine created the mode table at runtime"

@@ -158,7 +158,13 @@ def arm_connection(conn: Any, tenant: str, setting: str | None, reader: ModeRead
             cur.execute(sql, params)
             row = cur.fetchone()
     except Exception as exc:
-        if sqlstate(exc) != "42501":
+        state = sqlstate(exc)
+        if state == "42P01":
+            raise TenancyModeError(
+                f"{MODE_TABLE} does not exist in this schema; the database was built by a release before "
+                "0.34.0 or never migrated: stop every engine process and run stabilize mg-up"
+            ) from exc
+        if state != "42501":
             raise
         role = conn.info.user
         raise TenancyModeError(

@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 from stabilize.persistence.columns import ENGINE_COLUMNS, columns
+from stabilize.persistence.function_sources import FENCE_NAME, OWNER_NAME, function_problems
 from stabilize.persistence.tenancy import MODE_TENANCY, TENANT_CHECK, TENANT_COLUMN, EngineSchemaError
 
 logger = logging.getLogger(__name__)
@@ -99,10 +100,19 @@ def check_postgres_tables(conn: Any, schema: str | None, tables: list[str], mode
             (schema, tables),
         )
         invalid = [str(r[0]) for r in cur.fetchall()]
+        cur.execute(
+            "SELECT p.proname, p.prosrc, p.prosecdef, p.proconfig FROM pg_proc p "
+            "JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = %s AND p.proname = ANY(%s)",
+            (schema, [FENCE_NAME, OWNER_NAME]),
+        )
+        functions: dict[str, dict[str, object]] = {}
+        for name, body, definer, config in cur.fetchall():
+            functions[str(name)] = {"body": str(body), "security_definer": bool(definer), "config": config}
     for name in invalid:
         logger.warning("index %s is INVALID; the planner cannot use it. Run REINDEX INDEX %s.%s", name, schema, name)
     problems: list[str] = []
     current = mode()
+    problems.extend(function_problems(functions, current == MODE_TENANCY))
     for table in tables:
         if table not in present:
             problems.append(f"table {table} does not exist; run stabilize mg-up")
