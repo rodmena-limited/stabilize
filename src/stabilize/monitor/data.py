@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -112,7 +111,9 @@ class MonitorDataFetcher:
         limit: int,
         status_filter: str,
     ) -> list[WorkflowView]:
-        """Fetch workflows efficiently using batch queries (3-query pattern)."""
+        """Fetch workflows: through the store API for one tenant, batched SQL for the every-tenant view."""
+        if self.tenant is not None:
+            return self._fetch_workflows_through_store(app_filter, limit, status_filter)
         workflows_map: dict[str, WorkflowView] = {}
         stage_ids: list[str] = []
         workflow_ids: list[str] = []
@@ -261,6 +262,69 @@ class MonitorDataFetcher:
         )
         return sorted_workflows
 
+    def _fetch_workflows_through_store(
+        self, app_filter: str | None, limit: int, status_filter: str
+    ) -> list[WorkflowView]:
+        from stabilize.persistence.store import WorkflowCriteria
+
+        statuses: set[WorkflowStatus] | None = None
+        if status_filter == "running":
+            statuses = {WorkflowStatus.RUNNING}
+        elif status_filter == "failed":
+            statuses = {WorkflowStatus.TERMINAL, WorkflowStatus.FAILED_CONTINUE, WorkflowStatus.CANCELED}
+        criteria = WorkflowCriteria(page_size=limit, statuses=statuses, include_unstarted=True)
+        if app_filter:
+            workflows = list(self.store.retrieve_by_application(app_filter, criteria))
+        else:
+            workflows = list(self.store.get_all_pending_workflows(criteria))
+        views = [self._workflow_to_view(workflow) for workflow in workflows]
+        return sorted(views, key=lambda w: (0 if w.status == WorkflowStatus.RUNNING else 1, w.start_time or 0))
+
+    def _workflow_to_view(self, workflow: Any) -> WorkflowView:
+        stages = []
+        for stage in sorted(workflow.stages, key=lambda s: (s.start_time is None, s.start_time or 0)):
+            tasks = [
+                TaskView(
+                    name=task.name,
+                    implementing_class=task.implementing_class,
+                    status=task.status,
+                    start_time=task.start_time,
+                    end_time=task.end_time,
+                    error=self._task_error(task.task_exception_details),
+                )
+                for task in sorted(stage.tasks, key=lambda t: (t.start_time is None, t.start_time or 0))
+            ]
+            stages.append(
+                StageView(
+                    ref_id=stage.ref_id,
+                    name=stage.name or "",
+                    status=stage.status,
+                    start_time=stage.start_time,
+                    end_time=stage.end_time,
+                    execution_id=workflow.id,
+                    tasks=tasks,
+                    db_id=stage.id,
+                )
+            )
+        return WorkflowView(
+            id=workflow.id,
+            application=workflow.application,
+            name=workflow.name or "",
+            status=workflow.status,
+            start_time=workflow.start_time,
+            end_time=workflow.end_time,
+            stages=stages,
+        )
+
+    @staticmethod
+    def _task_error(details: Any) -> str | None:
+        if not isinstance(details, dict):
+            return None
+        message = details.get("message")
+        if message is None and isinstance(details.get("exception"), dict):
+            message = details["exception"].get("message")
+        return str(message) if message is not None else None
+
     def _build_workflow_query(self, app: str | None, limit: int, status: str, dialect: str) -> tuple[str, Any]:
         """Build the SQL query for fetching workflows."""
         clauses: list[str] = []
@@ -368,93 +432,14 @@ class MonitorDataFetcher:
         # Removed _fetch_recent_workflows and _convert_workflow as they are replaced by the batch logic above
 
     def _fetch_queue_stats(self) -> QueueStats:
-        """Fetch queue statistics."""
+        """Queue counts through the queue's own API, in its own table and clock."""
         if self.queue is None:
             return QueueStats()
-
         try:
-            # Try to get queue stats from the queue object
-            if hasattr(self.queue, "_manager") and hasattr(self.queue, "connection_string"):
-                conn_mgr = getattr(self.queue, "_manager")
-                conn = conn_mgr.get_sqlite_connection(getattr(self.queue, "connection_string"))
-                cursor = conn.cursor()
-
-                now = datetime.now().isoformat()
-                threshold = int(time.time()) - self.stuck_threshold_seconds
-
-                # Count pending (not locked, ready to deliver)
-                cursor.execute(
-                    f"""
-                    SELECT COUNT(*) FROM queue_messages
-                    WHERE (locked_until IS NULL OR locked_until < ?)
-                    AND deliver_at <= ?{self._sqlite_tenant()[0]}
-                    """,
-                    (now, now, *self._sqlite_tenant()[1]),
-                )
-                pending = cursor.fetchone()[0]
-
-                # Count processing (locked and not expired)
-                cursor.execute(
-                    f"""
-                    SELECT COUNT(*) FROM queue_messages
-                    WHERE locked_until IS NOT NULL AND locked_until > ?{self._sqlite_tenant()[0]}
-                    """,
-                    (now, *self._sqlite_tenant()[1]),
-                )
-                processing = cursor.fetchone()[0]
-
-                # Count stuck (locked for too long)
-                stuck_threshold = datetime.fromtimestamp(threshold).isoformat()
-                cursor.execute(
-                    f"""
-                    SELECT COUNT(*) FROM queue_messages
-                    WHERE locked_until IS NOT NULL
-                    AND locked_until < ?
-                    AND locked_until < ?{self._sqlite_tenant()[0]}
-                    """,
-                    (now, stuck_threshold, *self._sqlite_tenant()[1]),
-                )
-                stuck = cursor.fetchone()[0]
-
-                return QueueStats(pending=pending, processing=processing, stuck=stuck)
-
-            # Postgres queues expose a connection pool rather than the
-            # ConnectionManager+connection_string pair. Query the same stats
-            # so `stabilize monitor` is not blank on Postgres deployments.
-            if hasattr(self.queue, "_get_pool") or hasattr(self.queue, "_pool"):
-                pool_getter = getattr(self.queue, "_get_pool", None)
-                pool = pool_getter() if pool_getter is not None else getattr(self.queue, "_pool")
-                table = getattr(self.queue, "table_name", "queue_messages")
-                stuck_threshold_dt = datetime.fromtimestamp(int(time.time()) - self.stuck_threshold_seconds)
-                with pool.connection() as conn:
-                    with conn.cursor() as cur:
-                        # Alias the count so it works under the pool's dict_row
-                        # factory (rows are dict-like, not tuples).
-                        tenant_sql, tenant_params = self._pg_tenant()
-                        cur.execute(
-                            f"SELECT COUNT(*) AS n FROM {table} "
-                            f"WHERE (locked_until IS NULL OR locked_until < NOW()) AND deliver_at <= NOW(){tenant_sql}",
-                            tenant_params,
-                        )
-                        pending = _count(cur.fetchone())
-                        cur.execute(
-                            f"SELECT COUNT(*) AS n FROM {table} "
-                            f"WHERE locked_until IS NOT NULL AND locked_until > NOW(){tenant_sql}",
-                            tenant_params,
-                        )
-                        processing = _count(cur.fetchone())
-                        cur.execute(
-                            f"SELECT COUNT(*) AS n FROM {table} "
-                            f"WHERE locked_until IS NOT NULL AND locked_until < %(threshold)s{tenant_sql}",
-                            {"threshold": stuck_threshold_dt, **tenant_params},
-                        )
-                        stuck = _count(cur.fetchone())
-                return QueueStats(pending=pending, processing=processing, stuck=stuck)
-
+            counts = self.queue.counts(self.stuck_threshold_seconds, every_tenant=self.tenant is None)
         except Exception:
-            pass
-
-        return QueueStats()
+            return QueueStats()
+        return QueueStats(pending=counts.pending, processing=counts.processing, stuck=counts.stuck)
 
     def _calculate_workflow_stats(self, workflows: list[WorkflowView]) -> WorkflowStats:
         """Calculate aggregate workflow statistics."""

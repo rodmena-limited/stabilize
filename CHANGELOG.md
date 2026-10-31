@@ -214,6 +214,8 @@ host's own migretti history, now upgrade with no change to the command.
   `active_workflows` every `metrics_sample_interval_seconds` (30 by default) through
   `QueueProcessor.sample_metrics()`, `Queue.oldest_ready_age_seconds()` and
   `WorkflowStore.count_active_workflows()`. A bound tenant becomes the `tenant` tag.
+- **`Queue.counts()`** returns the pending, processing and stuck messages of the queue's table,
+  tenant-scoped unless asked for every tenant.
 - **`stabilize_updated_at`** on the three execution tables and **`created_at_ms`** on
   `pipeline_executions`, added by migration `01M68FGEZVQR6KPAMW6P5N8B0E_recovery_activity.sql`
   on PostgreSQL and SQLite migration 8, with the trigger function
@@ -340,6 +342,11 @@ host's own migretti history, now upgrade with no change to the command.
   module's docstring promised seven; the code emitted `task_execution_seconds` and installed no
   provider. The seven are emitted under the documented names and OpenTelemetry carries them.
   `task_execution_seconds` is gone; nothing could have consumed it.
+- **The monitor counts in UTC and reads through the store (B38).** On SQLite it compared
+  naive local time text against the queue's UTC stamps and always counted `queue_messages`
+  whatever table the queue used. On PostgreSQL it passed a naive local threshold to a
+  `TIMESTAMPTZ` comparison. Its queue statistics now come from `Queue.counts()`, and a
+  single-tenant view lists workflows through the store API.
 - **Recovery ages a workflow by its activity, not by its start (B21).** A run started 30
   hours ago whose task row changed five minutes ago was never recovered, because the only
   clock was `start_time`. `pipeline_executions`, `stage_executions` and `task_executions`

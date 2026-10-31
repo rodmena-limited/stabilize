@@ -22,6 +22,15 @@ class QueueFullError(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class QueueCounts:
+    """What a queue table holds right now: deliverable, leased, and abandoned messages."""
+
+    pending: int = 0
+    processing: int = 0
+    stuck: int = 0
+
+
 class Queue(ABC):
     """
     Abstract queue interface for message handling.
@@ -132,6 +141,13 @@ class Queue(ABC):
     def next_ready_in(self) -> float | None:
         """Seconds until the earliest message this consumer can poll; 0 when one is ready, None when none is pending."""
         return 0.0 if self.size() > 0 else None
+
+    def counts(self, stuck_after_seconds: int = 300, *, every_tenant: bool = False) -> QueueCounts:
+        """Pending (deliverable now), processing (leased) and stuck (lease expired *stuck_after_seconds* ago or more).
+
+        *every_tenant* drops the tenant predicate for an operator view of the whole table.
+        """
+        return QueueCounts(pending=self.size())
 
     def oldest_ready_age_seconds(self) -> float | None:
         """Seconds the oldest message this consumer could poll right now has been waiting; None when none is ready."""

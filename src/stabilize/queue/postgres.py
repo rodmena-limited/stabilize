@@ -33,7 +33,7 @@ from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.interface import Queue
 from stabilize.queue.message_ids import delivery_key, own_row_ids, row_id
 from stabilize.queue.messages import Message, get_message_type_name
-from stabilize.queue.postgres_lookups import PostgresQueueLookupsMixin
+from stabilize.queue.postgres_lookups import DELIVERABLE, PostgresQueueLookupsMixin
 
 _VALID_TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
@@ -41,10 +41,7 @@ logger = logging.getLogger(__name__)
 
 _FENCE = " AND (%(attempts)s::int IS NULL OR attempts = %(attempts)s::int)"
 _TENANT = " AND stabilize_tenant = %(tenant)s"
-_DELIVERABLE = (
-    "(attempts < %(max_attempts)s OR (store_retry_since IS NOT NULL "
-    "AND store_retry_since > NOW() - %(budget)s * INTERVAL '1 second'))"
-)
+_DELIVERABLE = DELIVERABLE
 
 
 class PostgresQueue(PostgresQueueLookupsMixin, Queue):
@@ -410,25 +407,6 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
             conn.commit()
         wait = row["wait"] if row else None
         return None if wait is None else max(0.0, float(wait))
-
-    def oldest_ready_age_seconds(self) -> float | None:
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT EXTRACT(EPOCH FROM (NOW() - MIN(deliver_at))) AS age FROM {self.table_name} "
-                    "WHERE stabilize_tenant = %(tenant)s AND deliver_at <= NOW() "
-                    "AND (locked_until IS NULL OR locked_until < NOW()) "
-                    f"AND {_DELIVERABLE}",
-                    {
-                        "tenant": self.tenant,
-                        "max_attempts": self.max_attempts,
-                        "budget": self.store_retry_budget.total_seconds(),
-                    },
-                )
-                row = cur.fetchone()
-            conn.commit()
-        age = row["age"] if row else None
-        return None if age is None else max(0.0, float(age))
 
     def clear(self) -> None:
         """Clear all messages from the queue."""

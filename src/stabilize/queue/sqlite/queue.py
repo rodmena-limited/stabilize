@@ -25,10 +25,11 @@ from stabilize.persistence.schema_check import check_sqlite_tables
 from stabilize.persistence.sqlite.tenant_schema import engine_shaped_tables, ensure_tenant_schema, read_mode
 from stabilize.persistence.tenancy import check_mode_admits, validate_tenant
 from stabilize.queue.decode import MessageDecodeError, decode_message
-from stabilize.queue.interface import Queue
+from stabilize.queue.interface import Queue, QueueCounts
 from stabilize.queue.message_ids import delivery_key, own_row_ids, row_id
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.sqlite.dlq import SqliteDLQMixin
+from stabilize.queue.sqlite.lookups import SqliteQueueLookupsMixin
 from stabilize.queue.sqlite.schema import create_queue_tables, ensure_redelivery_columns
 from stabilize.queue.sqlite.serialization import serialize_message
 
@@ -42,7 +43,7 @@ _DELIVERABLE = (
 )
 
 
-class SqliteQueue(SqliteDLQMixin, Queue):
+class SqliteQueue(SqliteDLQMixin, SqliteQueueLookupsMixin, Queue):
     """
     SQLite-backed queue implementation.
 
@@ -401,6 +402,24 @@ class SqliteQueue(SqliteDLQMixin, Queue):
             return None
         return max(0.0, float(row[0]))
 
+    def counts(self, stuck_after_seconds: int = 300, *, every_tenant: bool = False) -> QueueCounts:
+        conn = self._get_connection()
+        now = datetime.now(UTC).isoformat()
+        scope = "" if every_tenant else " AND stabilize_tenant = :tenant"
+        row = conn.execute(
+            "SELECT "
+            "SUM(CASE WHEN julianday(deliver_at) <= julianday(:now) "
+            "AND (locked_until IS NULL OR julianday(locked_until) < julianday(:now)) THEN 1 ELSE 0 END), "
+            "SUM(CASE WHEN locked_until IS NOT NULL AND julianday(locked_until) > julianday(:now) THEN 1 ELSE 0 END), "
+            "SUM(CASE WHEN locked_until IS NOT NULL "
+            "AND julianday(locked_until) < julianday(:now) - :stuck_days THEN 1 ELSE 0 END) "
+            f"FROM {self.table_name} WHERE 1 = 1{scope}",
+            {"now": now, "tenant": self.tenant, "stuck_days": stuck_after_seconds / 86400.0},
+        ).fetchone()
+        if not row:
+            return QueueCounts()
+        return QueueCounts(int(row[0] or 0), int(row[1] or 0), int(row[2] or 0))
+
     def oldest_ready_age_seconds(self) -> float | None:
         conn = self._get_connection()
         now = datetime.now(UTC).isoformat()
@@ -423,85 +442,3 @@ class SqliteQueue(SqliteDLQMixin, Queue):
 
         self._pending.clear()
         logger.debug("Cleared queue")
-
-    def has_pending_message_for_stage(self, stage_id: str) -> bool:
-        row = (
-            self._get_connection()
-            .execute(
-                f"SELECT 1 FROM {self.table_name} WHERE CASE WHEN json_valid(payload) "
-                "THEN json_extract(payload, '$.stage_id') END = ? AND stabilize_tenant = ? LIMIT 1",
-                (stage_id, self.tenant),
-            )
-            .fetchone()
-        )
-        return row is not None
-
-    def has_pending_message_for_config(self, pipeline_config_id: str) -> bool:
-        conn = self._get_connection()
-        row = conn.execute(
-            f"SELECT 1 FROM {self.table_name} "
-            "WHERE json_extract(payload, '$.pipeline_config_id') = :config AND stabilize_tenant = :tenant LIMIT 1",
-            {"config": pipeline_config_id, "tenant": self.tenant},
-        ).fetchone()
-        return row is not None
-
-    def dead_letter_moved_at_ms(self, message_type: str, execution_id: str, target_id: str | None) -> int | None:
-        conn = self._get_connection()
-        row = conn.execute(
-            f"SELECT CAST((julianday(max(moved_at)) - 2440587.5) * 86400000 AS INTEGER) FROM {self.table_name}_dlq "
-            "WHERE message_type = :type AND json_extract(payload, '$.execution_id') = :execution_id "
-            "AND stabilize_tenant = :tenant AND (:target IS NULL "
-            "OR json_extract(payload, '$.task_id') = :target OR json_extract(payload, '$.stage_id') = :target)",
-            {"type": message_type, "execution_id": execution_id, "tenant": self.tenant, "target": target_id},
-        ).fetchone()
-        return int(row[0]) if row and row[0] is not None else None
-
-    def has_pending_message_for_execution(self, execution_id: str) -> bool:
-        """Whether any queued message targets this workflow."""
-        row = (
-            self._get_connection()
-            .execute(
-                f"SELECT 1 FROM {self.table_name} WHERE CASE WHEN json_valid(payload) "
-                "THEN json_extract(payload, '$.execution_id') END = ? AND stabilize_tenant = ? LIMIT 1",
-                (execution_id, self.tenant),
-            )
-            .fetchone()
-        )
-        return row is not None
-
-    def purge_workflow(self, execution_id: str) -> int:
-        """Delete every queued and dead-lettered message for one workflow."""
-        conn = self._get_connection()
-        present = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
-        deleted = 0
-        for table in (t for t in (self.table_name, f"{self.table_name}_dlq") if t in present):
-            cur = conn.execute(
-                f"DELETE FROM {table} WHERE CASE WHEN json_valid(payload) "
-                "THEN json_extract(payload, '$.execution_id') END = ? AND stabilize_tenant = ?",
-                (execution_id, self.tenant),
-            )
-            deleted += cur.rowcount
-        conn.commit()
-        return deleted
-
-    def has_pending_message_for_task(self, task_id: str) -> bool:
-        """Check if there's already a pending message for a specific task.
-
-        Used by recovery to prevent creating duplicate messages.
-
-        Args:
-            task_id: The task ID to check for
-
-        Returns:
-            True if a pending message exists for this task
-        """
-        conn = self._get_connection()
-        result = conn.execute(
-            f"""
-            SELECT 1 FROM {self.table_name}
-            WHERE json_extract(payload, '$.task_id') = :task_id AND stabilize_tenant = :tenant
-            LIMIT 1
-            """,
-            {"task_id": task_id, "tenant": self.tenant},
-        )
-        return result.fetchone() is not None

@@ -431,6 +431,10 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, ABC):
         """How many stages of this tenant match *criteria*."""
         raise NotImplementedError(f"{type(self).__name__} does not query stages")
 
+    def get_all_pending_workflows(self, criteria: WorkflowCriteria | None = None) -> Iterator[Workflow]:
+        """Every workflow of this tenant matching *criteria*, whatever its application."""
+        raise NotImplementedError(f"{type(self).__name__} does not list workflows without an application")
+
     def count_active_workflows(self) -> int:
         """How many of this tenant's workflows are RUNNING."""
         raise NotImplementedError(f"{type(self).__name__} does not count active workflows")

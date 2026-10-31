@@ -352,7 +352,18 @@ Synthesis notes recorded while building 9d:
 - `workflow_count` is incremented in `start_running`, so a buffered workflow counts when it starts running, not when it is stored; the metric documents itself as "total workflows started".
 - The tenant tag is added by the module-level wrappers from `current_tenant()`, so a provider never has to know about tenancy and a handler never passes it.
 
-### WI-9 slices 9e … WI-11
+### WI-9 slice 9e: the monitor tells the truth (done)
+- `Queue.counts(stuck_after_seconds, every_tenant=)` shall return the pending (deliverable now), processing (leased) and stuck (lease expired longer ago than the threshold) counts of the queue's own table, in the queue's clock (UTC on SQLite, `NOW()` on PostgreSQL), tenant-scoped unless `every_tenant`; the monitor shall take its queue statistics from it and from nothing else (A12, B38).
+- When the monitor watches one tenant it shall list workflows through `retrieve_by_application` / `get_all_pending_workflows` with a `WorkflowCriteria` carrying the limit and status filter, building its views from the returned workflows; only the every-tenant operator view keeps the batched SQL.
+- The counts shall be right whatever the process's local zone, pinned under `TZ=Asia/Tokyo` on both backends.
+
+Synthesis notes recorded while building 9e:
+- `Queue.counts()` is the queue's own view of its table: SQLite compares `julianday()` values against a UTC `now` the way the queue's poll does, PostgreSQL uses `NOW()` server-side, and the stuck threshold is an interval, not a client-side timestamp. The monitor no longer holds queue SQL.
+- The single-tenant listing goes through the store API (`retrieve_by_application` / `get_all_pending_workflows`, `include_unstarted=True` so unstarted runs still show), which costs about three queries per listed workflow; the every-tenant operator view keeps the batched SQL because the store API is tenant-bound. Both paths produce the same views and the same ordering (running first).
+- `get_all_pending_workflows` was implemented by both stores but not declared on the interface; it is now, as a non-abstract default.
+- File caps: the SQLite queue's lookups moved to `queue/sqlite/lookups.py`, the PostgreSQL queue's counts and oldest-ready age (with the deliverability predicate) to `queue/postgres_lookups.py`.
+
+### WI-9 slices 9f … WI-11
 Specified when each item starts; the plan file holds the design.
 
 ### WI-2 slice 2: rule 1 column lists (done)
