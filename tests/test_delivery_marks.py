@@ -179,7 +179,8 @@ def test_the_happy_path_and_the_waiting_paths_mark_inside_their_pushing_transact
         assert store.retrieve(chain.id).status == WorkflowStatus.SUCCEEDED
         assert store.retrieve(mutex.id).status == WorkflowStatus.SUCCEEDED
         settled = store.retrieve(choice.id)
-        assert {s.status for s in settled.stages} == {WorkflowStatus.SUCCEEDED, WorkflowStatus.CANCELED}
+        assert {s.status for s in settled.stages} == {WorkflowStatus.SUCCEEDED, WorkflowStatus.SKIPPED}
+        assert settled.status == WorkflowStatus.SUCCEEDED
         assert any("mutex" in r.getMessage() for r in caplog.records), "the mutex wait path never ran"
         assert processor.delivery_defects == [], processor.delivery_defects
     finally:

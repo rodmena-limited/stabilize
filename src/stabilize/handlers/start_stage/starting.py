@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from stabilize.dag.deferred_choice import ON_START, claim_mode
 from stabilize.dag.readiness import MM_CONSUMED, MM_TRIGGER, multi_merge_candidates
 from stabilize.errors import ConcurrencyError
 from stabilize.handlers.base import StabilizeHandler
@@ -13,7 +14,7 @@ from stabilize.handlers.start_stage.orchestration import StartStageOrchestration
 from stabilize.handlers.start_stage.planner import StartStagePlannerMixin
 from stabilize.models.stage import JoinType
 from stabilize.models.status import WorkflowStatus
-from stabilize.queue.messages import CancelStage, SkipStage, StartStage
+from stabilize.queue.messages import SkipStage, StartStage
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
@@ -134,7 +135,7 @@ class StartStageStarting(
         # WCP-16: Deferred choice - check if a sibling already claimed this group
         # Query the database directly because retrieve_stage() only loads
         # upstreams, not siblings in the same deferred_choice_group.
-        if stage.deferred_choice_group and self._is_deferred_choice_claimed(stage):
+        if stage.deferred_choice_group and claim_mode(stage) == ON_START and self._is_deferred_choice_claimed(stage):
             logger.info(
                 "Deferred choice: sibling in group '%s' already claimed, cancelling %s",
                 stage.deferred_choice_group,
@@ -148,10 +149,11 @@ class StartStageStarting(
                         execution_id=message.execution_id,
                     )
                 txn.push_message(
-                    CancelStage(
+                    SkipStage(
                         execution_type=message.execution_type,
                         execution_id=message.execution_id,
                         stage_id=message.stage_id,
+                        pruned=True,
                     )
                 )
             return
@@ -209,10 +211,14 @@ class StartStageStarting(
                     steal_if_owner_terminal=True,
                 ):
                     raise _ClaimBlockedError("mutex")
-                if stage.deferred_choice_group and not txn.acquire_claim(
-                    message.execution_id,
-                    f"choice:{stage.deferred_choice_group}",
-                    stage.id,
+                if (
+                    stage.deferred_choice_group
+                    and claim_mode(stage) == ON_START
+                    and not txn.acquire_claim(
+                        message.execution_id,
+                        f"choice:{stage.deferred_choice_group}",
+                        stage.id,
+                    )
                 ):
                     raise _ClaimBlockedError("choice")
                 txn.store_stage(stage, expected_phase=claim_expected_phase)
@@ -256,10 +262,11 @@ class StartStageStarting(
                             execution_id=message.execution_id,
                         )
                     txn.push_message(
-                        CancelStage(
+                        SkipStage(
                             execution_type=message.execution_type,
                             execution_id=message.execution_id,
                             stage_id=message.stage_id,
+                            pruned=True,
                         )
                     )
             return
@@ -311,7 +318,7 @@ class StartStageStarting(
 
         # Collect messages to push BEFORE starting the transaction
         messages_to_push = self._collect_start_messages(stage, message, planned)
-        if stage.deferred_choice_group:
+        if stage.deferred_choice_group and claim_mode(stage) == ON_START:
             messages_to_push.extend(self._deferred_choice_sibling_messages(stage, message))
 
         # Atomic: store planned stage + push all start messages together

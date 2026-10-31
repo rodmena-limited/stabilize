@@ -205,6 +205,7 @@ VALID_TRANSITIONS: dict[WorkflowStatus, frozenset[WorkflowStatus]] = {
             WorkflowStatus.RUNNING,
             WorkflowStatus.CANCELED,
             WorkflowStatus.STOPPED,
+            WorkflowStatus.SKIPPED,
         }
     ),
     WorkflowStatus.SUSPENDED: frozenset(
@@ -212,6 +213,7 @@ VALID_TRANSITIONS: dict[WorkflowStatus, frozenset[WorkflowStatus]] = {
             WorkflowStatus.RUNNING,
             WorkflowStatus.CANCELED,
             WorkflowStatus.STOPPED,
+            WorkflowStatus.SKIPPED,
         }
     ),
     WorkflowStatus.REDIRECT: frozenset(

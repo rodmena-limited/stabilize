@@ -29,6 +29,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_LIVE_STAGE_STATUSES = frozenset(
+    {WorkflowStatus.RUNNING, WorkflowStatus.SUSPENDED, WorkflowStatus.PAUSED, WorkflowStatus.BUFFERED}
+)
+
 _ACTIVE_STAGE_STATUSES = frozenset(
     {WorkflowStatus.RUNNING, WorkflowStatus.PAUSED, WorkflowStatus.SUSPENDED, WorkflowStatus.BUFFERED}
 )
@@ -123,7 +127,7 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
             # Collect running stages to cancel if not successful
             running_stages = []
             if status != WorkflowStatus.SUCCEEDED:
-                running_stages = [s for s in execution.top_level_stages() if s.status == WorkflowStatus.RUNNING]
+                running_stages = [s for s in execution.top_level_stages() if s.status in _LIVE_STAGE_STATUSES]
 
             never_started: list[StageExecution] = []
             if status == WorkflowStatus.CANCELED and execution.is_canceled:

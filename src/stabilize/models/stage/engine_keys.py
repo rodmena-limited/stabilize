@@ -52,6 +52,7 @@ CONTROL_FLOW_KEYS = frozenset(
         "_activated_branches",
         "_blocking_failure",
         "_completed_branches",
+        "_deferred_choice_failed",
         "_join_fired",
         "_jump_bypass",
         "_jump_count",

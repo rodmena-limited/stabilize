@@ -480,6 +480,14 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             if not task_model:
                 logger.error("Task %s not found in stage %s", task_id, stage_id)
                 return
+            if task_model.status != WorkflowStatus.RUNNING:
+                logger.warning(
+                    "Dropping the result of task %s; the task is %s, not RUNNING",
+                    task_model.name,
+                    task_model.status.name,
+                )
+                self.txn_helper.execute_atomic(source_message=message, handler_name="RunTask")
+                return
             if not same_generation(task_model, message):
                 logger.warning(
                     "Dropping the result of task %s generation %s; the task is at generation %s",

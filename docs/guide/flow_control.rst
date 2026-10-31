@@ -575,6 +575,15 @@ Use ``SubWorkflowTask`` to start a child workflow and wait for its completion:
 
 Recursion depth is tracked via ``_recursion_depth`` (default max: 10).
 
+The task runs on the store and queue of the processor that executes it. The child is
+stored and its ``StartWorkflow`` pushed in one transaction, and the child's id is derived
+from the parent task's start time and a hash of the tenant, execution, task and
+generation. A redelivery after a crash therefore finds the child it already stored. A
+sub-workflow inside a loop starts a new child on each pass. ``sub_workflow_timeout_seconds``
+in the stage context bounds the whole child run. Without it there is no cap. Cancelling
+the parent task, or its timeout, cancels the child. The task cannot run under process
+isolation, because the worker process has no store or queue.
+
 
 Multiple Instance Patterns
 --------------------------

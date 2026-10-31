@@ -19,7 +19,7 @@ from stabilize.models.task import TaskExecution
 from stabilize.models.workflow import Workflow
 from stabilize.persistence.store import WorkflowStore
 from stabilize.queue import Queue
-from stabilize.queue.messages import CancelStage, StartStage
+from stabilize.queue.messages import SkipStage, StartStage
 
 
 def _task() -> TaskExecution:
@@ -117,20 +117,19 @@ class TestDeferredChoiceRace:
         running = [s.ref_id for s in fresh.stages if s.status == WorkflowStatus.RUNNING]
         assert len(running) == 1, f"deferred choice group 'response' started {running} — WCP-16 violated"
 
-        # The loser must be cancelled (immediately or via a queued CancelStage).
         loser_ref = "b" if running == ["a"] else "a"
         loser = next(s for s in fresh.stages if s.ref_id == loser_ref)
-        cancel_msgs = []
+        prune_msgs = []
         while True:
             m = queue.poll_one()
             if m is None:
                 break
-            if isinstance(m, CancelStage):
-                cancel_msgs.append(m)
+            if isinstance(m, SkipStage) and m.pruned and m.stage_id == loser.id:
+                prune_msgs.append(m)
             queue.ack(m)
         assert loser.status != WorkflowStatus.RUNNING
-        assert cancel_msgs or loser.status == WorkflowStatus.CANCELED, (
-            "losing deferred-choice branch was neither cancelled nor queued for cancellation"
+        assert prune_msgs or loser.status == WorkflowStatus.SKIPPED, (
+            "losing deferred-choice branch was neither pruned nor queued for pruning"
         )
 
     def test_deferred_choice_never_transfers_after_winner_completes(

@@ -12,7 +12,8 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from stabilize.handlers.base import StabilizeHandler
-from stabilize.handlers.run_task.execution import resolve_task
+from stabilize.handlers.cancel_hooks import run_cancel_hooks
+from stabilize.handlers.deferred_choice import record_settle_row
 from stabilize.models.stage.completion_records import recorded_completion
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import CancelStage, CompleteStage, CompleteWorkflow
@@ -27,6 +28,10 @@ if TYPE_CHECKING:
     from stabilize.tasks.registry import TaskRegistry
 
 logger = logging.getLogger(__name__)
+
+_LIVE_TASK_STATUSES = frozenset(
+    {WorkflowStatus.NOT_STARTED, WorkflowStatus.RUNNING, WorkflowStatus.SUSPENDED, WorkflowStatus.PAUSED}
+)
 
 
 class CancelStageHandler(StabilizeHandler[CancelStage]):
@@ -95,8 +100,10 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
             for task in stage.tasks:
                 if task.status == WorkflowStatus.SKIPPED and task.end_time is None:
                     task.end_time = self.current_time_millis()
-                if task.status in {WorkflowStatus.NOT_STARTED, WorkflowStatus.RUNNING}:
-                    if task.status == WorkflowStatus.RUNNING and not _canceled_by_run_task(stage, task):
+                if task.status in _LIVE_TASK_STATUSES:
+                    if task.status != WorkflowStatus.NOT_STARTED and not (
+                        task.status == WorkflowStatus.RUNNING and _canceled_by_run_task(stage, task)
+                    ):
                         moved.append(task)
                     self.set_task_status(task, WorkflowStatus.CANCELED)
                     task.end_time = self.current_time_millis()
@@ -105,8 +112,18 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
             self.set_stage_status(stage, WorkflowStatus.CANCELED)
             stage.end_time = self.current_time_millis()
 
+            live_children = [s for s in stage.synthetic_stages() if not s.status.is_complete]
             with self.repository.transaction(self.queue) as txn:
                 txn.store_stage(stage)
+                record_settle_row(txn, message.execution_id, stage)
+                for child in live_children:
+                    txn.push_message(
+                        CancelStage(
+                            execution_type=message.execution_type,
+                            execution_id=message.execution_id,
+                            stage_id=child.id,
+                        )
+                    )
                 if message.message_id:
                     txn.mark_message_processed(
                         message_id=message.message_id,
@@ -140,26 +157,7 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
         self.with_stage(message, on_stage)
 
     def _run_hooks(self, stage: StageExecution, moved: list[TaskExecution]) -> None:
-        if self.task_registry is None:
-            if moved:
-                logger.warning("CancelStage has no task registry; on_cancel/on_cleanup not called for %s", stage.name)
-            return
-        moved_ids = {t.id for t in moved}
-        for task in stage.tasks:
-            try:
-                impl = resolve_task(task.implementing_class, task, self.task_registry)
-            except Exception as e:
-                logger.warning("Cannot resolve task %s for cancel hooks: %s", task.name, e)
-                continue
-            if task.id in moved_ids:
-                try:
-                    impl.on_cancel(stage)
-                except Exception as e:
-                    logger.warning("Error in on_cancel for task %s in stage %s: %s", task.name, stage.name, e)
-            try:
-                impl.on_cleanup(stage)
-            except Exception as e:
-                logger.warning("Error in on_cleanup for task %s in stage %s: %s", task.name, stage.name, e)
+        run_cancel_hooks(self.task_registry, stage, moved)
 
 
 def _canceled_by_run_task(stage: StageExecution, task: TaskExecution) -> bool:

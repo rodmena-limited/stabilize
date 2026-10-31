@@ -17,6 +17,7 @@ from stabilize.models.status import CONTINUABLE_STATUSES, HALT_STATUSES, Workflo
 from stabilize.persistence.transaction import TransactionHelper
 from stabilize.queue.messages import (
     CompleteStage,
+    CompleteWorkflow,
     ContinueParentStage,
     StartStage,
     StartTask,
@@ -96,12 +97,34 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
 
         self.with_stage(message, on_stage)
 
+    def _parent_not_running(self, stage: StageExecution, message: ContinueParentStage) -> None:
+        """A ContinueParentStage for a parent that already completed: acknowledge it, and propagate a halt."""
+        logger.debug("ContinueParentStage for %s with status %s", stage.name, stage.status)
+        with self.repository.transaction(self.queue) as txn:
+            self.mark_in(txn, message, "ContinueParentStage")
+            if not stage.status.is_halt:
+                return
+            if stage.synthetic_stage_owner is None or stage.parent_stage_id is None:
+                execution = stage.execution
+                txn.push_message(CompleteWorkflow(execution_type=execution.type.value, execution_id=execution.id))
+            else:
+                txn.push_message(
+                    CompleteStage(
+                        execution_type=message.execution_type,
+                        execution_id=message.execution_id,
+                        stage_id=stage.parent_stage_id,
+                    )
+                )
+
     def _handle_before_phase(
         self,
         stage: StageExecution,
         message: ContinueParentStage,
     ) -> None:
         """Handle completion of before-stages."""
+        if stage.status != WorkflowStatus.RUNNING:
+            self._parent_not_running(stage, message)
+            return
         # Get all before-stages for this parent
         before_stages = stage.before_stages()
 
@@ -274,6 +297,9 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
         message: ContinueParentStage,
     ) -> None:
         """Handle completion of after-stages."""
+        if stage.status != WorkflowStatus.RUNNING:
+            self._parent_not_running(stage, message)
+            return
         # Get all after-stages for this parent
         after_stages = stage.after_stages()
 

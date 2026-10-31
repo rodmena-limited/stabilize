@@ -16,8 +16,10 @@ from typing import TYPE_CHECKING
 
 from stabilize.errors import is_transient
 from stabilize.errors.delivery import DuplicateDeliveryError
+from stabilize.handlers.complete_stage.deferred import CompleteStageDeferredMixin
 from stabilize.handlers.complete_stage.fan_out import CompleteStageFanOutMixin
 from stabilize.handlers.complete_stage.support import CompleteStageSupport
+from stabilize.handlers.deferred_choice import settles_on_complete
 from stabilize.models.stage.enums import SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
 from stabilize.persistence.tenancy import TenancyModeChanged, TenantContextError, TenantMismatchError
@@ -40,7 +42,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class CompleteStageHandler(CompleteStageFanOutMixin, CompleteStageSupport):
+class CompleteStageHandler(CompleteStageDeferredMixin, CompleteStageFanOutMixin, CompleteStageSupport):
     """
     Handler for CompleteStage messages.
 
@@ -231,7 +233,15 @@ class CompleteStageHandler(CompleteStageFanOutMixin, CompleteStageSupport):
                             )
                     return
 
-                # Update stage status
+                if status == WorkflowStatus.FAILED_CONTINUE and stage.context.get("_blocking_failure", False):
+                    logger.warning(
+                        "Stage %s has _blocking_failure=True, converting FAILED_CONTINUE to TERMINAL",
+                        stage.name,
+                    )
+                    status = WorkflowStatus.TERMINAL
+                if settles_on_complete(stage):
+                    self._complete_deferred_member(stage, status, message, settled)
+                    return
                 self.set_stage_status(stage, status)
                 stage.end_time = self.current_time_millis()
 
@@ -272,73 +282,10 @@ class CompleteStageHandler(CompleteStageFanOutMixin, CompleteStageSupport):
                     WorkflowStatus.FAILED_CONTINUE,
                     WorkflowStatus.SKIPPED,
                 }:
-                    # BLOCKING FAILURE CHECK: If stage has _blocking_failure=True and
-                    # status is FAILED_CONTINUE, treat it as a hard failure that blocks
-                    # downstream execution. This prevents false-positive workflow success.
-                    if status == WorkflowStatus.FAILED_CONTINUE and stage.context.get("_blocking_failure", False):
-                        logger.warning(
-                            "Stage %s has _blocking_failure=True, converting FAILED_CONTINUE to TERMINAL",
-                            stage.name,
-                        )
-                        status = WorkflowStatus.TERMINAL
-                        self.set_stage_status(stage, status)
-                        # Fall through to failure handling below
-                        with self.repository.transaction(self.queue) as txn:
-                            txn.store_stage(stage)
-                            self._record_completion_event(stage, status)
-                            self.mark_in(txn, message, "CompleteStage")
-                            txn.push_message(
-                                CancelStage(
-                                    execution_type=message.execution_type,
-                                    execution_id=message.execution_id,
-                                    stage_id=message.stage_id,
-                                )
-                            )
-                            if stage.synthetic_stage_owner is None or stage.parent_stage_id is None:
-                                txn.push_message(
-                                    CompleteWorkflow(
-                                        execution_type=message.execution_type,
-                                        execution_id=message.execution_id,
-                                    )
-                                )
-                            else:
-                                txn.push_message(
-                                    CompleteStage(
-                                        execution_type=message.execution_type,
-                                        execution_id=message.execution_id,
-                                        stage_id=stage.parent_stage_id,
-                                    )
-                                )
-                        return
                     self._complete_and_fan_out(stage, status, message)
                 else:
                     with self.repository.transaction(self.queue) as txn:
-                        txn.store_stage(stage)
-                        self._record_completion_event(stage, status)
-                        self.mark_in(txn, message, "CompleteStage")
-                        txn.push_message(
-                            CancelStage(
-                                execution_type=message.execution_type,
-                                execution_id=message.execution_id,
-                                stage_id=message.stage_id,
-                            )
-                        )
-                        if stage.synthetic_stage_owner is None or stage.parent_stage_id is None:
-                            txn.push_message(
-                                CompleteWorkflow(
-                                    execution_type=message.execution_type,
-                                    execution_id=message.execution_id,
-                                )
-                            )
-                        else:
-                            # Propagate to parent
-                            txn.push_message(
-                                CompleteStage(
-                                    execution_type=message.execution_type,
-                                    execution_id=message.execution_id,
-                                    stage_id=stage.parent_stage_id,
-                                )
-                            )
+                        self._halt_in(txn, stage, status, message)
 
             except (TenancyModeChanged, TenantMismatchError, TenantContextError, DuplicateDeliveryError):
                 raise
@@ -355,7 +302,7 @@ class CompleteStageHandler(CompleteStageFanOutMixin, CompleteStageSupport):
                 stage.context["exception"] = {
                     "details": {"error": str(e)},
                 }
-                self.set_stage_status(stage, WorkflowStatus.TERMINAL)
+                stage.status = WorkflowStatus.TERMINAL
                 stage.end_time = self.current_time_millis()
                 settled["stage"] = stage
 

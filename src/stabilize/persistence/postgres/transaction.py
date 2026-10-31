@@ -271,6 +271,16 @@ class PostgresTransaction(StoreTransaction):
             )
             return int(cur.rowcount or 0)
 
+    def count_claims(self, execution_id: str, prefix: str) -> int:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) AS n FROM stage_claims WHERE execution_id = %(execution_id)s "
+                "AND left(claim_key, %(length)s) = %(prefix)s AND stabilize_tenant = %(tenant)s",
+                {"execution_id": execution_id, "length": len(prefix), "prefix": prefix, "tenant": self._tenant},
+            )
+            row = cur.fetchone()
+        return int(row["n"]) if row else 0
+
     def claim_owner(self, execution_id: str, claim_key: str) -> str | None:
         with self._conn.cursor() as cur:
             cur.execute(

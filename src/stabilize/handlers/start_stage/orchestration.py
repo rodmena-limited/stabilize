@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 from stabilize.models.stage import SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import (
-    CancelStage,
     CompleteStage,
+    SkipStage,
     StartStage,
     StartTask,
 )
@@ -118,7 +118,7 @@ class StartStageOrchestrationMixin:
         stage: StageExecution,
         message: StartStage,
     ) -> list[Message]:
-        """The CancelStage messages for the other NOT_STARTED members of this stage's deferred choice group (WCP-16).
+        """The pruning SkipStage messages for the other NOT_STARTED members of this stage's deferred choice group.
 
         The caller pushes them in the transaction that marks the claiming StartStage processed.
         """
@@ -129,16 +129,17 @@ class StartStageOrchestrationMixin:
                 continue
             if s.deferred_choice_group == stage.deferred_choice_group and s.status == WorkflowStatus.NOT_STARTED:
                 logger.info(
-                    "Deferred choice: cancelling sibling %s (group=%s) because %s was claimed",
+                    "Deferred choice: pruning sibling %s (group=%s) because %s was claimed",
                     s.name,
                     stage.deferred_choice_group,
                     stage.name,
                 )
                 messages.append(
-                    CancelStage(
+                    SkipStage(
                         execution_type=message.execution_type,
                         execution_id=message.execution_id,
                         stage_id=s.id,
+                        pruned=True,
                     )
                 )
         return messages

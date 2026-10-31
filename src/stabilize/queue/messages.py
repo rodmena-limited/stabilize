@@ -188,7 +188,7 @@ class SkipStage(StageLevel):
     Sets stage status to SKIPPED and triggers downstream stages.
     """
 
-    pass
+    pruned: bool = False
 
 
 @dataclass

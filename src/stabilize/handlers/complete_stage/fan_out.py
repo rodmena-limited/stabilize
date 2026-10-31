@@ -6,12 +6,11 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from stabilize.dag.readiness import PRUNED_FROM
-from stabilize.queue.messages import CompleteWorkflow, ContinueParentStage, StartStage
+from stabilize.queue.messages import CancelStage, CompleteStage, CompleteWorkflow, ContinueParentStage, StartStage
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.models.status import WorkflowStatus
-    from stabilize.queue.messages import CompleteStage
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +31,48 @@ class CompleteStageFanOutMixin:
 
     def _fan_out_once(self, stage: StageExecution, status: WorkflowStatus, message: CompleteStage) -> None:
         handler = _any(self)
+        with handler.repository.transaction(handler.queue) as txn:
+            self._fan_out_in(txn, stage, status, message)
+
+    def _halt_in(self, txn: Any, stage: StageExecution, status: WorkflowStatus, message: CompleteStage) -> None:
+        """A halted stage: store it, mark the delivery, cancel its tasks and complete the workflow or the parent."""
+        handler = _any(self)
+        txn.store_stage(stage)
+        handler._record_completion_event(stage, status)
+        handler.mark_in(txn, message, "CompleteStage")
+        txn.push_message(
+            CancelStage(
+                execution_type=message.execution_type,
+                execution_id=message.execution_id,
+                stage_id=message.stage_id,
+            )
+        )
+        if stage.synthetic_stage_owner is None or stage.parent_stage_id is None:
+            txn.push_message(
+                CompleteWorkflow(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                )
+            )
+        else:
+            txn.push_message(
+                CompleteStage(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=stage.parent_stage_id,
+                )
+            )
+
+    def _fan_out_in(self, txn: Any, stage: StageExecution, status: WorkflowStatus, message: CompleteStage) -> None:
+        """Store the completed stage, mark the delivery and start what follows, inside *txn*."""
+        handler = _any(self)
         execution = stage.execution
         downstream_stages = handler.repository.get_downstream_stages(execution.id, stage.ref_id)
         phase = stage.synthetic_stage_owner
 
         activated_downstreams, skipped_downstreams = handler._apply_split_logic(stage, downstream_stages)
 
-        with handler.repository.transaction(handler.queue) as txn:
+        if True:
             txn.store_stage(stage)
             handler._record_completion_event(stage, status)
             handler._update_join_tracking(stage, downstream_stages, txn)

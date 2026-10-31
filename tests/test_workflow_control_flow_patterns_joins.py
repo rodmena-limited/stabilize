@@ -320,17 +320,12 @@ class TestDeferredChoice:
         agent = result.stage_by_ref_id("agent_contact")
         escalate = result.stage_by_ref_id("escalate")
 
-        # One should have succeeded, the other cancelled
         statuses = {agent.status, escalate.status}
         assert WorkflowStatus.SUCCEEDED in statuses, f"No SUCCEEDED stage: {statuses}"
-        assert WorkflowStatus.CANCELED in statuses, f"No CANCELED stage: {statuses}"
-
-        # Workflow completes (may be CANCELED due to sibling cancellation -
-        # this is expected since the cancel propagates to workflow level)
-        assert result.status in {
-            WorkflowStatus.SUCCEEDED,
-            WorkflowStatus.CANCELED,
-        }
+        assert WorkflowStatus.SKIPPED in statuses, f"the loser was not pruned: {statuses}"
+        loser = agent if agent.status == WorkflowStatus.SKIPPED else escalate
+        assert loser.context.get("_pruned") is True
+        assert result.status == WorkflowStatus.SUCCEEDED, result.status
 
 
 # =============================================================================

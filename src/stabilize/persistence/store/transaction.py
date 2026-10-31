@@ -115,6 +115,10 @@ class StoreTransaction(ABC):
         """Delete the stage_claims rows owned by *stage_id*."""
         return 0
 
+    def count_claims(self, execution_id: str, prefix: str) -> int:
+        """How many claims of *execution_id* have a key starting with *prefix*."""
+        return 0
+
     def claim_owner(self, execution_id: str, claim_key: str) -> str | None:
         """The stage that holds *claim_key* in *execution_id*, or None."""
         return None

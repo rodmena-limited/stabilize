@@ -402,6 +402,14 @@ class AtomicTransaction(StoreTransaction):
         )
         return int(cursor.rowcount or 0)
 
+    def count_claims(self, execution_id: str, prefix: str) -> int:
+        row = self._conn.execute(
+            "SELECT count(*) FROM stage_claims WHERE execution_id = :execution_id "
+            "AND substr(claim_key, 1, :length) = :prefix AND stabilize_tenant = :tenant",
+            {"execution_id": execution_id, "length": len(prefix), "prefix": prefix, "tenant": self._tenant},
+        ).fetchone()
+        return int(row[0]) if row else 0
+
     def claim_owner(self, execution_id: str, claim_key: str) -> str | None:
         row = self._conn.execute(
             "SELECT stage_id FROM stage_claims WHERE execution_id = :execution_id AND claim_key = :claim_key "

@@ -156,6 +156,10 @@ host's own migretti history, now upgrade with no change to the command.
 - **Paused time is not task lifetime.** `PauseTask` records `_paused_at`, `ResumeStage`
   adds the interval to `_paused_ms`, and the RunTask lifetime and stage-timeout checks
   subtract it for every `RetryableTask`.
+- **`stabilize.tasks.handles.current_engine()`** returns the store and queue of the
+  processor running the task, bound for the task's execution and its hooks;
+  `bind_engine(store, queue)` binds them in tests. `StoreTransaction.store_workflow()`
+  inserts a workflow with its stages inside a transaction on both backends.
 - **`SkipStage(pruned=True)`**, `deferredChoiceClaim` (`on_start` | `on_complete`), the
   `_deferred_choice_failed` engine key, `StoreTransaction.count_claims(execution_id, prefix)`,
   and the SUSPENDED→SKIPPED and PAUSED→SKIPPED transitions.
@@ -180,13 +184,33 @@ host's own migretti history, now upgrade with no change to the command.
 
 ### Fixed
 
+- **`SubWorkflowTask` runs on the processor's own store and queue (B23).** It used the
+  process-global `Orchestrator.get_instance()`, whichever orchestrator was built last, and
+  stored the child in one call and started it in another, so a crash in between left a
+  child that was never started and a retry started a second one. The RunTask handler now
+  binds its store and queue for the task's execution and hooks. The child's id is derived
+  from the parent task's start time and a hash of tenant, execution, task and generation,
+  so a retry finds the child it already stored. The child is stored and its
+  `StartWorkflow` pushed in one transaction under an admission lock. A sub-workflow inside
+  a loop starts a new child per generation. The timeout comes from
+  `sub_workflow_timeout_seconds` in the stage context instead of a fixed 30 minutes,
+  polling backs off from 1 s to 30 s, and `on_cancel` and `on_timeout` cancel the child.
+  A store error is re-raised, so the message is redelivered. It used to end the task
+  TERMINAL.
+- **Process isolation keeps the task's exception (B29).** The worker returned only the
+  message text. `TransientError`, `PermanentError` and the SQLSTATE classification were
+  lost on the way, and every failure read as permanent. The exception itself now crosses the process
+  boundary (its type name and message when it cannot be pickled), and a per-call timeout
+  runs the task's `on_timeout` hook before completing. `SubWorkflowTask` refuses to run
+  under process isolation, because the worker has no store or queue.
 - **Deferred choice losers are skipped, and the workflow succeeds (B12).** The branches
   that lose a deferred choice were cancelled, and the cancellation ended the whole
   workflow CANCELED. Losers now land SKIPPED with `_pruned`, downstream readiness drops
   the dead edges, and the winner's path completes the workflow. A pruning `SkipStage`
   accepts a RUNNING, SUSPENDED or PAUSED loser. Its live tasks are cancelled, the cancel
   and cleanup hooks run after the commit, and the stage's synthetic children are pruned
-  with it.
+  with it. A result that arrives for a task that is no longer RUNNING, because its branch
+  was pruned or cancelled while the task ran, is dropped instead of being saved.
 - **A deferred choice can settle when a branch completes (B13).** `deferredChoiceClaim`
   on each member's context is `on_start` (the default and today's behaviour) or
   `on_complete`. In `on_complete` mode no member claims the group when it starts. The

@@ -47,7 +47,7 @@ def default_handlers(
         StartWorkflowHandler(queue, store, handler_config=handler_config),
         StartWaitingWorkflowsHandler(queue, store, handler_config=handler_config),
         StartStageHandler(queue, store, handler_config=handler_config),
-        SkipStageHandler(queue, store, handler_config=handler_config),
+        SkipStageHandler(queue, store, handler_config=handler_config, task_registry=task_registry),
         CancelStageHandler(queue, store, task_registry=task_registry, handler_config=handler_config),
         ContinueParentStageHandler(queue, store, handler_config=handler_config),
         JumpToStageHandler(queue, store, handler_config=handler_config, task_registry=task_registry),
