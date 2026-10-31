@@ -19,15 +19,17 @@ from mutants import Mutant, all_mutants, apply  # noqa: E402
 from shards import shard_suites  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO))
+
+from tests.mg_support import require_gate_cluster  # noqa: E402
+
 PER_LINE_CAP = 12
 PER_TEST_TRIES = 30
 BATCH_CAP = 400
 SPECIFIC_BATCH = 50
 PG = os.environ.get("REDPROOF_PG", "postgresql://postgres:gate@127.0.0.1:55432")
-PG_CONTAINER = os.environ.get("REDPROOF_PG_CONTAINER", "stabilize-gate-pg")
-PYTHON = os.environ.get(
-    "REDPROOF_PYTHON", "/home/farshid/.local/share/uv/python/cpython-3.14-linux-x86_64-gnu/bin/python3.14"
-)
+PYTHON = os.environ.get("REDPROOF_PYTHON", sys.executable)
+NO_VENV = os.environ.get("REDPROOF_NO_VENV") == "1"
 SHARD = os.environ.get("REDPROOF_SHARD", "")
 DEFAULT_SUITES = os.environ.get("REDPROOF_SUITES", "tests golden_standard_tests").split()
 SUITES = shard_suites(REPO, SHARD) if SHARD else DEFAULT_SUITES
@@ -43,42 +45,32 @@ def wait_host() -> None:
 
 
 def fresh_db(name: str) -> str:
-    if not PG_CONTAINER:
-        import psycopg
+    import psycopg
 
-        with psycopg.connect(f"{PG}/postgres", autocommit=True) as conn:
-            conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
-            conn.execute(f'CREATE DATABASE "{name}"')
-        return f"{PG}/{name}"
-    subprocess.run(
-        [
-            "docker",
-            "exec",
-            PG_CONTAINER,
-            "psql",
-            "-U",
-            "postgres",
-            "-qc",
-            f"DROP DATABASE IF EXISTS {name} WITH (FORCE)",
-            "-c",
-            f"CREATE DATABASE {name}",
-        ],
-        check=True,
-        capture_output=True,
-    )
+    with psycopg.connect(f"{PG}/postgres", autocommit=True) as conn:
+        require_gate_cluster(conn)
+        conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        conn.execute(f'CREATE DATABASE "{name}"')
     return f"{PG}/{name}"
+
+
+def worker_python(ws: Path) -> str:
+    return PYTHON if NO_VENV else str(ws / ".venv/bin/python")
+
+
+def worker_pythonpath(ws: Path) -> str:
+    redproof = str(ws / "audit" / "redproof")
+    return f"{ws / 'src'}:{redproof}" if NO_VENV else redproof
 
 
 def prepare(out: Path, workers: int, sha: str) -> None:
     for i in range(workers):
         ws = out / f"ws-{i}"
-        if (ws / ".venv").exists():
+        if (ws / ".venv").exists() or (NO_VENV and (ws / "src").exists()):
             continue
         ws.mkdir(parents=True, exist_ok=True)
         if (REPO / ".git").exists():
-            archive = subprocess.run(
-                ["git", "-C", str(REPO), "archive", sha], check=True, capture_output=True
-            ).stdout
+            archive = subprocess.run(["git", "-C", str(REPO), "archive", sha], check=True, capture_output=True).stdout
             subprocess.run(["tar", "-x", "-C", str(ws)], input=archive, check=True)
         else:
             skip = shutil.ignore_patterns(".venv*", ".old", ".redproof", "__pycache__", "*.log", ".coverage*")
@@ -86,18 +78,20 @@ def prepare(out: Path, workers: int, sha: str) -> None:
         shutil.copytree(REPO / "audit" / "redproof", ws / "audit" / "redproof", dirs_exist_ok=True)
         for extra in EXTRA_TESTS:
             shutil.copy(extra, ws / "tests" / Path(extra).name)
-        subprocess.run(["uv", "venv", "-q", "-p", PYTHON, ".venv"], cwd=ws, check=True)
-        subprocess.run(
-            ["uv", "pip", "install", "-q", "-p", ".venv/bin/python", "-e", ".[dev,observability,cli]"],
-            cwd=ws,
-            check=True,
-        )
+        if not NO_VENV:
+            subprocess.run(["uv", "venv", "-q", "-p", PYTHON, ".venv"], cwd=ws, check=True)
+            subprocess.run(
+                ["uv", "pip", "install", "-q", "-p", ".venv/bin/python", "-e", ".[dev,observability,cli]"],
+                cwd=ws,
+                check=True,
+            )
         where = subprocess.run(
-            [str(ws / ".venv/bin/python"), "-c", "import stabilize; print(stabilize.__file__)"],
+            [worker_python(ws), "-c", "import stabilize; print(stabilize.__file__)"],
             cwd="/",
             check=True,
             capture_output=True,
             text=True,
+            env={**os.environ, "PYTHONPATH": worker_pythonpath(ws)},
         ).stdout.strip()
         if not where.startswith(str(ws / "src")):
             raise SystemExit(f"ws-{i} imports stabilize from {where}, not its own src")
@@ -108,7 +102,7 @@ def env_for(ws: Path, worker: int, result_file: Path) -> dict[str, str]:
     env = dict(os.environ)
     env.update(
         PYTHONDONTWRITEBYTECODE="1",
-        PYTHONPATH=str(ws / "audit" / "redproof"),
+        PYTHONPATH=worker_pythonpath(ws),
         REDPROOF_OUT=str(result_file),
         STABILIZE_TEST_DSN=fresh_db(f"rp_w{worker}"),
         PATH=f"{ws / '.venv' / 'bin'}:{env.get('PATH', '')}",
@@ -123,7 +117,7 @@ def run_pytest(ws: Path, worker: int, ids: list[str], extra: list[str], timeout:
     args_file = ws / f".redproof-{worker}.args"
     args_file.write_text("\n".join(ids))
     cmd = [
-        str(ws / ".venv/bin/python"),
+        worker_python(ws),
         "-m",
         "pytest",
         f"@{args_file}",
@@ -195,13 +189,9 @@ def baseline(out: Path) -> None:
     (out / "coverage_map.json").write_text(json.dumps(cmap))
     passing = {k for k, v in results.items() if v["outcome"] == "passed"}
     covered = set().union(*cmap.values()) & passing if cmap else set()
-    log(
-        f"coverage map: {len(cmap)} lines, {len(covered)}/{len(passing)} passing tests with at least one line"
-    )
+    log(f"coverage map: {len(cmap)} lines, {len(covered)}/{len(passing)} passing tests with at least one line")
     if len(covered) < 0.9 * len(passing):
-        raise SystemExit(
-            f"coverage map implausible: only {len(covered)} of {len(passing)} passing tests covered"
-        )
+        raise SystemExit(f"coverage map implausible: only {len(covered)} of {len(passing)} passing tests covered")
     counts = defaultdict(int)
     for v in results.values():
         counts[v["outcome"]] += 1
@@ -341,9 +331,7 @@ def try_mutant(ws: Path, worker: int, m: Mutant, ids: list[str]) -> tuple[dict[s
 
 def prove(out: Path, workers: int, budget_s: float) -> None:
     state = State(out)
-    log(
-        f"mutants {len(state.mutants)}, passing tests {len(state.passing)}, proven so far {len(state.proven)}"
-    )
+    log(f"mutants {len(state.mutants)}, passing tests {len(state.passing)}, proven so far {len(state.proven)}")
     import replay
 
     replay.run(state, out, workers, try_mutant, wait_host, log)

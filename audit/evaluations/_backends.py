@@ -13,6 +13,7 @@ import os
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 SKIP = 77
@@ -57,13 +58,18 @@ def _container_dsn() -> tuple[str | None, Any]:
 
 def dedicated_dsn(base: str, suffix: str = "probes") -> str:
     """A database of its own next to base's, so these probes never touch base's schemas."""
+    import sys
     from urllib.parse import urlsplit, urlunsplit
 
     import psycopg
 
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from tests.mg_support import require_gate_cluster
+
     parts = urlsplit(base)
     name = f"{parts.path.lstrip('/') or 'postgres'}_{suffix}"
     with psycopg.connect(base, autocommit=True) as conn:
+        require_gate_cluster(conn)
         if conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,)).fetchone() is None:
             conn.execute(f'CREATE DATABASE "{name}"')
     return urlunsplit((parts.scheme, parts.netloc, f"/{name}", parts.query, parts.fragment))

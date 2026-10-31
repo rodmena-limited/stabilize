@@ -420,6 +420,17 @@ Synthesis notes recorded while building 9i:
 - `CURRENT_SCHEMA_VERSION` 2 costs a code rollback its replay of 0.34 events (a 0.33 build skips newer versions by design); the alternative, writing the new shapes as version 1, would leave readers to sniff keys. The 1 → 2 step is registered when the global migrator is created, so a reset re-registers it; two existing upcasting tests that relied on an empty migrator now target version 3.
 - The bus has no tenant parameter (the WI-2 line about `subscribe(tenant=)` was not built); events carry their tenant, so the stream filters on it. Workflow ids are ULIDs, so this is a second check rather than the only one.
 
+### WI-10 slice 10a: gate hygiene and the old-runner rule (done)
+- Before any test or audit helper drops or creates a database on the DSN it was given (`tests/conftest.py` worker databases, `audit/redproof/run.py` worker databases, `audit/evaluations/_backends.py` dedicated probe databases), it shall read `SHOW cluster_name` on that connection and refuse, naming the cluster, unless the name starts with `stabilize-gate-` (B56 neighbour; the gate containers are `stabilize-gate-<id>`).
+- `audit/redproof/run.py` shall create its worker databases over the DSN only; the docker-exec branch and `REDPROOF_PG_CONTAINER` are gone; `REDPROOF_PYTHON` defaults to the running interpreter; with `REDPROOF_NO_VENV=1` the workers run the image interpreter with `PYTHONPATH=<ws>/src:<ws>/audit/redproof` instead of building a venv.
+- When a test runs a published stabilize (`old_stabilize`), it shall run it with `PYTHONPATH`, `PYTHONHOME`, `PYTHONSAFEPATH` and `VIRTUAL_ENV` removed from the environment, and shall first confirm, once per binary, that `<binary> --version` prints a version other than this checkout's and that the runner's interpreter imports `stabilize` from outside the checkout's `src`; a runner that fails either check is refused with a message naming what it imported (rule 8, B57).
+- The three manual proofs produced under a leaked `PYTHONPATH` (`audit/redproof/manual/tests_test_mg_up_history_schema.py__*.diff`) are re-produced at the gate, where the published runners exist; this slice records the debt and the fixed environment that the reproduction runs under.
+
+Synthesis notes recorded while building 10a:
+- The guard lives in `tests/mg_support.py` and the two audit helpers import it from there by putting the checkout on `sys.path`; one definition, three callers, and the probes and the red-proof runner already run from the checkout.
+- `assert_own_runner` judges a runner by two observable facts, the version it prints and the file its interpreter imports `stabilize` from, cached per binary; the tests use shell shims standing in for a published runner, one importing from a site-packages path and one from this checkout's `src`, so both directions of the refusal are exercised without the published runners installed.
+- The red-proof runner's no-venv mode exists for the gate image, where the dependencies are installed and a per-worker venv build would only add minutes; the worker interpreter and its `PYTHONPATH` come from one pair of helpers used by `run.py` and `fallback.py`.
+
 ### WI-10 … WI-11
 Specified when each item starts; the plan file holds the design.
 

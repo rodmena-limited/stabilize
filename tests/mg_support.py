@@ -66,14 +66,73 @@ def stabilize(*args: str, env: dict[str, str] | None = None, timeout: float = 30
     )
 
 
+IMPORT_PATH_VARS = ("PYTHONPATH", "PYTHONHOME", "PYTHONSAFEPATH", "VIRTUAL_ENV")
+GATE_CLUSTER_PREFIX = "stabilize-gate-"
+_own_runners: dict[str, str] = {}
+
+
+def require_gate_cluster(conn: Any) -> str:
+    """The connection's cluster_name, which must start with stabilize-gate-; anything else is refused."""
+    row = conn.execute("SHOW cluster_name").fetchone()
+    name = str(row[0]) if row and row[0] is not None else ""
+    if not name.startswith(GATE_CLUSTER_PREFIX):
+        raise RuntimeError(
+            f"refusing to create or drop databases on cluster {name!r}: the DSN must point at a "
+            f"{GATE_CLUSTER_PREFIX}* cluster (set cluster_name on the gate server)"
+        )
+    return name
+
+
+def runner_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment a published runner gets: the caller's, without the import-path variables."""
+    env = {k: v for k, v in clean_env().items() if k not in IMPORT_PATH_VARS}
+    env.update(extra or {})
+    return env
+
+
+def import_location(python: str, env: dict[str, str]) -> str:
+    result = subprocess.run(
+        [python, "-c", "import stabilize; print(stabilize.__file__)"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd="/",
+        timeout=120,
+    )
+    return result.stdout.strip() or f"<no stabilize: {result.stderr.strip()[:200]}>"
+
+
+def assert_own_runner(binary: str) -> str:
+    """Confirm once that *binary* is a published stabilize importing its own site-packages, not this checkout."""
+    if binary in _own_runners:
+        return _own_runners[binary]
+    from stabilize import __version__
+
+    env = runner_env()
+    version = subprocess.run([binary, "--version"], capture_output=True, text=True, env=env, timeout=120)
+    printed = (version.stdout + version.stderr).strip()
+    match = re.search(r"\d+\.\d+\.\d+[A-Za-z0-9.+-]*", printed)
+    if version.returncode != 0 or match is None:
+        raise RuntimeError(f"{binary} --version printed no version: {printed[:200]!r}")
+    if match.group(0) == __version__:
+        raise RuntimeError(f"{binary} reports version {__version__}, this checkout's own; it is not a published runner")
+    python = Path(binary).parent / "python"
+    where = import_location(str(python), env) if python.exists() else "<no interpreter next to the runner>"
+    if where.startswith(str(REPO / "src")) or where.startswith("<"):
+        raise RuntimeError(f"{binary} imports stabilize from {where}, not from its own site-packages")
+    _own_runners[binary] = match.group(0)
+    return match.group(0)
+
+
 def old_stabilize(
     binary: str, *args: str, env: dict[str, str] | None = None, cwd: Path | None = None
 ) -> subprocess.CompletedProcess[str]:
+    assert_own_runner(binary)
     return subprocess.run(
         [binary, *args],
         capture_output=True,
         text=True,
-        env=env if env is not None else clean_env(),
+        env=env if env is not None else runner_env(),
         cwd=cwd,
         timeout=300,
     )

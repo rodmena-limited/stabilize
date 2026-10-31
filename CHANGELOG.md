@@ -395,6 +395,16 @@ host's own migretti history, now upgrade with no change to the command.
 - **`cancel_remaining` is documented as deprecated and refused (A19, B43).** The guide showed
   `cancel_remaining=True` as working. The builder refuses it. The example, the builder and the model
   docstrings say so. The parameter is removed in 2.0.
+- **A published runner under test imports its own stabilize (B57).** The upgrade tests run released
+  versions through `old_stabilize`, which passed the caller's `PYTHONPATH` through, so under a
+  source-import job the "0.33.1 built the database" step ran this checkout's code. The runner now gets
+  an environment without `PYTHONPATH`, `PYTHONHOME`, `PYTHONSAFEPATH` and `VIRTUAL_ENV`, and is refused
+  unless `--version` prints another version and its interpreter imports stabilize from outside the
+  checkout. The three manual proofs produced under the leak are re-produced at the gate.
+- **Test and audit helpers drop databases only on a gate cluster.** The worker-database fixture, the
+  red-proof runner and the probe backends read `SHOW cluster_name` first and refuse any cluster not
+  named `stabilize-gate-*`. The red-proof runner no longer shells out to docker; `REDPROOF_NO_VENV=1`
+  runs its workers on the image interpreter with the workspace on `PYTHONPATH`.
 - **Recovery ages a workflow by its activity, not by its start (B21).** A run started 30
   hours ago whose task row changed five minutes ago was never recovered, because the only
   clock was `start_time`. `pipeline_executions`, `stage_executions` and `task_executions`

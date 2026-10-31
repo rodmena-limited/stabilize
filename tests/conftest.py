@@ -47,7 +47,10 @@ def _worker_database(base_dsn: str) -> str:
     worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
     parts = urlsplit(base_dsn)
     name = f"{parts.path.lstrip('/') or 'postgres'}_{worker}"
+    from tests.mg_support import require_gate_cluster
+
     with psycopg.connect(base_dsn, autocommit=True) as conn:
+        require_gate_cluster(conn)
         conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
         conn.execute(f'CREATE DATABASE "{name}"')
     return urlunsplit((parts.scheme, parts.netloc, f"/{name}", parts.query, parts.fragment))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import threading
 import time
 from collections import defaultdict
@@ -62,11 +63,14 @@ def defining_sources(test_file: Path, ws: Path) -> list[str]:
         "        pass\n"
         "print(json.dumps(sorted(x for x in out if x)))\n"
     )
+    import run as runner
+
     proc = subprocess.run(
-        [str(ws / ".venv/bin/python"), "-c", script, json.dumps(names)],
+        [runner.worker_python(ws), "-c", script, json.dumps(names)],
         cwd=ws,
         capture_output=True,
         text=True,
+        env={**os.environ, "PYTHONPATH": runner.worker_pythonpath(ws)},
     )
     try:
         files = json.loads(proc.stdout.strip().splitlines()[-1])
@@ -98,13 +102,9 @@ def plan(state: Any, ws0: Path) -> list[tuple[Mutant, list[str]]]:
     covered_lines = {k for k, v in state.line_tests.items() if v}
     jobs: list[tuple[Mutant, list[str]]] = []
     for test_file, tests in sorted(by_file.items()):
-        sources = sorted(
-            set(imported_sources(ws0 / test_file, src_root)) | set(defining_sources(ws0 / test_file, ws0))
-        )
+        sources = sorted(set(imported_sources(ws0 / test_file, src_root)) | set(defining_sources(ws0 / test_file, ws0)))
         pool = [m for p in sources for m in by_path.get(p, []) if m.key not in state.tried]
-        pool.sort(
-            key=lambda m: (f"{m.path}:{m.line}" in covered_lines, OPERATOR_ORDER.get(m.operator, 9), m.key)
-        )
+        pool.sort(key=lambda m: (f"{m.path}:{m.line}" in covered_lines, OPERATOR_ORDER.get(m.operator, 9), m.key))
         jobs.extend((m, tests) for m in pool[:PER_FILE_MUTANTS])
         helpers = [m for m in helper_mutants(ws0 / test_file, test_file) if m.key not in state.tried]
         helpers.sort(key=lambda m: (OPERATOR_ORDER.get(m.operator, 9), m.key))
@@ -112,9 +112,7 @@ def plan(state: Any, ws0: Path) -> list[tuple[Mutant, list[str]]]:
     return jobs
 
 
-def run(
-    state: Any, out: Path, workers: int, budget_s: float, try_mutant: Any, wait_host: Any, log: Any
-) -> None:
+def run(state: Any, out: Path, workers: int, budget_s: float, try_mutant: Any, wait_host: Any, log: Any) -> None:
     jobs = plan(state, out / "ws-0")
     log(f"fallback: {len(jobs)} mutant runs for {len(state.passing) - len(state.proven)} unproven tests")
     lock = threading.Lock()
