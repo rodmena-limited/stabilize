@@ -20,8 +20,9 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from stabilize.persistence.tenancy import TenancyModeChanged, require_same_tenant
+from stabilize.persistence.tenancy import TenancyModeChanged, TenantError, require_same_tenant
 from stabilize.queue import Queue
+from stabilize.queue.dedup import BloomDeduplicator
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.processor.config import QueueProcessorConfig
 from stabilize.queue.processor.drain import SynchronousDrainMixin
@@ -96,6 +97,8 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
         else:
             self.config = QueueProcessorConfig.from_handler_config(handler_config)
         self._store = store
+        self._dedup = BloomDeduplicator(expected_items=100_000, false_positive_rate=0.001)
+        _refuse_foreign_recorder(store)
 
         # Warn if deduplication is enabled but no store provided
         if self.config.enable_deduplication and store is None:
@@ -194,6 +197,11 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
                 _handler_fn(message)
 
         self.register_handler(FuncHandler())
+
+    @property
+    def deduplicator(self) -> BloomDeduplicator:
+        """This processor's own bloom filter; processors never share one."""
+        return self._dedup
 
     @property
     def fault(self) -> BaseException | None:
@@ -487,3 +495,18 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
         """Get the number of actively processing messages."""
         with self._lock:
             return self._active_count
+
+
+def _refuse_foreign_recorder(store: Any) -> None:
+    from stabilize.events.recorder import get_event_recorder
+
+    recorder = get_event_recorder()
+    if recorder is None or store is None:
+        return
+    recorder_tenant = getattr(getattr(recorder, "_event_store", None), "tenant", None)
+    store_tenant = getattr(store, "tenant", None)
+    if recorder_tenant is not None and store_tenant is not None and recorder_tenant != store_tenant:
+        raise TenantError(
+            f"the global event recorder writes for tenant {recorder_tenant!r} but this processor's store is "
+            f"{store_tenant!r}; configure one recorder per tenant process"
+        )

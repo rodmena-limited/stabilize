@@ -79,12 +79,19 @@ on the current code before the fix is written. No gate until every item is done.
 - While a store's tenant is not `''`, `store()` shall refuse workflow, stage and task ids that are not 26-character Crockford ULIDs (`ValueError` naming the id), so ids cannot collide across tenants on the shared primary keys.
 - `stabilize.current_tenant()` shall return the tenant of the store whose handler, task, hook or finalizer is running on the current thread, and `''` outside one; `RunTaskHandler` binds it around task execution.
 
-### WI-2 slice 6b: per-instance dedup and recorder, namespaced subscriptions, mg-queue-table (in progress)
+### WI-2 slice 6b: per-instance dedup and recorder, namespaced subscriptions, mg-queue-table (done)
 - Each `QueueProcessor` shall own its deduplicator (`processor.deduplicator`); two processors shall never share one bloom filter, and the module-level `get_deduplicator()` shall stay only for callers outside a processor.
 - `Event.tenant` shall exist (`''` by default); an event store shall stamp its own tenant on every event it appends and shall refuse with `TenantMismatchError` an event whose `tenant` is set to another value.
 - When a global event recorder is configured and a `QueueProcessor` is built whose store carries a different tenant from the recorder's event store, the processor shall refuse with `TenantError`; `configure_event_sourcing` keeps configuring the global recorder.
 - Under a non-empty tenant the event store shall store durable subscription ids as `"<tenant>" + chr(31) + "<name>"` and shall accept and return names only; names longer than 100 characters or containing control characters shall be refused with `ValueError`; `list_subscriptions()` shall return the tenant's names; a name saved by one tenant shall not be visible to another.
 - `stabilize mg-queue-table NAME` shall create `NAME` and `NAME_dlq` in the target schema with the shape of `queue_messages` and `queue_messages_dlq` (columns, defaults, indexes) and, in tenancy mode, the fence trigger, the CHECK and no default on `stabilize_tenant`; it shall refuse a name that is not a plain identifier and shall be idempotent.
+
+### WI-2 slice 6c: tenant flags on the maintenance CLI, factories, the orchestrator singleton, runbook (in progress)
+- `create_repository`, `create_queue` and `create_event_store` in `stabilize.persistence.factory` shall accept `tenant=` and pass it through.
+- `stabilize prune-processed`, `purge-workflows` and `prune-signals` shall accept `--tenant NAME` and `--all-tenants`, resolved by the same rule as the monitor: in tenancy mode one of them is required, in single-tenant mode the default is `''`; `--all-tenants` runs the command once per tenant found in `pipeline_executions` (and for `prune-processed`, in `processed_messages`).
+- While the store carries a tenant, `Orchestrator.get_instance()` shall raise `TenantError` (a process-global orchestrator cannot serve several tenants); in single-tenant mode it shall keep returning the last instance and emit a `DeprecationWarning`.
+- `PostgresEventStore.setup_ddl()` shall produce the same columns, types and nullability for `events`, `snapshots` and `event_subscriptions` as `mg-up` does; a test applies both to fresh databases and compares the catalogs.
+- The persistence guide's "One pool for several tenants" section shall describe tenancy mode with `tenant=`, `tenant_setting=` and the fence in place of the session-level `on_borrow` recipe, keeping the recipe only as the single-tenant RLS variant.
 
 ### WI-2 remaining slices (to be specified as each starts)
 Statements on every SQL site (rule 1 explicit column lists), the trigger fence and `mg-tenancy enable|disable|status`, the `TenancyModeChanged` latch, per-instance recorder/deduplicator, namespaced subscription ids and locks, the schema check, indexes, SQLite triggers, runbooks.

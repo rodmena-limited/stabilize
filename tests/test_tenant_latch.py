@@ -120,6 +120,7 @@ def test_a_fence_refusal_in_the_poll_loop_latches_the_processor(
     processor = QueueProcessor(queue, store=store, task_registry=registry)
     try:
         Orchestrator(queue, store=store).start(_workflow())
+
         def unarmed(conn: Any, tenant: str, setting: str | None, reader: Any = None) -> str:
             if reader is not None:
                 reader.record("tenancy")

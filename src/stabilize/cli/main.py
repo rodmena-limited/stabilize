@@ -8,6 +8,7 @@ from pathlib import Path
 
 from stabilize.cli.commands import mg_check_grants, mg_status, mg_up, monitor, prompt, prune_signals
 from stabilize.cli.migrations import MigrationsNotFoundError
+from stabilize.cli.queue_table_cli import mg_queue_table
 from stabilize.cli.tenancy_cli import mg_tenancy
 
 
@@ -72,6 +73,18 @@ def main() -> None:
         help="Database URL of a user that can read the catalogue (postgres://user:pass@host:port/dbname)",
     )
     grants_parser.add_argument(
+        "--config",
+        type=Path,
+        metavar="PATH",
+        help="Read the database target from this migretti-style YAML file (never from the working directory)",
+    )
+
+    queue_table_parser = subparsers.add_parser(
+        "mg-queue-table", help="Create a custom queue table and its _dlq sibling in the shape the schema's mode needs"
+    )
+    queue_table_parser.add_argument("name", help="Table name (lower-case identifier)")
+    queue_table_parser.add_argument("--db-url", help="Database URL of the migration role")
+    queue_table_parser.add_argument(
         "--config",
         type=Path,
         metavar="PATH",
@@ -236,6 +249,8 @@ def main() -> None:
         except MigrationsNotFoundError as exc:
             print(exc, file=sys.stderr)
             sys.exit(2)
+    elif args.command == "mg-queue-table":
+        mg_queue_table(args.name, args.db_url, config_path=args.config)
     elif args.command == "mg-tenancy":
         try:
             mg_tenancy(

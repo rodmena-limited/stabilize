@@ -11,6 +11,7 @@ import sqlite3
 from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EventType, parse_event_type
+from stabilize.events.store.subscription_names import qualify, unqualify
 from stabilize.persistence.columns import select_list
 from stabilize.persistence.tenancy import refuse_foreign_row
 
@@ -47,6 +48,7 @@ class SqliteSubscriptionsMixin:
         webhook_url: str | None = None,
     ) -> None:
         """Save or update a durable subscription."""
+        subscription_id = qualify(self.tenant, subscription_id)
         conn = self._get_connection()
 
         event_types_json = json.dumps([et.value for et in event_types]) if event_types else None
@@ -83,6 +85,7 @@ class SqliteSubscriptionsMixin:
 
     def get_subscription(self, subscription_id: str) -> dict[str, Any] | None:
         """Get a durable subscription by ID."""
+        subscription_id = qualify(self.tenant, subscription_id)
         conn = self._get_connection()
 
         cursor = conn.execute(
@@ -107,7 +110,7 @@ class SqliteSubscriptionsMixin:
             entity_filter = None
 
         return {
-            "id": row["id"],
+            "id": unqualify(self.tenant, row["id"]),
             "event_types": event_types,
             "entity_filter": entity_filter,
             "last_sequence": row["last_sequence"],
@@ -122,6 +125,7 @@ class SqliteSubscriptionsMixin:
         last_commit_cursor: str,
     ) -> None:
         """Persist both delivery positions for a subscription."""
+        subscription_id = qualify(self.tenant, subscription_id)
         conn = self._get_connection()
 
         conn.execute(
@@ -138,6 +142,7 @@ class SqliteSubscriptionsMixin:
 
     def update_subscription_sequence(self, subscription_id: str, last_sequence: int) -> None:
         """Update the last processed sequence for a subscription."""
+        subscription_id = qualify(self.tenant, subscription_id)
         conn = self._get_connection()
 
         conn.execute(
@@ -152,6 +157,7 @@ class SqliteSubscriptionsMixin:
 
     def delete_subscription(self, subscription_id: str) -> None:
         """Delete a durable subscription."""
+        subscription_id = qualify(self.tenant, subscription_id)
         conn = self._get_connection()
 
         conn.execute(
@@ -168,4 +174,4 @@ class SqliteSubscriptionsMixin:
             "SELECT id, last_sequence FROM event_subscriptions WHERE stabilize_tenant = ?", (self.tenant,)
         )
 
-        return [{"id": row["id"], "last_sequence": row["last_sequence"]} for row in cursor]
+        return [{"id": unqualify(self.tenant, row["id"]), "last_sequence": row["last_sequence"]} for row in cursor]

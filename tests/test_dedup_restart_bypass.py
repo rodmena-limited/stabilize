@@ -92,10 +92,11 @@ class TestBloomAuthority:
         store.mark_message_processed("msg-hydrate-1", handler_type="X", execution_id="e1")
         reset_deduplicator()  # restart
 
-        QueueProcessor(queue, store=store)
-        dedup = get_deduplicator()
+        processor = QueueProcessor(queue, store=store)
+        dedup = processor.deduplicator
         assert dedup.authoritative is True
         assert dedup.maybe_seen("msg-hydrate-1")
+        assert get_deduplicator().maybe_seen("msg-hydrate-1") is False, "the processor wrote to the global filter"
 
     def test_opt_in_negative_cache_skips_db_but_stays_correct(self, sqlite_env: Any) -> None:
         """With dedup_trust_negative_cache=True and a hydrated bloom, fresh

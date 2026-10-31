@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from stabilize.persistence.committed_marks import clear_committed, consume_committed
 from stabilize.persistence.tenancy import TenancyModeChanged, bind_tenant
-from stabilize.queue.dedup import get_deduplicator
+from stabilize.queue.dedup import BloomDeduplicator
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.processor.handler_base import MessageHandler
 
@@ -52,6 +52,8 @@ class _DiagnosticMarkerHandler(MessageHandler[Any]):
 
 class QueueProcessorMixin:
     """Mixin providing handler registration, message handling, and DLQ management."""
+
+    _dedup: BloomDeduplicator
 
     # These attributes are expected to be defined in the class using this mixin
     _handlers: dict[type[Message], MessageHandler[Any]]
@@ -139,7 +141,7 @@ class QueueProcessorMixin:
         execution_id = getattr(message, "execution_id", None)
 
         if self.config.enable_deduplication and message_id is not None:
-            dedup = get_deduplicator()
+            dedup = self._dedup
 
             # A bloom negative only proves "definitely new" while the filter
             # is authoritative (hydrated from the store, not reset since) AND
@@ -177,7 +179,7 @@ class QueueProcessorMixin:
         # Mark message as processed for deduplication
         if self.config.enable_deduplication and message_id is not None:
             # Mark in bloom filter (fast, in-memory)
-            dedup = get_deduplicator()
+            dedup = self._dedup
             dedup.mark_seen(message_id)
 
             if self._store is not None and not consume_committed(message_id):
@@ -197,7 +199,7 @@ class QueueProcessorMixin:
         """
         if self._store is None:
             return
-        dedup = get_deduplicator()
+        dedup = self._dedup
         capacity = dedup.expected_items
         try:
             # Fetch one beyond capacity so truncation is detectable.

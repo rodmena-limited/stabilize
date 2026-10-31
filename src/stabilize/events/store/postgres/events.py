@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +20,7 @@ from stabilize.events.base import (
 )
 from stabilize.events.store.interface import EventQuery
 from stabilize.persistence.columns import columns, select_list
+from stabilize.persistence.tenancy import TenantMismatchError
 
 _EVENTS = select_list("events", "postgres")
 
@@ -50,6 +52,10 @@ class PostgresEventsMixin:
             result_events = []
 
             for event in events:
+                if event.tenant and event.tenant != self.tenant:
+                    raise TenantMismatchError(
+                        f"event {event.event_id} carries tenant {event.tenant!r} but this store is {self.tenant!r}"
+                    )
                 cur.execute(
                     """
                     INSERT INTO events (
@@ -84,7 +90,7 @@ class PostgresEventsMixin:
 
                 row = cur.fetchone()
                 sequence = row[0] if isinstance(row, tuple) else row.get("sequence", 0)
-                result_events.append(event.with_sequence(sequence))
+                result_events.append(replace(event.with_sequence(sequence), tenant=self.tenant))
 
             return result_events
 
@@ -368,4 +374,5 @@ class PostgresEventsMixin:
                 source_handler=data["source_handler"],
             ),
             schema_version=data.get("schema_version", 1),
+            tenant=data["stabilize_tenant"] or "",
         )

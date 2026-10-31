@@ -179,6 +179,7 @@ class Event:
     data: dict[str, Any] = field(default_factory=dict)
     metadata: EventMetadata = field(default_factory=lambda: EventMetadata(correlation_id=""))
     schema_version: int = CURRENT_SCHEMA_VERSION
+    tenant: str = ""
 
     def with_sequence(self, sequence: int) -> Event:
         """Return a new event with the given sequence number."""
@@ -194,6 +195,7 @@ class Event:
             data=self.data,
             metadata=self.metadata,
             schema_version=self.schema_version,
+            tenant=self.tenant,
         )
 
     def to_dict(self) -> dict[str, Any]:

@@ -103,6 +103,19 @@ host's own migretti history, now upgrade with no change to the command.
   `ValueError`, which keeps caller-chosen ids from colliding across tenants.
 - **`stabilize.current_tenant()`** returns the tenant of the store whose handler or task
   is running on the current thread, and `''` outside one.
+- **Each processor owns its deduplicator.** Two `QueueProcessor` instances never share a
+  bloom filter. `processor.deduplicator` exposes the filter, and the module-level
+  `get_deduplicator()` stays for callers outside a processor.
+- **`Event.tenant`.** An event store stamps its tenant on every event it appends and
+  refuses one that names another tenant. A processor refuses a global event recorder
+  whose store belongs to another tenant.
+- **Durable subscription names are per tenant.** Under a tenant the store keeps the id
+  as the tenant, a unit separator and the name, and callers see names only. Names are at
+  most 100 characters and carry no control characters. Two tenants can both own a
+  subscription called `projector`.
+- **`stabilize mg-queue-table NAME`** creates `NAME` and `NAME_dlq` with the shape of the
+  built-in queue tables and, in tenancy mode, the fence, the CHECK and no default on the
+  tenant column. Running it twice changes nothing the second time.
 
 ### Fixed
 

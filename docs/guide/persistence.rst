@@ -336,6 +336,11 @@ setting to the tenant on each transaction as well, for policies written against 
 ``enable`` refuses a schema with ``FORCE ROW LEVEL SECURITY`` on an engine table and a
 database or role that already sets ``stabilize.tenant``.
 
+A custom queue table needs a ``_dlq`` sibling with the shape of ``queue_messages_dlq``,
+because the engine moves poison messages there. ``stabilize mg-queue-table NAME`` creates
+both in the target schema. In tenancy mode it adds the fence to them. A second run
+changes nothing.
+
 On its first statement each store, queue and event store checks the shape of the
 tables it uses and refuses with ``EngineSchemaError`` when a column, the fence or the
 tenant default is wrong. The message is the DDL to run as the owner. ``mg-up`` keeps the

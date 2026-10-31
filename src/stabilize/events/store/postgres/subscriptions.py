@@ -8,6 +8,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EventType, parse_event_type
+from stabilize.events.store.subscription_names import qualify, unqualify
 from stabilize.persistence.columns import select_list
 from stabilize.persistence.tenancy import refuse_foreign_row
 
@@ -36,6 +37,7 @@ class PostgresSubscriptionsMixin:
         webhook_url: str | None = None,
     ) -> None:
         """Save or update a durable subscription."""
+        subscription_id = qualify(self.tenant, subscription_id)
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 event_types_arr = [et.value for et in event_types] if event_types else None
@@ -77,6 +79,7 @@ class PostgresSubscriptionsMixin:
 
     def get_subscription(self, subscription_id: str) -> dict[str, Any] | None:
         """Get a durable subscription by ID."""
+        subscription_id = qualify(self.tenant, subscription_id)
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -122,6 +125,7 @@ class PostgresSubscriptionsMixin:
 
     def update_subscription_sequence(self, subscription_id: str, last_sequence: int) -> None:
         """Update the last processed sequence for a subscription."""
+        subscription_id = qualify(self.tenant, subscription_id)
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -141,6 +145,7 @@ class PostgresSubscriptionsMixin:
         last_commit_cursor: str,
     ) -> None:
         """Persist both delivery positions for a subscription."""
+        subscription_id = qualify(self.tenant, subscription_id)
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -162,6 +167,7 @@ class PostgresSubscriptionsMixin:
 
     def delete_subscription(self, subscription_id: str) -> None:
         """Delete a durable subscription."""
+        subscription_id = qualify(self.tenant, subscription_id)
         with self._borrow() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -180,7 +186,7 @@ class PostgresSubscriptionsMixin:
                 )
                 return [
                     {
-                        "id": row["id"],
+                        "id": unqualify(self.tenant, row["id"]),
                         "last_sequence": row["last_sequence"],
                     }
                     for row in cur.fetchall()
