@@ -41,9 +41,7 @@ def run(state: Any, out: Path, workers: int, try_mutant: Any, wait_host: Any, lo
         by_key[key].append(test)
     mutants = _lookup(out / "ws-0", set(by_key))
     jobs = [(mutants[k], tests) for k, tests in sorted(by_key.items()) if k in mutants]
-    log(
-        f"replay: {len(known)} known proofs, {len(jobs)} mutants still apply, {len(by_key) - len(jobs)} no longer do"
-    )
+    log(f"replay: {len(known)} known proofs, {len(jobs)} mutants still apply, {len(by_key) - len(jobs)} no longer do")
     lock = threading.Lock()
 
     def worker(i: int) -> None:
@@ -57,8 +55,7 @@ def run(state: Any, out: Path, workers: int, try_mutant: Any, wait_host: Any, lo
             confirmed, discarded = try_mutant(ws, i, m, tests)
             state.record(m, tests, confirmed, discarded)
             log(
-                f"replay w{i} {m.stable_key} ran={len(tests)} proven+={len(confirmed)} "
-                f"total_proven={len(state.proven)}"
+                f"replay w{i} {m.stable_key} ran={len(tests)} proven+={len(confirmed)} total_proven={len(state.proven)}"
             )
 
     threads = [threading.Thread(target=worker, args=(i,)) for i in range(workers)]

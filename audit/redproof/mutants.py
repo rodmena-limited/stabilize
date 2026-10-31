@@ -159,9 +159,7 @@ def _is_logging_call(node: ast.AST) -> bool:
 def _candidates(node: ast.AST) -> list[tuple[str, ast.AST, str]]:
     out: list[tuple[str, ast.AST, str]] = _tenant_predicate_mutants(node)
     if isinstance(node, ast.Compare) and len(node.ops) == 1 and type(node.ops[0]) in FLIP_CMP:
-        flipped = ast.Compare(
-            left=node.left, ops=[FLIP_CMP[type(node.ops[0])]()], comparators=node.comparators
-        )
+        flipped = ast.Compare(left=node.left, ops=[FLIP_CMP[type(node.ops[0])]()], comparators=node.comparators)
         out.append(("cmp-flip", node, _expr(flipped)))
     elif isinstance(node, ast.BoolOp):
         other = ast.Or() if isinstance(node.op, ast.And) else ast.And()
@@ -195,9 +193,7 @@ def _candidates(node: ast.AST) -> list[tuple[str, ast.AST, str]]:
         out.append(("call-drop", node, "pass"))
     elif isinstance(node, (ast.Raise, ast.AugAssign)):
         out.append(("stmt-drop", node, "pass"))
-    elif (
-        isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Attribute)
-    ):
+    elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Attribute):
         out.append(("attr-assign-drop", node, "pass"))
     return out
 
