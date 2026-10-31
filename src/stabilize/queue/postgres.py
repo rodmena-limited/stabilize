@@ -33,6 +33,7 @@ from stabilize.queue.decode import MessageDecodeError, decode_message
 from stabilize.queue.interface import Queue
 from stabilize.queue.message_ids import delivery_key, own_row_ids, row_id
 from stabilize.queue.messages import Message, get_message_type_name
+from stabilize.queue.postgres_lookups import PostgresQueueLookupsMixin
 
 _VALID_TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
@@ -40,9 +41,13 @@ logger = logging.getLogger(__name__)
 
 _FENCE = " AND (%(attempts)s::int IS NULL OR attempts = %(attempts)s::int)"
 _TENANT = " AND stabilize_tenant = %(tenant)s"
+_DELIVERABLE = (
+    "(attempts < %(max_attempts)s OR (store_retry_since IS NOT NULL "
+    "AND store_retry_since > NOW() - %(budget)s * INTERVAL '1 second'))"
+)
 
 
-class PostgresQueue(Queue):
+class PostgresQueue(PostgresQueueLookupsMixin, Queue):
     """
     PostgreSQL-backed queue implementation.
 
@@ -62,6 +67,7 @@ class PostgresQueue(Queue):
         schema: str | None = None,
         options: PoolOptions | None = None,
         tenant: str = "",
+        store_retry_budget: timedelta = timedelta(minutes=30),
     ) -> None:
         """
         Initialize the PostgreSQL queue.
@@ -93,6 +99,7 @@ class PostgresQueue(Queue):
         self.table_name = table_name
         self.lock_duration = lock_duration
         self.max_attempts = max_attempts
+        self.store_retry_budget = store_retry_budget
         self.schema = schema
         self._pool_options = with_schema(options, schema, connection_string)
         self._manager = get_connection_manager()
@@ -222,16 +229,17 @@ class PostgresQueue(Queue):
                         WHERE deliver_at <= NOW()
                         AND stabilize_tenant = %(tenant)s
                         AND (locked_until IS NULL OR locked_until < NOW())
-                        AND attempts < %(max_attempts)s
+                        AND {_DELIVERABLE}
                         ORDER BY deliver_at
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED
                     )
-                    RETURNING id, message_type, payload::text AS payload, attempts
+                    RETURNING id, message_type, payload::text AS payload, attempts, store_retries
                     """,
                     {
                         "lock_seconds": self.lock_duration.total_seconds(),
                         "max_attempts": self.max_attempts,
+                        "budget": self.store_retry_budget.total_seconds(),
                         "tenant": self.tenant,
                     },
                 )
@@ -252,6 +260,7 @@ class PostgresQueue(Queue):
 
         message.message_id = delivery_key(self.table_name, msg_id)
         message.attempts = row["attempts"]
+        message.store_retries = int(row["store_retries"] or 0)
         self._pending[msg_id] = {
             "message": message,
             "type": msg_type,
@@ -320,8 +329,10 @@ class PostgresQueue(Queue):
         self,
         message: Message,
         delay: timedelta,
+        *,
+        store_unavailable: bool = False,
     ) -> None:
-        """Reschedule a message with a new delay."""
+        """Reschedule a message; a store outage spends the store-retry budget, anything else closes it."""
         if not message.message_id:
             return
 
@@ -333,11 +344,14 @@ class PostgresQueue(Queue):
                     f"""
                     UPDATE {self.table_name}
                     SET deliver_at = NOW() + %(delay)s * INTERVAL '1 second',
-                        locked_until = NULL
+                        locked_until = NULL,
+                        store_retries = CASE WHEN %(store)s THEN store_retries + 1 ELSE 0 END,
+                        store_retry_since = CASE WHEN %(store)s THEN COALESCE(store_retry_since, NOW()) ELSE NULL END
                     WHERE id = %(id)s{_FENCE}{_TENANT}
                     """,
                     {
                         "id": msg_id,
+                        "store": bool(store_unavailable),
                         "delay": delay.total_seconds(),
                         "attempts": getattr(message, "attempts", None),
                         "tenant": self.tenant,
@@ -385,8 +399,12 @@ class PostgresQueue(Queue):
                 cur.execute(
                     f"SELECT EXTRACT(EPOCH FROM (MIN(deliver_at) - NOW())) AS wait FROM {self.table_name} "
                     "WHERE stabilize_tenant = %(tenant)s AND (locked_until IS NULL OR locked_until < NOW()) "
-                    "AND attempts < %(max_attempts)s",
-                    {"tenant": self.tenant, "max_attempts": self.max_attempts},
+                    f"AND {_DELIVERABLE}",
+                    {
+                        "tenant": self.tenant,
+                        "max_attempts": self.max_attempts,
+                        "budget": self.store_retry_budget.total_seconds(),
+                    },
                 )
                 row = cur.fetchone()
             conn.commit()
@@ -405,93 +423,6 @@ class PostgresQueue(Queue):
         self._pending.clear()
         # Invalidate size cache
         self._size_cache = None
-
-    def has_pending_message_for_task(self, task_id: str) -> bool:
-        """Check if there's already a pending message for a specific task.
-
-        Used by recovery to prevent creating duplicate messages.
-
-        Args:
-            task_id: The task ID to check for
-
-        Returns:
-            True if a pending message exists for this task
-        """
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                # Exact top-level match; served by the expression index
-                # idx_<table>_task_id (see add_queue_task_id_index migration).
-                cur.execute(
-                    f"""
-                    SELECT 1 FROM {self.table_name}
-                    WHERE payload ->> 'task_id' = %s AND stabilize_tenant = %s
-                    LIMIT 1
-                    """,
-                    (task_id, self.tenant),
-                )
-                return cur.fetchone() is not None
-
-    def has_pending_message_for_stage(self, stage_id: str) -> bool:
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT 1 FROM {self.table_name} "
-                    "WHERE payload ->> 'stage_id' = %s AND stabilize_tenant = %s LIMIT 1",
-                    (stage_id, self.tenant),
-                )
-                return cur.fetchone() is not None
-
-    def has_pending_message_for_config(self, pipeline_config_id: str) -> bool:
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT 1 FROM {self.table_name} "
-                    "WHERE payload ->> 'pipeline_config_id' = %s AND stabilize_tenant = %s LIMIT 1",
-                    (pipeline_config_id, self.tenant),
-                )
-                return cur.fetchone() is not None
-
-    def dead_letter_moved_at_ms(self, message_type: str, execution_id: str, target_id: str | None) -> int | None:
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT (EXTRACT(EPOCH FROM max(moved_at)) * 1000)::bigint AS ms FROM {self.table_name}_dlq "
-                    "WHERE message_type = %(type)s AND payload ->> 'execution_id' = %(execution_id)s "
-                    "AND stabilize_tenant = %(tenant)s AND (%(target)s::text IS NULL "
-                    "OR payload ->> 'task_id' = %(target)s OR payload ->> 'stage_id' = %(target)s)",
-                    {"type": message_type, "execution_id": execution_id, "tenant": self.tenant, "target": target_id},
-                )
-                row = cur.fetchone()
-        value = row["ms"] if row else None
-        return int(value) if value is not None else None
-
-    def has_pending_message_for_execution(self, execution_id: str) -> bool:
-        """Whether any queued message targets this workflow."""
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT 1 FROM {self.table_name} "
-                    "WHERE payload ->> 'execution_id' = %s AND stabilize_tenant = %s LIMIT 1",
-                    (execution_id, self.tenant),
-                )
-                return cur.fetchone() is not None
-
-    def purge_workflow(self, execution_id: str) -> int:
-        """Delete every queued and dead-lettered message for one workflow."""
-        deleted = 0
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                for table in (self.table_name, f"{self.table_name}_dlq"):
-                    cur.execute(
-                        f"DELETE FROM {table} WHERE payload ->> 'execution_id' = %s AND stabilize_tenant = %s",
-                        (execution_id, self.tenant),
-                    )
-                    deleted += cur.rowcount
-            conn.commit()
-        self._size_cache = None
-        return deleted
-
-    # ========== Dead Letter Queue Methods ==========
 
     def move_to_dlq(
         self,
@@ -535,4 +466,6 @@ class PostgresQueue(Queue):
         """Check for messages exceeding max_attempts and move to DLQ."""
         from stabilize.queue.dlq import check_and_move_expired as _check_and_move_expired
 
-        return _check_and_move_expired(self._engine, self.table_name, self._pending, self.max_attempts)
+        return _check_and_move_expired(
+            self._engine, self.table_name, self._pending, self.max_attempts, self.store_retry_budget
+        )

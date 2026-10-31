@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from stabilize.persistence.columns import select_list
@@ -34,6 +34,7 @@ class SqliteDLQMixin:
 
     table_name: str
     max_attempts: int
+    store_retry_budget: timedelta
     _pending: dict[int, dict[str, Any]]
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -61,7 +62,8 @@ class SqliteDLQMixin:
             f"""
             DELETE FROM {self.table_name}
             WHERE id = :id AND stabilize_tenant = :tenant
-            RETURNING id, message_id, message_type, payload, attempts, created_at, stabilize_tenant
+            RETURNING id, message_id, message_type, payload, attempts, created_at, stabilize_tenant,
+                      store_retries, store_retry_since
             """,
             {"id": msg_id, "tenant": self.tenant},
         )
@@ -75,10 +77,12 @@ class SqliteDLQMixin:
             f"""
             INSERT INTO {self.table_name}_dlq (
                 original_id, message_id, message_type, payload,
-                attempts, error, last_error_at, created_at, stabilize_tenant
+                attempts, error, last_error_at, created_at, stabilize_tenant,
+                store_retries, store_retry_since
             ) VALUES (
                 :original_id, :message_id, :message_type, :payload,
-                :attempts, :error, datetime('now', 'utc'), :created_at, :tenant
+                :attempts, :error, datetime('now', 'utc'), :created_at, :tenant,
+                :store_retries, :store_retry_since
             )
             """,
             {
@@ -90,6 +94,8 @@ class SqliteDLQMixin:
                 "error": error or "Max attempts exceeded",
                 "created_at": row["created_at"],
                 "tenant": row["stabilize_tenant"],
+                "store_retries": row["store_retries"],
+                "store_retry_since": row["store_retry_since"],
             },
         )
         conn.commit()
@@ -218,21 +224,27 @@ class SqliteDLQMixin:
         # Find messages that have exceeded max_attempts
         result = conn.execute(
             f"""
-            SELECT id, message_type, attempts
+            SELECT id, message_type, attempts, store_retries, store_retry_since IS NOT NULL AS over_budget
             FROM {self.table_name}
-            WHERE attempts >= :max_attempts AND stabilize_tenant = :tenant
+            WHERE stabilize_tenant = :tenant
             AND (locked_until IS NULL OR julianday(locked_until) < julianday(:now))
+            AND attempts >= :max_attempts
+            AND (store_retry_since IS NULL OR julianday(store_retry_since) <= julianday(:now) - :budget_days)
             """,
-            {"max_attempts": self.max_attempts, "tenant": self.tenant, "now": datetime.now(UTC).isoformat()},
+            {
+                "max_attempts": self.max_attempts,
+                "tenant": self.tenant,
+                "now": datetime.now(UTC).isoformat(),
+                "budget_days": self.store_retry_budget.total_seconds() / 86400.0,
+            },
         )
         rows = result.fetchall()
 
         moved_count = 0
         for row in rows:
-            self.move_to_dlq(
-                row["id"],
-                f"Exceeded max_attempts ({row['attempts']})",
-            )
+            from stabilize.queue.dlq import dead_letter_cause
+
+            self.move_to_dlq(row["id"], dead_letter_cause(row))
             moved_count += 1
 
         if moved_count > 0:

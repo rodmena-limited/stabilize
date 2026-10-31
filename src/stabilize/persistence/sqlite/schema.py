@@ -151,5 +151,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
     apply_migrations(conn)
 
     from stabilize.persistence.sqlite.tenant_schema import ensure_tenant_schema
+    from stabilize.queue.sqlite.schema import ensure_redelivery_columns
 
     ensure_tenant_schema(conn)
+    ensure_redelivery_columns(conn)

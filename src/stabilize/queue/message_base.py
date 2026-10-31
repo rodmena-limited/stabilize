@@ -19,6 +19,7 @@ class Message:
     created_at: datetime = field(default_factory=datetime.now, repr=False)
     attempts: int = field(default=0, repr=False)
     max_attempts: int = field(default=10, repr=False)
+    store_retries: int = field(default=0, repr=False)
 
     # Error tracking for retries - stores context from previous failures
     last_error: str | None = field(default=None, repr=False)

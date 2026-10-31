@@ -5,6 +5,7 @@ Dead Letter Queue (DLQ) functionality for PostgreSQL queue.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Any
 
 from ulid import ULID
@@ -45,14 +46,17 @@ def move_to_dlq(
                 WITH moved AS (
                     DELETE FROM {table_name}
                     WHERE id = %(id)s AND stabilize_tenant = %(tenant)s
-                    RETURNING id, message_id, message_type, payload, attempts, created_at, stabilize_tenant
+                    RETURNING id, message_id, message_type, payload, attempts, created_at, stabilize_tenant,
+                              store_retries, store_retry_since
                 )
                 INSERT INTO {table_name}_dlq (
                     original_id, message_id, message_type, payload,
-                    attempts, error, last_error_at, created_at, stabilize_tenant
+                    attempts, error, last_error_at, created_at, stabilize_tenant,
+                    store_retries, store_retry_since
                 )
                 SELECT id, message_id, message_type, payload,
-                       attempts, %(error)s, NOW(), created_at, stabilize_tenant
+                       attempts, %(error)s, NOW(), created_at, stabilize_tenant,
+                       store_retries, store_retry_since
                 FROM moved
                 RETURNING message_type, attempts
                 """,
@@ -185,13 +189,21 @@ def clear_dlq(engine: Any, table_name: str) -> int:
     return count
 
 
+def dead_letter_cause(row: Any) -> str:
+    """Why the sweep moves a row: the store budget ran out, or the attempts did."""
+    if row["over_budget"]:
+        return f"store_unavailable_budget_exhausted (attempts {row['attempts']}, store retries {row['store_retries']})"
+    return f"Exceeded max_attempts ({row['attempts']})"
+
+
 def check_and_move_expired(
     engine: Any,
     table_name: str,
     pending: dict[int, dict[str, Any]],
     max_attempts: int,
+    store_retry_budget: timedelta = timedelta(minutes=30),
 ) -> int:
-    """Check for messages exceeding max_attempts and move to DLQ.
+    """Move to the DLQ what exceeded max_attempts once its store-retry budget, if any, is spent.
 
     Returns:
         Number of messages moved to DLQ
@@ -201,12 +213,16 @@ def check_and_move_expired(
             # Find messages that have exceeded max_attempts
             cur.execute(
                 f"""
-                SELECT id, message_type, attempts
+                SELECT id, message_type, attempts, store_retries,
+                       store_retry_since IS NOT NULL AS over_budget
                 FROM {table_name}
-                WHERE attempts >= %(max_attempts)s AND stabilize_tenant = %(tenant)s
+                WHERE stabilize_tenant = %(tenant)s
                 AND (locked_until IS NULL OR locked_until < NOW())
+                AND attempts >= %(max_attempts)s
+                AND (store_retry_since IS NULL
+                     OR store_retry_since <= NOW() - %(budget)s * INTERVAL '1 second')
                 """,
-                {"max_attempts": max_attempts, "tenant": engine.tenant},
+                {"max_attempts": max_attempts, "tenant": engine.tenant, "budget": store_retry_budget.total_seconds()},
             )
             rows = cur.fetchall()
 
@@ -217,7 +233,7 @@ def check_and_move_expired(
             table_name,
             pending,
             row["id"],
-            f"Exceeded max_attempts ({row['attempts']})",
+            dead_letter_cause(row),
         )
         moved_count += 1
 

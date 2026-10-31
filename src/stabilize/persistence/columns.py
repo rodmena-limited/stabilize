@@ -92,6 +92,8 @@ QUEUE_MESSAGES: tuple[str, ...] = (
     "max_attempts",
     "locked_until",
     "created_at",
+    "store_retries",
+    "store_retry_since",
     TENANT_COLUMN,
 )
 
@@ -106,6 +108,8 @@ QUEUE_MESSAGES_DLQ: tuple[str, ...] = (
     "last_error_at",
     "created_at",
     "moved_at",
+    "store_retries",
+    "store_retry_since",
     TENANT_COLUMN,
 )
 

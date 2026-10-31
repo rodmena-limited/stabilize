@@ -29,13 +29,17 @@ from stabilize.queue.interface import Queue
 from stabilize.queue.message_ids import delivery_key, own_row_ids, row_id
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.sqlite.dlq import SqliteDLQMixin
-from stabilize.queue.sqlite.schema import create_queue_tables
+from stabilize.queue.sqlite.schema import create_queue_tables, ensure_redelivery_columns
 from stabilize.queue.sqlite.serialization import serialize_message
 
 logger = logging.getLogger(__name__)
 
 _FENCE = " AND (:attempts IS NULL OR attempts = :attempts)"
 _TENANT = " AND stabilize_tenant = :tenant"
+_DELIVERABLE = (
+    "(attempts < :max_attempts OR (store_retry_since IS NOT NULL "
+    "AND julianday(store_retry_since) > julianday(:now) - :budget_days))"
+)
 
 
 class SqliteQueue(SqliteDLQMixin, Queue):
@@ -66,6 +70,7 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         lock_duration: timedelta = timedelta(seconds=60),
         max_attempts: int = 10,
         tenant: str = "",
+        store_retry_budget: timedelta = timedelta(minutes=30),
     ) -> None:
         """
         Initialize the SQLite queue.
@@ -83,11 +88,13 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         self.table_name = table_name
         self.lock_duration = lock_duration
         self.max_attempts = max_attempts
+        self.store_retry_budget = store_retry_budget
         self._manager = get_connection_manager()
         self._pending: dict[int, dict[str, Any]] = {}
         conn = self._get_connection()
         if engine_shaped_tables(conn):
             ensure_tenant_schema(conn)
+            ensure_redelivery_columns(conn)
             check_mode_admits(read_mode(conn), self.tenant)
             check_sqlite_tables(conn, [self.table_name, f"{self.table_name}_dlq"], read_mode(conn))
         self._manager.bind_sqlite_tenant(connection_string, self.tenant)
@@ -112,6 +119,7 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         conn = self._get_connection()
         create_queue_tables(conn, self.table_name)
         ensure_tenant_schema(conn)
+        ensure_redelivery_columns(conn)
         check_mode_admits(read_mode(conn), self.tenant)
 
     def push(
@@ -190,16 +198,21 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         # Step 1: Find a candidate message
         result = conn.execute(
             f"""
-            SELECT id, message_type, payload, attempts, version
+            SELECT id, message_type, payload, attempts, version, store_retries
             FROM {self.table_name}
             WHERE julianday(deliver_at) <= julianday(:now)
             AND stabilize_tenant = :tenant
             AND (locked_until IS NULL OR julianday(locked_until) < julianday(:now))
-            AND attempts < :max_attempts
+            AND {_DELIVERABLE}
             ORDER BY deliver_at
             LIMIT 1
             """,
-            {"max_attempts": self.max_attempts, "now": datetime.now(UTC).isoformat(), "tenant": self.tenant},
+            {
+                "max_attempts": self.max_attempts,
+                "now": datetime.now(UTC).isoformat(),
+                "tenant": self.tenant,
+                "budget_days": self._budget_days(),
+            },
         )
         row = result.fetchone()
 
@@ -246,6 +259,7 @@ class SqliteQueue(SqliteDLQMixin, Queue):
 
         message.message_id = delivery_key(self.table_name, msg_id)
         message.attempts = attempts + 1
+        message.store_retries = int(row["store_retries"] or 0)
 
         self._pending[msg_id] = {
             "message": message,
@@ -309,12 +323,17 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         # A full implementation would check for duplicates
         self.push(message, delay)
 
+    def _budget_days(self) -> float:
+        return self.store_retry_budget.total_seconds() / 86400.0
+
     def reschedule(
         self,
         message: Message,
         delay: timedelta,
+        *,
+        store_unavailable: bool = False,
     ) -> None:
-        """Reschedule a message with a new delay."""
+        """Reschedule a message; a store outage spends the store-retry budget, anything else closes it."""
         if not message.message_id:
             return
 
@@ -326,11 +345,15 @@ class SqliteQueue(SqliteDLQMixin, Queue):
             f"""
             UPDATE {self.table_name}
             SET deliver_at = :deliver_at,
-                locked_until = NULL
+                locked_until = NULL,
+                store_retries = CASE WHEN :store = 1 THEN store_retries + 1 ELSE 0 END,
+                store_retry_since = CASE WHEN :store = 1 THEN COALESCE(store_retry_since, :now) ELSE NULL END
             WHERE id = :id{_FENCE}{_TENANT}
             """,
             {
                 "id": msg_id,
+                "store": 1 if store_unavailable else 0,
+                "now": datetime.now(UTC).isoformat(),
                 "deliver_at": deliver_at.isoformat(),
                 "attempts": getattr(message, "attempts", None),
                 "tenant": self.tenant,
@@ -371,8 +394,8 @@ class SqliteQueue(SqliteDLQMixin, Queue):
         row = conn.execute(
             f"SELECT (MIN(julianday(deliver_at)) - julianday(:now)) * 86400.0 FROM {self.table_name} "
             "WHERE stabilize_tenant = :tenant AND (locked_until IS NULL OR julianday(locked_until) < julianday(:now)) "
-            "AND attempts < :max_attempts",
-            {"now": now, "tenant": self.tenant, "max_attempts": self.max_attempts},
+            f"AND {_DELIVERABLE}",
+            {"now": now, "tenant": self.tenant, "max_attempts": self.max_attempts, "budget_days": self._budget_days()},
         ).fetchone()
         if not row or row[0] is None:
             return None

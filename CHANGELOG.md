@@ -183,6 +183,13 @@ host's own migretti history, now upgrade with no change to the command.
   57P01 to 57P03, 25006, 08007, 40003 and 0A000, `OperationalError`, `InterfaceError`
   and pool timeouts by class, `ConcurrencyError`. `STABILIZE_RETRY_ON_SHUTDOWN=1` makes
   57P01, 57P02 and 57014 transient for tasks.
+- **The store-retry budget.** `queue_messages` and `queue_messages_dlq` gain `store_retries`
+  and `store_retry_since`, added by migration `01M68PK3W1DW3T8GZ3YKE3SVSJ_redelivery_budget.sql`
+  on PostgreSQL and on open by SQLite, custom queue tables included.
+  `Queue.reschedule(..., store_unavailable=True)` spends that budget. `PostgresQueue` and
+  `SqliteQueue` take `store_retry_budget`, 30 minutes by default. `Message.store_retries` is
+  delivery metadata. The processor doubles `retry_delay` per store failure, capped at five
+  minutes.
 - **`stabilize_updated_at`** on the three execution tables and **`created_at_ms`** on
   `pipeline_executions`, added by migration `01M68FGEZVQR6KPAMW6P5N8B0E_recovery_activity.sql`
   on PostgreSQL and SQLite migration 8, with the trigger function
@@ -270,6 +277,12 @@ host's own migretti history, now upgrade with no change to the command.
   `StabilizeError.cause` and an unsuppressed `__context__`, each exception once, so a
   wrapped transient error is seen and a cyclic chain ends. `retry_after` on a transient
   error is honoured as a floor on the retry delay.
+- **A long store outage does not dead-letter healthy work at `max_attempts` (B02).** A message
+  redelivered for a store outage stays deliverable while its `store_retry_since` is younger
+  than the queue's `store_retry_budget`, whatever its attempt count. The sweep moves a message
+  at or past `max_attempts` to the dead-letter queue only once that budget is spent, with the
+  cause `store_unavailable_budget_exhausted`, and the dead-letter row keeps both counters. A
+  failure that is not a store outage closes the budget and the attempt rule applies again.
 - **Recovery ages a workflow by its activity, not by its start (B21).** A run started 30
   hours ago whose task row changed five minutes ago was never recovered, because the only
   clock was `start_time`. `pipeline_executions`, `stage_executions` and `task_executions`

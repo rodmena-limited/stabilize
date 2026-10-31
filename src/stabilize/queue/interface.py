@@ -110,6 +110,8 @@ class Queue(ABC):
         self,
         message: Message,
         delay: timedelta,
+        *,
+        store_unavailable: bool = False,
     ) -> None:
         """
         Reschedule a message with a new delay.
@@ -117,6 +119,8 @@ class Queue(ABC):
         Args:
             message: The message to reschedule
             delay: New delay before message is delivered
+            store_unavailable: The handler failed because the store was unreachable;
+                the message spends its store-retry budget instead of an attempt.
         """
         pass
 

@@ -9,10 +9,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from stabilize.errors.delivery import DeliveryContractError, DuplicateDeliveryError
+from stabilize.errors.store_errors import is_store_unavailable
 from stabilize.persistence.committed_marks import strict_delivery
 from stabilize.queue import Queue
 from stabilize.queue.messages import Message
 from stabilize.queue.processor.lease_guard import check_sync_lease, start_lock_heartbeat
+from stabilize.queue.processor.redelivery import redelivery_delay
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +87,12 @@ class SynchronousDrainMixin:
             except Exception as e:
                 logger.error("Error handling message: %s", e, exc_info=True)
                 message.set_error_context(e)
-                self.queue.reschedule(message, self.config.retry_delay)
+                unavailable = is_store_unavailable(e)
+                self.queue.reschedule(
+                    message,
+                    redelivery_delay(self.config.retry_delay, message, unavailable),
+                    store_unavailable=unavailable,
+                )
                 raise
             finally:
                 if heartbeat_stop is not None:

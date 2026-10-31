@@ -63,6 +63,7 @@ def create_queue_tables(conn: sqlite3.Connection, table_name: str) -> None:
     for statement in queue_lookup_indexes(table_name):
         conn.execute(statement)
     conn.commit()
+    ensure_redelivery_columns(conn)
 
 
 def queue_lookup_indexes(table_name: str) -> tuple[str, ...]:
@@ -75,3 +76,27 @@ def queue_lookup_indexes(table_name: str) -> tuple[str, ...]:
             (f"{table_name}_dlq", "execution_id"),
         )
     )
+
+
+REDELIVERY_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("store_retries", "INTEGER NOT NULL DEFAULT 0"),
+    ("store_retry_since", "TEXT"),
+)
+
+
+def ensure_redelivery_columns(conn: sqlite3.Connection) -> list[str]:
+    """Add the store-retry budget columns to every queue-shaped table that lacks them; returns the tables changed."""
+    from stabilize.persistence.sqlite.tenant_schema import engine_shaped_tables
+
+    changed: list[str] = []
+    for table in engine_shaped_tables(conn):
+        present = {str(row[1]) for row in conn.execute(f'PRAGMA table_info("{table}")').fetchall()}
+        if "payload" not in present or "attempts" not in present:
+            continue
+        for column, ddl in REDELIVERY_COLUMNS:
+            if column not in present:
+                conn.execute(f'ALTER TABLE "{table}" ADD COLUMN {column} {ddl}')
+                changed.append(table)
+    if changed:
+        conn.commit()
+    return sorted(set(changed))

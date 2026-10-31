@@ -281,7 +281,20 @@ Synthesis notes recorded while building 7a:
 - Breaker counting, decided: the task circuit breaker counts task exceptions whatever their class; a store-outage redelivery never reaches the task and never counts (documented in error_handling.rst).
 - Two runs of this slice failed only on PostgreSQL and only in processor-driven tests (1 of 95 under `-n 2`, 28 of 2,863 in a full suite) while other PostgreSQL test runs were executing on the same capped container; every failed test passed alone (the 28 in 73 s). The runs were not overlapped again. Rule for this work: one PostgreSQL test run at a time on the gate container.
 
-### WI-7 slice 7b … WI-11
+### WI-7 slice 7b: the store-retry budget (done)
+- `queue_messages` and `queue_messages_dlq` (and every custom queue table pair) shall carry `store_retries INTEGER NOT NULL DEFAULT 0` and `store_retry_since TIMESTAMPTZ` (SQLite TEXT), added by migration `01M68PK3W1DW3T8GZ3YKE3SVSJ_redelivery_budget.sql` on PostgreSQL and on SQLite by the same per-file step that adds the tenant column; `mg-queue-table` shall create the pair in that shape and the column catalog shall list both.
+- `Queue.reschedule(message, delay, store_unavailable=)` shall, for a store outage, add one to `store_retries` and set `store_retry_since` when it is NULL; for any other failure it shall reset both; `Message.store_retries` shall carry the count on delivery.
+- While `store_retry_since` is set and younger than the queue's `store_retry_budget` (30 minutes by default), the message shall stay deliverable past `max_attempts`; `next_ready_in` shall count it; the sweep shall move a message at or past `max_attempts` to the dead-letter queue only once its budget, if any, is spent, with the cause `store_unavailable_budget_exhausted` when a budget was open and `Exceeded max_attempts` otherwise; a message below `max_attempts` shall never be swept (B02).
+- The processor shall reschedule a store-unavailable failure after `retry_delay` doubled per `store_retries`, capped at five minutes, and shall never move the stage to TERMINAL for it.
+
+Synthesis notes recorded while building 7b:
+- The plan's sweep predicate dead-lettered a spent budget whatever the attempt count; the first green run showed a message with one attempt and a spent 1-second budget being swept while the poll still delivered it. The budget is an extension past `max_attempts`, not a shorter fuse: the sweep now requires both `attempts >= max_attempts` and a spent (or absent) budget, and the cause names the budget when one was open.
+- A store-unavailable reschedule adds one to `store_retries` and stamps `store_retry_since` once; any other reschedule resets both, so the next failure of a different kind falls back to the attempt rule at once.
+- `Message.store_retries` is delivery metadata (set at poll, excluded from payloads like `attempts`). The processor's delay is `retry_delay * 2**store_retries`, capped at five minutes (`queue/processor/redelivery.py`), on both the threaded and the synchronous path.
+- SQLite adds the columns on open through `queue/sqlite/schema.py::ensure_redelivery_columns`, the same mechanism the tenant column uses, so custom queue pairs in old files are covered; PostgreSQL custom pairs are covered by `mg-queue-table` (`LIKE queue_messages INCLUDING ALL`) and by the schema check naming the missing DDL.
+- `queue/postgres.py` crossed 550 lines and gave its lookups (pending-message checks, dead-letter stamp, purge) to `queue/postgres_lookups.py`.
+
+### WI-8 … WI-11
 Specified when each item starts; the plan file holds the design.
 
 ### WI-2 slice 2: rule 1 column lists (done)

@@ -114,6 +114,16 @@ re-raises and the message is redelivered. Nothing is written about the stage. Be
 ``stabilize.errors.is_store_unavailable`` is the predicate, shared with the path that
 holds a finished task's result for the redelivery.
 
+The redelivery spends a store-retry budget. ``reschedule(..., store_unavailable=True)``
+adds one to the row's ``store_retries`` and sets ``store_retry_since`` the first time. While
+that stamp is younger than the queue's ``store_retry_budget`` (30 minutes by default, an
+argument of ``PostgresQueue`` and ``SqliteQueue``) the message stays deliverable past
+``max_attempts``. The processor waits ``retry_delay`` doubled per store failure, five
+minutes at most, between deliveries. A message at or past ``max_attempts`` is moved to the
+dead-letter queue only once its budget is spent, with the cause
+``store_unavailable_budget_exhausted``. A failure that is not a store outage resets both
+columns and the attempt rule applies again.
+
 The circuit breaker counts task exceptions, transient and permanent alike, because each
 one is a call the task made and lost. A redelivery caused by a store outage is not a
 task call and never counts.

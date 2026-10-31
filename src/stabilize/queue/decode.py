@@ -7,7 +7,7 @@ from typing import Any
 
 from stabilize.queue.messages import Message, create_message_from_dict
 
-_METADATA_FIELDS = ("message_id", "created_at", "attempts", "max_attempts")
+_METADATA_FIELDS = ("message_id", "created_at", "attempts", "max_attempts", "store_retries")
 
 
 class MessageDecodeError(ValueError):
