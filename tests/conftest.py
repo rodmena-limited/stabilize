@@ -277,10 +277,12 @@ def queue(
         )
         sqlite_q._create_table()
         sqlite_q.clear()
+        sqlite_q.clear_dlq()
         q = sqlite_q
         yield q
         try:
             q.clear()
+            sqlite_q.clear_dlq()
         except Exception:
             pass  # Table may not exist if test created its own DB
     else:
@@ -293,9 +295,11 @@ def queue(
             table_name="queue_messages",
         )
         postgres_q.clear()
+        postgres_q.clear_dlq()
         q = postgres_q
         yield q
         q.clear()
+        postgres_q.clear_dlq()
         postgres_q.close()
 
 
@@ -397,10 +401,12 @@ def file_queue(
             table_name="queue_messages",
         )
         sqlite_q._create_table()
+        sqlite_q.clear_dlq()
         q = sqlite_q
         yield q
         try:
             q.clear()
+            sqlite_q.clear_dlq()
         except Exception:
             pass  # Table may not exist if test created its own DB
         q.close()
@@ -414,9 +420,11 @@ def file_queue(
             table_name="queue_messages",
         )
         postgres_q.clear()
+        postgres_q.clear_dlq()
         q = postgres_q
         yield q
         q.clear()
+        postgres_q.clear_dlq()
         postgres_q.close()
 
 

@@ -109,6 +109,7 @@ def test_an_instance_type_that_lost_its_builder_is_refused_and_recorded(
     parent = _parent()
     parent.mi_config = MultiInstanceConfig(allow_dynamic=True, sync_on_complete=True, instance_type="vanished_type")
     wf = start(repository, queue, [parent])
+    dead_letters_before = queue.dlq_size()
     drive(processor, repository, wf.id, timeout=2, idle=0.5)
     queue.push(AddMultiInstance(execution_type=wf.type.value, execution_id=wf.id, stage_id=parent.id))
     drive(processor, repository, wf.id, timeout=4, idle=1.0)
@@ -120,4 +121,6 @@ def test_an_instance_type_that_lost_its_builder_is_refused_and_recorded(
     refused = mi.context.get("_mi_dynamic_refused")
     assert refused is not None and refused["instance_type"] == "vanished_type"
     assert mi.context.get("_mi_instance_count", 0) == 0
-    assert queue.dlq_size() == 0, "the refused AddMultiInstance was dead-lettered instead of acknowledged"
+    assert queue.dlq_size() == dead_letters_before, (
+        "the refused AddMultiInstance was dead-lettered instead of acknowledged"
+    )
