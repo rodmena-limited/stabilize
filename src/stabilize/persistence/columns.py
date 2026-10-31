@@ -29,6 +29,9 @@ PIPELINE_EXECUTIONS: tuple[str, ...] = (
     "config_version",
     "created_at_ms",
     "stabilize_updated_at",
+    "pipeline_config_version",
+    "pipeline_config_sha256",
+    "pipeline_config_hash_alg",
     TENANT_COLUMN,
 )
 

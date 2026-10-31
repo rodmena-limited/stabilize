@@ -116,6 +116,7 @@ class WorkflowLauncher:
             stages=stages,
             trigger=trigger,
             pipeline_config_id=config.get("id"),
+            pipeline_config=config,
         )
 
         # Set additional properties

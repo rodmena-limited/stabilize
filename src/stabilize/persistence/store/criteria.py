@@ -24,6 +24,21 @@ class WorkflowCriteria:
     statuses: set[WorkflowStatus] | None = None
     start_time_before: int | None = None
     start_time_after: int | None = None
+    pipeline_config_version: str | None = None
+
+
+WORKFLOW_CRITERIA_FIELDS: frozenset[str] = frozenset(
+    {"page_size", "statuses", "start_time_before", "start_time_after", "pipeline_config_version"}
+)
+
+
+def version_sql(criteria: WorkflowCriteria | None, params: dict[str, Any], style: str) -> str:
+    """SQL for the criteria's definition version, when one is asked for."""
+    if criteria is None or criteria.pipeline_config_version is None:
+        return ""
+    params["pipeline_config_version"] = criteria.pipeline_config_version
+    placeholder = ":pipeline_config_version" if style == ":" else "%(pipeline_config_version)s"
+    return f" AND pipeline_config_version = {placeholder}"
 
 
 def time_window_sql(criteria: WorkflowCriteria | None, params: dict[str, Any], style: str) -> str:

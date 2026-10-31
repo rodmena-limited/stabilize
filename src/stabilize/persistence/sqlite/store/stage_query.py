@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from stabilize.persistence.columns import select_list
 from stabilize.persistence.sqlite.converters import row_to_execution, row_to_stage, row_to_task
+from stabilize.persistence.store.criteria import WORKFLOW_CRITERIA_FIELDS
 from stabilize.persistence.store.stage_criteria import SUPPORTED_CRITERIA, StageCriteria, stage_from, stage_where
 
 if TYPE_CHECKING:
@@ -31,6 +32,9 @@ class SqliteStageQueryMixin:
 
     def supported_criteria(self) -> frozenset[str]:
         return SUPPORTED_CRITERIA
+
+    def supported_workflow_criteria(self) -> frozenset[str]:
+        return WORKFLOW_CRITERIA_FIELDS
 
     def count_stages(self, criteria: StageCriteria) -> int:
         where, params = stage_where(criteria, self.tenant, ":")

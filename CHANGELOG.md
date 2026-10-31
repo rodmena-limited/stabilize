@@ -190,6 +190,15 @@ host's own migretti history, now upgrade with no change to the command.
   `SqliteQueue` take `store_retry_budget`, 30 minutes by default. `Message.store_retries` is
   delivery metadata. The processor doubles `retry_delay` per store failure, capped at five
   minutes.
+- **The definition version and hash.** `pipeline_executions` gains `pipeline_config_version`,
+  `pipeline_config_sha256` and `pipeline_config_hash_alg`, with the index
+  `idx_executions_tenant_config_version` (migration `01M68P99JK1H6MC1W6RZ0SNHH0_definition_version.sql`, SQLite
+  migration 10). `WorkflowLauncher.start` and `Workflow.create(pipeline_config=...)` record the
+  definition's version label and the SHA-256 of its canonical form,
+  `stabilize-canonical-json/1` (`stabilize.definition_hash`). A definition the canonical form
+  cannot express is stored with no digest and a warning. `WorkflowCriteria.pipeline_config_version`
+  filters the three listings; `WorkflowStore.supported_workflow_criteria()` names the honoured
+  fields.
 - **`stabilize_updated_at`** on the three execution tables and **`created_at_ms`** on
   `pipeline_executions`, added by migration `01M68FGEZVQR6KPAMW6P5N8B0E_recovery_activity.sql`
   on PostgreSQL and SQLite migration 8, with the trigger function

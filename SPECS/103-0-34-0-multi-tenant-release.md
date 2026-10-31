@@ -294,7 +294,19 @@ Synthesis notes recorded while building 7b:
 - SQLite adds the columns on open through `queue/sqlite/schema.py::ensure_redelivery_columns`, the same mechanism the tenant column uses, so custom queue pairs in old files are covered; PostgreSQL custom pairs are covered by `mg-queue-table` (`LIKE queue_messages INCLUDING ALL`) and by the schema check naming the missing DDL.
 - `queue/postgres.py` crossed 550 lines and gave its lookups (pending-message checks, dead-letter stamp, purge) to `queue/postgres_lookups.py`.
 
-### WI-8 … WI-11
+### WI-8: the definition version and hash (done)
+- `pipeline_executions` shall carry `pipeline_config_version VARCHAR(64)`, `pipeline_config_sha256 VARCHAR(64)` and `pipeline_config_hash_alg VARCHAR(32)` and the index `idx_executions_tenant_config_version (stabilize_tenant, pipeline_config_id, pipeline_config_version)`, added by migration `01M68P99JK1H6MC1W6RZ0SNHH0_definition_version.sql` on PostgreSQL and SQLite migration 10; the column catalog, both converters and both inserts shall carry them.
+- `stabilize.definition_hash.definition_hash(config)` shall return the SHA-256 hex digest of the canonical form `stabilize-canonical-json/1` and the algorithm name: string keys sorted by code point, compact separators, booleans before integers, exact integers, floats by `repr` with `-0.0` as `0.0`, `ensure_ascii=False`, `Enum` by value, aware `datetime` as ISO 8601 UTC, `Decimal`/`UUID`/`bytes` tagged `{"$type", "$value"}` with a real `$type` dict wrapped, tuples as lists, sets sorted by canonical encoding; a lone surrogate, a naive `datetime`, NaN, an infinity, a non-string key or an unknown type shall yield no digest and a warning, never a refusal.
+- `WorkflowLauncher.start` and `Workflow.create(pipeline_config=..., pipeline_config_version=...)` shall record the version label (the argument, else the definition's `version`, as text) and the hash computed on the caller's object before storage.
+- `WorkflowCriteria.pipeline_config_version` shall filter `retrieve_by_pipeline_config_id`, `retrieve_by_application` and `get_all_pending_workflows` on both backends; `WorkflowStore.supported_workflow_criteria()` shall name the fields a store honours, the 0.33 set by default.
+- The existing `config_version` column shall be documented as the HandlerConfig fingerprint recorded at start, distinct from the definition version.
+
+Synthesis notes recorded while building WI-8:
+- On SQLite the index is `idx_executions_tenant_config_version (pipeline_config_id, pipeline_config_version)` without the tenant column: migrations run before the per-file step that adds `stabilize_tenant` to an old file (the unversioned-upgrade test caught the ordering), and a SQLite file serves one tenant per process, so the column adds no selectivity there. PostgreSQL keeps the three-column index.
+- The hash is computed by `Workflow.record_definition` on the object the caller passed; the launcher passes the whole configuration dict. The version label is `str(version)[:64]`, so a numeric `version` in a configuration is stored as text.
+- `supported_workflow_criteria()` is a separate capability from `supported_criteria()` (StageCriteria): the interface default is the 0.33 field set, both engine stores answer the full set through their stage-query mixins.
+
+### WI-9 … WI-11
 Specified when each item starts; the plan file holds the design.
 
 ### WI-2 slice 2: rule 1 column lists (done)

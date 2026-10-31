@@ -31,7 +31,7 @@ from stabilize.persistence.sqlite.queries import (
     retrieve_by_pipeline_config_id as _retrieve_by_pipeline_config_id,
 )
 from stabilize.persistence.store import WorkflowCriteria
-from stabilize.persistence.store.criteria import time_window_sql
+from stabilize.persistence.store.criteria import time_window_sql, version_sql
 
 _PIPELINE = select_list("pipeline_executions", "sqlite")
 
@@ -158,6 +158,7 @@ class SqliteQueriesMixin:
                 params[f"status_{i}"] = name
 
         query += time_window_sql(criteria, params, ":")
+        query += version_sql(criteria, params, ":")
         query += " ORDER BY start_time DESC NULLS LAST"
 
         if criteria and criteria.page_size:

@@ -187,6 +187,17 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE workflow_signals ADD COLUMN persistent INTEGER NOT NULL DEFAULT 1",
         ),
     ),
+    Migration(
+        10,
+        "add_definition_version",
+        (
+            "ALTER TABLE pipeline_executions ADD COLUMN pipeline_config_version TEXT",
+            "ALTER TABLE pipeline_executions ADD COLUMN pipeline_config_sha256 TEXT",
+            "ALTER TABLE pipeline_executions ADD COLUMN pipeline_config_hash_alg TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_executions_tenant_config_version "
+            "ON pipeline_executions(pipeline_config_id, pipeline_config_version)",
+        ),
+    ),
 )
 
 

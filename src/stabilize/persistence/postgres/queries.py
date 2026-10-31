@@ -13,7 +13,7 @@ from stabilize.persistence.postgres.converters import (
     row_to_task,
 )
 from stabilize.persistence.store import WorkflowCriteria
-from stabilize.persistence.store.criteria import time_window_sql
+from stabilize.persistence.store.criteria import time_window_sql, version_sql
 
 _STAGE = select_list("stage_executions", "postgres")
 _TASK = select_list("task_executions", "postgres")
@@ -216,6 +216,7 @@ def retrieve_by_pipeline_config_id(
             params["statuses"] = status_names
 
     query += time_window_sql(criteria, params, "%")
+    query += version_sql(criteria, params, "%")
     query += " ORDER BY start_time DESC"
 
     if criteria and criteria.page_size:
@@ -248,6 +249,7 @@ def get_all_pending_workflows(
         params["statuses"] = status_names
 
     query += time_window_sql(criteria, params, "%")
+    query += version_sql(criteria, params, "%")
     query += " ORDER BY start_time DESC NULLS LAST"
 
     if criteria and criteria.page_size:
@@ -281,6 +283,7 @@ def retrieve_by_application(
             params["statuses"] = status_names
 
     query += time_window_sql(criteria, params, "%")
+    query += version_sql(criteria, params, "%")
     query += " ORDER BY start_time DESC"
 
     if criteria and criteria.page_size:

@@ -143,6 +143,9 @@ class Workflow:
     keep_waiting_pipelines: bool = False
     origin: str = "unknown"
     config_version: str | None = None
+    pipeline_config_version: str | None = None
+    pipeline_config_sha256: str | None = None
+    pipeline_config_hash_alg: str | None = None
     created_at_ms: int | None = None
     stabilize_updated_at: int | None = None
     queue_table: str | None = None  # Fingerprint of config used at workflow start
@@ -301,6 +304,8 @@ class Workflow:
         trigger: Trigger | None = None,
         pipeline_config_id: str | None = None,
         context: dict[str, Any] | None = None,
+        pipeline_config: dict[str, Any] | None = None,
+        pipeline_config_version: str | None = None,
     ) -> Workflow:
         """
         Factory method to create a new pipeline execution.
@@ -312,6 +317,8 @@ class Workflow:
             trigger: Optional trigger info
             pipeline_config_id: Optional config ID
             context: Optional execution-level context (for jump tracking, etc.)
+            pipeline_config: The definition this run was built from; its canonical hash is recorded
+            pipeline_config_version: The definition's version label (defaults to pipeline_config["version"])
 
         Returns:
             A new Workflow instance
@@ -333,7 +340,20 @@ class Workflow:
             trigger=trigger or Trigger(),
             pipeline_config_id=pipeline_config_id,
         )
+        execution.record_definition(pipeline_config, pipeline_config_version)
         return execution
+
+    def record_definition(self, pipeline_config: dict[str, Any] | None, version: str | None = None) -> None:
+        """Record the definition's version label and canonical hash; an unhashable definition keeps None."""
+        from stabilize.definition_hash import HASH_ALGORITHM, definition_hash
+
+        label = version if version is not None else (pipeline_config or {}).get("version")
+        if label is not None:
+            self.pipeline_config_version = str(label)[:64]
+        if pipeline_config is not None:
+            self.pipeline_config_sha256, self.pipeline_config_hash_alg = definition_hash(pipeline_config)
+        elif self.pipeline_config_hash_alg is None and label is not None:
+            self.pipeline_config_hash_alg = HASH_ALGORITHM
 
     @classmethod
     def create_orchestration(

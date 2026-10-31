@@ -61,6 +61,9 @@ class SqliteWorkflowCrudMixin:
             for c, ok in (
                 ("queue_table", has_queue_table_column(conn)),
                 ("config_version", has_execution_column(conn, "config_version")),
+                ("pipeline_config_version", has_execution_column(conn, "pipeline_config_version")),
+                ("pipeline_config_sha256", has_execution_column(conn, "pipeline_config_sha256")),
+                ("pipeline_config_hash_alg", has_execution_column(conn, "pipeline_config_hash_alg")),
             )
             if ok
         ]

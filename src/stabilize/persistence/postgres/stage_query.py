@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 from stabilize.persistence.columns import select_list
 from stabilize.persistence.postgres.converters import row_to_execution, row_to_stage
 from stabilize.persistence.postgres.queries import load_tasks_for_stages
+from stabilize.persistence.store.criteria import WORKFLOW_CRITERIA_FIELDS
 from stabilize.persistence.store.stage_criteria import SUPPORTED_CRITERIA, StageCriteria, stage_from, stage_where
 
 if TYPE_CHECKING:
@@ -64,6 +65,9 @@ class PostgresStageQueryMixin:
 
     def supported_criteria(self) -> frozenset[str]:
         return SUPPORTED_CRITERIA
+
+    def supported_workflow_criteria(self) -> frozenset[str]:
+        return WORKFLOW_CRITERIA_FIELDS
 
     def retrieve_stages(self, criteria: StageCriteria) -> list[StageExecution]:
         return retrieve_stages(self, criteria)

@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 from stabilize.errors.workflow import WorkflowNotFoundError as _WorkflowNotFoundErrorModel
+from stabilize.persistence.store.criteria import WORKFLOW_CRITERIA_FIELDS
 from stabilize.persistence.store.criteria import (
     WorkflowNotFoundError as _WorkflowNotFoundErrorStore,
 )
@@ -400,6 +401,10 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, ABC):
             True if healthy
         """
         return True
+
+    def supported_workflow_criteria(self) -> frozenset[str]:
+        """The WorkflowCriteria fields this store honours; the 0.33 set unless the store says otherwise."""
+        return WORKFLOW_CRITERIA_FIELDS - {"pipeline_config_version"}
 
     def supported_criteria(self) -> frozenset[str]:
         """The StageCriteria fields this store honours; empty for a store without stage queries."""

@@ -288,6 +288,38 @@ A page filtered by status is read through the ``idx_stages_tenant_status_id`` in
 PostgreSQL. The stores do not create an index for ``context_contains``. Add a GIN index
 on ``stage_executions (context)`` yourself if that filter carries most of your queries.
 
+Definition version and hash
+---------------------------
+
+Every workflow row records where its definition came from. ``pipeline_config_id`` names the
+definition, ``pipeline_config_version`` is the label the definition carried (``version`` in
+the configuration passed to ``WorkflowLauncher.start``, or the ``pipeline_config_version``
+argument of ``Workflow.create``), and ``pipeline_config_sha256`` is the SHA-256 of the
+definition's canonical form, with ``pipeline_config_hash_alg`` naming that form.
+
+The form is ``stabilize-canonical-json/1``. Keys are strings sorted by code point, separators
+are compact, booleans are booleans and integers are exact, floats are written by ``repr``
+with ``-0.0`` as ``0.0``, strings keep their characters, an ``Enum`` is its value, an aware
+``datetime`` is ISO 8601 in UTC, ``Decimal``, ``UUID`` and ``bytes`` are tagged
+``{"$type": ..., "$value": ...}``, tuples are lists and sets are sorted by their encoding.
+A definition the form cannot express (a NaN, a naive ``datetime``, a non-string key, an
+object) is stored with no digest and a warning. A launch is never refused for it.
+
+The hash is computed on the object the caller passed, before storage. It is not reproducible
+from the stored JSONB alone, because JSON does not keep the distinctions the form does
+(``Decimal`` against string, tuple against list).
+
+.. code-block:: python
+
+    from stabilize.persistence.store import WorkflowCriteria
+
+    v2 = WorkflowCriteria(pipeline_config_version="2")
+    runs = list(store.retrieve_by_pipeline_config_id("nightly-build", v2))
+
+``WorkflowStore.supported_workflow_criteria()`` names the criteria fields a store honours.
+The older ``config_version`` column is unrelated to the definition. It is the fingerprint of
+the ``HandlerConfig`` the processor ran with when the workflow started.
+
 Upgrading to 0.34
 -----------------
 

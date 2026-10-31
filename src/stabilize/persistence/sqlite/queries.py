@@ -11,7 +11,7 @@ from stabilize.dag.merge import merge_ancestor_outputs, topological_order
 from stabilize.persistence.columns import select_list
 from stabilize.persistence.sqlite.converters import row_to_stage, row_to_task
 from stabilize.persistence.store import WorkflowCriteria
-from stabilize.persistence.store.criteria import time_window_sql
+from stabilize.persistence.store.criteria import time_window_sql, version_sql
 
 _STAGE = select_list("stage_executions", "sqlite")
 _TASK = select_list("task_executions", "sqlite")
@@ -242,6 +242,7 @@ def retrieve_by_pipeline_config_id(
             params[f"status_{i}"] = name
 
     query += time_window_sql(criteria, params, ":")
+    query += version_sql(criteria, params, ":")
     query += " ORDER BY start_time DESC"
 
     if criteria and criteria.page_size:
@@ -274,6 +275,7 @@ def retrieve_by_application(
             params[f"status_{i}"] = name
 
     query += time_window_sql(criteria, params, ":")
+    query += version_sql(criteria, params, ":")
     query += " ORDER BY start_time DESC"
 
     if criteria and criteria.page_size:

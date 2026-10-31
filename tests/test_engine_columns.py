@@ -139,6 +139,9 @@ SAMPLE_ROWS: dict[str, dict[str, Any]] = {
         "config_version": None,
         "created_at_ms": None,
         "stabilize_updated_at": None,
+        "pipeline_config_version": None,
+        "pipeline_config_sha256": None,
+        "pipeline_config_hash_alg": None,
         "stabilize_tenant": "",
     },
     "stage_executions": {
