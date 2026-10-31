@@ -30,6 +30,7 @@ WORKFLOW_ABSENT_ERRORS = (_WorkflowNotFoundErrorStore, _WorkflowNotFoundErrorMod
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
+    from stabilize.persistence.store.stage_criteria import StageCriteria
     from stabilize.queue import Queue
 
     from .criteria import WorkflowCriteria
@@ -399,6 +400,18 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, ABC):
             True if healthy
         """
         return True
+
+    def supported_criteria(self) -> frozenset[str]:
+        """The StageCriteria fields this store honours; empty for a store without stage queries."""
+        return frozenset()
+
+    def retrieve_stages(self, criteria: StageCriteria) -> list[StageExecution]:
+        """The stages of this tenant matching *criteria*, newest id first, at most one page."""
+        raise NotImplementedError(f"{type(self).__name__} does not query stages")
+
+    def count_stages(self, criteria: StageCriteria) -> int:
+        """How many stages of this tenant match *criteria*."""
+        raise NotImplementedError(f"{type(self).__name__} does not query stages")
 
     def count_by_application(self, application: str) -> int:
         """

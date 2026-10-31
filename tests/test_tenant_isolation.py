@@ -241,3 +241,17 @@ def test_events_and_snapshots_are_per_tenant(tenants: tuple[Parts, Parts]) -> No
     a.events.save_snapshot(EntityType.WORKFLOW, wf.id, wf.id, 1, stored.sequence, {"status": "RUNNING"})
     assert a.events.get_latest_snapshot(EntityType.WORKFLOW, wf.id) is not None
     assert b.events.get_latest_snapshot(EntityType.WORKFLOW, wf.id) is None
+
+
+def test_stage_queries_are_per_tenant(tenants: tuple[Parts, Parts]) -> None:
+    from stabilize.persistence.store import StageCriteria
+
+    a, b = tenants
+    wf = _workflow("stages")
+    a.store.store(wf)
+    mine = StageCriteria(execution_id=wf.id)
+    assert {s.id for s in a.store.retrieve_stages(mine)} == {s.id for s in wf.stages}
+    assert a.store.count_stages(mine) == len(wf.stages)
+    assert b.store.retrieve_stages(mine) == []
+    assert b.store.count_stages(mine) == 0
+    assert b.store.count_stages(StageCriteria(application=wf.application)) == 0

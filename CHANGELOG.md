@@ -168,6 +168,16 @@ host's own migretti history, now upgrade with no change to the command.
   `01M68J0WB7ASSYV0JQYBA2KAQM_signal_delivery.sql` on PostgreSQL and SQLite migration 9.
 - **Recovery delivers buffered signals.** A `SUSPENDED` stage with an unconsumed signal
   row and no queued message gets a `SignalStage` naming the oldest row.
+- **Stage queries across workflows.** `StageCriteria` (in `stabilize.persistence.store`)
+  filters stages by status, type, `ref_id`, the workflow's application or id, start, end
+  and scheduled time windows that match only stages with the time set, and top-level
+  context keys. `WorkflowStore.retrieve_stages()` returns one page, newest id first, and
+  `after_id` continues below the last id of the previous page. `count_stages()` counts the
+  matches. Both are implemented on PostgreSQL and SQLite. A store without them raises
+  `NotImplementedError`.
+  `supported_criteria()` names the honoured fields. Each returned stage carries its tasks
+  and a summary of its workflow. A status page on PostgreSQL is served by
+  `idx_stages_tenant_status_id`.
 - **`stabilize_updated_at`** on the three execution tables and **`created_at_ms`** on
   `pipeline_executions`, added by migration `01M68FGEZVQR6KPAMW6P5N8B0E_recovery_activity.sql`
   on PostgreSQL and SQLite migration 8, with the trigger function

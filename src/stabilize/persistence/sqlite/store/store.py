@@ -35,6 +35,7 @@ from stabilize.persistence.sqlite.operations import (
 from stabilize.persistence.sqlite.schema import create_tables
 from stabilize.persistence.sqlite.store.queries import SqliteQueriesMixin
 from stabilize.persistence.sqlite.store.stage_ops import SqliteStageOpsMixin
+from stabilize.persistence.sqlite.store.stage_query import SqliteStageQueryMixin
 from stabilize.persistence.sqlite.store.workflow_crud import SqliteWorkflowCrudMixin
 from stabilize.persistence.sqlite.tenant_schema import engine_shaped_tables, ensure_tenant_schema, read_mode
 from stabilize.persistence.store import WorkflowStore
@@ -52,6 +53,7 @@ class SqliteWorkflowStore(
     SqliteWorkflowCrudMixin,
     SqliteStageOpsMixin,
     SqliteQueriesMixin,
+    SqliteStageQueryMixin,
     WorkflowStore,
 ):
     """

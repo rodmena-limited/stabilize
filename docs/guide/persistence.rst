@@ -252,6 +252,42 @@ transaction. Measured on PostgreSQL 16 for one idle processor:
 Raise ``poll_frequency_ms`` where pickup latency allows; the same cost applies per
 processor instance.
 
+Querying stages across workflows
+--------------------------------
+
+``retrieve_stages`` and ``count_stages`` answer a ``StageCriteria`` on both backends.
+The criteria filter on the stage's status, type and ``ref_id``, on the owning
+workflow's application and id, on the start, end and scheduled times, and on
+top-level keys of the stage context. Results come newest id first, at most
+``page_size`` (1 to 500) per call. Pass the last id of one page as ``after_id`` to get
+the next.
+
+.. code-block:: python
+
+    from stabilize import WorkflowStatus
+    from stabilize.persistence.store import StageCriteria
+
+    waiting = StageCriteria(
+        statuses={WorkflowStatus.SUSPENDED},
+        application="billing",
+        context_contains={"env": "prod"},
+        page_size=50,
+    )
+    page = store.retrieve_stages(waiting)
+    total = store.count_stages(waiting)
+    older = store.retrieve_stages(StageCriteria(statuses={WorkflowStatus.SUSPENDED}, after_id=page[-1].id))
+
+A time window matches a stage only when that time is set. ``context_contains`` takes
+scalar values (strings, numbers, booleans, ``None``) and refuses nested ones with
+``ValueError``. On PostgreSQL the match is the JSONB containment operator. On SQLite it
+is ``json_extract`` on a bound path. Each returned stage carries its tasks and a strong
+reference to a summary of its workflow (the row of ``pipeline_executions``, without the
+other stages). ``supported_criteria()`` names the fields a store honours.
+
+A page filtered by status is read through the ``idx_stages_tenant_status_id`` index on
+PostgreSQL. The stores do not create an index for ``context_contains``. Add a GIN index
+on ``stage_executions (context)`` yourself if that filter carries most of your queries.
+
 Upgrading to 0.34
 -----------------
 

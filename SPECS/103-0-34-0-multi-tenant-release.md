@@ -250,7 +250,22 @@ Synthesis notes recorded while building 5c:
 - `plan_running_workflow(workflow, queue, store=None)` plans the SUSPENDED stages when given the store; the 5b barrier test wraps it with `*args, **kwargs`.
 - SQLite migration 9 re-issues the baseline `workflow_signals` DDL before its `ALTER TABLE`s so it holds on a file whose signals table was never created. `persistence/sqlite/transaction_ops.py` (the SQLite transaction's row operations) and `queue/message_base.py` (the message base classes) are file-cap splits.
 
-### WI-6 … WI-11
+### WI-6: the stage query (done)
+- `stabilize.persistence.store.StageCriteria` shall carry `statuses`, `types`, `ref_ids`, `application`, `execution_id`, the `start_time`/`end_time`/`scheduled_time` windows (`*_after`, `*_before`), `context_contains`, `page_size` and `after_id`; `page_size` outside 1..500 and a `context_contains` value that is not a scalar shall be refused with `ValueError` at construction.
+- `WorkflowStore.retrieve_stages(criteria)` shall return the matching stages of the store's tenant newest id first, at most `page_size` of them, and `after_id` shall continue from below that id; `count_stages(criteria)` shall count every match; both shall be non-abstract on the interface (raising `NotImplementedError` by default) and implemented on PostgreSQL and SQLite; `supported_criteria()` shall name the fields a store honours.
+- A time window shall match only stages whose time is set; `application` shall join `pipeline_executions` on id and tenant with explicit columns; `context_contains` shall match top-level keys by value (PostgreSQL `@>` on the JSONB column, SQLite `json_extract` on a bound quoted path, `json_type = 'null'` for None).
+- Each returned stage shall carry its tasks (one batched query) and a strong summary parent (one batched query per page, one object per workflow); the parent shall hold no stages.
+- On PostgreSQL a status page shall be served by `idx_stages_tenant_status_id` (EXPLAIN names the index) with at most `page_size` rows removed by filter; the p95 of 20 repeats over 1,200 stages shall be measured and reported in the ticket (D7).
+
+Synthesis notes recorded while building WI-6:
+- Measured (D7): `tests/test_stage_query.py::test_a_status_page_is_served_by_the_tenant_status_index` on the capped PostgreSQL 16 container, 1,200 stages in 400 workflows, a 10-row status page: EXPLAIN names `idx_stages_tenant_status_id`, 0 rows removed by filter, p95 5.9 ms over 20 repeats (store API end to end, tasks and parents included).
+- One WHERE compiler (`persistence/store/stage_criteria.py::stage_where`) serves both backends; the backend differences are the placeholder style, `= ANY(array)` against `IN (...)`, and `@>` against `json_extract`/`json_type`. The JSON path is bound as a parameter (`$."key"`, quotes and backslashes escaped), never interpolated.
+- The workflow join is added only when `application` is filtered, so the common status page stays a single-table index scan.
+- Tasks and summary parents are loaded in two batched statements per page; stages of one workflow share one parent object (`set_execution_strong`), and the parent holds no stages, which keeps a 500-row page from materialising 500 workflows.
+- `retrieve_stages`/`count_stages` are non-abstract on `WorkflowStore` so a third-party store keeps constructing; they raise `NotImplementedError` naming the class, and `supported_criteria()` is empty there.
+- `PostgresWorkflowStore` and `SqliteWorkflowStore` take the methods from mixins (`persistence/postgres/stage_query.py`, `persistence/sqlite/store/stage_query.py`); `postgres/store.py` sits at 544 lines and is listed for a split (rule 5) before anything else lands in it.
+
+### WI-7 … WI-11
 Specified when each item starts; the plan file holds the design.
 
 ### WI-2 slice 2: rule 1 column lists (done)

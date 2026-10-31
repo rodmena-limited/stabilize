@@ -52,6 +52,7 @@ from stabilize.persistence.postgres.queries import (
     retrieve_by_pipeline_config_id as _retrieve_by_pipeline_config_id,
 )
 from stabilize.persistence.postgres.signals import PostgresSignalMixin
+from stabilize.persistence.postgres.stage_query import PostgresStageQueryMixin
 from stabilize.persistence.schema_check import check_postgres_tables
 from stabilize.persistence.store import (
     StoreTransaction,
@@ -88,7 +89,7 @@ STORE_TABLES = [
 logger = logging.getLogger(__name__)
 
 
-class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, WorkflowStore):
+class PostgresWorkflowStore(PostgresSignalMixin, PostgresMaintenanceMixin, PostgresStageQueryMixin, WorkflowStore):
     """
     PostgreSQL implementation of WorkflowStore.
 

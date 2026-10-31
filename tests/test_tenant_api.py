@@ -263,10 +263,19 @@ STORE_OPERATIONS: dict[str, Any] = {
     "completed_workflow_ids": lambda s: s.completed_workflow_ids(0, 10),
     "buffer_signal": lambda s: s.buffer_signal(SOME_ID, "a", "go", {}),
     "pending_signal_count": lambda s: s.pending_signal_count(SOME_ID, "a"),
+    "pending_signals": lambda s: s.pending_signals(SOME_ID, "a"),
     "discard_signals": lambda s: s.discard_signals(SOME_ID, "a"),
+    "retrieve_stages": lambda s: s.retrieve_stages(_stage_criteria()),
+    "count_stages": lambda s: s.count_stages(_stage_criteria()),
     "transaction": lambda s: _in_transaction(s),
     "lease_acquire": lambda s: _lease(s).acquire("t"),
 }
+
+
+def _stage_criteria() -> Any:
+    from stabilize.persistence.store import StageCriteria
+
+    return StageCriteria(execution_id=SOME_ID)
 
 
 def _in_transaction(store: Any) -> Any:
