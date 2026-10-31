@@ -1,4 +1,4 @@
-"""Rewrite known_proofs.tsv from line-based mutant keys to stable keys, reading the sources at the commit the proofs were made on."""
+"""Rewrite known_proofs.tsv from line-based mutant keys to stable keys, reading the sources at the base commit."""
 
 from __future__ import annotations
 

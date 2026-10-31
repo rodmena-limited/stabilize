@@ -190,5 +190,42 @@ def test_the_runner_has_no_helper_mutants_and_measures_subprocesses() -> None:
     assert "patch = subprocess" in coveragerc and "parallel = true" in coveragerc
     assert (REDPROOF / "sitecustomize.py").exists()
     run = (REDPROOF / "run.py").read_text()
-    assert "coveragerc" in run and "combine" in run
+    baseline_src = (REDPROOF / "baseline.py").read_text()
+    assert "coveragerc" in baseline_src and "combine" in baseline_src
+    assert "baseline.run(" in run, "run.py no longer runs the baseline through the sharded module"
     assert isinstance(Mutant, type)
+
+
+def test_the_baseline_splits_files_across_workers_by_weight() -> None:
+    from baseline import shard_files
+
+    files = ["tests/a.py", "tests/b.py", "tests/c.py", "tests/d.py"]
+    weight = {"tests/a.py": 10, "tests/b.py": 1, "tests/c.py": 1, "tests/d.py": 1}
+    assert shard_files(files, weight, 2) == [["tests/a.py"], ["tests/b.py", "tests/c.py", "tests/d.py"]]
+    assert shard_files(files, weight, 1) == [files]
+    assert [f for s in shard_files(files, weight, 3) for f in s] and sum(map(len, shard_files(files, weight, 3))) == 4
+
+
+def test_combining_shard_data_files_keeps_every_test_context(tmp_path: Path) -> None:
+    from baseline import combine
+    from coverage import CoverageData
+    from run import coverage_map
+
+    ws = tmp_path / "ws-0"
+    (ws / "src" / "stabilize").mkdir(parents=True)
+    measured = str(ws / "src" / "stabilize" / "x.py")
+    parts: list[Path] = []
+    for i, nodeid in enumerate(["tests/t1.py::test_one", "tests/t2.py::test_two"]):
+        part_dir = tmp_path / f"baseline-{i}"
+        part_dir.mkdir()
+        data = CoverageData(basename=str(part_dir / ".coverage"))
+        data.set_context(f"{nodeid}|run")
+        data.add_lines({measured: [1, 2 + i]})
+        data.write()
+        parts.append(part_dir / ".coverage")
+    (tmp_path / ".coverage").write_text("stale")
+    combine(tmp_path, REDPROOF / "coveragerc", sys.executable, parts)
+    cmap = coverage_map(tmp_path, ws)
+    assert cmap["src/stabilize/x.py:1"] == ["tests/t1.py::test_one", "tests/t2.py::test_two"]
+    assert cmap["src/stabilize/x.py:2"] == ["tests/t1.py::test_one"]
+    assert cmap["src/stabilize/x.py:3"] == ["tests/t2.py::test_two"]

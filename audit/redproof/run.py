@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mutants import Mutant, all_mutants, apply  # noqa: E402
-from proofs import assert_baseline_usable, confirm_with_control  # noqa: E402
+from proofs import confirm_with_control  # noqa: E402
 from shards import shard_suites  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
@@ -131,7 +131,9 @@ def env_for(ws: Path, worker: int, result_file: Path) -> dict[str, str]:
     return env
 
 
-def run_pytest(ws: Path, worker: int, ids: list[str], extra: list[str], timeout: int) -> dict:
+def run_pytest(
+    ws: Path, worker: int, ids: list[str], extra: list[str], timeout: int, env_extra: dict[str, str] | None = None
+) -> dict:
     result_file = ws / f".redproof-{worker}.json"
     result_file.unlink(missing_ok=True)
     args_file = ws / f".redproof-{worker}.args"
@@ -148,10 +150,12 @@ def run_pytest(ws: Path, worker: int, ids: list[str], extra: list[str], timeout:
         "redproof_plugin",
         *extra,
     ]
+    env = env_for(ws, worker, result_file)
+    env.update(env_extra or {})
     proc = subprocess.Popen(
         cmd,
         cwd=ws,
-        env=env_for(ws, worker, result_file),
+        env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
@@ -186,48 +190,11 @@ def coverage_map(out: Path, ws: Path) -> dict[str, list[str]]:
     return {k: sorted(v) for k, v in lines.items()}
 
 
-def baseline(out: Path) -> None:
-    ws = out / "ws-0"
+def baseline(out: Path, workers: int) -> None:
+    import baseline
+
     wait_host()
-    log("baseline with per-test coverage contexts")
-    cov_env_file = out / ".coverage"
-    for stale in out.glob(".coverage*"):
-        stale.unlink()
-    os.environ["COVERAGE_FILE"] = str(cov_env_file)
-    os.environ["COVERAGE_CORE"] = "ctrace"
-    rc = ws / "audit" / "redproof" / "coveragerc"
-    res = run_pytest(
-        ws, 0, SUITES, ["--cov=stabilize", "--cov-context=test", "--cov-report=", f"--cov-config={rc}"], 7200
-    )
-    subprocess.run(
-        [worker_python(ws), "-m", "coverage", "combine", "--keep", "--rcfile", str(rc)],
-        cwd=out,
-        env={**os.environ, "COVERAGE_FILE": str(cov_env_file), "PYTHONPATH": worker_pythonpath(ws)},
-        check=False,
-    )
-    os.environ.pop("COVERAGE_FILE")
-    os.environ.pop("COVERAGE_CORE")
-    assert_baseline_usable(res)
-    results = res["results"]
-    failed = sorted(k for k, v in results.items() if v["outcome"] in ("failed", "error"))
-    if failed:
-        log(f"{len(failed)} baseline failures; rerunning them once without coverage")
-        again = run_pytest(ws, 0, failed, [], 3600)["results"]
-        for k in failed:
-            if again.get(k, {}).get("outcome") == "passed":
-                results[k] = {"outcome": "passed", "kind": "flaky-baseline"}
-    (out / "baseline.json").write_text(json.dumps(results))
-    cmap = coverage_map(out, ws)
-    (out / "coverage_map.json").write_text(json.dumps(cmap))
-    passing = {k for k, v in results.items() if v["outcome"] == "passed"}
-    covered = set().union(*cmap.values()) & passing if cmap else set()
-    log(f"coverage map: {len(cmap)} lines, {len(covered)}/{len(passing)} passing tests with at least one line")
-    if len(covered) < 0.9 * len(passing):
-        raise SystemExit(f"coverage map implausible: only {len(covered)} of {len(passing)} passing tests covered")
-    counts = defaultdict(int)
-    for v in results.values():
-        counts[v["outcome"]] += 1
-    log(f"baseline: {dict(counts)}")
+    baseline.run(out, workers, sys.modules[__name__])
 
 
 class State:
@@ -484,7 +451,7 @@ def main() -> int:
     if a.command in ("prepare", "all"):
         prepare(a.out, a.workers, a.sha)
     if a.command in ("baseline", "all"):
-        baseline(a.out)
+        baseline(a.out, a.workers)
     if a.command in ("prove", "all"):
         prove(a.out, a.workers, a.budget_hours * 3600)
     if a.command in ("fallback", "all"):

@@ -39,7 +39,7 @@ def proof_kind(entry: dict[str, Any]) -> str | None:
 
 
 def confirm_with_control(ids: list[str], runner: Callable[[str, list[str]], dict[str, Any]]) -> dict[str, str] | None:
-    """Run the ids under the mutant twice, then once without it; the tests red both times and green without it are proofs.
+    """Run the ids under the mutant twice, then once without it; red both times and green without it is a proof.
 
     None means the run itself was unusable (pytest crashed, timed out, or lost tests) and the mutant is discarded.
     """
