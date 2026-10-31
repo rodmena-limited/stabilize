@@ -55,9 +55,11 @@ class Parts:
 def _build(url: str, tenant: str) -> Parts:
     if url.startswith("sqlite:"):
         from stabilize.events.store.sqlite.store import SqliteEventStore
+        from stabilize.persistence.connection import ConnectionManager, SingletonMeta
         from stabilize.persistence.sqlite import SqliteWorkflowStore
         from stabilize.queue.sqlite import SqliteQueue
 
+        SingletonMeta.reset(ConnectionManager)
         store = SqliteWorkflowStore(url, create_tables=True, tenant=tenant)
         return Parts(tenant, store, SqliteQueue(url, tenant=tenant), SqliteEventStore(url, tenant=tenant))
     from stabilize.events.store.postgres.store import PostgresEventStore

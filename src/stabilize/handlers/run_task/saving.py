@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from stabilize.handlers.run_task import held_results
 from stabilize.handlers.run_task.error import complete_with_error
+from stabilize.persistence.tenancy import TenancyModeChanged, TenantContextError, TenantMismatchError
 
 if TYPE_CHECKING:
     from stabilize.handlers.run_task.handler import RunTaskHandler
@@ -25,6 +26,8 @@ def save_or_hold(handler: RunTaskHandler, task_model: TaskExecution, result: Tas
     """
     try:
         handler._process_result_safely(message.stage_id, task_model.id, result, message)
+    except (TenancyModeChanged, TenantMismatchError, TenantContextError):
+        raise
     except Exception as e:
         if held_results.is_store_unavailable(e):
             held_results.hold(task_model, result)

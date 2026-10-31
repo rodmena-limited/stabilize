@@ -17,6 +17,7 @@ from stabilize.errors import is_transient
 from stabilize.handlers.start_stage.starting import StartStageStarting
 from stabilize.models.stage.stage import PLANNING_FAILED
 from stabilize.models.status import ACTIVE_STATUSES, WorkflowStatus
+from stabilize.persistence.tenancy import TenancyModeChanged, TenantContextError, TenantMismatchError
 from stabilize.queue.messages import (
     CompleteStage,
     CompleteWorkflow,
@@ -207,9 +208,10 @@ class StartStageHandler(StartStageStarting):
                 )
                 self.queue.push(new_message, self.retry_delay)
 
+            except (TenancyModeChanged, TenantMismatchError, TenantContextError):
+                raise
             except Exception as e:
                 if is_transient(e):
-                    # Transient error - re-raise to allow retry by QueueProcessor
                     raise
 
                 logger.error(

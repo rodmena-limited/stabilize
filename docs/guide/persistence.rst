@@ -336,3 +336,16 @@ setting to the tenant on each transaction as well, for policies written against 
 ``enable`` refuses a schema with ``FORCE ROW LEVEL SECURITY`` on an engine table and a
 database or role that already sets ``stabilize.tenant``.
 
+A processor whose statements the fence refuses records the error as its ``fault``,
+stops polling and leaves the message it was handling for a process built for the new
+mode. It does not start again. Watch ``processor.fault`` and restart the service after
+``mg-tenancy``.
+
+On SQLite the fence is a set of triggers on every engine table, installed by
+``mg-tenancy enable`` and by the engine when it creates a table in a tenancy-mode file.
+They compare each row with ``stabilize_tenant()``, a function stabilize registers on
+every connection it opens. A process binds one tenant per file. Two tenants on one
+SQLite file therefore need two processes. The ``sqlite3`` shell has no
+``stabilize_tenant()`` and cannot write to a tenancy-mode file. It can still ``DROP
+TRIGGER``.
+

@@ -65,6 +65,21 @@ host's own migretti history, now upgrade with no change to the command.
   statement that also reads the mode record. In tenancy mode it costs one statement per
   engine transaction. In single-tenant mode without a `tenant_setting` the engine skips
   it and re-reads the mode record at most every 5 s.
+- **A processor that meets the fence stops.** When a statement is refused with `ST001`,
+  or a NOT NULL or CHECK violation on the tenant column, the `QueueProcessor` records the
+  `TenancyModeChanged` fault, stops polling, lets in-flight handlers finish, and leaves
+  the message it was handling unacked and unrescheduled for a process built for the new
+  mode. `processor.fault` holds the error and `start()` refuses afterwards. Handlers
+  re-raise tenancy errors before classifying anything as transient or permanent.
+- **The SQLite fence.** In tenancy mode every engine table in a file carries triggers:
+  an insert with an empty tenant aborts with `ST001`, and an insert, update or delete
+  whose row tenant differs from `stabilize_tenant()` aborts with `ST002`.
+  `stabilize_tenant()` is a function the `ConnectionManager` registers on every
+  connection it opens, returning the tenant the process bound to that file. A process
+  binds one tenant per SQLite file; a second tenant on the same file is refused with
+  `TenantError` (`:memory:` is exempt). A connection the engine did not open, the
+  `sqlite3` shell included, cannot write to a tenancy-mode file except to drop the
+  triggers.
 
 ### Fixed
 

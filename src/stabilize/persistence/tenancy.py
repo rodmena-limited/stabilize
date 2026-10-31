@@ -56,6 +56,18 @@ def sqlstate(exc: BaseException) -> str | None:
 def tenant_error_from(exc: BaseException) -> StabilizeError | None:
     """The engine error a database error stands for, by SQLSTATE; None when it is not a tenancy error."""
     code = sqlstate(exc)
+    if code is None and type(exc).__module__ == "sqlite3":
+        text = str(exc)
+        if text.startswith("ST001:"):
+            return TenancyModeChanged(text)
+        if text.startswith("ST002:"):
+            return TenantMismatchError(text)
+        if "no such function: stabilize_tenant" in text:
+            return TenantContextError(
+                "this SQLite connection was not opened by stabilize's ConnectionManager, so the fence cannot "
+                "see a tenant on it; the file is in tenancy mode and only the engine writes to it"
+            )
+        return None
     if code == "ST001":
         return TenancyModeChanged(str(exc))
     if code == "ST002":

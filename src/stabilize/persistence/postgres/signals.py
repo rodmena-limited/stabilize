@@ -7,11 +7,17 @@ import logging
 import time
 from typing import Any
 
-from stabilize.persistence.tenancy import TenancyModeError, TenantError
+from stabilize.persistence.tenancy import (
+    TenancyModeChanged,
+    TenancyModeError,
+    TenantContextError,
+    TenantError,
+    TenantMismatchError,
+)
 
 logger = logging.getLogger(__name__)
 
-ENGINE_REFUSALS = (TenancyModeError, TenantError)
+ENGINE_REFUSALS = (TenancyModeError, TenantError, TenancyModeChanged, TenantContextError, TenantMismatchError)
 
 SIGNAL_TABLE = "workflow_signals"
 

@@ -10,6 +10,7 @@ import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from stabilize.persistence.committed_marks import clear_committed, consume_committed
+from stabilize.persistence.tenancy import TenancyModeChanged
 from stabilize.queue.dedup import get_deduplicator
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.processor.handler_base import MessageHandler
@@ -200,6 +201,8 @@ class QueueProcessorMixin:
         try:
             # Fetch one beyond capacity so truncation is detectable.
             ids = self._store.get_processed_message_ids(limit=capacity + 1)
+        except TenancyModeChanged:
+            raise
         except Exception as e:
             logger.warning("Dedup hydration failed; bloom stays advisory: %s", e)
             return
@@ -225,5 +228,8 @@ class QueueProcessorMixin:
                 moved = getattr(self.queue, "check_and_move_expired")()
                 if moved > 0:
                     logger.info("Moved %d expired messages to DLQ", moved)
+            except TenancyModeChanged as e:
+                self._latch(e)  # type: ignore[attr-defined]
+                raise
             except Exception as e:
                 logger.warning("Error checking DLQ: %s", e)

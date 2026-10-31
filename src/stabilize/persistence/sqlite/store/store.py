@@ -94,6 +94,7 @@ class SqliteWorkflowStore(
         if _has_engine_tables(conn):
             ensure_tenant_schema(conn)
             check_mode_admits(read_mode(conn), self.tenant)
+        self._manager.bind_sqlite_tenant(connection_string, self.tenant)
 
     def _get_connection(self) -> sqlite3.Connection:
         """

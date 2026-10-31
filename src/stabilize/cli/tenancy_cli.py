@@ -200,7 +200,12 @@ def _mg_tenancy_sqlite(action: str, path: str, wanted: str) -> None:
     import sqlite3
     from datetime import UTC, datetime
 
-    from stabilize.persistence.sqlite.tenant_schema import engine_shaped_tables, ensure_tenant_schema
+    from stabilize.persistence.sqlite.tenant_schema import (
+        drop_fence,
+        engine_shaped_tables,
+        ensure_fence,
+        ensure_tenant_schema,
+    )
 
     conn = sqlite3.connect(path)
     try:
@@ -237,7 +242,9 @@ def _mg_tenancy_sqlite(action: str, path: str, wanted: str) -> None:
                 f"UPDATE {MODE_TABLE} SET mode = ?, enabled_at = ?, enabled_by = ? WHERE id = 1",
                 (wanted, datetime.now(UTC).isoformat(), getpass.getuser()),
             )
+            ensure_fence(conn)
         else:
+            drop_fence(conn)
             conn.execute(
                 f"UPDATE {MODE_TABLE} SET mode = ?, enabled_at = NULL, enabled_by = NULL WHERE id = 1", (wanted,)
             )

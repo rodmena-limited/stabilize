@@ -96,6 +96,7 @@ class ConnectionManager(metaclass=SingletonMeta):
         self._sqlite_local = threading.local()
         self._sqlite_lock = threading.Lock()
         self._sqlite_paths: set[str] = set()
+        self._sqlite_tenants: dict[str, str] = {}
 
     def get_postgres_pool(
         self,
@@ -204,8 +205,10 @@ class ConnectionManager(metaclass=SingletonMeta):
                 db_path,
                 timeout=30,
                 check_same_thread=False,
+                factory=engine_sqlite_connection_class(),
             )
             conn.row_factory = sqlite3.Row
+            conn.create_function("stabilize_tenant", 0, lambda: self._sqlite_tenants.get(db_path, ""))
 
             if db_path == ":memory:":
                 # In-memory databases: only foreign keys needed
@@ -221,6 +224,26 @@ class ConnectionManager(metaclass=SingletonMeta):
             connections[db_path] = conn
 
         return connections[db_path]
+
+    def bind_sqlite_tenant(self, connection_string: str, tenant: str) -> None:
+        """Record the one tenant this process uses a SQLite file for; a second, different tenant is refused."""
+        from stabilize.persistence.tenancy import TenantError
+
+        db_path = self._parse_sqlite_path(connection_string)
+        if db_path == ":memory:":
+            return
+        with self._sqlite_lock:
+            bound = self._sqlite_tenants.get(db_path)
+            if bound is None:
+                self._sqlite_tenants[db_path] = tenant
+            elif bound != tenant:
+                raise TenantError(
+                    f"{db_path} is already in use for tenant {bound!r} in this process; tenant {tenant!r} needs "
+                    "its own process (one tenant per SQLite file per process)"
+                )
+
+    def sqlite_tenant(self, connection_string: str) -> str | None:
+        return self._sqlite_tenants.get(self._parse_sqlite_path(connection_string))
 
     def _parse_sqlite_path(self, connection_string: str) -> str:
         """Parse SQLite connection string to extract database path."""
@@ -309,3 +332,39 @@ def release_pool_once(owner: Any, manager: ConnectionManager, pool: Any) -> None
         return
     owner._stabilize_pool_released = True
     manager.release_postgres_pool(pool)
+
+
+def engine_sqlite_connection_class() -> type[sqlite3.Connection]:
+    """sqlite3.Connection whose cursors raise the engine's tenancy errors for the fence's RAISE(ABORT) messages."""
+    from stabilize.persistence.tenancy import tenant_error_from
+
+    class EngineSqliteCursor(sqlite3.Cursor):
+        def execute(self, sql: str, parameters: Any = (), /) -> Any:
+            try:
+                return super().execute(sql, parameters)
+            except sqlite3.Error as exc:
+                mapped = tenant_error_from(exc)
+                if mapped is not None:
+                    raise mapped from exc
+                raise
+
+        def executemany(self, sql: str, seq_of_parameters: Any, /) -> Any:
+            try:
+                return super().executemany(sql, seq_of_parameters)
+            except sqlite3.Error as exc:
+                mapped = tenant_error_from(exc)
+                if mapped is not None:
+                    raise mapped from exc
+                raise
+
+    class EngineSqliteConnection(sqlite3.Connection):
+        def cursor(self, factory: Any = EngineSqliteCursor) -> Any:
+            return super().cursor(factory)
+
+        def execute(self, sql: str, parameters: Any = (), /) -> Any:
+            return self.cursor().execute(sql, parameters)
+
+        def executemany(self, sql: str, seq_of_parameters: Any, /) -> Any:
+            return self.cursor().executemany(sql, seq_of_parameters)
+
+    return EngineSqliteConnection

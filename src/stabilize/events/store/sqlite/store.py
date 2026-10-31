@@ -59,6 +59,7 @@ class SqliteEventStore(
         """
         self.tenant = validate_tenant(tenant)
         self._connection_string = connection_string
+        self._manager = get_connection_manager()
         self._lock = threading.Lock()
 
         if create_tables:
@@ -67,10 +68,11 @@ class SqliteEventStore(
         if engine_shaped_tables(conn):
             ensure_tenant_schema(conn)
             check_mode_admits(read_mode(conn), self.tenant)
+        self._manager.bind_sqlite_tenant(connection_string, self.tenant)
 
     def _get_connection(self) -> sqlite3.Connection:
         """Get thread-local connection."""
-        return get_connection_manager().get_sqlite_connection(self._connection_string)
+        return self._manager.get_sqlite_connection(self._connection_string)
 
     def _create_tables(self) -> None:
         """Create event tables if they don't exist."""

@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from stabilize.persistence.tenancy import require_same_tenant
+from stabilize.persistence.tenancy import TenancyModeChanged, require_same_tenant
 from stabilize.queue import Queue
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.processor.config import QueueProcessorConfig
@@ -109,6 +109,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
         if self.config.enable_deduplication and store is not None:
             self._hydrate_deduplicator()
         self._handlers: dict[type[Message], MessageHandler[Any]] = {}
+        self._fault: BaseException | None = None
         self._running = False
         self._stopping = False  # Flag for graceful stop (stop accepting new work)
         self._executor: ThreadPoolExecutor | None = None
@@ -194,8 +195,28 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
 
         self.register_handler(FuncHandler())
 
+    @property
+    def fault(self) -> BaseException | None:
+        """The tenancy change that stopped this processor, if one did; it never starts again after one."""
+        return self._fault
+
+    def _latch(self, exc: BaseException) -> None:
+        with self._lock:
+            first = self._fault is None
+            if first:
+                self._fault = exc
+            self._stopping = True
+            self._running = False
+        if first:
+            logger.error(
+                "Tenancy changed under this process; stopping and leaving in-flight messages to another process: %s",
+                exc,
+            )
+
     def start(self) -> None:
         """Start the queue processor."""
+        if self._fault is not None:
+            raise self._fault
         if self._running:
             return
 
@@ -319,6 +340,9 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
                 max_recovery_age_hours=self.config.recovery_max_age_hours,
             )
             return recovery.recover_pending_workflows(application=self.config.recovery_application)
+        except TenancyModeChanged as e:
+            self._latch(e)
+            raise
         except Exception as e:
             logger.error("Workflow recovery sweep failed: %s", e, exc_info=True)
             return []
@@ -382,6 +406,9 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
                 else:
                     time.sleep(poll_interval)
 
+            except TenancyModeChanged as e:
+                self._latch(e)
+                break
             except Exception as e:
                 logger.error("Error in poll loop: %s", e, exc_info=True)
                 if self.config.stop_on_error:
@@ -417,6 +444,8 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin):
             try:
                 self._handle_message(message)
                 self.queue.ack(message)
+            except TenancyModeChanged as e:
+                self._latch(e)
             except Exception as e:
                 logger.error(
                     "Error handling %s: %s",

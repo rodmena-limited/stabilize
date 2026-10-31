@@ -19,6 +19,7 @@ from stabilize.errors import is_transient
 from stabilize.handlers.complete_stage.support import CompleteStageSupport
 from stabilize.models.stage.enums import SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
+from stabilize.persistence.tenancy import TenancyModeChanged, TenantContextError, TenantMismatchError
 from stabilize.queue.messages import (
     CancelStage,
     CompleteStage,
@@ -441,10 +442,10 @@ class CompleteStageHandler(CompleteStageSupport):
                                 )
                             )
 
+            except (TenancyModeChanged, TenantMismatchError, TenantContextError):
+                raise
             except Exception as e:
                 if is_transient(e):
-                    # Transient error - re-raise to allow retry by QueueProcessor
-                    # or retry_on_concurrency_error wrapper
                     raise
 
                 logger.error(

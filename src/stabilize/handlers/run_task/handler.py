@@ -46,6 +46,7 @@ from stabilize.handlers.run_task.saving import save_or_hold
 from stabilize.handlers.run_task.verification import verify_task_outputs
 from stabilize.metrics import Timer
 from stabilize.models.status import WorkflowStatus
+from stabilize.persistence.tenancy import TenancyModeChanged, TenantContextError, TenantMismatchError
 from stabilize.persistence.transaction import TransactionHelper
 from stabilize.queue.messages import CompleteTask, PauseTask, RunTask
 from stabilize.resilience.bulkheads import TaskBulkheadManager
@@ -366,6 +367,8 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                     self.txn_helper,
                     self.retry_on_concurrency_error,
                 )
+            except (TenancyModeChanged, TenantMismatchError, TenantContextError):
+                raise
             except Exception as e:
                 if is_transient(e):
                     logger.debug(

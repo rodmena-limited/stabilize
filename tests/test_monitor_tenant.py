@@ -24,6 +24,9 @@ def tenancy_file(tmp_path: Path) -> str:
 
 
 def _parts(url: str, tenant: str) -> tuple[Any, Any]:
+    from stabilize.persistence.connection import ConnectionManager, SingletonMeta
+
+    SingletonMeta.reset(ConnectionManager)
     store = SqliteWorkflowStore(url, create_tables=True, tenant=tenant)
     return store, SqliteQueue(url, tenant=tenant)
 
