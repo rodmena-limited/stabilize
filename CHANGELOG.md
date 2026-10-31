@@ -123,6 +123,18 @@ host's own migretti history, now upgrade with no change to the command.
 - **`Orchestrator.get_instance()` is deprecated** and refused with `TenantError` while
   the orchestrator's store carries a tenant. A process-global orchestrator cannot serve
   several tenants. Pass it to the task explicitly.
+- **Engine connections name themselves.** Unless the DSN or `connect_kwargs` sets
+  `application_name`, every engine pool connects as `stabilize/<version> <hostname>`.
+  `pg_stat_activity` then tells the engine's sessions from the host's.
+- **INVALID indexes are refused by `mg-up`** before anything is applied, naming the
+  `REINDEX INDEX` to run. A failed `CREATE INDEX CONCURRENTLY` leaves such an index
+  behind, and the planner cannot use it. The engine logs a warning for one at first use
+  and carries on.
+- **`PostgresEventStore(create_tables=True)` creates only absent tables.** A table that is
+  present in the wrong shape is never altered. The first-use schema check refuses it with
+  the DDL to run.
+- **Upgrade runbooks** in the persistence guide for a single-tenant upgrade, a fresh
+  install with tenants, and a host that owns its DDL.
 
 ### Fixed
 

@@ -93,11 +93,25 @@ on the current code before the fix is written. No gate until every item is done.
 - `PostgresEventStore.setup_ddl()` shall produce the same columns, types and nullability for `events`, `snapshots` and `event_subscriptions` as `mg-up` does; a test applies both to fresh databases and compares the catalogs.
 - The persistence guide's "One pool for several tenants" section shall describe tenancy mode with `tenant=`, `tenant_setting=` and the fence in place of the session-level `on_borrow` recipe, keeping the recipe only as the single-tenant RLS variant.
 
-### WI-2 slice 6d: application_name, INVALID indexes, event-store DDL path, upgrade runbooks (in progress)
+### WI-2 slice 6d: application_name, INVALID indexes, event-store DDL path, upgrade runbooks (done)
 - Unless the DSN or `PoolOptions.connect_kwargs` sets `application_name`, every engine pool shall connect with `application_name = stabilize/<version> <hostname>` (one name per pool); a host's own value is kept.
 - `mg-up` shall refuse, before `mg apply`, when any index on an engine table is INVALID (`pg_index.indisvalid = false`), naming the index and `REINDEX INDEX <name>`; the engine shall log a warning at first use for an INVALID engine index and carry on.
 - `PostgresEventStore(create_tables=True)` shall create only absent tables; a present table in the wrong shape is refused by the first-use schema check with its DDL, never altered.
 - The persistence guide shall carry an upgrade runbook per host shape: fresh install with tenancy (Casebound), single-tenant upgrade from 0.30-0.33 (Provenance, Trace), own-DDL host (ci-conductor), each with the grants, the stop-processes rule and the `stabilize_tenancy` grant.
+
+### WI-2 items handed to other work items
+- `SubWorkflowTask` taking a `(store, queue)` contextvar bound by RunTask (WI-4, with its child-id redesign); `WorkflowStream` using its workflow's tenant (WI-9 A20 event work); `mg-up --through`, `--ddl-lock-timeout`, the `pg_depend` preflight and `SHOW TimeZone` (WI-9 A15); the PostgreSQL floor (D6, director).
+
+### WI-3 message delivery correctness (rule 7) (in progress)
+- Every handler transaction that pushes a message shall mark its delivered message processed in the same transaction; a mark that inserts no row shall raise `DuplicateDeliveryError` inside the transaction, and the transaction shall roll back.
+- `process_and_ack` and `process_one` shall catch `DuplicateDeliveryError` and ack the redelivered message without an error context, a reschedule or a second mark; the handler `except Exception` blocks in `complete_stage`, `start_stage` and `run_task/saving` shall re-raise `DuplicateDeliveryError` ahead of `is_transient`.
+- Exactly one marking transaction per delivery path: the bare `queue.push` sites in `start_stage/handler.py`, `start_stage/orchestration.py`, `start_workflow.py`, `start_stage/starting.py`, `complete_workflow.py` and `continue_parent_stage.py`, and the pushing transactions without marks in `complete_stage/handler.py`, `start_stage/handler.py` and `complete_stage/split_logic.py`, shall move into the transaction that marks the message.
+- Both transaction classes shall record a `_pushed` flag when `push_message` runs and hand it to the committed-marks record on commit; after a handler returns, the processor shall treat a committed push without a committed mark as a defect: log at ERROR with the message type and id, count it in a metric, and ack the message (never raise after a committed push); under `STABILIZE_STRICT_DELIVERY=1` it shall raise instead. `NoOpTransaction` is exempt by name.
+- `SignalStage` shall mark its message inside the transaction that stores the stage (today the mark runs after the connection is returned, on another thread's transaction at worst) (B05).
+- `process_one` shall run its handler under the lock heartbeat so an overlapping cron drain does not execute a message twice (B15).
+- `check_and_move_expired` shall move only rows whose lease has lapsed (`locked_until IS NULL OR locked_until < now()`), with `FOR UPDATE SKIP LOCKED` on PostgreSQL, on both backends (B16).
+- One `sqlstate(exc)` helper (already in `persistence.tenancy`) shall serve `is_deadlock_error`, which shall keep {40001, 40P01} and stop depending on English error text (B31).
+- A redelivered message whose mark is already committed shall be acked on both backends with `enable_deduplication=False` (pinned).
 
 ### WI-2 remaining slices (to be specified as each starts)
 Statements on every SQL site (rule 1 explicit column lists), the trigger fence and `mg-tenancy enable|disable|status`, the `TenancyModeChanged` latch, per-instance recorder/deduplicator, namespaced subscription ids and locks, the schema check, indexes, SQLite triggers, runbooks.

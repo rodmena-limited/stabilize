@@ -103,6 +103,31 @@ def _acquire_lock(psycopg: Any, conn: Any, timeout: float) -> None:
         cur.execute("SELECT set_config('lock_timeout', '0', false)")
 
 
+def invalid_engine_indexes(conn: Any, schema: str) -> list[str]:
+    """Names of INVALID indexes on the engine tables in *schema* (a CREATE INDEX CONCURRENTLY that failed)."""
+    from stabilize.cli.grants import engine_tables
+    from stabilize.cli.migrations import get_migrations
+
+    rows = conn.execute(
+        "SELECT ic.relname FROM pg_index i "
+        "JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_class tc ON tc.oid = i.indrelid "
+        "JOIN pg_namespace n ON n.oid = tc.relnamespace "
+        "WHERE n.nspname = %s AND tc.relname = ANY(%s) AND NOT i.indisvalid ORDER BY ic.relname",
+        (schema, engine_tables(get_migrations())),
+    ).fetchall()
+    return [str(r[0] if not isinstance(r, dict) else next(iter(r.values()))) for r in rows]
+
+
+def _refuse_invalid_indexes(conn: Any, schema: str) -> None:
+    broken = invalid_engine_indexes(conn, schema)
+    if broken:
+        raise TakeoverRefusedError(
+            "INVALID index(es) on engine tables; a concurrent build failed and left them unusable. Run "
+            + "; ".join(f"REINDEX INDEX {schema}.{name}" for name in broken)
+            + " and retry"
+        )
+
+
 def _refuse_role_shadow(conn: Any, schema: str | None) -> None:
     """A target schema named after the connecting role shadows public for every unqualified name.
 
@@ -245,6 +270,7 @@ def mg_up(
             _acquire_lock(psycopg, conn, lock_timeout)
             _refuse_role_shadow(conn, schema)
             run = _prepare(conn, params, schema, history)
+            _refuse_invalid_indexes(conn, run.layout.target)
             if schema:
                 conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
                 print(f"Target schema: {schema}")

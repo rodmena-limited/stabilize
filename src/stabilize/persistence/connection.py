@@ -146,6 +146,8 @@ class ConnectionManager(metaclass=SingletonMeta):
 
                 kwargs: dict[str, Any] = {"row_factory": dict_row}
                 kwargs.update(resolved.connect_kwargs)
+                if "application_name" not in kwargs and not dsn_sets_application_name(connection_string):
+                    kwargs["application_name"] = engine_application_name()
                 pool_kwargs: dict[str, Any] = {
                     "min_size": resolved.min_size,
                     "max_size": resolved.max_size,
@@ -368,3 +370,21 @@ def engine_sqlite_connection_class() -> type[sqlite3.Connection]:
             return self.cursor().executemany(sql, seq_of_parameters)
 
     return EngineSqliteConnection
+
+
+def engine_application_name() -> str:
+    """What the engine's connections report in pg_stat_activity unless the host named them itself."""
+    import socket
+
+    from stabilize import __version__
+
+    return f"stabilize/{__version__} {socket.gethostname()}"[:63]
+
+
+def dsn_sets_application_name(connection_string: str) -> bool:
+    try:
+        from psycopg.conninfo import conninfo_to_dict
+
+        return "application_name" in conninfo_to_dict(connection_string)
+    except Exception:
+        return False
