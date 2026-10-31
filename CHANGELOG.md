@@ -347,6 +347,11 @@ host's own migretti history, now upgrade with no change to the command.
   whatever table the queue used. On PostgreSQL it passed a naive local threshold to a
   `TIMESTAMPTZ` comparison. Its queue statistics now come from `Queue.counts()`, and a
   single-tenant view lists workflows through the store API.
+- **The gate stamp covers the migrations (B53).** `scripts/gate_stamp.py` hashed the sources and
+  tests only, so an edited migration, allowlist, probe or example kept a valid stamp and
+  `release.py --skip-tests` skipped the tests. It now hashes those too.
+- **The redaction probe no longer calls ticket #17 open (B63).** It was closed as won't-do; the
+  probe says so and names the behaviour a recorded limitation.
 - **Recovery ages a workflow by its activity, not by its start (B21).** A run started 30
   hours ago whose task row changed five minutes ago was never recovered, because the only
   clock was `start_time`. `pipeline_executions`, `stage_executions` and `task_executions`

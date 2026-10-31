@@ -28,7 +28,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STAMP_PATH = PROJECT_ROOT / ".gate-stamp.json"
 
 # What the gate actually exercises. A change to any of it invalidates the stamp.
-TRACKED_GLOBS = ("src/**/*.py", "tests/**/*.py", "golden_standard_tests/**/*.py")
+TRACKED_GLOBS = (
+    "src/**/*.py",
+    "tests/**/*.py",
+    "tests/**/*.txt",
+    "golden_standard_tests/**/*.py",
+    "migrations/**/*.sql",
+    "audit/**/*.py",
+    "audit/**/*.txt",
+    "audit/**/*.sh",
+    "audit/**/*.tsv",
+    "examples/**/*.py",
+)
 TRACKED_FILES = ("pyproject.toml", "Makefile")
 
 
@@ -56,7 +67,10 @@ def _head() -> str:
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=10,
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return out.stdout.strip() or "unknown"
     except Exception:
@@ -129,8 +143,7 @@ def main() -> int:
     if stamp is None:
         print("no valid gate stamp for this tree (it changed, or was never recorded)")
         return 1
-    print(f"gate was green on these exact bytes at {stamp['recorded_at']} "
-          f"(HEAD {stamp['head']}): {stamp['results']}")
+    print(f"gate was green on these exact bytes at {stamp['recorded_at']} (HEAD {stamp['head']}): {stamp['results']}")
     return 0
 
 

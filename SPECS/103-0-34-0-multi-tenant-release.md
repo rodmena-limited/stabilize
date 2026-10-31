@@ -363,7 +363,20 @@ Synthesis notes recorded while building 9e:
 - `get_all_pending_workflows` was implemented by both stores but not declared on the interface; it is now, as a non-abstract default.
 - File caps: the SQLite queue's lookups moved to `queue/sqlite/lookups.py`, the PostgreSQL queue's counts and oldest-ready age (with the deliverability predicate) to `queue/postgres_lookups.py`.
 
-### WI-9 slices 9f … WI-11
+### WI-9 slice 9f: the file cap, the gate stamp, the probe's claim (done)
+- No file under `src/stabilize` shall exceed 500 lines, pinned by `tests/test_source_cap_and_stamp.py` (A30); the three over it (`persistence/postgres/store.py`, `handlers/run_task/handler.py`, `persistence/store/interface.py`) give their workflow-row operations, result-saving methods and 0.34 query defaults to `persistence/postgres/workflow_ops.py`, `handlers/run_task/saving.py` and `persistence/store/query_defaults.py`.
+- `scripts/gate_stamp.py` shall fingerprint the migrations, the audit tree (`.py`, `.txt`, `.sh`, `.tsv`), the examples and the `.txt` files under `tests` as well as the sources, so an edited migration or allowlist invalidates the stamp (A31, B53).
+- `audit/evaluations/probe_secret_redaction.py` shall describe ticket #17 as closed won't-do and the behaviour as the recorded limitation, not as an open defect (A28, B63).
+- A33 ("re-examined under the release rule") has no record in the ticket, the SPECS or the plan beyond its label; nothing is changed for it and this line says so.
+
+Synthesis notes recorded while building 9f:
+- The splits move whole methods into mixins the classes compose; no method changed body. `PostgresWorkflowOpsMixin` declares the attributes it reads (`tenant`, `_engine`, `_pool`, `_health_timeout`) and a `retrieve` stub so the type checker sees the contract the store fulfils; `RunTaskSavingMixin` does the same for the handler's repository, transaction helper, registry and backoff.
+- `save_or_hold` takes `Any` for the handler now that the mixin calls it; it only ever read attributes the handler and the mixin both carry.
+- The cap test counts files first and asserts there are more than 150, so an empty glob cannot pass it.
+- The gate-stamp test builds a small tree and touches one tracked file at a time; `pyproject.toml` and a source file are known positives that already changed the stamp before this slice.
+- The first green run failed 27 tests with `NotImplementedError`: the saving mixin's placeholder methods (`retry_on_concurrency_error`, `current_time_millis`) came before `StabilizeHandler` in the handler's base list and shadowed the real ones. The mixin now follows the base class, and a check across every engine class confirms no mixin placeholder resolves ahead of a concrete method.
+
+### WI-9 slice 9g … WI-11
 Specified when each item starts; the plan file holds the design.
 
 ### WI-2 slice 2: rule 1 column lists (done)

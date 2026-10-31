@@ -1,6 +1,6 @@
 """Audit probe (#17): declared secrets in stage context.
 
-This is a CHARACTERISATION harness for an OPEN defect, not a regression test
+This is a CHARACTERISATION harness for a recorded limitation (ticket #17, closed as won't-do), not a regression test
 for a fix. It records two things:
 
   FINDING   a context key declared secret via the documented `secrets` list is
@@ -125,20 +125,20 @@ def main() -> int:
 
         print()
         print("=" * 72)
-        print("FINDING (#17, OPEN) — is the declared secret in the database?")
+        print("FINDING (#17, closed as won't-do) — is the declared secret in the database?")
         if holders:
             for holder in holders:
                 print(f"  cleartext in: {holder}")
-            print("  >>> REPRODUCES: ticket #17 is open and this is its evidence.")
-            print("      Not a probe failure; it is the defect this probe characterises.")
+            print("  >>> REPRODUCES: ticket #17 recorded this and was closed as won't-do; the engine stores")
+            print("      task context as given. Not a probe failure; it is the limitation this probe characterises.")
         else:
             print("  >>> NOT REPRODUCED: no live row holds the secret.")
-            print("      If #17 is still open, check that this probe can still see a")
-            print("      secret at all before concluding it is fixed.")
+            print("      Before reading this as a fix, check that this probe can still see a")
+            print("      secret at all.")
 
     print()
     print("=" * 72)
-    print("RESULT: CONSTRAINT HOLDS (see FINDING above for the open defect)")
+    print("RESULT: CONSTRAINT HOLDS (see FINDING above for the recorded limitation)")
     return 0
 
 

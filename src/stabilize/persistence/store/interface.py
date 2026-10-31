@@ -17,11 +17,11 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 from stabilize.errors.workflow import WorkflowNotFoundError as _WorkflowNotFoundErrorModel
-from stabilize.persistence.store.criteria import WORKFLOW_CRITERIA_FIELDS
 from stabilize.persistence.store.criteria import (
     WorkflowNotFoundError as _WorkflowNotFoundErrorStore,
 )
 from stabilize.persistence.store.maintenance_defaults import MaintenanceDefaults
+from stabilize.persistence.store.query_defaults import QueryDefaults
 from stabilize.persistence.store.signal_defaults import SignalStoreDefaults
 
 # Both spellings exist in the tree and different backends raise different
@@ -31,14 +31,13 @@ WORKFLOW_ABSENT_ERRORS = (_WorkflowNotFoundErrorStore, _WorkflowNotFoundErrorMod
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
-    from stabilize.persistence.store.stage_criteria import StageCriteria
     from stabilize.queue import Queue
 
     from .criteria import WorkflowCriteria
     from .transaction import StoreTransaction
 
 
-class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, ABC):
+class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC):
     """Abstract interface for execution persistence."""
 
     # ========== Execution Operations ==========
@@ -414,30 +413,6 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, ABC):
             True if healthy
         """
         return True
-
-    def supported_workflow_criteria(self) -> frozenset[str]:
-        """The WorkflowCriteria fields this store honours; the 0.33 set unless the store says otherwise."""
-        return WORKFLOW_CRITERIA_FIELDS - {"pipeline_config_version"}
-
-    def supported_criteria(self) -> frozenset[str]:
-        """The StageCriteria fields this store honours; empty for a store without stage queries."""
-        return frozenset()
-
-    def retrieve_stages(self, criteria: StageCriteria) -> list[StageExecution]:
-        """The stages of this tenant matching *criteria*, newest id first, at most one page."""
-        raise NotImplementedError(f"{type(self).__name__} does not query stages")
-
-    def count_stages(self, criteria: StageCriteria) -> int:
-        """How many stages of this tenant match *criteria*."""
-        raise NotImplementedError(f"{type(self).__name__} does not query stages")
-
-    def get_all_pending_workflows(self, criteria: WorkflowCriteria | None = None) -> Iterator[Workflow]:
-        """Every workflow of this tenant matching *criteria*, whatever its application."""
-        raise NotImplementedError(f"{type(self).__name__} does not list workflows without an application")
-
-    def count_active_workflows(self) -> int:
-        """How many of this tenant's workflows are RUNNING."""
-        raise NotImplementedError(f"{type(self).__name__} does not count active workflows")
 
     def count_by_application(self, application: str) -> int:
         """
