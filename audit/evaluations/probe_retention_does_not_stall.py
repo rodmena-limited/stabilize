@@ -190,8 +190,8 @@ def main() -> int:
     from _backends import postgres_dsn
 
     with postgres_dsn() as dsn:
-        if dsn is None or os.environ.get("AUDIT_ALLOW_DESTRUCTIVE") != "1":
-            print("[SKIP] postgres: needs STABILIZE_PROBE_DSN or Docker, and AUDIT_ALLOW_DESTRUCTIVE=1 (2 M row fixture)")
+        if os.environ.get("AUDIT_ALLOW_DESTRUCTIVE") != "1":
+            print("[SKIP] postgres: needs AUDIT_ALLOW_DESTRUCTIVE=1 (2 M row fixture)")
         else:
 
             def pg_run() -> tuple[float, bool, bool, bool]:

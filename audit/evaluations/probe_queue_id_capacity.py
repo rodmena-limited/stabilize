@@ -28,7 +28,7 @@ from pathlib import Path
 logging.basicConfig(level=logging.CRITICAL)
 sys.path.insert(0, str(Path(__file__).parent))
 
-from _backends import _container_dsn, dedicated_dsn  # noqa: E402
+from _backends import _container_dsn, dedicated_dsn, skip  # noqa: E402
 
 
 def main() -> int:
@@ -45,8 +45,7 @@ def main() -> int:
     else:
         dsn, container = _container_dsn()
         if dsn is None:
-            print("[SKIP] no throwaway PostgreSQL available (docker/testcontainers)")
-            return 0
+            skip("no throwaway PostgreSQL available (docker/testcontainers)")
     try:
         mg_up(dsn)
         with psycopg.connect(dsn, autocommit=True) as c:

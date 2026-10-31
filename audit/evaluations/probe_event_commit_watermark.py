@@ -19,6 +19,12 @@ Run:  python audit/evaluations/probe_event_commit_watermark.py
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _backends import skip  # noqa: E402
+
 import logging
 import os
 import subprocess
@@ -45,8 +51,7 @@ def _start_container() -> str | None:
         capture_output=True, text=True, check=False,
     )
     if started.returncode != 0:
-        print(f"SKIP: could not start container: {started.stderr.strip()}")
-        return None
+        skip(f"could not start container: {started.stderr.strip()}")
     dsn = f"postgresql://postgres:probe@127.0.0.1:{PORT}/probe"
     import psycopg
 
@@ -56,8 +61,7 @@ def _start_container() -> str | None:
                 return dsn
         except Exception:  # noqa: BLE001
             time.sleep(1)
-    print("SKIP: container never became reachable")
-    return None
+    skip("container never became reachable")
 
 
 def _stop_container() -> None:

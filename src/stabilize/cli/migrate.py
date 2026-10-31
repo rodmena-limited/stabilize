@@ -54,8 +54,10 @@ class _Run:
     shipped_ids: set[str] = field(default_factory=set)
 
 
-def _target(db_url: str | None, history_flag: str | None) -> tuple[dict[str, Any], str | None, str | None]:
-    config = apply_schema_override(parse_db_url(db_url)) if db_url else load_config()
+def _target(
+    db_url: str | None, history_flag: str | None, config_path: Path | None = None
+) -> tuple[dict[str, Any], str | None, str | None]:
+    config = apply_schema_override(parse_db_url(db_url)) if db_url else load_config(config_path)
     schema = config.get("schema")
     if schema:
         schema = validate_schema_name(schema)
@@ -203,10 +205,11 @@ def mg_up(
     db_url: str | None = None,
     lock_timeout: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
     history_schema: str | None = None,
+    config_path: Path | None = None,
 ) -> None:
     """Apply pending migrations with migretti, first handing over any history migretti does not hold."""
     psycopg = import_psycopg()
-    params, schema, history = _target(db_url, history_schema)
+    params, schema, history = _target(db_url, history_schema, config_path)
     if not lock_timeout > 0:
         print("Error: --lock-timeout must be a positive number of seconds")
         sys.exit(1)
@@ -289,10 +292,12 @@ def _print_status(run: _Run, state: MigrettiState, untracked: set[str]) -> None:
     print(f"Applied {applied} of {len(rows)}")
 
 
-def mg_status(db_url: str | None = None, history_schema: str | None = None) -> None:
+def mg_status(
+    db_url: str | None = None, history_schema: str | None = None, config_path: Path | None = None
+) -> None:
     """Report migration state from migretti, without creating or altering anything."""
     psycopg = import_psycopg()
-    params, schema, history = _target(db_url, history_schema)
+    params, schema, history = _target(db_url, history_schema, config_path)
     _require_migretti()
     announce_driver(psycopg)
     print(f"Database: {_describe(params)}")

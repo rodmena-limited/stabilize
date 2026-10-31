@@ -13,6 +13,12 @@ Run:  python audit/evaluations/probe_dsn_ssl_params.py
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _backends import skip  # noqa: E402
+
 import os
 import subprocess
 import sys
@@ -84,10 +90,10 @@ def main() -> int:
     dsn = os.environ.get("STABILIZE_PROBE_DSN") or _start()
     owns = "STABILIZE_PROBE_DSN" not in os.environ
     if dsn is None:
-        print()
-        print("SKIP (live half): no PostgreSQL available")
         print(f"RESULT: {'STATIC CHECKS PASSED' if failures == 0 else f'{failures} FAILED'}")
-        return 1 if failures else 0
+        if failures:
+            return 1
+        skip("live half: no PostgreSQL available")
 
     try:
         print()

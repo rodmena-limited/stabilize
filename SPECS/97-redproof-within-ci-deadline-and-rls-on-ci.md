@@ -16,6 +16,6 @@ Ticket: issuedb #97.
 
 ## Finding during 0.33.3 (2026-10-30)
 The original diagnosis, that red-proof's work does not fit a 3 h pipeline, was not shown. In pipeline 4366 all four shards ran 170 minutes and never started a test: audit/redproof/run.py (and manual_proofs.py) wait for /proc/loadavg < 8 and MemAvailable >= 6 GiB, a vm-1 admission rule. In a CI container those files describe the shared node, so the wait never ended and logged nothing. The shards burned the repository's container-minutes quota and held pipeline 4367 on quota:container-minutes from 16:43Z.
-- R7. While red-proof or the manual proofs run on CI, they shall not wait on host load (REDPROOF_HOST_GATE=off), and while either waits anywhere it shall log the wait at least every 5 minutes.
+- R7. Red-proof and the manual proofs shall not gate on host load at all (0.34.0: `audit/redproof/host.py` deleted; admission belongs to the launcher that starts the job, not to the harness inside it).
 - R8. A red-proof shard shall time out within 130 minutes.
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from stabilize.cli.commands import mg_check_grants, mg_status, mg_up, monitor, prompt, prune_signals
 from stabilize.cli.migrations import MigrationsNotFoundError
@@ -35,6 +36,12 @@ def main() -> None:
         metavar="SCHEMA",
         help="Keep stabilize's migretti history in this schema, apart from the target schema's own",
     )
+    up_parser.add_argument(
+        "--config",
+        type=Path,
+        metavar="PATH",
+        help="Read the database target from this migretti-style YAML file (never from the working directory)",
+    )
 
     # mg-status command
     status_parser = subparsers.add_parser("mg-status", help="Show migration status as migretti records it")
@@ -47,6 +54,12 @@ def main() -> None:
         metavar="SCHEMA",
         help="Read stabilize's migretti history from this schema",
     )
+    status_parser.add_argument(
+        "--config",
+        type=Path,
+        metavar="PATH",
+        help="Read the database target from this migretti-style YAML file (never from the working directory)",
+    )
 
     grants_parser = subparsers.add_parser(
         "mg-check-grants",
@@ -56,6 +69,12 @@ def main() -> None:
     grants_parser.add_argument(
         "--db-url",
         help="Database URL of a user that can read the catalogue (postgres://user:pass@host:port/dbname)",
+    )
+    grants_parser.add_argument(
+        "--config",
+        type=Path,
+        metavar="PATH",
+        help="Read the database target from this migretti-style YAML file (never from the working directory)",
     )
 
     # prompt command
@@ -72,6 +91,12 @@ def main() -> None:
     monitor_parser.add_argument(
         "--app",
         help="Filter by application name",
+    )
+    monitor_parser.add_argument(
+        "--config",
+        type=Path,
+        metavar="PATH",
+        help="Read the database target from this migretti-style YAML file (never from the working directory)",
     )
     monitor_parser.add_argument(
         "--db-url",
@@ -156,26 +181,31 @@ def main() -> None:
 
     if args.command == "mg-up":
         try:
-            mg_up(args.db_url, lock_timeout=args.lock_timeout, history_schema=args.history_schema)
+            mg_up(
+                args.db_url,
+                lock_timeout=args.lock_timeout,
+                history_schema=args.history_schema,
+                config_path=args.config,
+            )
         except MigrationsNotFoundError as exc:
             print(exc, file=sys.stderr)
             sys.exit(1)
     elif args.command == "mg-status":
         try:
-            mg_status(args.db_url, history_schema=args.history_schema)
+            mg_status(args.db_url, history_schema=args.history_schema, config_path=args.config)
         except MigrationsNotFoundError as exc:
             print(exc, file=sys.stderr)
             sys.exit(1)
     elif args.command == "mg-check-grants":
         try:
-            mg_check_grants(args.role, args.db_url)
+            mg_check_grants(args.role, args.db_url, config_path=args.config)
         except MigrationsNotFoundError as exc:
             print(exc, file=sys.stderr)
             sys.exit(2)
     elif args.command == "prompt":
         prompt()
     elif args.command == "monitor":
-        monitor(args.db_url, args.app, args.refresh, args.status)
+        monitor(args.db_url, args.app, args.refresh, args.status, config_path=args.config)
     elif args.command == "prune-signals":
         prune_signals(args.db_url, args.include_active, args.dry_run, args.statuses)
     elif args.command == "prune-processed":

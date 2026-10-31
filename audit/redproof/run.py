@@ -16,7 +16,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mutants import Mutant, all_mutants, apply  # noqa: E402
-import host  # noqa: E402
 from shards import shard_suites  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
@@ -40,7 +39,7 @@ def log(msg: str) -> None:
 
 
 def wait_host() -> None:
-    host.wait_host(log)
+    return None
 
 
 def fresh_db(name: str) -> str:
@@ -133,8 +132,6 @@ def run_pytest(ws: Path, worker: int, ids: list[str], extra: list[str], timeout:
         "no:cacheprovider",
         "-p",
         "redproof_plugin",
-        "--timeout",
-        "120",
         *extra,
     ]
     proc = subprocess.Popen(

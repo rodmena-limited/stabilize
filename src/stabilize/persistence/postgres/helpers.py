@@ -70,42 +70,6 @@ def insert_stage(cur: Any, stage: StageExecution, execution_id: str) -> None:
         upsert_tasks_bulk(cur, stage.tasks, stage.id)
 
 
-def upsert_task(cur: Any, task: TaskExecution, stage_id: str) -> None:
-    """Insert or update a task."""
-    cur.execute(
-        """
-        INSERT INTO task_executions (
-            id, stage_id, name, implementing_class, status,
-            start_time, end_time, stage_start, stage_end,
-            loop_start, loop_end, task_exception_details
-        ) VALUES (
-            %(id)s, %(stage_id)s, %(name)s, %(implementing_class)s, %(status)s,
-            %(start_time)s, %(end_time)s, %(stage_start)s, %(stage_end)s,
-            %(loop_start)s, %(loop_end)s, %(task_exception_details)s::jsonb
-        )
-        ON CONFLICT (id) DO UPDATE SET
-            status = EXCLUDED.status,
-            start_time = EXCLUDED.start_time,
-            end_time = EXCLUDED.end_time,
-            task_exception_details = EXCLUDED.task_exception_details
-        """,
-        {
-            "id": task.id,
-            "stage_id": stage_id,
-            "name": task.name,
-            "implementing_class": task.implementing_class,
-            "status": task.status.name,
-            "start_time": task.start_time,
-            "end_time": task.end_time,
-            "stage_start": task.stage_start,
-            "stage_end": task.stage_end,
-            "loop_start": task.loop_start,
-            "loop_end": task.loop_end,
-            "task_exception_details": json.dumps(task.task_exception_details, default=str),
-        },
-    )
-
-
 def upsert_tasks_bulk(cur: Any, tasks: list[TaskExecution], stage_id: str, only_changed: bool = False) -> None:
     """
     Batch upsert tasks with optimistic locking.

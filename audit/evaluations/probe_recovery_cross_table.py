@@ -146,8 +146,6 @@ def main() -> int:
             runs.append((f"sqlite {label}", lambda f=flt: _sqlite(f)))
             if dsn is not None:
                 runs.append((f"postgres {label}", lambda f=flt: _pg(dsn, f)))
-        if dsn is None:
-            print("[SKIP] postgres: no PostgreSQL available")
         for label, fn in runs:
             ok, detail = fn()
             print(f"[{'PASS' if ok else 'FAIL'}] {label}: {detail} (want True/False)")

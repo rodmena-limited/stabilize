@@ -471,7 +471,7 @@ query parameter such as `?dbname=` wins over the same part of the URL.
 
 By default tables land in the connection's default schema (usually `public`).
 To keep stabilize's tables in a dedicated schema, add `?schema=` to the URL
-(or set `MG_SCHEMA`, or a `schema:` key under `database:` in `mg.yaml`) —
+(or set `MG_SCHEMA`, or a `schema:` key under `database:` in the file named by `--config`) —
 `mg-up` creates the schema if missing and applies everything into it:
 
 ```bash

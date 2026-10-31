@@ -7,8 +7,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-import host
-
 REPO = Path(__file__).resolve().parents[2]
 MANUAL = REPO / "audit" / "redproof" / "manual"
 PYTHON = os.environ.get("MANUAL_PROOFS_PYTHON", str(REPO / ".venv" / "bin" / "python"))
@@ -49,10 +47,8 @@ def imports_tree(tree: Path) -> bool:
 
 
 def run_test(tree: Path, test_id: str) -> tuple[int, str]:
-    host.wait_host()
     proc = subprocess.run(
-        [PYTHON, "-m", "pytest", test_id, "-q", "-p", "no:cacheprovider", "-p", "no:logging", "-rf"]
-        + ["--timeout", "300"],
+        [PYTHON, "-m", "pytest", test_id, "-q", "-p", "no:cacheprovider", "-p", "no:logging", "-rf"],
         cwd=tree,
         env=env_for(tree),
         capture_output=True,

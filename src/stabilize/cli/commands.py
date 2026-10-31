@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from stabilize.cli.config import (
@@ -58,18 +59,14 @@ def monitor(
     app_filter: str | None,
     refresh_interval: int,
     status_filter: str,
+    config_path: Path | None = None,
 ) -> None:
     """Launch the real-time monitoring dashboard."""
     from stabilize.monitor import run_monitor
 
     schema: str | None = None
     if db_url is None:
-        try:
-            config = load_config()
-        except SystemExit:
-            print("Error: No database configuration found.")
-            print("Provide --db-url or set up mg.yaml / MG_DATABASE_URL")
-            sys.exit(1)
+        config = load_config(config_path)
         db_url, schema = monitor_target(config)
     elif not db_url.startswith("sqlite"):
         db_url, schema = monitor_target(apply_schema_override(parse_db_url(db_url)))
@@ -117,12 +114,12 @@ def monitor(
     )
 
 
-def mg_check_grants(role: str, db_url: str | None = None) -> None:
+def mg_check_grants(role: str, db_url: str | None = None, config_path: Path | None = None) -> None:
     """Report which engine tables *role* cannot SELECT, INSERT, UPDATE or DELETE."""
     from stabilize.cli.grants import check_role_grants, format_report, required_tables
 
     psycopg = import_psycopg()
-    config = apply_schema_override(parse_db_url(db_url)) if db_url else load_config()
+    config = apply_schema_override(parse_db_url(db_url)) if db_url else load_config(config_path)
     schema = config.get("schema")
     if schema:
         schema = validate_schema_name(schema)

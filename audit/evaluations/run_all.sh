@@ -25,14 +25,7 @@ fi
 # with no Docker cannot run these, and "could not run" is NOT "failed" -- a
 # runner that conflates them reports a red that means nothing, which is the
 # defect this harness exists to catch. Select with PROBE_SET.
-DOCKER_PROBES="probe_event_store_ddl_on_construction.py
-probe_event_store_no_ddl_by_default.py
-probe_multitenant_rls.py
-probe_pool_release_per_tenant.py
-probe_runtime_role_needs_no_create.py
-probe_schema_namespace_resolution.py
-probe_signal_storage_degrades.py
-probe_split_namespace.py"
+DOCKER_PROBES="$(cd audit/evaluations && grep -lE "PostgresContainer|docker (run|exec|rm)" probe_*.py | sort)"
 
 # PROBE_SET: all (default) | sqlite (skip Docker probes) | postgres (only those)
 PROBE_SET="${PROBE_SET:-all}"
@@ -41,9 +34,7 @@ _needs_docker() {
     grep -qxF "$1" <<<"$DOCKER_PROBES"
 }
 
-declare -A EXCLUDED=(
-    [probe_event_store_ddl_on_construction.py]="asserts the PRE-39 contract (constructor issues DDL by default), which 0.28.0 reversed; kept as the historical reproduction, superseded by probe_event_store_no_ddl_by_default.py"
-)
+declare -A EXCLUDED=()
 
 mapfile -t ALL < <(cd audit/evaluations && ls probe_*.py | sort)
 
@@ -89,11 +80,22 @@ echo
 
 failures=0
 declare -a failed_names=()
+declare -a skipped_names=()
 for probe in "${PROBES[@]}"; do
     echo "==================================================================="
     echo "RUNNING $probe"
     echo "==================================================================="
-    if "$PYTHON" "$probe"; then
+    "$PYTHON" "$probe"; rc=$?
+    if [ "$rc" -eq 77 ]; then
+        if [ "${PROBE_REQUIRE_PG:-0}" = "1" ]; then
+            echo "--- $probe: SKIP counted as FAIL (PROBE_REQUIRE_PG=1)"
+            failures=$((failures + 1))
+            failed_names+=("$probe")
+        else
+            echo "--- $probe: SKIP (exit 77)"
+            skipped_names+=("$probe")
+        fi
+    elif [ "$rc" -eq 0 ]; then
         echo "--- $probe: PASS"
     else
         echo "--- $probe: FAIL"

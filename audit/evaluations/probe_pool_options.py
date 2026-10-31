@@ -9,6 +9,12 @@ Run:  python audit/evaluations/probe_pool_options.py
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _backends import skip  # noqa: E402
+
 import os
 import subprocess
 import sys
@@ -57,8 +63,7 @@ def main() -> int:
     dsn = os.environ.get("STABILIZE_PROBE_DSN") or _start_container()
     owns_container = "STABILIZE_PROBE_DSN" not in os.environ
     if dsn is None:
-        print("SKIP: no PostgreSQL available (set STABILIZE_PROBE_DSN or enable docker)")
-        return 0
+        skip("no PostgreSQL available (set STABILIZE_PROBE_DSN or enable docker)")
 
     failures = 0
     try:

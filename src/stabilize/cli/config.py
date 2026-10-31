@@ -46,34 +46,58 @@ def announce_file_source(path: Path, config: dict[str, Any] | None) -> None:
     print(f"Using database configuration from {path}: {target}")
 
 
-def load_config() -> dict[str, Any]:
-    """Load database config from mg.yaml or environment."""
-    config: dict[str, Any] | None = None
+TARGET_VARIABLES = (
+    "MG_DB_HOST",
+    "MG_DB_PORT",
+    "MG_DB_USER",
+    "MG_DB_PASSWORD",
+    "MG_DB_NAME",
+    "PGHOST",
+    "PGPORT",
+    "PGDATABASE",
+)
 
+
+def load_config(config_path: Path | None = None) -> dict[str, Any]:
+    """Resolve the database target from MG_DATABASE_URL, or from the file named by --config.
+
+    A working-directory mg.yaml is never read on its own: migretti owns that
+    name, and a bare ``stabilize mg-up`` in a repo configured for migretti
+    would otherwise connect to whatever that file names (B51).
+    """
     db_url = os.environ.get("MG_DATABASE_URL")
     if db_url:
-        config = parse_db_url(db_url)
-    else:
-        # Try to load mg.yaml
-        mg_yaml = Path("mg.yaml")
-        if mg_yaml.exists():
-            try:
-                import yaml
+        present = [name for name in TARGET_VARIABLES if os.environ.get(name)]
+        if present:
+            print(
+                "Error: MG_DATABASE_URL is set together with "
+                + ", ".join(present)
+                + "; the URL names the target, so unset the others"
+            )
+            sys.exit(1)
+        return apply_schema_override(parse_db_url(db_url))
 
-                with open(mg_yaml) as f:
-                    raw = yaml.safe_load(f)
-                    config = raw.get("database", {}) if raw else {}
-                announce_file_source(mg_yaml, config)
-            except ImportError:
-                print("Warning: PyYAML not installed, cannot read mg.yaml")
-                print("Set MG_DATABASE_URL environment variable instead")
-                sys.exit(1)
-
-    if config is None:
+    if config_path is None:
         print("Error: No database configuration found")
-        print("Either create mg.yaml or set MG_DATABASE_URL environment variable")
+        print("Set MG_DATABASE_URL, pass --db-url, or name a file with --config PATH")
         sys.exit(1)
-
+    try:
+        import yaml
+    except ImportError:
+        print("Error: PyYAML is not installed, so --config cannot be read")
+        print("Set MG_DATABASE_URL instead")
+        sys.exit(1)
+    try:
+        with open(config_path) as f:
+            raw = yaml.safe_load(f)
+    except OSError as exc:
+        print(f"Error: cannot read {config_path}: {exc.strerror}")
+        sys.exit(1)
+    config: dict[str, Any] = (raw or {}).get("database") or {}
+    if not config:
+        print(f"Error: {config_path} has no database: section")
+        sys.exit(1)
+    announce_file_source(config_path, config)
     return apply_schema_override(config)
 
 

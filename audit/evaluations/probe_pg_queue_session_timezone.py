@@ -41,9 +41,6 @@ def _with_tz(dsn: str, tz: str) -> str:
 
 def main() -> int:
     with postgres_dsn() as dsn:
-        if dsn is None:
-            print("[SKIP] no PostgreSQL available")
-            return 0
         ny = PostgresQueue(_with_tz(dsn, "America/New_York"))
         utc = PostgresQueue(_with_tz(dsn, "UTC"))
         results = []

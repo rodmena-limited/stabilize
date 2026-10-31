@@ -21,7 +21,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "python-ulid>=2.0",
+    "python-ulid>=3.2",
     "pydantic>=2.0",
     # NO UPPER BOUNDS here on the house libraries, because stabilize is pulled
     # in transitively almost everywhere and a cap of ours would block their
@@ -119,7 +119,7 @@ Repository = "https://github.com/rodmena-limited/stabilize"
 Issues = "https://github.com/rodmena-limited/stabilize/issues"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.33.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
@@ -158,6 +158,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+timeout = 600
 filterwarnings = [
     "ignore::DeprecationWarning:testcontainers.*:",
     "ignore::DeprecationWarning:psycopg_pool.*:",

@@ -15,6 +15,14 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
+SKIP = 77
+
+
+def skip(reason: str) -> None:
+    """Exit with code 77: this probe could not run here. run_all.sh reports it as SKIP, never PASS."""
+    print(f"SKIP: {reason}", flush=True)
+    raise SystemExit(SKIP)
+
 
 @contextmanager
 def sqlite_backend() -> Iterator[tuple[Any, Any]]:
@@ -62,7 +70,7 @@ def dedicated_dsn(base: str, suffix: str = "probes") -> str:
 
 
 @contextmanager
-def postgres_dsn() -> Iterator[str | None]:
+def postgres_dsn() -> Iterator[str]:
     dsn = os.environ.get("STABILIZE_PROBE_DSN")
     container = None
     if dsn:
@@ -70,8 +78,7 @@ def postgres_dsn() -> Iterator[str | None]:
     else:
         dsn, container = _container_dsn()
     if dsn is None:
-        yield None
-        return
+        skip("no PostgreSQL available (set STABILIZE_PROBE_DSN or enable docker)")
     from stabilize.cli.commands import mg_up
 
     mg_up(dsn)

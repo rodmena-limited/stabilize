@@ -146,11 +146,8 @@ def main() -> int:
     cases: list[tuple[str, Any]] = [("sqlite A own id sequence per table", _sqlite_case)]
     failures: list[str] = []
     with postgres_dsn() as dsn:
-        if dsn is None:
-            print("[SKIP] postgres: no PostgreSQL available")
-        else:
-            cases.append(("postgres A own id sequence per table", lambda: _pg_case(dsn, shared=False)))
-            cases.append(("postgres B CONTROL shared sequence", lambda: _pg_case(dsn, shared=True)))
+        cases.append(("postgres A own id sequence per table", lambda: _pg_case(dsn, shared=False)))
+        cases.append(("postgres B CONTROL shared sequence", lambda: _pg_case(dsn, shared=True)))
         for label, fn in cases:
             COUNT.clear()
             wa, wb = fn()
