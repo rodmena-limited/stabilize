@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
     from stabilize.queue.messages import Message
+    from stabilize.tasks.registry import TaskRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -158,8 +159,10 @@ class RestartStageHandler(StabilizeHandler[RestartStage], _ControlHandler):
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
         event_recorder: EventRecorder | None = None,
+        task_registry: TaskRegistry | None = None,
     ) -> None:
         super().__init__(queue, repository, retry_delay, handler_config, event_recorder=event_recorder)
+        self.task_registry = task_registry
 
     @property
     def message_type(self) -> type[RestartStage]:
@@ -198,16 +201,28 @@ class RestartStageHandler(StabilizeHandler[RestartStage], _ControlHandler):
                 self._mark_processed_only(message, "RestartStage")
                 return
 
-            reset_stage_for_retry(stage)
-
+            reset_stage_for_retry(stage, task_registry=self.task_registry)
+            children = stage.synthetic_stages()
+            dropped = [s for s in children if s.context.get("_on_failure_child")]
+            kept = [s for s in children if not s.context.get("_on_failure_child")]
+            for child in kept:
+                reset_stage_for_retry(child, task_registry=self.task_registry)
+            dropped_ids = {s.id for s in dropped}
+            execution.stages[:] = [s for s in execution.stages if s.id not in dropped_ids]
             execution_changed = False
             if execution.status.is_complete:
                 execution.update_status(WorkflowStatus.RUNNING)
                 execution.end_time = None
                 execution_changed = True
-
             with self.repository.transaction(self.queue) as txn:
                 txn.store_stage(stage)
+                for child in kept:
+                    txn.store_stage(child)
+                for child in dropped:
+                    txn.remove_stage(child.id)
+                for stage_id in (stage.id, *(child.id for child in children)):
+                    txn.purge_stage_messages(stage_id, except_message_id=message.message_id)
+                    txn.release_claims(execution.id, stage_id)
                 if execution_changed:
                     txn.update_workflow_status(execution)
                 if message.message_id:
@@ -314,6 +329,7 @@ class ResumeStageHandler(StabilizeHandler[ResumeStage], _ControlHandler):
                             execution_id=message.execution_id,
                             stage_id=stage.id,
                             task_id=paused_tasks[0].id,
+                            generation=paused_tasks[0].generation,
                             task_type=paused_tasks[0].implementing_class,
                         )
                     )
@@ -382,6 +398,7 @@ class PauseTaskHandler(StabilizeHandler[PauseTask], _ControlHandler):
                                 execution_id=message.execution_id,
                                 stage_id=stage.id,
                                 task_id=task.id,
+                                generation=task.generation,
                                 task_type=task.implementing_class,
                             )
                         )

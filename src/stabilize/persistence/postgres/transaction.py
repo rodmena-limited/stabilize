@@ -249,6 +249,52 @@ class PostgresTransaction(StoreTransaction):
 
             return False
 
+    def _queue_table(self) -> str:
+        return str(getattr(self._queue, "table_name", None) or "queue_messages")
+
+    def purge_stage_messages(self, stage_id: str, *, except_message_id: str | None = None) -> int:
+        keep = _queue_row_id(except_message_id)
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"DELETE FROM {self._queue_table()} WHERE payload ->> 'stage_id' = %(stage_id)s "
+                "AND stabilize_tenant = %(tenant)s AND (%(keep)s::bigint IS NULL OR id <> %(keep)s::bigint)",
+                {"stage_id": stage_id, "tenant": self._tenant, "keep": keep},
+            )
+            return int(cur.rowcount or 0)
+
+    def release_claims(self, execution_id: str, stage_id: str) -> int:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM stage_claims WHERE execution_id = %(execution_id)s AND stage_id = %(stage_id)s "
+                "AND stabilize_tenant = %(tenant)s",
+                {"execution_id": execution_id, "stage_id": stage_id, "tenant": self._tenant},
+            )
+            return int(cur.rowcount or 0)
+
+    def claim_owner(self, execution_id: str, claim_key: str) -> str | None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT stage_id FROM stage_claims WHERE execution_id = %(execution_id)s "
+                "AND claim_key = %(claim_key)s AND stabilize_tenant = %(tenant)s",
+                {"execution_id": execution_id, "claim_key": claim_key, "tenant": self._tenant},
+            )
+            row = cur.fetchone()
+        return str(row["stage_id"]) if row else None
+
+    def remove_stage(self, stage_id: str) -> None:
+        self.purge_stage_messages(stage_id)
+        with self._conn.cursor() as cur:
+            params = {"stage_id": stage_id, "tenant": self._tenant}
+            cur.execute(
+                "DELETE FROM task_executions WHERE stage_id = %(stage_id)s AND stabilize_tenant = %(tenant)s", params
+            )
+            cur.execute(
+                "DELETE FROM stage_claims WHERE stage_id = %(stage_id)s AND stabilize_tenant = %(tenant)s", params
+            )
+            cur.execute(
+                "DELETE FROM stage_executions WHERE id = %(stage_id)s AND stabilize_tenant = %(tenant)s", params
+            )
+
     def lock_admission(self, key: str) -> None:
         with self._conn.cursor() as cur:
             cur.execute("SET LOCAL lock_timeout = '30s'")
@@ -313,3 +359,15 @@ class PostgresTransaction(StoreTransaction):
 from stabilize.persistence.postgres.store import (  # noqa: E402, F401
     PostgresWorkflowStore,
 )
+
+
+def _queue_row_id(message_id: str | None) -> int | None:
+    """The queue row behind a delivered message id; None when the id names no row (a test or foreign id)."""
+    if not message_id:
+        return None
+    from stabilize.queue.message_ids import row_id
+
+    try:
+        return int(row_id(message_id))
+    except (TypeError, ValueError):
+        return None

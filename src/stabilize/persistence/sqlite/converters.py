@@ -188,6 +188,7 @@ def row_to_task(row: sqlite3.Row) -> TaskExecution:
         loop_start=bool(row["loop_start"]),
         loop_end=bool(row["loop_end"]),
         task_exception_details=exception_details,
+        generation=row["generation"],
         version=version,
     )
     mark_persisted(task)

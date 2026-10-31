@@ -182,6 +182,7 @@ SAMPLE_ROWS: dict[str, dict[str, Any]] = {
         "loop_end": False,
         "task_exception_details": None,
         "version": 0,
+        "generation": 0,
         "stabilize_tenant": "",
     },
 }

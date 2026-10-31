@@ -65,6 +65,8 @@ CONTROL_FLOW_KEYS = frozenset(
         "_mm_consumed",
         "_mm_firings",
         "_mm_trigger",
+        "_on_failure_child",
+        "_on_failure_child",
         "_on_failure_planned",
         "_parent_workflow_id",
         "_pruned",

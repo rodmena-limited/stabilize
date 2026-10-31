@@ -17,6 +17,7 @@ def _state(task: TaskExecution) -> tuple[Any, ...]:
     return (
         task.id,
         task.version,
+        task.generation,
         task.name,
         task.implementing_class,
         task.status.name,

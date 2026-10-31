@@ -385,6 +385,40 @@ class AtomicTransaction(StoreTransaction):
 
         return False
 
+    def purge_stage_messages(self, stage_id: str, *, except_message_id: str | None = None) -> int:
+        keep = _queue_row_id(except_message_id)
+        cursor = self._conn.execute(
+            f"DELETE FROM {self._queue_table} WHERE json_extract(payload, '$.stage_id') = :stage_id "
+            "AND stabilize_tenant = :tenant AND (:keep IS NULL OR id <> :keep)",
+            {"stage_id": stage_id, "tenant": self._tenant, "keep": keep},
+        )
+        return int(cursor.rowcount or 0)
+
+    def release_claims(self, execution_id: str, stage_id: str) -> int:
+        cursor = self._conn.execute(
+            "DELETE FROM stage_claims WHERE execution_id = :execution_id AND stage_id = :stage_id "
+            "AND stabilize_tenant = :tenant",
+            {"execution_id": execution_id, "stage_id": stage_id, "tenant": self._tenant},
+        )
+        return int(cursor.rowcount or 0)
+
+    def claim_owner(self, execution_id: str, claim_key: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT stage_id FROM stage_claims WHERE execution_id = :execution_id AND claim_key = :claim_key "
+            "AND stabilize_tenant = :tenant",
+            {"execution_id": execution_id, "claim_key": claim_key, "tenant": self._tenant},
+        ).fetchone()
+        return str(row[0]) if row else None
+
+    def remove_stage(self, stage_id: str) -> None:
+        self.purge_stage_messages(stage_id)
+        params = {"stage_id": stage_id, "tenant": self._tenant}
+        self._conn.execute(
+            "DELETE FROM task_executions WHERE stage_id = :stage_id AND stabilize_tenant = :tenant", params
+        )
+        self._conn.execute("DELETE FROM stage_claims WHERE stage_id = :stage_id AND stabilize_tenant = :tenant", params)
+        self._conn.execute("DELETE FROM stage_executions WHERE id = :stage_id AND stabilize_tenant = :tenant", params)
+
     def lock_admission(self, key: str) -> None:
         if self._conn.in_transaction:
             raise RuntimeError("lock_admission must be the first statement of its transaction")
@@ -445,3 +479,15 @@ def _queue_table_for(store: Any, queue: Any) -> str:
 
 # Forward reference for type hint
 from stabilize.persistence.sqlite.store import SqliteWorkflowStore  # noqa: E402, F401
+
+
+def _queue_row_id(message_id: str | None) -> int | None:
+    """The queue row behind a delivered message id; None when the id names no row (a test or foreign id)."""
+    if not message_id:
+        return None
+    from stabilize.queue.message_ids import row_id
+
+    try:
+        return int(row_id(message_id))
+    except (TypeError, ValueError):
+        return None

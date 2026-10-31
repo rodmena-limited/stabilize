@@ -115,6 +115,7 @@ def upsert_task(
             loop_start = :loop_start,
             loop_end = :loop_end,
             task_exception_details = :task_exception_details,
+            generation = :generation,
             version = version + 1
         WHERE id = :id AND version = :version AND stabilize_tenant = :tenant
         """,
@@ -131,6 +132,7 @@ def upsert_task(
             "loop_start": 1 if task.loop_start else 0,
             "loop_end": 1 if task.loop_end else 0,
             "task_exception_details": json.dumps(task.task_exception_details, default=str),
+            "generation": task.generation,
             "version": task.version,
         },
     )
@@ -143,11 +145,11 @@ def upsert_task(
                 INSERT INTO task_executions (
                     id, stage_id, name, implementing_class, status,
                     start_time, end_time, stage_start, stage_end,
-                    loop_start, loop_end, task_exception_details, version, stabilize_tenant
+                    loop_start, loop_end, task_exception_details, version, generation, stabilize_tenant
                 ) VALUES (
                     :id, :stage_id, :name, :implementing_class, :status,
                     :start_time, :end_time, :stage_start, :stage_end,
-                    :loop_start, :loop_end, :task_exception_details, 0, :tenant
+                    :loop_start, :loop_end, :task_exception_details, 0, :generation, :tenant
                 )
                 """,
                 {
@@ -164,6 +166,7 @@ def upsert_task(
                     "loop_start": 1 if task.loop_start else 0,
                     "loop_end": 1 if task.loop_end else 0,
                     "task_exception_details": json.dumps(task.task_exception_details, default=str),
+                    "generation": task.generation,
                 },
             )
         except sqlite3.IntegrityError:

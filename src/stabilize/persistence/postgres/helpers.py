@@ -105,6 +105,7 @@ def upsert_tasks_bulk(
             "loop_end": task.loop_end,
             "task_exception_details": json.dumps(task.task_exception_details, default=str),
             "version": task.version,
+            "generation": task.generation,
             "tenant": tenant,
         }
 
@@ -114,14 +115,16 @@ def upsert_tasks_bulk(
             INSERT INTO task_executions (
                 id, stage_id, name, implementing_class, status,
                 start_time, end_time, stage_start, stage_end,
-                loop_start, loop_end, task_exception_details, version, stabilize_tenant
+                loop_start, loop_end, task_exception_details, version, generation, stabilize_tenant
             ) VALUES (
                 %(id)s, %(stage_id)s, %(name)s, %(implementing_class)s, %(status)s,
                 %(start_time)s, %(end_time)s, %(stage_start)s, %(stage_end)s,
-                %(loop_start)s, %(loop_end)s, %(task_exception_details)s::jsonb, %(version)s, %(tenant)s
+                %(loop_start)s, %(loop_end)s, %(task_exception_details)s::jsonb, %(version)s, %(generation)s,
+                %(tenant)s
             )
             ON CONFLICT (id) DO UPDATE SET
                 status = EXCLUDED.status,
+                generation = EXCLUDED.generation,
                 start_time = EXCLUDED.start_time,
                 end_time = EXCLUDED.end_time,
                 task_exception_details = EXCLUDED.task_exception_details,

@@ -48,6 +48,7 @@ class TaskExecution:
         loop_start: True if this task starts a loop
         loop_end: True if this task ends a loop
         task_exception_details: Exception information if task failed
+        generation: Incremented by every reset of the task; a message of an older generation is ignored
     """
 
     id: str = field(default_factory=_generate_task_id)
@@ -62,6 +63,7 @@ class TaskExecution:
     loop_end: bool = False
     task_exception_details: dict[str, Any] = field(default_factory=dict)
     version: int = 0
+    generation: int = 0
 
     # Back-reference to parent stage (set after construction)
     # Can be weakref (default) or strong ref (for standalone tasks)

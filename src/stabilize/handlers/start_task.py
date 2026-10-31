@@ -123,6 +123,7 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
                                 execution_id=message.execution_id,
                                 stage_id=message.stage_id,
                                 task_id=message.task_id,
+                                generation=task_model.generation,
                                 status=WorkflowStatus.SKIPPED,
                             )
                         )
@@ -148,6 +149,7 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
                         execution_id=message.execution_id,
                         stage_id=message.stage_id,
                         task_id=message.task_id,
+                        generation=task_model.generation,
                         task_type=task_model.implementing_class,
                     )
                 )
@@ -197,6 +199,7 @@ class StartTaskHandler(StabilizeHandler[StartTask]):
                     execution_id=message.execution_id,
                     stage_id=message.stage_id,
                     task_id=message.task_id,
+                    generation=task_model.generation,
                     status=status,
                     original_status=WorkflowStatus.TERMINAL,
                 )

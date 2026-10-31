@@ -14,6 +14,7 @@ import logging
 import os
 import threading
 import time
+from dataclasses import replace
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -33,6 +34,7 @@ from stabilize.handlers.run_task.error import (
     handle_exception,
 )
 from stabilize.handlers.run_task.execution import execute_with_timeout, resolve_task
+from stabilize.handlers.run_task.generation import same_generation
 from stabilize.handlers.run_task.guards import (
     CONVERTED_BASE_EXCEPTIONS,
     as_task_error,
@@ -82,7 +84,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
 
     # Class-level lock to track tasks currently being executed (prevents duplicate execution)
     # Maps task_id -> start_time (monotonic) for staleness detection
-    _executing_tasks: dict[str, float] = {}
+    _executing_tasks: dict[tuple[str, int], float] = {}
     _executing_lock = threading.Lock()
 
     def __init__(
@@ -153,6 +155,16 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                     with self.repository.transaction(self.queue) as txn:
                         txn.mark_message_processed(message.message_id)
                 return
+            if not same_generation(task_model, message):
+                logger.info(
+                    "Ignoring RunTask for %s - generation %s is not the task's %s",
+                    task_model.name,
+                    message.generation,
+                    task_model.generation,
+                )
+                held_results.take(task_model)
+                self.txn_helper.execute_atomic(source_message=message, handler_name="RunTask")
+                return
 
             held = held_results.take(task_model)
             if held is not None:
@@ -199,6 +211,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                                 execution_id=message.execution_id,
                                 stage_id=message.stage_id,
                                 task_id=message.task_id,
+                                generation=message.generation,
                             ),
                             None,
                         )
@@ -220,6 +233,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                                 execution_id=message.execution_id,
                                 stage_id=message.stage_id,
                                 task_id=message.task_id,
+                                generation=message.generation,
                                 status=WorkflowStatus.SKIPPED,
                             ),
                             None,
@@ -275,8 +289,31 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
 
             # CONCURRENT EXECUTION CHECK: Prevent duplicate execution of same task
             stale_threshold_s = 3600
+            execution_key = (task_model.id, task_model.generation)
             with RunTaskHandler._executing_lock:
-                existing_start = RunTaskHandler._executing_tasks.get(task_model.id)
+                older = [k for k in RunTaskHandler._executing_tasks if k[0] == task_model.id and k != execution_key]
+                existing_start = RunTaskHandler._executing_tasks.get(execution_key)
+                if older and existing_start is None:
+                    RunTaskHandler._executing_tasks.setdefault(execution_key, float("-inf"))
+            if older and existing_start is None:
+                with RunTaskHandler._executing_lock:
+                    RunTaskHandler._executing_tasks.pop(execution_key, None)
+                logger.info(
+                    "Task %s generation %s is still executing; re-queuing generation %s",
+                    task_model.name,
+                    older[0][1],
+                    task_model.generation,
+                )
+                self.txn_helper.execute_atomic(
+                    source_message=message,
+                    messages_to_push=[
+                        (replace(message, message_id=None, retry_count=0), self.retry_delay.total_seconds())
+                    ],
+                    handler_name="RunTask",
+                )
+                return
+            with RunTaskHandler._executing_lock:
+                existing_start = RunTaskHandler._executing_tasks.get(execution_key)
                 if existing_start is not None:
                     elapsed = time.monotonic() - existing_start
                     if elapsed < stale_threshold_s:
@@ -293,7 +330,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                             elapsed,
                             stale_threshold_s,
                         )
-                RunTaskHandler._executing_tasks[task_model.id] = time.monotonic()
+                RunTaskHandler._executing_tasks[execution_key] = time.monotonic()
 
             # Register a cooperative cancellation token so a concurrent
             # CancelStage (or a cooperative task) can signal this task to stop.
@@ -412,7 +449,7 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
                 self._save_result(task_model, result, message)
             finally:
                 with RunTaskHandler._executing_lock:
-                    RunTaskHandler._executing_tasks.pop(task_model.id, None)
+                    RunTaskHandler._executing_tasks.pop(execution_key, None)
                 unregister_token(task_model.id)
                 if lease_acquired and self.task_lease is not None:
                     self.task_lease.release(task_model.id)
@@ -442,6 +479,15 @@ class RunTaskHandler(StabilizeHandler[RunTask]):
             task_model = next((t for t in stage.tasks if t.id == task_id), None)
             if not task_model:
                 logger.error("Task %s not found in stage %s", task_id, stage_id)
+                return
+            if not same_generation(task_model, message):
+                logger.warning(
+                    "Dropping the result of task %s generation %s; the task is at generation %s",
+                    task_model.name,
+                    message.generation,
+                    task_model.generation,
+                )
+                self.txn_helper.execute_atomic(source_message=message, handler_name="RunTask")
                 return
 
             process_result(

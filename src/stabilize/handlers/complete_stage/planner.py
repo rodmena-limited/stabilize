@@ -39,5 +39,6 @@ class CompleteStagePlannerMixin:
         planned = list(graph.build())
         for s in planned:
             s.execution = stage.execution
+            s.context["_on_failure_child"] = True
             stage.execution.stages.append(s)
         return planned

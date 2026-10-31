@@ -200,6 +200,7 @@ def row_to_task(row: dict[str, Any]) -> TaskExecution:
         loop_start=row["loop_start"] or False,
         loop_end=row["loop_end"] or False,
         task_exception_details=exception_details,
+        generation=row["generation"],
         version=row["version"] or 0,
     )
     mark_persisted(task)

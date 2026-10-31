@@ -107,6 +107,22 @@ class StoreTransaction(ABC):
         """
         return True
 
+    def purge_stage_messages(self, stage_id: str, *, except_message_id: str | None = None) -> int:
+        """Delete the queued messages that target *stage_id* or its tasks, keeping the in-flight one."""
+        return 0
+
+    def release_claims(self, execution_id: str, stage_id: str) -> int:
+        """Delete the stage_claims rows owned by *stage_id*."""
+        return 0
+
+    def claim_owner(self, execution_id: str, claim_key: str) -> str | None:
+        """The stage that holds *claim_key* in *execution_id*, or None."""
+        return None
+
+    def remove_stage(self, stage_id: str) -> None:
+        """Delete a synthetic stage, its tasks, its claims and its queued messages."""
+        raise NotImplementedError(f"{type(self).__name__} cannot remove stages")
+
     def lock_admission(self, key: str) -> None:
         """Serialize admission for ``key`` until this transaction ends."""
         raise NotImplementedError(f"{type(self).__name__} does not support admission control")

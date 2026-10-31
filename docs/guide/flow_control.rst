@@ -244,8 +244,10 @@ State-Based Patterns
 Deferred Choice (WCP-16)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A race between branches — the first to start execution wins, others are
-cancelled. Group competing stages with ``deferred_choice_group``:
+A race between branches. Group competing stages with ``deferred_choice_group``.
+The losers end SKIPPED and carry ``_pruned`` in their context; the edges out of them are
+dead, so a stage downstream of the group runs once the winner reaches it, and the
+workflow completes through the winner's path.
 
 .. code-block:: python
 
@@ -261,8 +263,28 @@ cancelled. Group competing stages with ``deferred_choice_group``:
         ...
     ),
 
-When one stage in the group starts running, all siblings in the same group are
-automatically cancelled.
+``deferredChoiceClaim`` on each member's context says when the group is decided.
+
+* ``on_start`` (the default): the first member to start wins and the others are pruned
+  before they run. Use it when starting is the event, for example two operators racing
+  to pick up a case.
+* ``on_complete``: every member starts; the first to complete wins, and its live siblings
+  are pruned (a running task is cancelled and its ``on_cancel`` hook runs). Use it for a
+  timer against a signal wait: the timer only wins if it fires before the signal arrives.
+  A member that fails while a sibling is still live is pruned, marked
+  ``_deferred_choice_failed`` and keeps its ``exception``. When every member has failed,
+  the group fails once.
+
+All members of a group must name the same mode. ``Workflow.create`` refuses a mix.
+
+.. code-block:: python
+
+    StageExecution(ref_id="await_signal", type="wait_signal",
+                   deferred_choice_group="approval",
+                   context={"deferredChoiceClaim": "on_complete"}),
+    StageExecution(ref_id="escalate", type="timer",
+                   deferred_choice_group="approval",
+                   context={"deferredChoiceClaim": "on_complete", "duration_seconds": 3600}),
 
 Milestone Gating (WCP-18)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~

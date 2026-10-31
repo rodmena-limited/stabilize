@@ -74,6 +74,7 @@ TASK_EXECUTIONS: tuple[str, ...] = (
     "loop_end",
     "task_exception_details",
     "version",
+    "generation",
     TENANT_COLUMN,
 )
 

@@ -288,7 +288,8 @@ while every engine table is empty. Run it before the first workflow.
 with ``stabilize.cli.migrations.get_migration_files()``, or ``PostgresEventStore.setup_ddl()``
 for the event tables alone. Apply them with your own tool and run ``mg-check-grants``.
 When a table differs from what the engine expects, the first-use schema check names
-the DDL to run.
+the DDL to run. 0.34.0 adds ``task_executions.generation`` (``INTEGER NOT NULL DEFAULT 0``)
+through the ``task_generation`` migration file; apply it before the 0.34.0 processors start.
 
 Tenancy mode
 ------------

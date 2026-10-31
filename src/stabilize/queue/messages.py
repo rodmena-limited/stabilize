@@ -321,6 +321,7 @@ class TaskLevel(StageLevel):
     """
 
     task_id: str = ""
+    generation: int | None = None
 
     @classmethod
     def from_stage_level(cls, msg: StageLevel, task_id: str) -> TaskLevel:

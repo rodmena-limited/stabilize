@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 CONVERTED_BASE_EXCEPTIONS = (SystemExit, GeneratorExit)
 
 

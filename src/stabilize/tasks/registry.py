@@ -182,6 +182,20 @@ class TaskRegistry:
 
         return decorator
 
+    def reset_context_keys_for(self, name: str) -> tuple[str, ...]:
+        """The context keys a reset clears for the task registered as *name*; empty when unknown."""
+        from stabilize.tasks.builtins import BUILTIN_ALIASES, BUILTIN_TASKS
+
+        resolved = self._aliases.get(name, name)
+        impl = self._tasks.get(resolved)
+        if impl is None:
+            impl = BUILTIN_TASKS.get(BUILTIN_ALIASES.get(name, name))
+        if isinstance(impl, type) and issubclass(impl, Task):
+            return tuple(impl.reset_context_keys)
+        if isinstance(impl, Task):
+            return tuple(type(impl).reset_context_keys)
+        return ()
+
     def get(self, name: str) -> Task:
         """
         Get a task implementation by name.

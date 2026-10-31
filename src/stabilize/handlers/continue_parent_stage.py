@@ -213,6 +213,7 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                             execution_id=message.execution_id,
                             stage_id=stage.id,
                             task_id=first_task.id,
+                            generation=first_task.generation,
                         ),
                         None,
                     )

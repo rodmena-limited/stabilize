@@ -50,7 +50,7 @@ def default_handlers(
         SkipStageHandler(queue, store, handler_config=handler_config),
         CancelStageHandler(queue, store, task_registry=task_registry, handler_config=handler_config),
         ContinueParentStageHandler(queue, store, handler_config=handler_config),
-        JumpToStageHandler(queue, store, handler_config=handler_config),
+        JumpToStageHandler(queue, store, handler_config=handler_config, task_registry=task_registry),
         SignalStageHandler(queue, store, handler_config=handler_config),
         CancelRegionHandler(queue, store, handler_config=handler_config),
         AddMultiInstanceHandler(queue, store, handler_config=handler_config),
@@ -67,7 +67,7 @@ def default_handlers(
         CompleteStageHandler(queue, store, task_registry=task_registry, handler_config=handler_config),
         CompleteWorkflowHandler(queue, store, handler_config=handler_config),
         CancelWorkflowHandler(queue, store, handler_config=handler_config),
-        RestartStageHandler(queue, store, handler_config=handler_config),
+        RestartStageHandler(queue, store, handler_config=handler_config, task_registry=task_registry),
         ResumeStageHandler(queue, store, handler_config=handler_config),
         PauseTaskHandler(queue, store, handler_config=handler_config),
     ]

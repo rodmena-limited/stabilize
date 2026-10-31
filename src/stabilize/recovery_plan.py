@@ -53,6 +53,7 @@ def _plan_running_stage(workflow: Workflow, stage: StageExecution, queue: Queue)
                         execution_id=workflow.id,
                         stage_id=stage.id,
                         task_id=task.id,
+                        generation=task.generation,
                         status=status,
                         original_status=original,
                         task_start_time=task.start_time,
@@ -65,6 +66,7 @@ def _plan_running_stage(workflow: Workflow, stage: StageExecution, queue: Queue)
                         execution_id=workflow.id,
                         stage_id=stage.id,
                         task_id=task.id,
+                        generation=task.generation,
                         task_type=task.implementing_class,
                     )
                 )
@@ -75,7 +77,15 @@ def _plan_running_stage(workflow: Workflow, stage: StageExecution, queue: Queue)
         first = not_started[0]
         if queue.has_pending_message_for_task(first.id):
             return []
-        return [StartTask(execution_type=kind, execution_id=workflow.id, stage_id=stage.id, task_id=first.id)]
+        return [
+            StartTask(
+                execution_type=kind,
+                execution_id=workflow.id,
+                stage_id=stage.id,
+                task_id=first.id,
+                generation=first.generation,
+            )
+        ]
     if stage.tasks and all(t.status.is_complete for t in stage.tasks):
         if queue.has_pending_message_for_stage(stage.id) or any(s.status in ACTIVE for s in stage.after_stages()):
             return []

@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from stabilize.models.workflow import Workflow
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.tasks.registry import TaskRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -76,9 +77,12 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
         retry_delay: timedelta | None = None,
         handler_config: HandlerConfig | None = None,
         event_recorder: EventRecorder | None = None,
+        task_registry: TaskRegistry | None = None,
     ) -> None:
         super().__init__(queue, repository, retry_delay, handler_config, event_recorder=event_recorder)
         self.txn_helper = TransactionHelper(repository, queue)
+        self.task_registry = task_registry
+        self._reset = partial(reset_stage_for_retry, task_registry=task_registry)
 
     @property
     def message_type(self) -> type[JumpToStage]:
@@ -98,7 +102,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
     ) -> list[tuple[str, Any]]:
         """Collect reset mutations for a stage's synthetic children."""
         synthetics = self.repository.get_synthetic_stages(execution_id, parent_stage_id) or []
-        return [(s.id, reset_stage_for_retry) for s in synthetics]
+        return [(s.id, self._reset) for s in synthetics]
 
     def _apply_jump(
         self,
@@ -126,6 +130,8 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                         continue
                     mutate(fresh)
                     txn.store_stage(fresh)
+                    txn.purge_stage_messages(stage_id, except_message_id=message.message_id)
+                    txn.release_claims(message.execution_id, stage_id)
                 if message.message_id:
                     txn.mark_message_processed(
                         message_id=message.message_id,
@@ -188,7 +194,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             for downstream in get_resettable_downstream_stages(execution, target_stage.ref_id):
                 if downstream.id != source_stage.id and downstream.id != target_stage.id:
                     logger.debug("Resetting downstream stage: %s", downstream.ref_id)
-                    mutations.append((downstream.id, reset_stage_for_retry))
+                    mutations.append((downstream.id, self._reset))
                     mutations.extend(self._synthetic_reset_mutations(message.execution_id, downstream.id))
 
             # Determine if this is a forward or backward jump
@@ -250,7 +256,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
                 if is_backward_jump:
 
                     def mutate_source(s: StageExecution, updates: dict[str, Any] = source_context_updates) -> None:
-                        reset_stage_for_retry(s)
+                        self._reset(s)
                         s.context.update(updates)
 
                 else:

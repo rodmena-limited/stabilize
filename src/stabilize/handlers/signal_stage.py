@@ -113,6 +113,7 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
                                 execution_id=message.execution_id,
                                 stage_id=message.stage_id,
                                 task_id=suspended_task.id,
+                                generation=suspended_task.generation,
                                 task_type=suspended_task.implementing_class,
                             )
                         )

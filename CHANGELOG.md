@@ -156,6 +156,18 @@ host's own migretti history, now upgrade with no change to the command.
 - **Paused time is not task lifetime.** `PauseTask` records `_paused_at`, `ResumeStage`
   adds the interval to `_paused_ms`, and the RunTask lifetime and stage-timeout checks
   subtract it for every `RetryableTask`.
+- **`SkipStage(pruned=True)`**, `deferredChoiceClaim` (`on_start` | `on_complete`), the
+  `_deferred_choice_failed` engine key, `StoreTransaction.count_claims(execution_id, prefix)`,
+  and the SUSPENDED→SKIPPED and PAUSED→SKIPPED transitions.
+- **`task_executions.generation`** (`INTEGER NOT NULL DEFAULT 0`), added by migration
+  `01M68BCSDHR6ECPVVESPS8WJC4_task_generation.sql` on PostgreSQL and by SQLite migration 7
+  at first use. `TaskExecution.generation` and `generation` on the task-level messages
+  expose it. A host that owns its DDL adds the column before upgrading its processors.
+- **Transaction API**: `purge_stage_messages(stage_id, except_message_id=)`,
+  `release_claims(execution_id, stage_id)`, `claim_owner(execution_id, claim_key)` and
+  `remove_stage(stage_id)` on both backends' transactions.
+- **`TaskRegistry.reset_context_keys_for(name)`** returns the reset keys of a registered
+  task class, falling back to the built-in tasks.
 - **`Task.reset_context_keys`** names the context keys a reset clears for that task
   (`TimerTask`: its two timer keys; `WaitTask` adds `waitStartTime`). The reset paths
   use it in the next slice.
@@ -168,6 +180,55 @@ host's own migretti history, now upgrade with no change to the command.
 
 ### Fixed
 
+- **Deferred choice losers are skipped, and the workflow succeeds (B12).** The branches
+  that lose a deferred choice were cancelled, and the cancellation ended the whole
+  workflow CANCELED. Losers now land SKIPPED with `_pruned`, downstream readiness drops
+  the dead edges, and the winner's path completes the workflow. A pruning `SkipStage`
+  accepts a RUNNING, SUSPENDED or PAUSED loser. Its live tasks are cancelled, the cancel
+  and cleanup hooks run after the commit, and the stage's synthetic children are pruned
+  with it.
+- **A deferred choice can settle when a branch completes (B13).** `deferredChoiceClaim`
+  on each member's context is `on_start` (the default and today's behaviour) or
+  `on_complete`. In `on_complete` mode no member claims the group when it starts. The
+  first member to complete wins under the group's lock and prunes its live siblings. A
+  timer branch therefore does not win the moment it starts. A member that fails while siblings are
+  still live is pruned with `_deferred_choice_failed` and keeps its `exception`. When
+  every member has failed, the last one ends the workflow TERMINAL once. `Workflow.create`
+  refuses a group whose members disagree on the mode.
+- **A blocking failure no longer dead-letters its own CompleteStage (B08).** Converting
+  FAILED_CONTINUE to TERMINAL after the stage was already set FAILED_CONTINUE raised an
+  invalid transition. The message went to the dead-letter queue and the workflow hung.
+  The conversion now happens before the status is set, and the error path assigns
+  TERMINAL directly.
+- **`ContinueParentStage` for a parent that already completed is acknowledged (B26).**
+  It set TERMINAL on a complete parent, raised an invalid transition and was
+  dead-lettered. It now marks the message and, for a halted parent, propagates
+  completion. Cancelling or pruning a stage reaches its synthetic children.
+- **A TERMINAL or CANCELED workflow cancels its suspended and paused branches (B27).**
+  `CompleteWorkflow` cancelled RUNNING top-level stages only. A branch waiting on a
+  signal therefore stayed SUSPENDED inside a finished workflow. It now cancels RUNNING, SUSPENDED,
+  PAUSED and BUFFERED stages, and `CancelStage` moves SUSPENDED and PAUSED tasks to
+  CANCELED and runs their hooks.
+- **A reset task runs in a new generation, and the old generation's messages and results
+  are dropped (B09, B10).** A backward jump, a `RestartStage` or a multi-merge re-arm
+  increments `task_executions.generation` for every task it resets. `StartTask`,
+  `RunTask`, `CompleteTask` and `PauseTask` carry the generation they were created for.
+  `RunTask` ignores a delivery of another generation, drops a result whose task moved on
+  while it ran, and re-queues a newer generation that arrives while an older one is still
+  executing. `CompleteTask` treats a generation mismatch as stale. The resetting
+  transaction also deletes the queued messages that target the reset stage and its tasks.
+  A stale `RunTask` is therefore never delivered. Before, a stale chain could overwrite
+  the replacement task's result or start a second task chain.
+- **A jump or restart releases the claims of the stages it resets (B11).** `stage_claims`
+  rows survived loops, jumps and restarts. A loop re-entering a deferred choice or a
+  mutex therefore found it pre-decided by the previous round.
+- **`RestartStage` drops the old on-failure children and the failure keys (B24).** The
+  on-failure stages planned by the failed run, `_on_failure_planned` and `exception`
+  survived a restart. Children planned by `on_failure_stages` are now marked
+  `_on_failure_child`. A restart deletes them and resets the before and after stages.
+- **A multi-merge re-arm resets its tasks the way every other reset does (B25).** It
+  used to clear status and times only. It now bumps the generation and clears each
+  task's `reset_context_keys`, the timer keys included.
 - **A synchronous drain no longer spins while a delayed message waits (B14).**
   `process_all` kept polling for its whole timeout while a row existed, because `size()`
   counts delayed rows too. A one-minute cron with one pending timer burned 60 s and

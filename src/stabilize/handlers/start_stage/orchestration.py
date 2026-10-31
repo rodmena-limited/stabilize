@@ -80,6 +80,7 @@ class StartStageOrchestrationMixin:
                     execution_id=message.execution_id,
                     stage_id=message.stage_id,
                     task_id=first_task.id,
+                    generation=first_task.generation,
                 )
             )
             return messages

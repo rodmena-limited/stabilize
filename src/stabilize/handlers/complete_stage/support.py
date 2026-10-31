@@ -9,6 +9,7 @@ from stabilize.dag.readiness import MM_FIRINGS, MM_TRIGGER, multi_merge_candidat
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.handlers.complete_stage.planner import CompleteStagePlannerMixin
 from stabilize.handlers.complete_stage.split_logic import CompleteStagesSplitMixin
+from stabilize.handlers.jump_to_stage.reset import reset_tasks
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import CompleteStage, CompleteWorkflow, StartStage
 
@@ -114,10 +115,7 @@ class CompleteStageSupport(
         stage.start_time = None
         stage.end_time = None
         stage.outputs = {}
-        for task in stage.tasks:
-            task.status = WorkflowStatus.NOT_STARTED
-            task.start_time = None
-            task.end_time = None
+        reset_tasks(stage, self.task_registry)
 
         txn.store_stage(stage)
         txn.push_message(

@@ -133,6 +133,11 @@ MIGRATIONS: tuple[Migration, ...] = (
             *queue_lookup_indexes("queue_messages"),
         ),
     ),
+    Migration(
+        7,
+        "add_task_generation",
+        ("ALTER TABLE task_executions ADD COLUMN generation INTEGER NOT NULL DEFAULT 0",),
+    ),
 )
 
 
