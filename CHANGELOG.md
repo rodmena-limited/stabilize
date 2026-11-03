@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Lock-contention retry exhaustion logs at WARNING (#108, asked by Casebound).** When a handler
+  transaction gives up after its retries on a deadlock, serialisation failure or `ConcurrencyError`,
+  the line "gave up after 5 retries on lock contention: <handler>; the message is redelivered" is a
+  WARNING, because the processor redelivers the message and a run cancel's own row locks are a normal
+  cause. The error-handling path keeps CRITICAL and the dead-letter move keeps ERROR, which are the
+  terminal outcomes. `tests/test_contention_log_level.py`.
+
 ## [0.34.3] - 2026-11-03
 
 ### Fixed

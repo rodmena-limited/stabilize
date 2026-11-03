@@ -96,8 +96,10 @@ def is_deadlock_error(error: Exception) -> bool:
 
 
 # Deadlock retry policy
+DEADLOCK_MAX_RETRIES = 5
+
 DEADLOCK_RETRY_POLICY = RetryWithBackoffPolicy(
-    max_retries=5,
+    max_retries=DEADLOCK_MAX_RETRIES,
     backoff=DEADLOCK_BACKOFF,
     should_handle=is_deadlock_error,
 )
@@ -208,11 +210,11 @@ class TransactionHelper:
         try:
             _execute()
         except RetryLimitReached as e:
-            logger.error(
-                "Transaction failed after max retries due to lock contention: %s",
+            logger.warning(
+                "Transaction gave up after %d retries on lock contention: %s; the message is redelivered",
+                DEADLOCK_MAX_RETRIES,
                 handler_name,
             )
-            # Re-raise the original exception
             raise e.__cause__ if e.__cause__ else e from e
         return True
 
