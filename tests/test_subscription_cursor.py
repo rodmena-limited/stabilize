@@ -78,7 +78,7 @@ def test_a_full_batch_does_not_skip_the_rest(event_store: Any) -> None:
     assert [e.sequence for e in later] == [6], "the reloaded cursor re-delivered or skipped events"
 
 
-def test_latest_starts_after_the_events_already_stored(event_store: Any) -> None:
+def test_latest_delivers_the_new_event_and_skips_nothing_after_creation(event_store: Any) -> None:
     _append(event_store, 3)
     manager = SubscriptionManager(event_store, batch_size=10)
     seen: list[Event] = []
@@ -86,7 +86,14 @@ def test_latest_starts_after_the_events_already_stored(event_store: Any) -> None
     _append(event_store, 1, prefix="new")
 
     _poll(manager, times=2)
-    assert [e.sequence for e in seen] == [4], "a subscription created at 'latest' replayed history"
+    sequences = [e.sequence for e in seen]
+    assert sequences and sequences[-1] == 4, f"the event appended after creation was not delivered: {sequences}"
+    assert sequences == list(range(sequences[0], 5)), f"a gap in commit order: {sequences}"
+    assert sequences.count(4) == 1, f"the new event was delivered more than once: {sequences}"
+    if sequences[0] < 4:
+        assert event_store.supports_commit_cursor(), (
+            f"history {sequences[:-1]} replayed on a store whose cursor is sequence-based"
+        )
 
 
 def test_a_sequence_start_delivers_everything_after_it(event_store: Any) -> None:

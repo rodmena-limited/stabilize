@@ -131,6 +131,10 @@ class StoreTransaction(ABC):
         """Delete a synthetic stage, its tasks, its claims and its queued messages."""
         raise NotImplementedError(f"{type(self).__name__} cannot remove stages")
 
+    def lock_stage(self, stage_id: str) -> str | None:
+        """Lock the stage row until this transaction ends and return its status name; None when unsupported."""
+        return None
+
     def consume_signal(
         self,
         execution_id: str,

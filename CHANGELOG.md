@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.34.3] - 2026-11-03
+
+### Fixed
+
+- **A persistent signal handled while its stage suspends on another worker is delivered, not
+  stranded (#107, reported by Casebound).** The signal handler decided to buffer from a stage status
+  read outside any transaction and inserted the `workflow_signals` row without re-checking; the
+  suspend path consumed only rows already committed. With two workers the two could interleave so
+  that the row landed unconsumed on a SUSPENDED stage, where only a recovery sweep would find it, and
+  the sweep is off unless `recovery_interval_seconds` is set. Both paths now take the stage row lock
+  inside their transactions (`StoreTransaction.lock_stage`, `SELECT ... FOR UPDATE` on PostgreSQL, a
+  read inside `BEGIN IMMEDIATE` on SQLite); the buffer path re-reads the status under the lock and,
+  when the stage is already SUSPENDED, stores the row and pushes the `SignalStage` that delivers it
+  in the same transaction. `tests/test_signal_suspend_race.py` reproduces the interleaving
+  deterministically on both backends.
+
 ## [0.34.2] - 2026-10-31
 
 ### Fixed

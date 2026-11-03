@@ -105,6 +105,12 @@ class SqliteTransactionOps:
         ).fetchall()
         return [str(r[0]) for r in rows]
 
+    def lock_stage(self, stage_id: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT status FROM stage_executions WHERE id = ? AND stabilize_tenant = ?", (stage_id, self._tenant)
+        ).fetchone()
+        return None if row is None else str(row[0])
+
     def consume_signal(
         self,
         execution_id: str,

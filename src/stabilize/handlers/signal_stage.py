@@ -161,6 +161,39 @@ class SignalStageHandler(StabilizeHandler[SignalStage]):
                 )
 
                 with self.repository.transaction(self.queue) as txn:
+                    if txn.lock_stage(stage.id) == WorkflowStatus.SUSPENDED.name:
+                        logger.info(
+                            "Stage %s suspended while signal '%s' was being buffered; delivering it",
+                            stage.name,
+                            message.signal_name,
+                        )
+                        row_id = message.signal_row_id
+                        if row_id is None and store_backed:
+                            row_id = (
+                                txn.buffer_signal(
+                                    stage.execution.id,
+                                    stage.ref_id,
+                                    message.signal_name,
+                                    message.signal_data,
+                                    user=message.user,
+                                    persistent=True,
+                                )
+                                or None
+                            )
+                        txn.push_message(
+                            SignalStage(
+                                execution_type=message.execution_type,
+                                execution_id=message.execution_id,
+                                stage_id=message.stage_id,
+                                signal_name=message.signal_name,
+                                signal_data=message.signal_data,
+                                persistent=True,
+                                user=message.user,
+                                signal_row_id=row_id,
+                            )
+                        )
+                        self.mark_in(txn, message, "SignalStage")
+                        return
                     if message.signal_row_id is None:
                         stored = 0
                         if store_backed:

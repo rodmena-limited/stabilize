@@ -213,6 +213,7 @@ def _handle_suspended(
 
     def resume_or_wait(txn: StoreTransaction) -> list[tuple[Message, float | None]]:
         nonlocal resumed
+        txn.lock_stage(stage.id)
         for key in signal_keys:
             stage.context.pop(key, None)
         stage.context.update(before)
