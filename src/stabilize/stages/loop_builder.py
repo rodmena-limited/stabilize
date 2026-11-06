@@ -1,5 +1,4 @@
-"""
-Structured loop builder for WCP-21.
+"""Structured loop builder for WCP-21.
 
 Provides builder methods for creating structured loop patterns
 using the existing jump_to mechanism internally.
@@ -24,13 +23,10 @@ Usage:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from stabilize.models.stage import StageExecution
 from stabilize.models.task import TaskExecution
-
-if TYPE_CHECKING:
-    pass
 
 
 class LoopBuilder:
@@ -96,7 +92,7 @@ class LoopBuilder:
 
         # Body stages - chain them after condition
         prev_ref = condition_ref
-        for i, body_stage in enumerate(body_stages):
+        for _i, body_stage in enumerate(body_stages):
             body_stage.requisite_stage_ref_ids = {prev_ref}
             body_stage.context["_loop_scope"] = loop_ref_prefix
             prev_ref = body_stage.ref_id

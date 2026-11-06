@@ -1,5 +1,4 @@
-"""
-Event sourcing base types.
+"""Event sourcing base types.
 
 This module defines the core event model used for event sourcing in Stabilize.
 Events are immutable records of state changes that can be replayed to reconstruct
@@ -9,11 +8,13 @@ workflow state at any point in time.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +35,7 @@ CURRENT_SCHEMA_VERSION = 2
 
 
 class EventType(Enum):
-    """
-    All event types in the system.
+    """All event types in the system.
 
     Events are organized by entity lifecycle:
     - workflow.* - Workflow-level events
@@ -111,8 +111,7 @@ class EntityType(Enum):
 
 @dataclass(frozen=True)
 class EventMetadata:
-    """
-    Metadata attached to every event for tracing and debugging.
+    """Metadata attached to every event for tracing and debugging.
 
     Attributes:
         correlation_id: Links related events across a workflow execution.
@@ -149,8 +148,7 @@ class EventMetadata:
 
 @dataclass(frozen=True)
 class Event:
-    """
-    Immutable event record.
+    """Immutable event record.
 
     Events are the source of truth for all state changes in the system.
     They are append-only and can be replayed to reconstruct state.

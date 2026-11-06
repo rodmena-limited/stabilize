@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.cli import migretti_runner as runner
 from stabilize.cli.adoption import AdoptionRefusedError
@@ -15,6 +14,9 @@ from stabilize.cli.migrate import DEFAULT_LOCK_TIMEOUT_SECONDS, _acquire_lock, _
 from stabilize.cli.migrations import get_migrations
 from stabilize.persistence.tenancy import MODE_SINGLE, MODE_TABLE, MODE_TENANCY
 from stabilize.redaction import redact_text
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 STOP_RULE = "Every engine process must be stopped before this command runs and started again only after it reports OK."
 QUEUE_SHAPE = ("message_id", "message_type", "payload", "deliver_at", "attempts")

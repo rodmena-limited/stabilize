@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.queue.decode import MessageDecodeError, decode_message
-from stabilize.queue.messages import Message
+
+if TYPE_CHECKING:
+    from stabilize.queue.messages import Message
 
 logger = logging.getLogger(__name__)
 

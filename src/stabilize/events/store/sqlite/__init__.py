@@ -1,10 +1,11 @@
-"""
-SQLite event store implementation.
+"""SQLite event store implementation.
 
 Provides durable, append-only event storage using SQLite.
 Events are stored with auto-incrementing sequence numbers
 for global ordering.
 """
+
+from __future__ import annotations
 
 from stabilize.events.store.sqlite.schema import (
     EVENTS_SCHEMA,

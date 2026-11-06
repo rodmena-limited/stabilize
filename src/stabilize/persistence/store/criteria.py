@@ -3,10 +3,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from stabilize.errors.workflow import WorkflowNotFoundError as WorkflowNotFoundError
-from stabilize.models.status import WorkflowStatus
+from stabilize.errors.workflow import WorkflowNotFoundError
+
+if TYPE_CHECKING:
+    from stabilize.models.status import WorkflowStatus
+
+__all__ = [
+    "CURSOR_VERSION",
+    "WORKFLOW_CRITERIA_FIELDS",
+    "WorkflowCriteria",
+    "WorkflowNotFoundError",
+    "cursor_sql",
+    "order_sql",
+    "parse_cursor",
+    "time_window_sql",
+    "version_sql",
+]
 
 
 @dataclass

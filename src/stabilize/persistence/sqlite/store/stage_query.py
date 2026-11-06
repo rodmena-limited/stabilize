@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 from typing import TYPE_CHECKING
 
 from stabilize.persistence.columns import select_list
@@ -11,6 +10,8 @@ from stabilize.persistence.store.criteria import WORKFLOW_CRITERIA_FIELDS
 from stabilize.persistence.store.stage_criteria import SUPPORTED_CRITERIA, StageCriteria, stage_from, stage_where
 
 if TYPE_CHECKING:
+    import sqlite3
+
     from stabilize.models.stage import StageExecution
 
 _STAGE = select_list("stage_executions", "sqlite", alias="s")

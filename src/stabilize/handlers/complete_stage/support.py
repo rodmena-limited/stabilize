@@ -15,6 +15,8 @@ from stabilize.queue.messages import CompleteStage, CompleteWorkflow, StartStage
 
 if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
+    from stabilize.models.workflow import Workflow
+    from stabilize.persistence.store.transaction import StoreTransaction
     from stabilize.tasks.registry import TaskRegistry
 
 logger = logging.getLogger("stabilize.handlers.complete_stage.handler")
@@ -64,7 +66,7 @@ class CompleteStageSupport(
         """
         if not self.event_recorder:
             return
-        self.set_event_context(stage.execution.id if stage.execution else "")
+        self.set_event_context(stage.execution.id)
         if status.is_failure:
             error = stage.context.get("exception", {}).get("details", {}).get("error", "Unknown error")
             self.event_recorder.record_stage_failed(
@@ -84,7 +86,7 @@ class CompleteStageSupport(
                 source_handler="CompleteStageHandler",
             )
 
-    def _rearm_multi_merge(self, stage, execution, txn) -> bool:  # type: ignore[no-untyped-def]
+    def _rearm_multi_merge(self, stage: StageExecution, execution: Workflow, txn: StoreTransaction) -> bool:
         """Re-arm a multi-merge stage for its next upstream. True if re-armed.
 
         Archives the firing that just completed, then resets the row in place.

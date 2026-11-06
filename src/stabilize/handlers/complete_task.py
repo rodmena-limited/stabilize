@@ -1,5 +1,4 @@
-"""
-CompleteTaskHandler - handles task completion.
+"""CompleteTaskHandler - handles task completion.
 
 This handler updates task status and triggers either the next task
 or stage completion.
@@ -8,7 +7,6 @@ or stage completion.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.handlers.base import StabilizeHandler
@@ -19,14 +17,16 @@ from stabilize.queue.messages import (
     CompleteTask,
     StartTask,
 )
-from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.models.task import TaskExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.resilience.config import HandlerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +52,7 @@ def accepts_start_task_skip(task: TaskExecution, message: CompleteTask) -> bool:
 
 
 class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
-    """
-    Handler for CompleteTask messages.
+    """Handler for CompleteTask messages.
 
     Execution flow:
     1. Update task status and end time
@@ -127,7 +126,7 @@ class CompleteTaskHandler(StabilizeHandler[CompleteTask]):
                 # bus publication is deferred until after commit.
                 if not self.event_recorder:
                     return
-                workflow_id = stage.execution.id if stage.execution else ""
+                workflow_id = stage.execution.id
                 self.set_event_context(workflow_id)
                 if message.status.is_failure:
                     error = "Task failed"

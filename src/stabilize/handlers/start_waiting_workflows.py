@@ -1,5 +1,4 @@
-"""
-StartWaitingWorkflowsHandler - starts buffered executions.
+"""StartWaitingWorkflowsHandler - starts buffered executions.
 
 This handler is triggered when a pipeline execution completes.
 It checks if there are any BUFFERED executions for the same pipeline config
@@ -9,26 +8,26 @@ and starts them if capacity allows.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.audit import audit
 from stabilize.handlers.admission import promote_waiting
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.queue.messages import StartWaitingWorkflows
-from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from stabilize.events.recorder import EventRecorder
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.resilience.config import HandlerConfig
 
 logger = logging.getLogger(__name__)
 
 
 class StartWaitingWorkflowsHandler(StabilizeHandler[StartWaitingWorkflows]):
-    """
-    Handler for StartWaitingWorkflows messages.
+    """Handler for StartWaitingWorkflows messages.
 
     Execution flow:
     1. Find buffered executions for the pipeline config

@@ -1,5 +1,4 @@
-"""
-Stage definition builders.
+"""Stage definition builders.
 
 Stage definition builders are responsible for:
 1. Building tasks for a stage
@@ -12,19 +11,17 @@ from __future__ import annotations
 
 import logging
 import os
-from abc import ABC
 from typing import TYPE_CHECKING, Any
 
-from stabilize.dag.graph import StageGraphBuilder
 from stabilize.models.task import TaskExecution
 
 if TYPE_CHECKING:
+    from stabilize.dag.graph import StageGraphBuilder
     from stabilize.models.stage import StageExecution
 
 
-class StageDefinitionBuilder(ABC):
-    """
-    Abstract base class for stage definition builders.
+class StageDefinitionBuilder:
+    """Abstract base class for stage definition builders.
 
     Each stage type has a corresponding builder that defines:
     - What tasks the stage should execute
@@ -68,14 +65,12 @@ class StageDefinitionBuilder(ABC):
 
     @property
     def type(self) -> str:
-        """
-        Get the stage type this builder handles.
+        """Get the stage type this builder handles.
 
         Defaults to lowercase class name without "StageBuilder" suffix.
         """
         name = self.__class__.__name__
-        if name.endswith("StageBuilder"):
-            name = name[:-12]
+        name = name.removesuffix("StageBuilder")
         return name.lower()
 
     @property
@@ -84,8 +79,7 @@ class StageDefinitionBuilder(ABC):
         return []
 
     def build_tasks(self, stage: StageExecution) -> list[TaskExecution]:
-        """
-        Build the tasks for this stage.
+        """Build the tasks for this stage.
 
         Override to define what tasks the stage should execute.
 
@@ -102,8 +96,7 @@ class StageDefinitionBuilder(ABC):
         stage: StageExecution,
         graph: StageGraphBuilder,
     ) -> None:
-        """
-        Build synthetic stages that run before this stage's tasks.
+        """Build synthetic stages that run before this stage's tasks.
 
         Override to add setup, validation, or other pre-requisite stages.
 
@@ -111,15 +104,13 @@ class StageDefinitionBuilder(ABC):
             stage: The parent stage
             graph: Builder for adding synthetic stages
         """
-        pass
 
     def after_stages(
         self,
         stage: StageExecution,
         graph: StageGraphBuilder,
     ) -> None:
-        """
-        Build synthetic stages that run after this stage completes.
+        """Build synthetic stages that run after this stage completes.
 
         Override to add cleanup, notification, or other post-processing stages.
 
@@ -127,15 +118,13 @@ class StageDefinitionBuilder(ABC):
             stage: The parent stage
             graph: Builder for adding synthetic stages
         """
-        pass
 
     def on_failure_stages(
         self,
         stage: StageExecution,
         graph: StageGraphBuilder,
     ) -> None:
-        """
-        Build synthetic stages that run when this stage fails.
+        """Build synthetic stages that run when this stage fails.
 
         Override to add rollback, alerting, or other failure-handling stages.
 
@@ -143,18 +132,15 @@ class StageDefinitionBuilder(ABC):
             stage: The failed stage
             graph: Builder for adding synthetic stages
         """
-        pass
 
     def add_context_flags(self, stage: StageExecution) -> None:
-        """
-        Add any required context flags to the stage.
+        """Add any required context flags to the stage.
 
         Called before task execution to set up stage context.
 
         Args:
             stage: The stage to modify
         """
-        pass
 
 
 class NoOpStageBuilder(StageDefinitionBuilder):
@@ -248,8 +234,7 @@ class StageDefinitionBuilderFactory:
         self.register(WaitStageBuilder())
 
     def register(self, builder: StageDefinitionBuilder) -> None:
-        """
-        Register a stage definition builder.
+        """Register a stage definition builder.
 
         Args:
             builder: The builder to register
@@ -266,8 +251,7 @@ class StageDefinitionBuilderFactory:
         self.register(builder_class())
 
     def get(self, stage_type: str) -> StageDefinitionBuilder:
-        """
-        Get the builder for a stage type.
+        """Get the builder for a stage type.
 
         Args:
             stage_type: The stage type

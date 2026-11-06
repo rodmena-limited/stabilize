@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field, replace
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.cli import migretti_runner as runner
 from stabilize.cli.adoption import (
@@ -41,6 +40,9 @@ from stabilize.cli.migrate_zone import (
 )
 from stabilize.cli.migrations import get_migration_files, migration_id, migration_text, migretti_checksum
 from stabilize.redaction import redact_db_url, redact_text
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 MG_UP_LOCK_CLASS = 0x53544D47
 MG_UP_LOCK_KEY = "stabilize mg-up"

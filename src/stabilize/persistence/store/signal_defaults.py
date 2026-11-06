@@ -75,11 +75,11 @@ class SignalStoreDefaults:
         only_complete: bool = True,
         statuses: list[str] | None = None,
     ) -> int:
-        """
-        Count stage rows carrying a WCP-24 persistent-signal buffer.
+        """Count stage rows carrying a WCP-24 persistent-signal buffer.
 
         Args:
             only_complete: When True, count only stages whose status is complete.
+            statuses: Count only stages in these statuses; every status when None.
 
         Returns:
             Number of stage rows carrying a buffer (0 for stores without contexts)
@@ -91,13 +91,13 @@ class SignalStoreDefaults:
         only_complete: bool = True,
         statuses: list[str] | None = None,
     ) -> int:
-        """
-        Remove the WCP-24 persistent-signal buffer from stage contexts.
+        """Remove the WCP-24 persistent-signal buffer from stage contexts.
 
         Args:
             only_complete: When True, restrict removal to stages whose status
                 is complete, whose buffer can never be consumed. When False,
                 every stage carrying a buffer is stripped.
+            statuses: Restrict removal to stages in these statuses; every status when None.
 
         Returns:
             Number of stage rows modified (0 for stores without contexts)

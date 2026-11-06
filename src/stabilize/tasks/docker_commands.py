@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 import shlex
+from pathlib import Path
 from typing import Any
 
 _DANGEROUS_CAPABILITIES = frozenset(
@@ -24,23 +24,23 @@ class DockerCommandMixin:
         """Build Docker command based on action and context."""
         if action == "run":
             return self._build_run_command(context)
-        elif action == "exec":
+        if action == "exec":
             return self._build_exec_command(context)
-        elif action == "build":
+        if action == "build":
             return self._build_build_command(context)
-        elif action == "pull":
+        if action == "pull":
             image = context.get("image")
             if not image:
                 raise ValueError("'image' is required for pull action")
             return ["docker", "pull", image]
-        elif action == "ps":
+        if action == "ps":
             cmd = ["docker", "ps"]
             if context.get("all"):
                 cmd.append("-a")
             return cmd
-        elif action == "images":
+        if action == "images":
             return ["docker", "images"]
-        elif action == "logs":
+        if action == "logs":
             name = context.get("name")
             if not name:
                 raise ValueError("'name' is required for logs action")
@@ -51,12 +51,12 @@ class DockerCommandMixin:
                 cmd.extend(["--tail", str(context["tail"])])
             cmd.append(name)
             return cmd
-        elif action == "stop":
+        if action == "stop":
             name = context.get("name")
             if not name:
                 raise ValueError("'name' is required for stop action")
             return ["docker", "stop", name]
-        elif action == "rm":
+        if action == "rm":
             name = context.get("name")
             if not name:
                 raise ValueError("'name' is required for rm action")
@@ -65,8 +65,7 @@ class DockerCommandMixin:
                 cmd.append("-f")
             cmd.append(name)
             return cmd
-        else:
-            raise ValueError(f"Unknown action: {action}")
+        raise ValueError(f"Unknown action: {action}")
 
     def _build_run_command(self, context: dict[str, Any]) -> list[str]:
         """Build docker run command."""
@@ -194,7 +193,7 @@ class DockerCommandMixin:
             host_path = parts[0] if parts else vol
             if ".." in host_path:
                 raise ValueError(f"Volume mount path traversal blocked: {vol}")
-            if not os.path.isabs(host_path):
+            if not Path(host_path).is_absolute():
                 raise ValueError(f"Volume host path must be absolute: {vol}")
             cmd.extend(["-v", vol])
 

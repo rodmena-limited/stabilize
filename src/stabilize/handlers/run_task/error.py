@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import replace
 from datetime import timedelta
 from typing import TYPE_CHECKING
@@ -16,6 +15,8 @@ from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import CompleteTask
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from stabilize.models.stage import StageExecution
     from stabilize.models.task import TaskExecution
     from stabilize.persistence.store import WorkflowStore
@@ -67,14 +68,8 @@ def handle_cancellation(
             status=WorkflowStatus.CANCELED,
         )
         fresh_stage = repository.retrieve_stage(message.stage_id)
-        if fresh_stage is not None and stale_generation(fresh_stage, message):
+        if stale_generation(fresh_stage, message):
             txn_helper.execute_atomic(source_message=message, handler_name="RunTask")
-            return
-        if fresh_stage is None:
-            logger.error("Stage %s not found during cancellation", message.stage_id)
-            txn_helper.execute_atomic(
-                source_message=message, messages_to_push=[(complete, None)], handler_name="RunTask"
-            )
             return
         fresh_task = next((t for t in fresh_stage.tasks if t.id == message.task_id), None)
         if fresh_task is None or fresh_task.status != WorkflowStatus.RUNNING:
@@ -104,10 +99,8 @@ def handle_cancellation(
 
     def keep_cancel_result() -> None:
         fresh_stage = repository.retrieve_stage(message.stage_id)
-        if fresh_stage is not None and stale_generation(fresh_stage, message):
+        if stale_generation(fresh_stage, message):
             txn_helper.execute_atomic(source_message=message, handler_name="RunTask")
-            return
-        if fresh_stage is None:
             return
         if context:
             fresh_stage.context.update(context)
@@ -200,9 +193,9 @@ def retry_after_floor(exception: BaseException) -> timedelta:
     from stabilize.errors.chain import walk_causes
 
     hints = [
-        float(getattr(exc, "retry_after"))
+        float(hint)
         for exc in walk_causes(exception)
-        if isinstance(getattr(exc, "retry_after", None), (int, float))
+        if isinstance(hint := getattr(exc, "retry_after", None), (int, float))
     ]
     return timedelta(seconds=max(hints)) if hints else timedelta(0)
 
@@ -243,7 +236,7 @@ def _handle_transient_retry(
     from stabilize.errors.chain import walk_causes
 
     context_update = next(
-        (getattr(exc, "context_update") for exc in walk_causes(exception) if getattr(exc, "context_update", None)),
+        (update for exc in walk_causes(exception) if (update := getattr(exc, "context_update", None))),
         None,
     )
 
@@ -257,18 +250,8 @@ def _handle_transient_retry(
         # CRITICAL: Reload stage from DB before storing to get latest version.
         def do_update_context() -> None:
             fresh_stage = repository.retrieve_stage(message.stage_id)
-            if fresh_stage is not None and stale_generation(fresh_stage, message):
+            if stale_generation(fresh_stage, message):
                 txn_helper.execute_atomic(source_message=message, handler_name="RunTask")
-                return
-            if fresh_stage is None:
-                logger.warning("Stage %s not found during context update", message.stage_id)
-                # Still push retry message even if stage not found
-                txn_helper.execute_atomic(
-                    source_message=message,
-                    messages_to_push=[(retry_message, delay.total_seconds())],
-                    handler_name="RunTask",
-                    during_txn=_record_retry,
-                )
                 return
             fresh_stage.context.update(context_update)
             # Atomic: store stage with context update + push retry message
@@ -332,29 +315,8 @@ def _mark_terminal(
     def do_mark_terminal() -> None:
         # Re-fetch stage to get current version on each retry attempt
         fresh_stage = repository.retrieve_stage(message.stage_id)
-        if fresh_stage is not None and stale_generation(fresh_stage, message):
+        if stale_generation(fresh_stage, message):
             txn_helper.execute_atomic(source_message=message, handler_name="RunTask")
-            return
-        if fresh_stage is None:
-            logger.error("Stage %s not found during exception handling", message.stage_id)
-            # Mark message processed and push CompleteTask to prevent workflow hang
-            txn_helper.execute_atomic_critical(
-                source_message=message,
-                messages_to_push=[
-                    (
-                        CompleteTask(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=message.stage_id,
-                            task_id=message.task_id,
-                            generation=message.generation,
-                            status=WorkflowStatus.TERMINAL,
-                        ),
-                        None,
-                    )
-                ],
-                handler_name="RunTask_ErrorHandling",
-            )
             return
 
         fresh_stage.context["exception"] = exception_details
@@ -433,29 +395,8 @@ def complete_with_error(
     def do_complete() -> None:
         # Re-fetch stage to get current version on each retry attempt
         fresh_stage = repository.retrieve_stage(message.stage_id)
-        if fresh_stage is not None and stale_generation(fresh_stage, message):
+        if stale_generation(fresh_stage, message):
             txn_helper.execute_atomic(source_message=message, handler_name="RunTask")
-            return
-        if fresh_stage is None:
-            logger.error("Stage %s not found during error completion", message.stage_id)
-            # Mark message processed and push CompleteTask to prevent workflow hang
-            txn_helper.execute_atomic_critical(
-                source_message=message,
-                messages_to_push=[
-                    (
-                        CompleteTask(
-                            execution_type=message.execution_type,
-                            execution_id=message.execution_id,
-                            stage_id=message.stage_id,
-                            task_id=message.task_id,
-                            generation=message.generation,
-                            status=WorkflowStatus.TERMINAL,
-                        ),
-                        None,
-                    )
-                ],
-                handler_name="RunTask_ErrorHandling",
-            )
             return
 
         fresh_stage.context["exception"] = {

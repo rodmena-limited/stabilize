@@ -1,5 +1,4 @@
-"""
-Task event recording mixin.
+"""Task event recording mixin.
 
 Provides record_task_* methods for the EventRecorder.
 """

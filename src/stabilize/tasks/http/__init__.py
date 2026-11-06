@@ -1,5 +1,7 @@
 """HTTP task package for making HTTP requests."""
 
+from __future__ import annotations
+
 from stabilize.tasks.http.constants import (
     CHUNK_SIZE,
     CONTENT_TYPES,
@@ -11,11 +13,11 @@ from stabilize.tasks.http.constants import (
 from stabilize.tasks.http.task import HTTPTask
 
 __all__ = [
-    "HTTPTask",
-    "DEFAULT_TIMEOUT",
+    "CHUNK_SIZE",
+    "CONTENT_TYPES",
     "DEFAULT_MAX_RESPONSE_SIZE",
     "DEFAULT_RETRY_ON_STATUS",
-    "CHUNK_SIZE",
+    "DEFAULT_TIMEOUT",
     "SUPPORTED_METHODS",
-    "CONTENT_TYPES",
+    "HTTPTask",
 ]

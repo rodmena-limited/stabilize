@@ -1,5 +1,7 @@
 """Core data models for pipeline execution."""
 
+from __future__ import annotations
+
 from stabilize.models.multi_instance import MultiInstanceConfig
 from stabilize.models.stage import (
     JoinType,
@@ -12,13 +14,13 @@ from stabilize.models.task import TaskExecution
 from stabilize.models.workflow import Workflow, WorkflowType
 
 __all__ = [
-    "WorkflowStatus",
-    "TaskExecution",
+    "JoinType",
+    "MultiInstanceConfig",
+    "SplitType",
     "StageExecution",
     "SyntheticStageOwner",
-    "JoinType",
-    "SplitType",
-    "MultiInstanceConfig",
+    "TaskExecution",
     "Workflow",
+    "WorkflowStatus",
     "WorkflowType",
 ]

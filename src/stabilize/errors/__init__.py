@@ -4,6 +4,8 @@ All error classes are re-exported here for backward compatibility.
 Import from ``stabilize.errors`` as before.
 """
 
+from __future__ import annotations
+
 from stabilize.errors.base import StabilizeBaseException, StabilizeError
 from stabilize.errors.delivery import DeliveryContractError, DuplicateDeliveryError
 from stabilize.errors.permanent import ConfigurationError, PermanentError, RecoveryError
@@ -24,10 +26,6 @@ __all__ = [
     "ConcurrencyError",
     "ConfigurationError",
     "DeadLetterError",
-    "DeliveryContractError",
-    "DuplicateDeliveryError",
-    "DeliveryContractError",
-    "DuplicateDeliveryError",
     "DeliveryContractError",
     "DuplicateDeliveryError",
     "PermanentError",

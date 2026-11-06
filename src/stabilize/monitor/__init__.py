@@ -22,16 +22,16 @@ if TYPE_CHECKING:
     from stabilize.queue import Queue
 
 __all__ = [
-    "run_monitor",
     "MonitorData",
     "MonitorDataFetcher",
     "MonitorDisplay",
-    "WorkflowView",
+    "QueueStats",
     "StageView",
     "TaskView",
-    "QueueStats",
     "WorkflowStats",
+    "WorkflowView",
     "format_duration",
+    "run_monitor",
 ]
 
 
@@ -43,8 +43,7 @@ def run_monitor(
     status_filter: str = "all",
     tenant: str | None = None,
 ) -> None:
-    """
-    Launch the real-time monitoring dashboard.
+    """Launch the real-time monitoring dashboard.
 
     Args:
         store: Workflow store for fetching execution data
@@ -52,6 +51,7 @@ def run_monitor(
         app_filter: Filter workflows by application name
         refresh_interval: Refresh interval in seconds (default: 2)
         status_filter: Filter by status ('all', 'running', 'failed', 'recent')
+        tenant: Show one tenant's rows; None shows every tenant
     """
     data_fetcher = MonitorDataFetcher(store, queue, tenant=tenant)
 

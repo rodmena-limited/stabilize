@@ -1,6 +1,4 @@
-"""
-Snapshot operations for PostgreSQL event store.
-"""
+"""Snapshot operations for PostgreSQL event store."""
 
 from __future__ import annotations
 
@@ -8,7 +6,6 @@ import hashlib
 import json
 from typing import TYPE_CHECKING, Any
 
-from stabilize.events.base import EntityType
 from stabilize.persistence.columns import select_list
 from stabilize.persistence.tenancy import refuse_foreign_row
 
@@ -18,6 +15,8 @@ if TYPE_CHECKING:
     from psycopg import Connection
     from psycopg.rows import DictRow
     from psycopg_pool import ConnectionPool
+
+    from stabilize.events.base import EntityType
 
 
 class PostgresSnapshotsMixin:
@@ -88,51 +87,50 @@ class PostgresSnapshotsMixin:
         entity_id: str,
     ) -> dict[str, Any] | None:
         """Get the latest snapshot for an entity."""
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"""
                     SELECT {_SNAPSHOTS} FROM snapshots
                     WHERE entity_type = %(entity_type)s AND entity_id = %(entity_id)s AND stabilize_tenant = %(tenant)s
                     ORDER BY version DESC
                     LIMIT 1
                     """,
-                    {"entity_type": entity_type.value, "entity_id": entity_id, "tenant": self.tenant},
-                )
+                {"entity_type": entity_type.value, "entity_id": entity_id, "tenant": self.tenant},
+            )
 
-                row = cur.fetchone()
-                if row is None:
-                    return None
+            row = cur.fetchone()
+            if row is None:
+                return None
 
-                if isinstance(row, dict):
-                    data = row
-                else:
-                    data = {
-                        "entity_type": row[1],
-                        "entity_id": row[2],
-                        "workflow_id": row[3],
-                        "version": row[4],
-                        "sequence": row[5],
-                        "state": row[6],
-                        "state_hash": row[7] if len(row) > 7 else None,
-                    }
-
-                state = data["state"]
-                if isinstance(state, str):
-                    try:
-                        state = json.loads(state)
-                    except (json.JSONDecodeError, TypeError):
-                        state = {}
-
-                result = {
-                    "entity_type": data["entity_type"],
-                    "entity_id": data["entity_id"],
-                    "workflow_id": data["workflow_id"],
-                    "version": data["version"],
-                    "sequence": data["sequence"],
-                    "state": state,
+            if isinstance(row, dict):
+                data = row
+            else:
+                data = {
+                    "entity_type": row[1],
+                    "entity_id": row[2],
+                    "workflow_id": row[3],
+                    "version": row[4],
+                    "sequence": row[5],
+                    "state": row[6],
+                    "state_hash": row[7] if len(row) > 7 else None,
                 }
-                state_hash = data.get("state_hash")
-                if state_hash is not None:
-                    result["state_hash"] = state_hash
-                return result
+
+            state = data["state"]
+            if isinstance(state, str):
+                try:
+                    state = json.loads(state)
+                except (json.JSONDecodeError, TypeError):
+                    state = {}
+
+            result = {
+                "entity_type": data["entity_type"],
+                "entity_id": data["entity_id"],
+                "workflow_id": data["workflow_id"],
+                "version": data["version"],
+                "sequence": data["sequence"],
+                "state": state,
+            }
+            state_hash = data.get("state_hash")
+            if state_hash is not None:
+                result["state_hash"] = state_hash
+            return result

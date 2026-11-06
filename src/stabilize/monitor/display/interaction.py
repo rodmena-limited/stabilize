@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import curses
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from stabilize.monitor.display.constants import PAIR_HEADER
@@ -16,6 +16,10 @@ if TYPE_CHECKING:
         TaskView,
         WorkflowView,
     )
+
+
+def _local_time(epoch_ms: int) -> datetime:
+    return datetime.fromtimestamp(epoch_ms / 1000, tz=UTC).astimezone()
 
 
 def get_input(stdscr: Any, prompt: str) -> str | None:
@@ -96,7 +100,7 @@ def show_scrollable_modal(stdscr: Any, title: str, text: str) -> None:
         key = win.getch()
         if key == ord("q") or key == 27:
             break
-        elif key == curses.KEY_UP:
+        if key == curses.KEY_UP:
             offset = max(0, offset - 1)
         elif key == curses.KEY_DOWN:
             offset = min(offset + 1, max(0, total_lines - content_h))
@@ -148,7 +152,7 @@ def handle_workflow_action(
             else:
                 show_message(stdscr, "Cancellation aborted")
     except Exception as e:
-        show_message(stdscr, f"Error: {str(e)}", color=curses.COLOR_RED)
+        show_message(stdscr, f"Error: {e!s}", color=curses.COLOR_RED)
 
 
 def show_details(
@@ -174,9 +178,9 @@ def show_details(
                 {
                     "id": wf.id,
                     "status": wf.status.name,
-                    "context": wf.trigger.payload if wf.trigger else {},
-                    "start_time": (datetime.fromtimestamp(wf.start_time / 1000).isoformat() if wf.start_time else None),
-                    "end_time": (datetime.fromtimestamp(wf.end_time / 1000).isoformat() if wf.end_time else None),
+                    "context": wf.trigger.payload,
+                    "start_time": (_local_time(wf.start_time).isoformat() if wf.start_time else None),
+                    "end_time": (_local_time(wf.end_time).isoformat() if wf.end_time else None),
                     "paused": wf.paused.__dict__ if wf.paused else None,
                     "cancellation_reason": wf.cancellation_reason,
                 },
@@ -195,12 +199,8 @@ def show_details(
                         "status": stage.status.name,
                         "context": stage.context,
                         "outputs": stage.outputs,
-                        "start_time": (
-                            datetime.fromtimestamp(stage.start_time / 1000).isoformat() if stage.start_time else None
-                        ),
-                        "end_time": (
-                            datetime.fromtimestamp(stage.end_time / 1000).isoformat() if stage.end_time else None
-                        ),
+                        "start_time": (_local_time(stage.start_time).isoformat() if stage.start_time else None),
+                        "end_time": (_local_time(stage.end_time).isoformat() if stage.end_time else None),
                     },
                     indent=2,
                     default=str,
@@ -217,18 +217,14 @@ def show_details(
                     "status": task_view.status.name,
                     "implementing_class": task_view.implementing_class,
                     "error": task_view.error,
-                    "start_time": (
-                        datetime.fromtimestamp(task_view.start_time / 1000).isoformat()
-                        if task_view.start_time
-                        else None
-                    ),
+                    "start_time": (_local_time(task_view.start_time).isoformat() if task_view.start_time else None),
                 },
                 indent=2,
                 default=str,
             )
 
     except Exception as e:
-        text = f"Error fetching details: {str(e)}"
+        text = f"Error fetching details: {e!s}"
 
     if text:
         show_scrollable_modal(stdscr, title, text)

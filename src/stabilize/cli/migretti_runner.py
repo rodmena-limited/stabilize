@@ -9,12 +9,14 @@ import os
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterator, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.cli.legacy_history import MigrettiState
 from stabilize.redaction import redact_against
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
 
 SCRUBBED_ENV = (
     "MG_DATABASE_URL",
@@ -107,7 +109,7 @@ def staged(migrations: Sequence[tuple[str, bytes]]) -> Iterator[Path]:
     """A private directory holding exactly *migrations* under migrations/, and no mg.yaml."""
     with tempfile.TemporaryDirectory(prefix="stabilize-mg-") as tmp:
         root = Path(tmp)
-        os.chmod(root, 0o700)
+        root.chmod(0o700)
         _write_tree(root, migrations)
         yield root
 

@@ -1,5 +1,4 @@
-"""
-AddMultiInstanceHandler - adds a new instance to a running MI activity.
+"""AddMultiInstanceHandler - adds a new instance to a running MI activity.
 
 Implements WCP-15: Multiple Instances without a priori Run-Time Knowledge.
 Dynamically creates new parallel instances during execution.
@@ -8,25 +7,25 @@ Dynamically creates new parallel instances during execution.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.queue.messages import AddMultiInstance, StartStage
-from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.resilience.config import HandlerConfig
 
 logger = logging.getLogger(__name__)
 
 
 class AddMultiInstanceHandler(StabilizeHandler[AddMultiInstance]):
-    """
-    Handler for AddMultiInstance messages.
+    """Handler for AddMultiInstance messages.
 
     Execution flow:
     1. Load the parent MI stage

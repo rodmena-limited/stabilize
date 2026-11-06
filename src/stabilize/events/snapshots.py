@@ -1,5 +1,4 @@
-"""
-Snapshot management for event sourcing.
+"""Snapshot management for event sourcing.
 
 Snapshots are periodic saves of entity state that allow
 faster replay by starting from a checkpoint instead of
@@ -22,8 +21,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class Snapshot:
-    """
-    A snapshot of entity state at a point in time.
+    """A snapshot of entity state at a point in time.
 
     Snapshots capture:
     - Entity identity (type, id, workflow)
@@ -94,8 +92,7 @@ class Snapshot:
 
 
 class SnapshotPolicy:
-    """
-    Determines when to create snapshots.
+    """Determines when to create snapshots.
 
     Snapshots are created based on:
     - Number of events since last snapshot
@@ -108,8 +105,7 @@ class SnapshotPolicy:
         event_interval: int = 100,
         time_interval_seconds: int = 3600,  # 1 hour
     ) -> None:
-        """
-        Initialize snapshot policy.
+        """Initialize snapshot policy.
 
         Args:
             event_interval: Create snapshot after this many events.
@@ -125,8 +121,7 @@ class SnapshotPolicy:
         entity_id: str,
         events_since: int,
     ) -> bool:
-        """
-        Check if an entity should be snapshotted.
+        """Check if an entity should be snapshotted.
 
         Args:
             entity_id: The entity identifier.
@@ -164,8 +159,7 @@ class SnapshotPolicy:
 
 
 class SnapshotStore:
-    """
-    Store for managing entity snapshots.
+    """Store for managing entity snapshots.
 
     Uses the event store's snapshot tables for persistence.
     """
@@ -175,8 +169,7 @@ class SnapshotStore:
         event_store: EventStore,
         policy: SnapshotPolicy | None = None,
     ) -> None:
-        """
-        Initialize the snapshot store.
+        """Initialize the snapshot store.
 
         Args:
             event_store: The event store for persistence.
@@ -186,15 +179,14 @@ class SnapshotStore:
         self._policy = policy or SnapshotPolicy()
 
     def save_snapshot(self, snapshot: Snapshot) -> None:
-        """
-        Save a snapshot.
+        """Save a snapshot.
 
         Args:
             snapshot: The snapshot to save.
         """
         # Delegate to event store's snapshot methods
         if hasattr(self._event_store, "save_snapshot"):
-            getattr(self._event_store, "save_snapshot")(
+            self._event_store.save_snapshot(
                 entity_type=snapshot.entity_type,
                 entity_id=snapshot.entity_id,
                 workflow_id=snapshot.workflow_id,
@@ -209,8 +201,7 @@ class SnapshotStore:
         entity_type: EntityType,
         entity_id: str,
     ) -> Snapshot | None:
-        """
-        Get the latest snapshot for an entity.
+        """Get the latest snapshot for an entity.
 
         Args:
             entity_type: Type of entity.
@@ -220,7 +211,7 @@ class SnapshotStore:
             The latest snapshot or None if not found.
         """
         if hasattr(self._event_store, "get_latest_snapshot"):
-            data = getattr(self._event_store, "get_latest_snapshot")(entity_type, entity_id)
+            data = self._event_store.get_latest_snapshot(entity_type, entity_id)
             if data:
                 return Snapshot.from_dict(data)
         return None
@@ -232,8 +223,7 @@ class SnapshotStore:
         version: int,
         sequence: int,
     ) -> Snapshot:
-        """
-        Create a snapshot for a workflow.
+        """Create a snapshot for a workflow.
 
         Args:
             workflow_state: The workflow state to snapshot.

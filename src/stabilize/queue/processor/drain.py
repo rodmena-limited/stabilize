@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import threading
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -11,10 +10,14 @@ from typing import TYPE_CHECKING, Any
 from stabilize.errors.delivery import DeliveryContractError, DuplicateDeliveryError
 from stabilize.errors.store_errors import is_store_unavailable
 from stabilize.persistence.committed_marks import strict_delivery
-from stabilize.queue import Queue
-from stabilize.queue.messages import Message
 from stabilize.queue.processor.lease_guard import check_sync_lease, start_lock_heartbeat
 from stabilize.queue.processor.redelivery import redelivery_delay
+
+if TYPE_CHECKING:
+    import threading
+
+    from stabilize.queue import Queue
+    from stabilize.queue.messages import Message
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +58,7 @@ class SynchronousDrainMixin:
             logger.warning("%s", warning)
 
     def process_one(self) -> bool:
-        """
-        Process a single message synchronously.
+        """Process a single message synchronously.
 
         Useful for testing and debugging.
 
@@ -79,13 +81,12 @@ class SynchronousDrainMixin:
             try:
                 self._handle_message(message)
                 self.queue.ack(message)
-                return True
             except DuplicateDeliveryError as e:
                 logger.info("%s; acknowledged without a second push", e)
                 self.queue.ack(message)
                 return True
             except Exception as e:
-                logger.error("Error handling message: %s", e, exc_info=True)
+                logger.exception("Error handling message")
                 message.set_error_context(e)
                 unavailable = is_store_unavailable(e)
                 self.queue.reschedule(
@@ -94,14 +95,15 @@ class SynchronousDrainMixin:
                     store_unavailable=unavailable,
                 )
                 raise
+            else:
+                return True
             finally:
                 if heartbeat_stop is not None:
                     heartbeat_stop.set()
         return False
 
     def process_all(self, timeout: float = 60.0, raise_on_error: bool = True) -> int:
-        """
-        Process messages synchronously until none is pending or ready within the budget.
+        """Process messages synchronously until none is pending or ready within the budget.
 
         Thread-safe: uses a processing lock to prevent concurrent calls.
         Also performs periodic DLQ cleanup for expired messages.

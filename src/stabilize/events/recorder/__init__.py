@@ -1,5 +1,4 @@
-"""
-Event recorder service.
+"""Event recorder service.
 
 Records events for all state transitions in the workflow system.
 Provides context tracking for correlation and causation.
@@ -7,6 +6,8 @@ Provides context tracking for correlation and causation.
 This package re-exports everything that was previously importable from
 the stabilize.events.recorder module, preserving backwards compatibility.
 """
+
+from __future__ import annotations
 
 from stabilize.events.recorder.composed import EventRecorder
 from stabilize.events.recorder.context import get_event_metadata, set_event_context

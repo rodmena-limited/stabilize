@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.maintenance import PURGEABLE
 from stabilize.persistence.postgres.operations import (
@@ -30,23 +29,30 @@ from stabilize.persistence.postgres.operations import (
 )
 from stabilize.queue.ownership import DEFAULT_TABLE
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from contextlib import AbstractContextManager
+
 
 class PostgresMaintenanceMixin:
     """Dedup bookkeeping and row reclamation, split out of the store body."""
+
+    if TYPE_CHECKING:
+
+        def _borrow(self) -> AbstractContextManager[Any]: ...
 
     _pool: Any
     _engine: Any
     tenant: str
 
     def count_active_workflows(self) -> int:
-        with self._engine.connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT count(*) AS n FROM pipeline_executions "
-                    "WHERE status = 'RUNNING' AND stabilize_tenant = %(tenant)s",
-                    {"tenant": self._engine.tenant},
-                )
-                row = cur.fetchone()
+        with self._engine.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) AS n FROM pipeline_executions "
+                "WHERE status = 'RUNNING' AND stabilize_tenant = %(tenant)s",
+                {"tenant": self._engine.tenant},
+            )
+            row = cur.fetchone()
         return int(row["n"]) if row else 0
 
     def is_message_processed(self, message_id: str) -> bool:
@@ -130,8 +136,7 @@ class PostgresMaintenanceMixin:
             sql += " AND application = %(app)s"
             params["app"] = application
         sql += " ORDER BY end_time LIMIT %(limit)s"
-        with self._borrow() as conn:  # type: ignore[attr-defined]
-            with conn.cursor() as cur:
-                cur.execute(sql, params)
-                rows = cur.fetchall()
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
         return [r["id"] for r in rows]

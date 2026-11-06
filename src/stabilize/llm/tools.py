@@ -1,5 +1,4 @@
-"""
-Tool definitions for LLM tool-calling loops.
+"""Tool definitions for LLM tool-calling loops.
 
 The ``@tool`` decorator turns a plain Python function into a callable tool with
 an auto-generated OpenAI-style JSON schema (derived from its signature and
@@ -11,8 +10,10 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Callable
-from typing import Any, get_type_hints
+from typing import TYPE_CHECKING, Any, get_type_hints
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def _json_type(annotation: Any) -> str:
@@ -84,7 +85,7 @@ def tool(
             name or func.__name__,
             description or (inspect.getdoc(func) or "").strip() or func.__name__,
         )
-        func._tool_spec = spec  # type: ignore[attr-defined]
+        func.__dict__["_tool_spec"] = spec
         return func
 
     if _func is not None:
@@ -119,10 +120,7 @@ class ToolRegistry:
         function = tool_call.get("function", tool_call)
         name = function.get("name", "")
         raw_args = function.get("arguments", {})
-        if isinstance(raw_args, str):
-            arguments = json.loads(raw_args) if raw_args.strip() else {}
-        else:
-            arguments = raw_args or {}
+        arguments = (json.loads(raw_args) if raw_args.strip() else {}) if isinstance(raw_args, str) else raw_args or {}
         if name not in self._tools:
             raise KeyError(f"Unknown tool: {name}")
         return self._tools[name].call(arguments)

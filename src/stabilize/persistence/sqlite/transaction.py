@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
-import sqlite3
 import uuid
 from datetime import UTC, datetime, timedelta
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from stabilize.errors import ConcurrencyError
@@ -19,9 +18,12 @@ from stabilize.persistence.task_state import Captured, capture, commit_captured
 from stabilize.persistence.tenancy import refuse_foreign_row
 
 if TYPE_CHECKING:
+    import sqlite3
+
     from stabilize.models.stage import StageExecution
     from stabilize.models.task import TaskExecution
     from stabilize.models.workflow import Workflow
+    from stabilize.persistence.sqlite.store import SqliteWorkflowStore
     from stabilize.queue.messages import Message
 
 
@@ -405,7 +407,7 @@ def _queue_table_for(store: Any, queue: Any) -> str:
 
         def location(cs: str) -> str:
             path = parse(cs).split("?", 1)[0]
-            return path if path.startswith(":memory:") or path.startswith("file:") else os.path.abspath(path)
+            return path if path.startswith((":memory:", "file:")) else str(Path(path).resolve())
 
         if location(queue_cs) != location(store.connection_string):
             raise ValueError(
@@ -413,7 +415,3 @@ def _queue_table_for(store: Any, queue: Any) -> str:
                 "a push cannot be atomic with the store write"
             )
     return str(getattr(queue, "table_name", None) or "queue_messages")
-
-
-# Forward reference for type hint
-from stabilize.persistence.sqlite.store import SqliteWorkflowStore  # noqa: E402, F401

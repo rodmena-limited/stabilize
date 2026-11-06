@@ -15,6 +15,9 @@ if TYPE_CHECKING:
     from stabilize.models.stage import StageExecution
     from stabilize.models.task import TaskExecution
     from stabilize.models.workflow import Workflow
+    from stabilize.persistence.postgres.store import (
+        PostgresWorkflowStore,
+    )
     from stabilize.queue import Queue
     from stabilize.queue.messages import Message
 
@@ -391,12 +394,6 @@ class PostgresTransaction(PostgresSignalTransactionMixin, StoreTransaction):
             )
             rows = cur.fetchall()
         return [str(row["id"]) if isinstance(row, dict) else str(row[0]) for row in rows]
-
-
-# Forward reference for type hint
-from stabilize.persistence.postgres.store import (  # noqa: E402, F401
-    PostgresWorkflowStore,
-)
 
 
 def _queue_row_id(message_id: str | None) -> int | None:

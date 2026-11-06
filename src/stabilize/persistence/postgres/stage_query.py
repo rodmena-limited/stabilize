@@ -32,7 +32,7 @@ def count_stages(store: Any, criteria: StageCriteria) -> int:
             cur.execute(f"SELECT count(*) AS n {stage_from(criteria)} {where}", params)
             row = cur.fetchone()
         conn.rollback()
-    return int(cast(dict[str, Any], row)["n"]) if row else 0
+    return int(cast("dict[str, Any]", row)["n"]) if row else 0
 
 
 def retrieve_stages(store: Any, criteria: StageCriteria) -> list[StageExecution]:
@@ -40,7 +40,7 @@ def retrieve_stages(store: Any, criteria: StageCriteria) -> list[StageExecution]
     with store._borrow() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params)
-            rows = [cast(dict[str, Any], row) for row in cur.fetchall()]
+            rows = [cast("dict[str, Any]", row) for row in cur.fetchall()]
             stages = [row_to_stage(row) for row in rows]
             owners = {stage.id: row["execution_id"] for stage, row in zip(stages, rows, strict=True)}
             parents: dict[str, Any] = {}
@@ -51,7 +51,7 @@ def retrieve_stages(store: Any, criteria: StageCriteria) -> list[StageExecution]
                     "WHERE id = ANY(%(ids)s) AND stabilize_tenant = %(tenant)s",
                     {"ids": sorted(set(owners.values())), "tenant": store.tenant},
                 )
-                parents = {r["id"]: row_to_execution(cast(dict[str, Any], r)) for r in cur.fetchall()}
+                parents = {r["id"]: row_to_execution(cast("dict[str, Any]", r)) for r in cur.fetchall()}
         conn.rollback()
     for stage in stages:
         parent = parents.get(owners[stage.id])

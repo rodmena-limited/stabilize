@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from typing import TYPE_CHECKING
 
-from stabilize.models.status import WorkflowStatus
+if TYPE_CHECKING:
+    from datetime import datetime
+
+    from stabilize.models.status import WorkflowStatus
 
 
 @dataclass
@@ -103,9 +106,8 @@ def format_duration(start_ms: int | None, end_ms: int | None = None) -> str:
         return "-"
     if seconds < 60:
         return f"{seconds}s"
-    elif seconds < 3600:
+    if seconds < 3600:
         return f"{seconds // 60}m {seconds % 60}s"
-    else:
-        hours = seconds // 3600
-        minutes = (seconds % 3600) // 60
-        return f"{hours}h {minutes}m"
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    return f"{hours}h {minutes}m"

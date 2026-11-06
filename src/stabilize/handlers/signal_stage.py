@@ -1,5 +1,4 @@
-"""
-SignalStageHandler - handles external signals for suspended stages.
+"""SignalStageHandler - handles external signals for suspended stages.
 
 Implements:
 - WCP-23: Transient Trigger - signal is lost if stage not SUSPENDED
@@ -9,27 +8,27 @@ Implements:
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.handlers.signal_refusal import RefusalTracker
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import RunTask, SignalStage, StartStage
-from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import StoreTransaction, WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.resilience.config import HandlerConfig
 
 logger = logging.getLogger(__name__)
 
 
 class SignalStageHandler(StabilizeHandler[SignalStage]):
-    """
-    Handler for SignalStage messages.
+    """Handler for SignalStage messages.
 
     Execution flow:
     1. Check if stage is SUSPENDED

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
 

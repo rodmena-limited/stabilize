@@ -1,5 +1,4 @@
-"""
-Base class for message handlers.
+"""Base class for message handlers.
 
 This module provides the MessageHandler generic class used by
 the queue processor to dispatch messages to appropriate handlers.
@@ -15,8 +14,7 @@ M = TypeVar("M", bound=Message)
 
 
 class MessageHandler(Generic[M]):
-    """
-    Base class for message handlers.
+    """Base class for message handlers.
 
     Each handler processes a specific type of message.
     """
@@ -27,8 +25,7 @@ class MessageHandler(Generic[M]):
         raise NotImplementedError
 
     def handle(self, message: M) -> None:
-        """
-        Handle a message.
+        """Handle a message.
 
         Args:
             message: The message to handle

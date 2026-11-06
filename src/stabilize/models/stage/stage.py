@@ -1,5 +1,4 @@
-"""
-StageExecution model.
+"""StageExecution model.
 
 A stage represents a logical unit of work in a pipeline. Stages can have:
 - Prerequisites (other stages that must complete first)
@@ -24,11 +23,11 @@ from stabilize.models.stage.enums import (
 )
 from stabilize.models.stage.navigation import StageNavigationMixin
 from stabilize.models.status import WorkflowStatus
-from stabilize.models.task import TaskExecution
 
 if TYPE_CHECKING:
     from stabilize.models.multi_instance import MultiInstanceConfig
     from stabilize.models.snapshot import StageStateSnapshot
+    from stabilize.models.task import TaskExecution
     from stabilize.models.workflow import Workflow
 
 
@@ -38,8 +37,7 @@ PLANNING_FAILED = "beforeStagePlanningFailed"
 
 @dataclass
 class StageExecution(StageNavigationMixin):
-    """
-    Represents a stage execution within a pipeline.
+    """Represents a stage execution within a pipeline.
 
     The DAG structure is encoded in requisite_stage_ref_ids:
     - Empty set = initial stage (no dependencies)
@@ -362,8 +360,7 @@ class StageExecution(StageNavigationMixin):
         context: dict[str, Any] | None = None,
         requisite_stage_ref_ids: set[str] | None = None,
     ) -> StageExecution:
-        """
-        Factory method to create a new stage execution.
+        """Factory method to create a new stage execution.
 
         Args:
             type: Stage type
@@ -392,8 +389,7 @@ class StageExecution(StageNavigationMixin):
         owner: SyntheticStageOwner,
         context: dict[str, Any] | None = None,
     ) -> StageExecution:
-        """
-        Factory method to create a synthetic stage.
+        """Factory method to create a synthetic stage.
 
         Args:
             type: Stage type

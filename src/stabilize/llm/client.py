@@ -1,5 +1,4 @@
-"""
-Dependency-light chat client for OpenAI-compatible / Ollama endpoints.
+"""Dependency-light chat client for OpenAI-compatible / Ollama endpoints.
 
 Uses only the standard library (urllib) so the LLM toolkit adds no runtime
 dependency and runs on a laptop. The endpoint and credentials are injectable

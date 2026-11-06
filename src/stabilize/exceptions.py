@@ -1,5 +1,4 @@
-"""
-Exception classes for Stabilize workflow execution.
+"""Exception classes for Stabilize workflow execution.
 
 This module defines the exception hierarchy used throughout Stabilize for
 error handling and validation.
@@ -13,23 +12,17 @@ from typing import Any
 class StabilizeError(Exception):
     """Base exception for Stabilize errors."""
 
-    pass
-
 
 class StabilizeFatalError(StabilizeError):
-    """
-    Fatal error that should terminate the pipeline.
+    """Fatal error that should terminate the pipeline.
 
     Fatal errors indicate unrecoverable situations like invalid configuration
     or programming errors.
     """
 
-    pass
-
 
 class StabilizeExpectedError(StabilizeError):
-    """
-    Expected error raised by assertion helpers during normal operation.
+    """Expected error raised by assertion helpers during normal operation.
 
     NOTE: "expected" describes the error's origin, not its retry semantics.
     The engine's retry machinery only retries errors deriving from
@@ -37,12 +30,9 @@ class StabilizeExpectedError(StabilizeError):
     context_update) from a task to get automatic retries.
     """
 
-    pass
-
 
 class PreconditionError(StabilizeExpectedError):
-    """
-    Error raised when a precondition is not met.
+    """Error raised when a precondition is not met.
 
     Precondition errors typically indicate that the stage should be
     retried or that an upstream dependency hasn't completed.
@@ -54,8 +44,7 @@ class PreconditionError(StabilizeExpectedError):
 
 
 class ContextError(StabilizeFatalError):
-    """
-    Error raised when required context is missing or invalid.
+    """Error raised when required context is missing or invalid.
 
     Context errors are fatal because they indicate misconfiguration.
     """
@@ -66,8 +55,7 @@ class ContextError(StabilizeFatalError):
 
 
 class OutputError(StabilizeExpectedError):
-    """
-    Error raised when expected output is missing or invalid.
+    """Error raised when expected output is missing or invalid.
 
     Output errors may be recoverable if the task can be retried.
     """
@@ -78,8 +66,7 @@ class OutputError(StabilizeExpectedError):
 
 
 class ConfigError(StabilizeFatalError):
-    """
-    Error raised when configuration is invalid.
+    """Error raised when configuration is invalid.
 
     Config errors are fatal because they indicate invalid setup.
     """
@@ -90,8 +77,7 @@ class ConfigError(StabilizeFatalError):
 
 
 class VerificationError(StabilizeExpectedError):
-    """
-    Error raised when verification fails.
+    """Error raised when verification fails.
 
     Verification errors may allow retry depending on the verifier.
     """
@@ -102,8 +88,7 @@ class VerificationError(StabilizeExpectedError):
 
 
 class StageNotReadyError(StabilizeExpectedError):
-    """
-    Error raised when a stage is not ready for execution.
+    """Error raised when a stage is not ready for execution.
 
     This typically means upstream dependencies haven't completed.
     """

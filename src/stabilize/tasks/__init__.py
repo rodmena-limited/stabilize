@@ -1,5 +1,7 @@
 """Task system for pipeline execution."""
 
+from __future__ import annotations
+
 from stabilize.tasks.interface import (
     CallableTask,
     RetryableTask,
@@ -10,10 +12,10 @@ from stabilize.tasks.registry import TaskRegistry
 from stabilize.tasks.result import TaskResult
 
 __all__ = [
-    "TaskResult",
-    "Task",
-    "RetryableTask",
     "CallableTask",
+    "RetryableTask",
     "SkippableTask",
+    "Task",
     "TaskRegistry",
+    "TaskResult",
 ]

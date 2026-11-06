@@ -1,5 +1,4 @@
-"""
-Message types for the queue-based execution engine.
+"""Message types for the queue-based execution engine.
 
 This module defines all message types used in the pipeline execution queue.
 """
@@ -13,12 +12,41 @@ from pydantic import ValidationError
 
 from stabilize.models.stage import SyntheticStageOwner
 from stabilize.models.status import WorkflowStatus
-from stabilize.queue.message_base import Message as Message
-from stabilize.queue.message_base import StageLevel as StageLevel
-from stabilize.queue.message_base import TaskLevel as TaskLevel
-from stabilize.queue.message_base import WorkflowLevel as WorkflowLevel
-from stabilize.queue.message_contract import MessageContractError as MessageContractError
-from stabilize.queue.message_contract import _adapter_for
+from stabilize.queue.message_base import Message, StageLevel, TaskLevel, WorkflowLevel
+from stabilize.queue.message_contract import MessageContractError, _adapter_for
+
+__all__ = [
+    "AddMultiInstance",
+    "CancelRegion",
+    "CancelStage",
+    "CancelWorkflow",
+    "CompleteStage",
+    "CompleteTask",
+    "CompleteWorkflow",
+    "ContinueParentStage",
+    "InvalidStageId",
+    "InvalidTaskId",
+    "InvalidTaskType",
+    "InvalidWorkflowId",
+    "JumpToStage",
+    "Message",
+    "MessageContractError",
+    "PauseTask",
+    "RestartStage",
+    "ResumeStage",
+    "RunTask",
+    "SignalStage",
+    "SkipStage",
+    "StageLevel",
+    "StartStage",
+    "StartTask",
+    "StartWaitingWorkflows",
+    "StartWorkflow",
+    "TaskLevel",
+    "WorkflowLevel",
+    "create_message_from_dict",
+    "get_message_type_name",
+]
 
 # ============================================================================
 # Execution-level messages
@@ -27,19 +55,15 @@ from stabilize.queue.message_contract import _adapter_for
 
 @dataclass
 class StartWorkflow(WorkflowLevel):
-    """
-    Message to start a pipeline execution.
+    """Message to start a pipeline execution.
 
     Triggers the beginning of pipeline execution, starting initial stages.
     """
 
-    pass
-
 
 @dataclass
 class CompleteWorkflow(WorkflowLevel):
-    """
-    Message to complete a pipeline execution.
+    """Message to complete a pipeline execution.
 
     Sent when all stages have completed or execution should be finalized.
 
@@ -53,8 +77,7 @@ class CompleteWorkflow(WorkflowLevel):
 
 @dataclass
 class CancelWorkflow(WorkflowLevel):
-    """
-    Message to cancel a pipeline execution.
+    """Message to cancel a pipeline execution.
 
     Marks the execution as canceled and stops all running stages.
     """
@@ -65,8 +88,7 @@ class CancelWorkflow(WorkflowLevel):
 
 @dataclass
 class StartWaitingWorkflows(Message):
-    """
-    Message to start any queued/waiting executions for a pipeline config.
+    """Message to start any queued/waiting executions for a pipeline config.
 
     Sent after an execution completes when concurrent execution limits are enabled.
     """
@@ -82,8 +104,7 @@ class StartWaitingWorkflows(Message):
 
 @dataclass
 class StartStage(StageLevel):
-    """
-    Message to start a stage.
+    """Message to start a stage.
 
     Checks if upstream stages are complete, then plans and starts the stage.
 
@@ -99,19 +120,15 @@ class StartStage(StageLevel):
 
 @dataclass
 class CompleteStage(StageLevel):
-    """
-    Message to complete a stage.
+    """Message to complete a stage.
 
     Determines stage status, plans after stages, and triggers downstream.
     """
 
-    pass
-
 
 @dataclass
 class SkipStage(StageLevel):
-    """
-    Message to skip a stage.
+    """Message to skip a stage.
 
     Sets stage status to SKIPPED and triggers downstream stages.
     """
@@ -121,41 +138,31 @@ class SkipStage(StageLevel):
 
 @dataclass
 class CancelStage(StageLevel):
-    """
-    Message to cancel a stage.
+    """Message to cancel a stage.
 
     Cancels any running tasks and marks stage as canceled.
     """
 
-    pass
-
 
 @dataclass
 class RestartStage(StageLevel):
-    """
-    Message to restart a stage.
+    """Message to restart a stage.
 
     Resets stage status and re-executes from the beginning.
     """
 
-    pass
-
 
 @dataclass
 class ResumeStage(StageLevel):
-    """
-    Message to resume a paused stage.
+    """Message to resume a paused stage.
 
     Continues execution from where it was paused.
     """
 
-    pass
-
 
 @dataclass
 class ContinueParentStage(StageLevel):
-    """
-    Message to continue parent stage after synthetic stage completes.
+    """Message to continue parent stage after synthetic stage completes.
 
     Sent when a synthetic stage completes to notify its parent.
     """
@@ -165,8 +172,7 @@ class ContinueParentStage(StageLevel):
 
 @dataclass
 class JumpToStage(StageLevel):
-    """
-    Message to jump to a different stage (dynamic routing).
+    """Message to jump to a different stage (dynamic routing).
 
     Resets the target stage to NOT_STARTED and starts it with merged context.
     Used by TaskResult.jump_to() for dynamic flow control.
@@ -184,8 +190,7 @@ class JumpToStage(StageLevel):
 
 @dataclass
 class SignalStage(StageLevel):
-    """
-    Message to signal a suspended stage (WCP-23, WCP-24).
+    """Message to signal a suspended stage (WCP-23, WCP-24).
 
     For transient triggers (WCP-23), the signal is discarded if the stage
     is not currently SUSPENDED. For persistent triggers (WCP-24), the
@@ -209,8 +214,7 @@ class SignalStage(StageLevel):
 
 @dataclass
 class CancelRegion(WorkflowLevel):
-    """
-    Message to cancel all stages in a named region (WCP-25).
+    """Message to cancel all stages in a named region (WCP-25).
 
     Finds all stages with matching cancel_region and pushes
     CancelStage for each active one.
@@ -224,8 +228,7 @@ class CancelRegion(WorkflowLevel):
 
 @dataclass
 class AddMultiInstance(StageLevel):
-    """
-    Message to add a new instance to a running multi-instance activity (WCP-15).
+    """Message to add a new instance to a running multi-instance activity (WCP-15).
 
     Creates a new parallel instance for an MI stage that allows dynamic additions.
 
@@ -243,19 +246,15 @@ class AddMultiInstance(StageLevel):
 
 @dataclass
 class StartTask(TaskLevel):
-    """
-    Message to start a task.
+    """Message to start a task.
 
     Sets task status to RUNNING and triggers RunTask.
     """
 
-    pass
-
 
 @dataclass
 class RunTask(TaskLevel):
-    """
-    Message to execute a task.
+    """Message to execute a task.
 
     Runs the task implementation and handles the result.
     """
@@ -265,8 +264,7 @@ class RunTask(TaskLevel):
 
 @dataclass
 class CompleteTask(TaskLevel):
-    """
-    Message to complete a task.
+    """Message to complete a task.
 
     Updates task status and triggers next task or stage completion.
     """
@@ -278,13 +276,10 @@ class CompleteTask(TaskLevel):
 
 @dataclass
 class PauseTask(TaskLevel):
-    """
-    Message to pause a task.
+    """Message to pause a task.
 
     Used when execution is paused - task will resume when execution resumes.
     """
-
-    pass
 
 
 # ============================================================================
@@ -294,41 +289,31 @@ class PauseTask(TaskLevel):
 
 @dataclass
 class InvalidWorkflowId(WorkflowLevel):
-    """
-    Message indicating an invalid execution ID was referenced.
+    """Message indicating an invalid execution ID was referenced.
 
     Logged and dropped - no further processing.
     """
-
-    pass
 
 
 @dataclass
 class InvalidStageId(StageLevel):
-    """
-    Message indicating an invalid stage ID was referenced.
+    """Message indicating an invalid stage ID was referenced.
 
     Logged and dropped - no further processing.
     """
-
-    pass
 
 
 @dataclass
 class InvalidTaskId(TaskLevel):
-    """
-    Message indicating an invalid task ID was referenced.
+    """Message indicating an invalid task ID was referenced.
 
     Logged and dropped - no further processing.
     """
 
-    pass
-
 
 @dataclass
 class InvalidTaskType(TaskLevel):
-    """
-    Message indicating an unknown task type was referenced.
+    """Message indicating an unknown task type was referenced.
 
     Logged and dropped - no further processing.
     """
@@ -377,7 +362,7 @@ def get_message_type_name(message: Message) -> str:
 def _validated(message_class: type[Message], data: dict[str, Any], type_name: str) -> Message:
     adapter = _adapter_for(message_class)
     try:
-        return cast(Message, adapter.validate_python(data))
+        return cast("Message", adapter.validate_python(data))
     except ValidationError as exc:
         problems = "; ".join(
             f"{'.'.join(str(p) for p in err['loc']) or '<message>'}: {err['msg']}" for err in exc.errors()[:4]
@@ -386,8 +371,7 @@ def _validated(message_class: type[Message], data: dict[str, Any], type_name: st
 
 
 def create_message_from_dict(type_name: str, data: dict[str, Any]) -> Message:
-    """
-    Create a message from a dictionary representation.
+    """Create a message from a dictionary representation.
 
     Args:
         type_name: The message type name

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from stabilize.cli.config import (
@@ -40,6 +39,8 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
 
@@ -214,16 +215,15 @@ def mg_check_grants(role: str, db_url: str | None = None, config_path: Path | No
     params = connection_params(config)
     announce_driver(psycopg)
     try:
-        with psycopg.connect(**params) as conn:
-            with conn.cursor() as cur:
-                if not schema:
-                    cur.execute("SELECT current_schema()")
-                    row = cur.fetchone()
-                    schema = row[0] if row else None
-                if not schema:
-                    print("Error: no current schema; pass ?schema= in the database URL")
-                    sys.exit(2)
-                report = check_role_grants(cur, role, schema, tables)
+        with psycopg.connect(**params) as conn, conn.cursor() as cur:
+            if not schema:
+                cur.execute("SELECT current_schema()")
+                row = cur.fetchone()
+                schema = row[0] if row else None
+            if not schema:
+                print("Error: no current schema; pass ?schema= in the database URL")
+                sys.exit(2)
+            report = check_role_grants(cur, role, schema, tables)
     except psycopg.Error as e:
         print(f"Database error: {redact_text(str(e))}")
         sys.exit(2)

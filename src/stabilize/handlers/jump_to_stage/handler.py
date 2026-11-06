@@ -1,5 +1,4 @@
-"""
-JumpToStageHandler - handles dynamic routing jumps.
+"""JumpToStageHandler - handles dynamic routing jumps.
 
 This handler processes JumpToStage messages to redirect workflow execution
 to a different stage. It's used by TaskResult.jump_to() for dynamic flow
@@ -17,7 +16,6 @@ The handler:
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -41,14 +39,16 @@ from stabilize.queue.messages import (
     JumpToStage,
     StartStage,
 )
-from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.resilience.config import HandlerConfig
     from stabilize.tasks.registry import TaskRegistry
 
 logger = logging.getLogger(__name__)
@@ -58,8 +58,7 @@ DEFAULT_MAX_JUMPS = 10
 
 
 class JumpToStageHandler(StabilizeHandler[JumpToStage]):
-    """
-    Handler for JumpToStage messages.
+    """Handler for JumpToStage messages.
 
     Execution flow:
     1. Validate target stage exists
@@ -111,8 +110,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
         messages_to_push: list[Any],
         jump_event: tuple[str, str, str] | None = None,
     ) -> None:
-        """Apply every stage mutation of a jump plus its follow-on messages in
-        ONE transaction.
+        """Apply every stage mutation of a jump and its follow-on messages in one transaction.
 
         A jump that commits stage-by-stage can crash half-applied: the source
         already SUCCEEDED while skip-region stages are still startable, which
@@ -125,9 +123,6 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
             with self.repository.transaction(self.queue) as txn:
                 for stage_id, mutate in mutations:
                     fresh = self.repository.retrieve_stage(stage_id)
-                    if fresh is None:
-                        logger.warning("Stage %s not found during jump; skipping", stage_id)
-                        continue
                     mutate(fresh)
                     txn.store_stage(fresh)
                     txn.purge_stage_messages(stage_id, except_message_id=message.message_id)
@@ -193,7 +188,7 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
 
             # Reset all downstream stages that depend on target (for retry loops)
             for downstream in get_resettable_downstream_stages(execution, target_stage.ref_id):
-                if downstream.id != source_stage.id and downstream.id != target_stage.id:
+                if downstream.id not in (source_stage.id, target_stage.id):
                     logger.debug("Resetting downstream stage: %s", downstream.ref_id)
                     mutations.append((downstream.id, self._reset))
                     mutations.extend(self._synthetic_reset_mutations(message.execution_id, downstream.id))
@@ -348,7 +343,6 @@ class JumpToStageHandler(StabilizeHandler[JumpToStage]):
         source_stage: StageExecution,
     ) -> bool:
         """Check if jump count is within limits. Returns False if exceeded."""
-
         jump_count = source_stage.context.get("_jump_count", 0)
         # Use explicit None checks to allow max_jumps=0 (disables jumps)
         max_jumps = execution.context.get("_max_jumps")

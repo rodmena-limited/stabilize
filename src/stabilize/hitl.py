@@ -1,5 +1,4 @@
-"""
-Human-in-the-loop (HITL) helpers (agentic ergonomics).
+"""Human-in-the-loop (HITL) helpers (agentic ergonomics).
 
 LangGraph's ``interrupt`` pauses a graph and returns the human's value inline
 on resume. Stabilize already has the durable machinery — ``TaskResult.suspend``
@@ -18,7 +17,7 @@ All additive: existing suspend/signal users are unaffected.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from stabilize.persistence.committed_marks import delivery_exempt
 from stabilize.queue.messages import SignalStage
@@ -55,7 +54,7 @@ class ApprovalTask(Task):
     Send the decision with :func:`approve` / :func:`reject`.
     """
 
-    aliases = ["human_approval", "hitl_approval"]
+    aliases: ClassVar[list[str]] = ["human_approval", "hitl_approval"]
 
     def execute(self, stage: StageExecution) -> TaskResult:
         signal_name = stage.context.get("_signal_name")

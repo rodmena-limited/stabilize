@@ -27,8 +27,10 @@ from __future__ import annotations
 import importlib
 import logging
 import sys
-import types
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import types
 
 # structlog is optional - gracefully degrade to stdlib logging
 structlog: types.ModuleType | None
@@ -84,7 +86,8 @@ def configure_logging(
         stream=sys.stdout,
     )
 
-    assert structlog is not None
+    if structlog is None:
+        return
 
     # Build processor chain
     processors: list[Any] = [
@@ -138,8 +141,7 @@ def get_logger(name: str) -> Any:
 
     if STRUCTLOG_AVAILABLE and structlog is not None:
         return structlog.get_logger(name)
-    else:
-        return logging.getLogger(name)
+    return logging.getLogger(name)
 
 
 def bind_context(**kwargs: Any) -> None:

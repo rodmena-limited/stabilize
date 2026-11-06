@@ -1,5 +1,4 @@
-"""
-LLM tasks: a plain chat task and a ReAct tool-calling agent loop.
+"""LLM tasks: a plain chat task and a ReAct tool-calling agent loop.
 
 Built on the engine's existing primitives so they inherit its durability:
 - :class:`LLMTask` calls the model once and returns the completion.
@@ -14,7 +13,7 @@ endpoints without hard-coding anything.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from stabilize.llm.client import ChatMessage, LLMClient
 from stabilize.tasks.interface import Task
@@ -40,14 +39,13 @@ class LLMTask(Task):
     Outputs: ``{output_key: <text>, "llm_raw": <provider response>}``.
     """
 
-    aliases = ["llm", "chat"]
+    aliases: ClassVar[list[str]] = ["llm", "chat"]
 
     def __init__(self, client: LLMClient | None = None) -> None:
         self._client = client
 
     def build_client(self, stage: StageExecution) -> LLMClient:
-        """Return the LLM client. Override to construct one from context, or
-        pass a client to the constructor."""
+        """Return the LLM client, from the constructor or from an override that builds one from the context."""
         if self._client is not None:
             return self._client
         model = stage.context.get("model")
@@ -108,7 +106,7 @@ class AgentLoopTask(LLMTask):
     "iterations": <n>}``.
     """
 
-    aliases = ["agent", "react_agent", "agent_loop"]
+    aliases: ClassVar[list[str]] = ["agent", "react_agent", "agent_loop"]
 
     def __init__(self, client: LLMClient | None = None, tools: ToolRegistry | None = None) -> None:
         super().__init__(client)

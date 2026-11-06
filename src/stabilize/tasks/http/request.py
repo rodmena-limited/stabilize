@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import uuid
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request
@@ -116,15 +117,15 @@ def build_multipart(context: dict[str, Any]) -> tuple[bytes, str]:
     # Add file
     upload_file = context["upload_file"]
     field_name = context.get("upload_field", "file")
-    filename = context.get("upload_filename") or os.path.basename(upload_file)
+    filename = context.get("upload_filename") or Path(upload_file).name
 
     if ".." in upload_file:
         raise ValueError(f"Path traversal blocked in upload_file: {upload_file}")
     resolved = os.path.realpath(upload_file)
-    if not os.path.isfile(resolved):
+    if not Path(resolved).is_file():
         raise FileNotFoundError(f"Upload file not found: {upload_file}")
 
-    with open(resolved, "rb") as f:
+    with Path(resolved).open("rb") as f:
         file_content = f.read()
 
     # Detect content type

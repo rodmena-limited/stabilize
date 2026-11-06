@@ -1,5 +1,4 @@
-"""
-PythonTask for executing Python code in isolated subprocess.
+"""PythonTask for executing Python code in isolated subprocess.
 
 This module provides a production-ready PythonTask with:
 - Inline script execution
@@ -12,6 +11,7 @@ This module provides a production-ready PythonTask with:
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import logging
 import os
@@ -35,8 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 class PythonTask(Task):
-    """
-        Execute Python code in isolated subprocess.
+    """Execute Python code in isolated subprocess.
 
         Supports three execution modes:
         1. Inline script: Pass Python code as a string
@@ -69,14 +68,14 @@ class PythonTask(Task):
             exit_code (int): Process exit code
             result (any): Value of RESULT variable if set in script
 
-        Notes:
+    Notes:
             - Scripts access input data via the INPUT dict
             - Scripts set return value via the RESULT variable
             - RESULT must be JSON-serializable
             - Module mode: imports module.function and calls with INPUT as argument
             - Upstream stage outputs are automatically available in INPUT
 
-        Examples:
+    Examples:
             # Inline script
             context = {
                 "script": '''
@@ -221,7 +220,7 @@ print("__PYTHONTASK_RESULT_END__")
                 tmp_path = tmp.name
 
             # Build command
-            cmd = [python_path, tmp_path] + list(args)
+            cmd = [python_path, tmp_path, *list(args)]
 
             # Build environment
             env = os.environ.copy()
@@ -232,6 +231,7 @@ print("__PYTHONTASK_RESULT_END__")
             # Execute
             result = subprocess.run(
                 cmd,
+                check=False,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -271,13 +271,12 @@ print("__PYTHONTASK_RESULT_END__")
             if exit_code == 0:
                 logger.debug("PythonTask success, result: %s", str(script_result)[:100])
                 return TaskResult.success(outputs=outputs)
-            else:
-                error_msg = f"Python script failed with exit code {exit_code}"
-                if stderr:
-                    error_msg += f": {stderr[:200]}"
-                if continue_on_failure:
-                    return TaskResult.failed_continue(error=error_msg, outputs=outputs)
-                return TaskResult.terminal(error=error_msg, context=outputs)
+            error_msg = f"Python script failed with exit code {exit_code}"
+            if stderr:
+                error_msg += f": {stderr[:200]}"
+            if continue_on_failure:
+                return TaskResult.failed_continue(error=error_msg, outputs=outputs)
+            return TaskResult.terminal(error=error_msg, context=outputs)
 
         except subprocess.TimeoutExpired:
             error_msg = f"Python script timed out after {timeout}s"
@@ -293,11 +292,9 @@ print("__PYTHONTASK_RESULT_END__")
 
         finally:
             # Clean up temp file
-            if tmp_path and os.path.exists(tmp_path):
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
+            if tmp_path:
+                with contextlib.suppress(OSError):
+                    Path(tmp_path).unlink(missing_ok=True)
 
     def _generate_script(
         self,
@@ -329,7 +326,8 @@ print("__PYTHONTASK_RESULT_END__")
                 raise FileNotFoundError(f"Script file not found: {script_file}")
             script = script_path.read_text()
 
-        assert script is not None
+        if script is None:
+            raise ValueError("PythonTask needs one of script, script_file or module")
         return self.SCRIPT_WRAPPER.format(
             inputs_json_b64=inputs_json_b64,
             script=script,

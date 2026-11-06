@@ -1,5 +1,4 @@
-"""
-TaskExecution model.
+"""TaskExecution model.
 
 A task is the smallest unit of work within a stage. Each stage contains
 one or more tasks that execute sequentially.
@@ -27,8 +26,7 @@ def _generate_task_id() -> str:
 
 @dataclass
 class TaskExecution:
-    """
-    Represents a single task within a stage execution.
+    """Represents a single task within a stage execution.
 
     Tasks are the atomic units of work in a pipeline. They execute sequentially
     within a stage, and each task produces a result that can include:
@@ -180,8 +178,7 @@ class TaskExecution:
         stage_start: bool = False,
         stage_end: bool = False,
     ) -> TaskExecution:
-        """
-        Factory method to create a new task execution.
+        """Factory method to create a new task execution.
 
         Args:
             name: Human-readable task name

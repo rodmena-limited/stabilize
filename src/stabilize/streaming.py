@@ -1,5 +1,4 @@
-"""
-Streaming surface for live workflow progress (agentic ergonomics).
+"""Streaming surface for live workflow progress (agentic ergonomics).
 
 LangGraph exposes ``stream``/``astream`` to feed live values, state updates,
 and LLM tokens to a caller. Stabilize already has the plumbing — an
@@ -19,16 +18,18 @@ unaffected.
 
 from __future__ import annotations
 
+import contextlib
 import queue as _queue
-from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from stabilize.events.base import EntityType, Event, EventType
 from stabilize.events.bus import SubscriptionMode, get_event_bus
 from stabilize.persistence.tenancy import current_tenant
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from stabilize.events.recorder import EventRecorder
     from stabilize.events.store.interface import EventStore
     from stabilize.models.stage import StageExecution
@@ -49,8 +50,8 @@ class StreamItem:
     @classmethod
     def from_event(cls, event: Event, source: str) -> StreamItem:
         return cls(
-            event_type=event.event_type.value if event.event_type else "",
-            entity_type=event.entity_type.value if event.entity_type else "",
+            event_type=event.event_type.value,
+            entity_type=event.entity_type.value,
             entity_id=event.entity_id,
             workflow_id=event.workflow_id,
             data=dict(event.data),
@@ -80,7 +81,7 @@ def emit_progress(
         recorder: Optional recorder to also persist the event durably.
         **data: Extra structured fields (e.g. token="...", percent=42).
     """
-    workflow_id = stage.execution.id if stage.execution else ""
+    workflow_id = stage.execution.id
     payload: dict[str, Any] = {"message": message, "stage_ref_id": stage.ref_id}
     payload.update(data)
     event = Event(
@@ -114,7 +115,7 @@ class WorkflowStream:
         stream.close()
     """
 
-    _TERMINAL_EVENTS = {
+    _TERMINAL_EVENTS: ClassVar[set[str]] = {
         EventType.WORKFLOW_COMPLETED.value,
         EventType.WORKFLOW_FAILED.value,
         EventType.WORKFLOW_CANCELED.value,
@@ -127,7 +128,9 @@ class WorkflowStream:
         subscription_id: str | None = None,
         tenant: str | None = None,
     ) -> None:
-        """Args:
+        """Stream one workflow's events, live from the bus and replayed from the store.
+
+        Args:
         execution_id: Workflow to stream.
         event_store: Optional durable store for replaying history. Required
             for :meth:`replay`; live streaming works without it.
@@ -220,14 +223,12 @@ class WorkflowStream:
     def close(self) -> None:
         """Unsubscribe from the live event bus."""
         if self._subscribed:
-            try:
+            with contextlib.suppress(Exception):
                 get_event_bus().unsubscribe(self._sub_id)
-            except Exception:
-                pass
             self._subscribed = False
 
-    def __enter__(self) -> WorkflowStream:
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *exc: Any) -> None:
+    def __exit__(self, *exc: object) -> None:
         self.close()

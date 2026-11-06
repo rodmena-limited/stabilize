@@ -25,13 +25,15 @@ up from its own stale copy.
 from __future__ import annotations
 
 import ast
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from stabilize.expressions import ExpressionError, evaluate_expression
-from stabilize.models.stage import StageExecution
 from stabilize.tasks.interface import Task
 from stabilize.tasks.result import TaskResult
+
+if TYPE_CHECKING:
+    from stabilize.models.stage import StageExecution
 
 _LITERALS = {"True", "False", "None", "true", "false", "null", "none"}
 
@@ -42,7 +44,7 @@ LOOP_TYPE = "_loop_type"
 LOOP_TARGET = "_loop_target_ref_id"
 LOOP_EXIT_REF = "_loop_exit_ref_id"
 LOOP_EXIT = "_loop_exit"
-LOOP_TOKEN = "_loop_token"
+LOOP_NONCE = "_loop_token"
 LOOP_EXHAUSTED = "_loop_exhausted"
 JUMP_COUNT = "_jump_count"
 
@@ -102,7 +104,7 @@ class LoopConditionTask(Task):
         # A counter only carries meaning when this entry came from the loop's own
         # jump. Re-entry from outside (an enclosing loop resetting these stages)
         # starts a fresh budget.
-        token = context.get(LOOP_TOKEN)
+        token = context.get(LOOP_NONCE)
         iteration = int(context.get(LOOP_ITERATION, 0) or 0) if token else 0
 
         if not expression:
@@ -141,7 +143,7 @@ class LoopConditionTask(Task):
                     LOOP_EXIT: True,
                     LOOP_EXHAUSTED: exhausted,
                     LOOP_ITERATION: iteration,
-                    LOOP_TOKEN: None,
+                    LOOP_NONCE: None,
                     JUMP_COUNT: 0,
                 },
                 outputs={"loop_iterations": iteration},
@@ -155,7 +157,7 @@ class LoopConditionTask(Task):
         # the previous pass; without this it would keep counting up from there
         # and the inner loop would reach its bound early.
         return TaskResult.success(
-            context={LOOP_ITERATION: iteration, LOOP_TOKEN: None},
+            context={LOOP_ITERATION: iteration, LOOP_NONCE: None},
             outputs={
                 **_loop_variables(stage),
                 LOOP_ITERATION: iteration,
@@ -173,7 +175,7 @@ class LoopConditionTask(Task):
     ) -> TaskResult:
         if satisfied:
             return TaskResult.success(
-                context={LOOP_TOKEN: None},
+                context={LOOP_NONCE: None},
                 outputs={"loop_iterations": iteration + 1, "loop_exhausted": False},
             )
 
@@ -188,7 +190,7 @@ class LoopConditionTask(Task):
             context={
                 **_loop_variables(stage),
                 LOOP_ITERATION: iteration + 1,
-                LOOP_TOKEN: uuid4().hex,
+                LOOP_NONCE: uuid4().hex,
                 JUMP_COUNT: 0,
             },
         )
@@ -238,7 +240,7 @@ class LoopBackTask(Task):
             context={
                 **_loop_variables(stage),
                 LOOP_ITERATION: iteration + 1,
-                LOOP_TOKEN: uuid4().hex,
+                LOOP_NONCE: uuid4().hex,
                 JUMP_COUNT: 0,
             },
         )

@@ -1,9 +1,10 @@
-"""
-Stage enums and helpers.
+"""Stage enums and helpers.
 
 Provides the enum types used by StageExecution and a helper
 for generating unique stage IDs.
 """
+
+from __future__ import annotations
 
 from enum import Enum
 
@@ -16,8 +17,7 @@ def _generate_stage_id() -> str:
 
 
 class SyntheticStageOwner(Enum):
-    """
-    Indicates the relationship of a synthetic stage to its parent.
+    """Indicates the relationship of a synthetic stage to its parent.
 
     STAGE_BEFORE: Runs before the parent's tasks
     STAGE_AFTER: Runs after the parent completes

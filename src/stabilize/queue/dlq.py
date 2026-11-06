@@ -1,6 +1,4 @@
-"""
-Dead Letter Queue (DLQ) functionality for PostgreSQL queue.
-"""
+"""Dead Letter Queue (DLQ) functionality for PostgreSQL queue."""
 
 from __future__ import annotations
 
@@ -31,7 +29,7 @@ def move_to_dlq(
     stored, whatever JSON it holds.
 
     Args:
-        pool: Database connection pool
+        engine: The queue's connection borrower
         table_name: Name of the queue table
         pending: Pending messages dict (will be modified)
         message_id: The message ID (integer or string)
@@ -88,7 +86,7 @@ def list_dlq(
     """List messages in the Dead Letter Queue.
 
     Args:
-        pool: Database connection pool
+        engine: The queue's connection borrower
         table_name: Name of the queue table
         limit: Maximum number of messages to return
         message_type: Optional filter by message type
@@ -96,37 +94,36 @@ def list_dlq(
     Returns:
         List of DLQ message dictionaries
     """
-    with engine.connection() as conn:
-        with conn.cursor() as cur:
-            if message_type:
-                cur.execute(
-                    f"""
+    with engine.connection() as conn, conn.cursor() as cur:
+        if message_type:
+            cur.execute(
+                f"""
                     SELECT {_DLQ} FROM {table_name}_dlq
                     WHERE message_type = %(message_type)s AND stabilize_tenant = %(tenant)s
                     ORDER BY moved_at DESC
                     LIMIT %(limit)s
                     """,
-                    {"message_type": message_type, "limit": limit, "tenant": engine.tenant},
-                )
-            else:
-                cur.execute(
-                    f"""
+                {"message_type": message_type, "limit": limit, "tenant": engine.tenant},
+            )
+        else:
+            cur.execute(
+                f"""
                     SELECT {_DLQ} FROM {table_name}_dlq
                     WHERE stabilize_tenant = %(tenant)s
                     ORDER BY moved_at DESC
                     LIMIT %(limit)s
                     """,
-                    {"limit": limit, "tenant": engine.tenant},
-                )
-            rows = cur.fetchall()
-            return [dict(row) for row in rows]
+                {"limit": limit, "tenant": engine.tenant},
+            )
+        rows = cur.fetchall()
+        return [dict(row) for row in rows]
 
 
 def replay_dlq(engine: Any, table_name: str, dlq_id: int) -> bool:
     """Replay a message from the DLQ back to the main queue.
 
     Args:
-        pool: Database connection pool
+        engine: The queue's connection borrower
         table_name: Name of the queue table
         dlq_id: The DLQ entry ID
 
@@ -164,14 +161,13 @@ def replay_dlq(engine: Any, table_name: str, dlq_id: int) -> bool:
 
 def dlq_size(engine: Any, table_name: str) -> int:
     """Get the number of messages in the Dead Letter Queue."""
-    with engine.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"SELECT COUNT(*) as cnt FROM {table_name}_dlq WHERE stabilize_tenant = %(tenant)s",
-                {"tenant": engine.tenant},
-            )
-            row = cur.fetchone()
-            return row["cnt"] if row else 0
+    with engine.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT COUNT(*) as cnt FROM {table_name}_dlq WHERE stabilize_tenant = %(tenant)s",
+            {"tenant": engine.tenant},
+        )
+        row = cur.fetchone()
+        return row["cnt"] if row else 0
 
 
 def clear_dlq(engine: Any, table_name: str) -> int:
@@ -208,11 +204,10 @@ def check_and_move_expired(
     Returns:
         Number of messages moved to DLQ
     """
-    with engine.connection() as conn:
-        with conn.cursor() as cur:
-            # Find messages that have exceeded max_attempts
-            cur.execute(
-                f"""
+    with engine.connection() as conn, conn.cursor() as cur:
+        # Find messages that have exceeded max_attempts
+        cur.execute(
+            f"""
                 SELECT id, message_type, attempts, store_retries,
                        store_retry_since IS NOT NULL AS over_budget
                 FROM {table_name}
@@ -222,9 +217,9 @@ def check_and_move_expired(
                 AND (store_retry_since IS NULL
                      OR store_retry_since <= NOW() - %(budget)s * INTERVAL '1 second')
                 """,
-                {"max_attempts": max_attempts, "tenant": engine.tenant, "budget": store_retry_budget.total_seconds()},
-            )
-            rows = cur.fetchall()
+            {"max_attempts": max_attempts, "tenant": engine.tenant, "budget": store_retry_budget.total_seconds()},
+        )
+        rows = cur.fetchall()
 
     moved_count = 0
     for row in rows:

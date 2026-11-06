@@ -1,5 +1,4 @@
-"""
-Event store interface.
+"""Event store interface.
 
 Defines the abstract interface for event storage backends.
 All implementations must support atomic append operations
@@ -9,19 +8,19 @@ and efficient querying by various criteria.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from datetime import datetime
+
     from stabilize.events.base import EntityType, Event, EventType
 
 
 @dataclass
 class EventQuery:
-    """
-    Query parameters for retrieving events.
+    """Query parameters for retrieving events.
 
     All fields are optional - unset fields are not filtered.
     Results are ordered by sequence number ascending.
@@ -62,8 +61,7 @@ class AppendResult:
 
 
 class EventStore(ABC):
-    """
-    Abstract event store interface.
+    """Abstract event store interface.
 
     Event stores are append-only - events cannot be modified or deleted.
     Each event is assigned a monotonically increasing sequence number
@@ -78,8 +76,7 @@ class EventStore(ABC):
 
     @abstractmethod
     def append(self, event: Event, connection: Any | None = None) -> Event:
-        """
-        Append a single event to the store.
+        """Append a single event to the store.
 
         Args:
             event: The event to append. Sequence will be assigned.
@@ -88,12 +85,10 @@ class EventStore(ABC):
         Returns:
             The event with sequence number assigned.
         """
-        pass
 
     @abstractmethod
     def append_batch(self, events: list[Event], connection: Any | None = None) -> list[Event]:
-        """
-        Append multiple events atomically.
+        """Append multiple events atomically.
 
         All events are appended in a single transaction.
         Sequence numbers are assigned in order.
@@ -105,12 +100,10 @@ class EventStore(ABC):
         Returns:
             Events with sequence numbers assigned.
         """
-        pass
 
     @abstractmethod
     def get_events(self, query: EventQuery) -> Iterator[Event]:
-        """
-        Query events matching criteria.
+        """Query events matching criteria.
 
         Args:
             query: Query parameters.
@@ -118,7 +111,6 @@ class EventStore(ABC):
         Returns:
             Iterator of matching events ordered by sequence.
         """
-        pass
 
     @abstractmethod
     def get_events_for_entity(
@@ -127,8 +119,7 @@ class EventStore(ABC):
         entity_id: str,
         from_version: int = 0,
     ) -> list[Event]:
-        """
-        Get all events for a specific entity.
+        """Get all events for a specific entity.
 
         Args:
             entity_type: Type of entity.
@@ -138,7 +129,6 @@ class EventStore(ABC):
         Returns:
             List of events for the entity.
         """
-        pass
 
     @abstractmethod
     def get_events_for_workflow(
@@ -146,8 +136,7 @@ class EventStore(ABC):
         workflow_id: str,
         from_sequence: int = 0,
     ) -> list[Event]:
-        """
-        Get all events for a workflow execution.
+        """Get all events for a workflow execution.
 
         Args:
             workflow_id: Workflow identifier.
@@ -156,17 +145,14 @@ class EventStore(ABC):
         Returns:
             List of events for the workflow.
         """
-        pass
 
     @abstractmethod
     def get_current_sequence(self) -> int:
-        """
-        Get the current (latest) global sequence number.
+        """Get the current (latest) global sequence number.
 
         Returns:
             The highest sequence number in the store, or 0 if empty.
         """
-        pass
 
     @abstractmethod
     def get_events_since(
@@ -174,8 +160,7 @@ class EventStore(ABC):
         sequence: int,
         limit: int = 1000,
     ) -> list[Event]:
-        """
-        Get events since a sequence number.
+        """Get events since a sequence number.
 
         Used for catch-up subscriptions.
 
@@ -186,11 +171,9 @@ class EventStore(ABC):
         Returns:
             List of events after the sequence.
         """
-        pass
 
     def get_event_by_id(self, event_id: str) -> Event | None:
-        """
-        Get a single event by its ID.
+        """Get a single event by its ID.
 
         Args:
             event_id: The event identifier.
@@ -200,7 +183,7 @@ class EventStore(ABC):
         """
         # Default implementation using query
 
-        for event in self.get_events(EventQuery(limit=1)):
+        for _event in self.get_events(EventQuery(limit=1)):
             # This is inefficient - implementations should override
             pass
         return None
@@ -217,9 +200,19 @@ class EventStore(ABC):
         """Delete events inside the bound; refuse while an enabled subscription has not delivered them."""
         raise NotImplementedError(f"{type(self).__name__} does not implement purge_events")
 
+    def supports_commit_cursor(self) -> bool:
+        return False
+
+    def get_events_since_committed(
+        self,
+        cursor: str,
+        limit: int = 1000,
+        after_sequence: int = 0,
+    ) -> tuple[list[Event], str, int]:
+        raise NotImplementedError(f"{type(self).__name__} does not deliver events in commit order")
+
     def count_events(self, query: EventQuery | None = None) -> int:
-        """
-        Count events matching query.
+        """Count events matching query.
 
         Args:
             query: Optional query parameters.

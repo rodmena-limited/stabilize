@@ -1,5 +1,4 @@
-"""
-Singleton connection manager for database connections.
+"""Singleton connection manager for database connections.
 
 Provides centralized connection pooling for PostgreSQL and thread-local
 connections for SQLite, ensuring efficient resource usage across all
@@ -11,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 import threading
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 if TYPE_CHECKING:
     from psycopg import Connection
@@ -25,15 +24,14 @@ from stabilize.persistence.pool_options import DEFAULT_POOL_OPTIONS, PoolOptions
 
 
 class SingletonMeta(type):
-    """
-    Thread-safe metaclass for singleton pattern.
+    """Thread-safe metaclass for singleton pattern.
 
     Ensures only one instance of a class exists, even when accessed
     from multiple threads simultaneously.
     """
 
-    _instances: dict[type, Any] = {}
-    _lock: threading.Lock = threading.Lock()
+    _instances: ClassVar[dict[type, Any]] = {}
+    _lock: ClassVar[threading.Lock] = threading.Lock()
 
     def __call__(cls, *args: Any, **kwargs: Any) -> Any:
         if cls not in cls._instances:
@@ -45,11 +43,11 @@ class SingletonMeta(type):
         return cls._instances[cls]
 
     @classmethod
-    def reset(mcs, cls: type) -> None:
+    def reset(cls, target: type) -> None:
         """Reset singleton instance (for testing)."""
-        with mcs._lock:
-            if cls in mcs._instances:
-                instance = mcs._instances.pop(cls)
+        with cls._lock:
+            if target in cls._instances:
+                instance = cls._instances.pop(target)
                 if hasattr(instance, "close_all"):
                     instance.close_all()
 
@@ -75,8 +73,7 @@ def require_parseable_conninfo(connection_string: str) -> None:
 
 
 class ConnectionManager(metaclass=SingletonMeta):
-    """
-    Singleton connection manager for all database connections.
+    """Singleton connection manager for all database connections.
 
     Manages:
     - PostgreSQL connection pools (one pool per connection string)
@@ -106,8 +103,7 @@ class ConnectionManager(metaclass=SingletonMeta):
         max_size: int | None = None,
         options: PoolOptions | None = None,
     ) -> ConnectionPool[Connection[DictRow]]:
-        """
-        Get or create a PostgreSQL connection pool.
+        """Get or create a PostgreSQL connection pool.
 
         Pools are shared between callers asking for the same connection string
         AND the same options. Each call registers a holder; the pool is closed
@@ -182,8 +178,7 @@ class ConnectionManager(metaclass=SingletonMeta):
             return pool
 
     def get_sqlite_connection(self, connection_string: str) -> sqlite3.Connection:
-        """
-        Get or create a thread-local SQLite connection.
+        """Get or create a thread-local SQLite connection.
 
         Args:
             connection_string: SQLite connection string
@@ -253,7 +248,7 @@ class ConnectionManager(metaclass=SingletonMeta):
         """Parse SQLite connection string to extract database path."""
         if connection_string.startswith("sqlite:///"):
             return connection_string[10:]
-        elif connection_string.startswith("sqlite://"):
+        if connection_string.startswith("sqlite://"):
             return connection_string[9:]
         return connection_string
 

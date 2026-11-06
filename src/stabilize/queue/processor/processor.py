@@ -1,5 +1,4 @@
-"""
-Queue processor for handling messages.
+"""Queue processor for handling messages.
 
 This module provides the QueueProcessor class that polls messages from
 the queue and dispatches them to appropriate handlers.
@@ -15,14 +14,11 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from stabilize.persistence.committed_marks import DeliveryDefect
 from stabilize.persistence.floors import refuse_free_threaded
 from stabilize.persistence.tenancy import TenancyModeChanged, TenantError, require_same_tenant
-from stabilize.queue import Queue
 from stabilize.queue.dedup import BloomDeduplicator
 from stabilize.queue.messages import Message
 from stabilize.queue.processor.config import QueueProcessorConfig
@@ -32,13 +28,17 @@ from stabilize.queue.processor.mixins import QueueProcessorMixin
 from stabilize.queue.processor.retention import start_retention_thread
 from stabilize.queue.processor.submission import MessageSubmissionMixin
 from stabilize.recovery import RecoverySummary
-from stabilize.resilience.config import HandlerConfig
 from stabilize.threads import in_context
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from stabilize.persistence.committed_marks import DeliveryDefect
     from stabilize.persistence.store import WorkflowStore
+    from stabilize.queue import Queue
     from stabilize.resilience.bulkheads import TaskBulkheadManager
     from stabilize.resilience.circuits import WorkflowCircuitFactory
+    from stabilize.resilience.config import HandlerConfig
     from stabilize.tasks.registry import TaskRegistry
 
 logger = logging.getLogger(__name__)
@@ -47,8 +47,7 @@ M = TypeVar("M", bound=Message)
 
 
 class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissionMixin):
-    """
-    Processes messages from a queue using registered handlers.
+    """Processes messages from a queue using registered handlers.
 
     The processor polls the queue at regular intervals and dispatches
     messages to appropriate handlers. Handlers run in a thread pool
@@ -75,8 +74,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
         bulkhead_manager: TaskBulkheadManager | None = None,
         circuit_factory: WorkflowCircuitFactory | None = None,
     ) -> None:
-        """
-        Initialize the queue processor.
+        """Initialize the queue processor.
 
         Args:
             queue: The queue to process
@@ -145,8 +143,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
             )
 
     def register_handler(self, handler: MessageHandler[Any]) -> None:
-        """
-        Register a message handler.
+        """Register a message handler.
 
         Raises ValueError if a handler for the same message type is already
         registered. Use :meth:`replace_handler` to override an existing handler.
@@ -165,8 +162,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
         logger.debug("Registered handler for %s", handler.message_type.__name__)
 
     def replace_handler(self, handler: MessageHandler[Any]) -> None:
-        """
-        Replace an existing handler.
+        """Replace an existing handler.
 
         Args:
             handler: The new handler to use
@@ -184,8 +180,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
         message_type: type[M],
         handler_func: Callable[[M], None],
     ) -> None:
-        """
-        Register a handler function for a message type.
+        """Register a handler function for a message type.
 
         Args:
             message_type: The type of message to handle
@@ -265,8 +260,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
         logger.info("Queue processor started")
 
     def stop(self, wait: bool = True, timeout: float | None = None) -> int:
-        """
-        Stop the queue processor.
+        """Stop the queue processor.
 
         Args:
             wait: Whether to wait for running handlers to complete
@@ -308,8 +302,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
         return remaining
 
     def request_stop(self) -> None:
-        """
-        Request graceful stop without blocking.
+        """Request graceful stop without blocking.
 
         Sets the stopping flag to stop accepting new messages,
         but doesn't wait for active tasks to complete.
@@ -365,7 +358,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
                 if isinstance(e, RecoveryError):
                     raise
                 raise RecoveryError(f"Workflow recovery sweep failed: {e}", cause=e) from e
-            logger.error("Workflow recovery sweep failed: %s", e, exc_info=True)
+            logger.exception("Workflow recovery sweep failed")
             return []
         self.last_recovery = RecoverySummary.of(results)
         return results
@@ -434,10 +427,7 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
                 message = None
                 with self._lock:
                     # Check if stopping - don't accept new work
-                    if self._stopping:
-                        pass  # Will sleep outside lock
-                    # Check if we have capacity
-                    elif self._active_count >= self.config.max_workers:
+                    if self._stopping or self._active_count >= self.config.max_workers:
                         pass  # Will sleep outside lock
                     else:
                         # Poll under lock to prevent race
@@ -455,8 +445,8 @@ class QueueProcessor(QueueProcessorMixin, SynchronousDrainMixin, MessageSubmissi
             except TenancyModeChanged as e:
                 self._latch(e)
                 break
-            except Exception as e:
-                logger.error("Error in poll loop: %s", e, exc_info=True)
+            except Exception:
+                logger.exception("Error in poll loop")
                 if self.config.stop_on_error:
                     self._running = False
                     break

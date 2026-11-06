@@ -1,5 +1,4 @@
-"""
-Transaction helper service.
+"""Transaction helper service.
 
 Encapsulates common transaction patterns to reduce code duplication
 in handlers.
@@ -12,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from collections.abc import Callable, Sequence
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -20,11 +18,12 @@ from resilient_circuit import ExponentialDelay, RetryWithBackoffPolicy
 from resilient_circuit.exceptions import RetryLimitReached
 
 from stabilize.models.stage.completion_records import record_completion
-from stabilize.persistence.store import StoreTransaction
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from stabilize.models.stage import StageExecution
-    from stabilize.persistence.store import WorkflowStore
+    from stabilize.persistence.store import StoreTransaction, WorkflowStore
     from stabilize.queue import Queue
     from stabilize.queue.messages import Message
 
@@ -143,8 +142,7 @@ class TransactionHelper:
         during_txn: Callable[[], None] | None = None,
         within: Callable[[StoreTransaction], Sequence[tuple[Message, float | None]] | None] | None = None,
     ) -> bool:
-        """
-        Execute an atomic transaction to update state and queue messages.
+        """Execute an atomic transaction to update state and queue messages.
 
         Automatically retries on deadlock/lock contention errors with
         exponential backoff.
@@ -215,7 +213,7 @@ class TransactionHelper:
                 DEADLOCK_MAX_RETRIES,
                 handler_name,
             )
-            raise e.__cause__ if e.__cause__ else e from e
+            raise e.__cause__ or e from e
         return True
 
     def execute_atomic_critical(
@@ -226,8 +224,7 @@ class TransactionHelper:
         handler_name: str = "UnknownHandler",
         require_atomic: bool = False,
     ) -> bool:
-        """
-        Execute an atomic transaction with more aggressive retry for critical paths.
+        """Execute an atomic transaction with more aggressive retry for critical paths.
 
         Use this for error handling and other critical paths where failure to
         persist state could leave the system in an inconsistent state or lose
@@ -284,7 +281,7 @@ class TransactionHelper:
                 handler_name,
             )
             # Re-raise the original exception
-            raise e.__cause__ if e.__cause__ else e from e
+            raise e.__cause__ or e from e
         return True
 
 

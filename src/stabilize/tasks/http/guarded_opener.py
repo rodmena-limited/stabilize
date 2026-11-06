@@ -13,11 +13,11 @@ hostname verification intact: the connection is still made by hostname.
 from __future__ import annotations
 
 import http.client
-import socket
 from typing import TYPE_CHECKING, Any
 from urllib.request import HTTPHandler, HTTPSHandler
 
 if TYPE_CHECKING:
+    import socket
     from collections.abc import Callable
 
 

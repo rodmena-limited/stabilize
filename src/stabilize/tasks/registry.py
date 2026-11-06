@@ -1,5 +1,4 @@
-"""
-Task registry for resolving task implementations.
+"""Task registry for resolving task implementations.
 
 This module provides the TaskRegistry class for registering and resolving
 task implementations by name or type.
@@ -36,14 +35,13 @@ TaskImplementation = type[Task] | Task | TaskCallable
 class TaskNotFoundError(Exception):
     """Raised when a task type cannot be resolved."""
 
-    def __init__(self, task_type: str):
+    def __init__(self, task_type: str) -> None:
         self.task_type = task_type
         super().__init__(f"No task found for type: {task_type}")
 
 
 class TaskRegistry:
-    """
-    Registry for task implementations.
+    """Registry for task implementations.
 
     Allows registering tasks by name and resolving them at runtime.
     Supports:
@@ -98,8 +96,7 @@ class TaskRegistry:
         aliases: list[str] | None = None,
         strict: bool = False,
     ) -> None:
-        """
-        Register a task implementation.
+        """Register a task implementation.
 
         By default a duplicate name overwrites the previous registration with
         a warning (kept for backward compatibility). Pass strict=True to make
@@ -145,8 +142,7 @@ class TaskRegistry:
         task_class: type[Task],
         name: str | None = None,
     ) -> None:
-        """
-        Register a task class using its class name.
+        """Register a task class using its class name.
 
         Args:
             task_class: The task class to register
@@ -160,8 +156,7 @@ class TaskRegistry:
         name: str,
         aliases: list[str] | None = None,
     ) -> Callable[[TaskCallable], TaskCallable]:
-        """
-        Decorator to register a function as a task.
+        """Decorator to register a function as a task.
 
         Args:
             name: The task type name
@@ -197,8 +192,7 @@ class TaskRegistry:
         return ()
 
     def get(self, name: str) -> Task:
-        """
-        Get a task implementation by name.
+        """Get a task implementation by name.
 
         Args:
             name: The task type name
@@ -220,20 +214,18 @@ class TaskRegistry:
         # Handle different registration types
         if isinstance(impl, Task):
             return impl
-        elif isinstance(impl, type) and issubclass(impl, Task):
+        if isinstance(impl, type) and issubclass(impl, Task):
             return impl()
-        elif callable(impl):
+        if callable(impl):
             # Cast to the proper type for CallableTask
             from typing import cast
 
-            func = cast(TaskCallable, impl)
+            func = cast("TaskCallable", impl)
             return CallableTask(func, name=resolved_name)
-        else:
-            raise TaskNotFoundError(resolved_name)
+        raise TaskNotFoundError(resolved_name)
 
     def get_by_class(self, class_name: str) -> Task:
-        """
-        Get a task by its implementing class name.
+        """Get a task by its implementing class name.
 
         Args:
             class_name: Fully qualified or simple class name
@@ -249,7 +241,7 @@ class TaskRegistry:
             return self.get(class_name)
 
         # Try simple class name
-        simple_name = class_name.split(".")[-1]
+        simple_name = class_name.rsplit(".", maxsplit=1)[-1]
         if simple_name in self._tasks:
             return self.get(simple_name)
 
@@ -283,8 +275,7 @@ class TaskRegistry:
         name: str,
         verifier: Verifier | VerifierCallable,
     ) -> None:
-        """
-        Register a verifier function or Verifier instance.
+        """Register a verifier function or Verifier instance.
 
         Verifiers validate stage outputs after task completion.
         They can be referenced in stage context verification config.
@@ -328,8 +319,7 @@ class TaskRegistry:
         self,
         name: str,
     ) -> Callable[[VerifierCallable], VerifierCallable]:
-        """
-        Decorator to register a function as a verifier.
+        """Decorator to register a function as a verifier.
 
         Args:
             name: The verifier name
@@ -351,8 +341,7 @@ class TaskRegistry:
         return decorator
 
     def get_verifier(self, name: str) -> Verifier | VerifierCallable:
-        """
-        Get a verifier by name.
+        """Get a verifier by name.
 
         Args:
             name: The verifier name

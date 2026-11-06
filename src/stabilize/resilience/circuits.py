@@ -1,5 +1,4 @@
-"""
-Circuit breaker management for Stabilize.
+"""Circuit breaker management for Stabilize.
 
 Provides per-workflow circuit breakers using CircuitProtectorPolicy
 from resilient_circuit.
@@ -21,10 +20,9 @@ from resilient_circuit.storage import CircuitBreakerStorage, InMemoryStorage
 from stabilize.errors import is_transient
 from stabilize.persistence.connection import require_parseable_conninfo
 from stabilize.redaction import redact_text
-from stabilize.resilience.config import ResilienceConfig
 
 if TYPE_CHECKING:
-    pass
+    from stabilize.resilience.config import ResilienceConfig
 
 
 def _should_trip_circuit(error: Exception | None) -> bool:
@@ -109,8 +107,7 @@ def _degrade_or_raise(reason: str, error: BaseException | None) -> CircuitBreake
 
 
 def _create_storage(database_url: str | None) -> CircuitBreakerStorage:
-    """
-    Create circuit breaker storage based on database URL.
+    """Create circuit breaker storage based on database URL.
 
     Args:
         database_url: Database connection string
@@ -145,19 +142,16 @@ def _create_storage(database_url: str | None) -> CircuitBreakerStorage:
         # may never have been created.
         logger.info("Using PostgreSQL storage for circuit breakers")
         return storage
-    else:
-        # SQLite or no database: use in-memory storage
-        # Circuit state is per-process only (not shared across instances)
-        logger.info(
-            "Using in-memory storage for circuit breakers (no PostgreSQL DSN configured); "
-            "circuit state is process-local"
-        )
-        return InMemoryStorage()
+    # SQLite or no database: use in-memory storage
+    # Circuit state is per-process only (not shared across instances)
+    logger.info(
+        "Using in-memory storage for circuit breakers (no PostgreSQL DSN configured); circuit state is process-local"
+    )
+    return InMemoryStorage()
 
 
 class WorkflowCircuitFactory:
-    """
-    Creates per-workflow, per-task-type circuit breakers.
+    """Creates per-workflow, per-task-type circuit breakers.
 
     Each workflow execution gets isolated circuit breakers, so failures
     in one workflow don't affect others.
@@ -183,8 +177,7 @@ class WorkflowCircuitFactory:
     """
 
     def __init__(self, config: ResilienceConfig) -> None:
-        """
-        Initialize the circuit factory.
+        """Initialize the circuit factory.
 
         Args:
             config: Resilience configuration
@@ -202,8 +195,7 @@ class WorkflowCircuitFactory:
         workflow_execution_id: str,
         task_type: str,
     ) -> CircuitProtectorPolicy:
-        """
-        Get or create a circuit breaker for a workflow + task type.
+        """Get or create a circuit breaker for a workflow + task type.
 
         Args:
             workflow_execution_id: The workflow execution ID (used as namespace)
@@ -244,8 +236,7 @@ class WorkflowCircuitFactory:
         return circuit
 
     def clear_workflow_circuits(self, workflow_execution_id: str) -> None:
-        """
-        Remove all circuits for a completed workflow.
+        """Remove all circuits for a completed workflow.
 
         Call this when a workflow completes to free memory.
 

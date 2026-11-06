@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from stabilize.queue.processor.config import QueueProcessorConfig
 from stabilize.queue.processor.handler_base import MessageHandler
 from stabilize.queue.processor.processor import QueueProcessor

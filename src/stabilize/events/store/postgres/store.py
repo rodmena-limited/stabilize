@@ -1,5 +1,4 @@
-"""
-PostgreSQL event store implementation.
+"""PostgreSQL event store implementation.
 
 Provides durable, append-only event storage using PostgreSQL.
 Uses BIGSERIAL for sequence numbers and JSONB for event data.
@@ -10,9 +9,9 @@ from __future__ import annotations
 import logging
 import threading
 import warnings
-from collections.abc import Iterator
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.events.store.interface import EventStore
 from stabilize.events.store.postgres.events import PostgresEventsMixin
@@ -44,6 +43,9 @@ from stabilize.persistence.tenancy import (
     validate_tenant,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 logger = logging.getLogger(__name__)
 
 
@@ -56,16 +58,16 @@ class EventStoreSchemaError(RuntimeError):
     """
 
 
-def _scalar(row: object) -> object:
-    if isinstance(row, dict):
+def _scalar(row: Mapping[str, object] | Sequence[object]) -> object:
+    if isinstance(row, Mapping):
         return next(iter(row.values()))
-    return row[0]  # type: ignore[index]
+    return row[0]
 
 
-def _pair(row: object) -> tuple[object, object]:
-    if isinstance(row, dict):
+def _pair(row: Mapping[str, object] | Sequence[object]) -> tuple[object, object]:
+    if isinstance(row, Mapping):
         return row["table_name"], row["column_name"]
-    return row[0], row[1]  # type: ignore[index]
+    return row[0], row[1]
 
 
 class PostgresEventStore(
@@ -75,8 +77,7 @@ class PostgresEventStore(
     PostgresRetentionMixin,
     EventStore,
 ):
-    """
-    PostgreSQL implementation of event store.
+    """PostgreSQL implementation of event store.
 
     Uses connection pooling via ConnectionManager.
     Events are stored with BIGSERIAL sequence numbers for
@@ -96,8 +97,7 @@ class PostgresEventStore(
         options: PoolOptions | None = None,
         tenant: str = "",
     ) -> None:
-        """
-        Initialize PostgreSQL event store.
+        """Initialize PostgreSQL event store.
 
         Args:
             connection_string: PostgreSQL connection string
@@ -112,6 +112,7 @@ class PostgresEventStore(
             options: Pool and connection options. Pass the PoolOptions given to
                 the workflow store and the queue to share their pool, and with it
                 their ``on_borrow`` and ``reset``.
+            tenant: The tenant this store reads and writes; '' in single-tenant mode.
         """
         self.tenant = validate_tenant(tenant)
         self._connection_string = connection_string
@@ -171,52 +172,51 @@ class PostgresEventStore(
         answers what the name actually binds to on THIS connection, which is the
         artefact the engine will read and write.
         """
-        with self._pool.connection() as conn:
-            with conn.cursor() as cur:
-                resolved: dict[str, str] = {}
-                namespaces: dict[str, str] = {}
-                misplaced: list[str] = []
-                for table in REQUIRED_TABLES:
-                    # Ask the catalog which NAMESPACE the oid belongs to rather
-                    # than reading to_regclass()::text. That rendering omits the
-                    # schema exactly when the schema is on the search_path --
-                    # the healthy case -- so a comparison against a qualified
-                    # name fails when everything is correct, and relaxing it to
-                    # the unqualified form then accepts a shadow copy in another
-                    # schema. The rendering depends on the setting under test;
-                    # the namespace does not.
-                    cur.execute(
-                        "SELECT to_regclass(%s)::text AS rel, "
-                        "  (SELECT n.nspname FROM pg_class c "
-                        "     JOIN pg_namespace n ON n.oid = c.relnamespace "
-                        "    WHERE c.oid = to_regclass(%s)) AS nsp",
-                        (table, table),
-                    )
-                    row = cur.fetchone()
-                    if not row:
-                        continue
-                    rel = row["rel"] if isinstance(row, dict) else row[0]
-                    nsp = row["nsp"] if isinstance(row, dict) else row[1]
-                    if not rel:
-                        continue
-                    if self._schema and nsp != self._schema:
-                        misplaced.append(f"{table} resolves to {nsp}.{table}, not {self._schema}")
-                        continue
-                    resolved[table] = rel
-                    if nsp:
-                        namespaces[table] = str(nsp)
-                present_tables = set(resolved)
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            resolved: dict[str, str] = {}
+            namespaces: dict[str, str] = {}
+            misplaced: list[str] = []
+            for table in REQUIRED_TABLES:
+                # Ask the catalog which NAMESPACE the oid belongs to rather
+                # than reading to_regclass()::text. That rendering omits the
+                # schema exactly when the schema is on the search_path --
+                # the healthy case -- so a comparison against a qualified
+                # name fails when everything is correct, and relaxing it to
+                # the unqualified form then accepts a shadow copy in another
+                # schema. The rendering depends on the setting under test;
+                # the namespace does not.
+                cur.execute(
+                    "SELECT to_regclass(%s)::text AS rel, "
+                    "  (SELECT n.nspname FROM pg_class c "
+                    "     JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "    WHERE c.oid = to_regclass(%s)) AS nsp",
+                    (table, table),
+                )
+                row = cur.fetchone()
+                if not row:
+                    continue
+                rel = row["rel"] if isinstance(row, dict) else row[0]
+                nsp = row["nsp"] if isinstance(row, dict) else row[1]
+                if not rel:
+                    continue
+                if self._schema and nsp != self._schema:
+                    misplaced.append(f"{table} resolves to {nsp}.{table}, not {self._schema}")
+                    continue
+                resolved[table] = rel
+                if nsp:
+                    namespaces[table] = str(nsp)
+            present_tables = set(resolved)
 
-                present_columns = set()
-                if resolved:
-                    cur.execute(
-                        "SELECT c.relname AS table_name, a.attname AS column_name "
-                        "FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
-                        "WHERE a.attrelid = ANY(%s::regclass[]) AND a.attnum > 0 "
-                        "AND NOT a.attisdropped",
-                        (list(resolved.values()),),
-                    )
-                    present_columns = {_pair(row) for row in cur.fetchall()}
+            present_columns = set()
+            if resolved:
+                cur.execute(
+                    "SELECT c.relname AS table_name, a.attname AS column_name "
+                    "FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
+                    "WHERE a.attrelid = ANY(%s::regclass[]) AND a.attnum > 0 "
+                    "AND NOT a.attisdropped",
+                    (list(resolved.values()),),
+                )
+                present_columns = {_pair(row) for row in cur.fetchall()}
 
         missing_tables = [name for name in REQUIRED_TABLES if name not in present_tables]
         missing_columns = [
@@ -287,10 +287,9 @@ class PostgresEventStore(
         return getattr(self, "_resolved_schema", None)
 
     def _server_supports_xid8(self) -> bool:
-        with self._pool.connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SHOW server_version_num")
-                row = cur.fetchone()
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.execute("SHOW server_version_num")
+            row = cur.fetchone()
         if row is None:
             return False
         raw = row["server_version_num"] if isinstance(row, dict) else row[0]

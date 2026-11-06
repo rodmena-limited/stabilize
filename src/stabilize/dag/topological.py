@@ -1,5 +1,4 @@
-"""
-Topological sort for stage execution ordering.
+"""Topological sort for stage execution ordering.
 
 This module implements a topological sort algorithm for stages based on their
 requisite_stage_ref_ids (DAG edges).
@@ -7,22 +6,22 @@ requisite_stage_ref_ids (DAG edges).
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from stabilize.models.stage import StageExecution
 
 
 class CircularDependencyError(Exception):
-    """
-    Raised when a circular dependency is detected in the stage graph.
+    """Raised when a circular dependency is detected in the stage graph.
 
     This indicates an invalid pipeline configuration where stages depend
     on each other in a cycle.
     """
 
-    def __init__(self, message: str, stages: list[StageExecution] | None = None):
+    def __init__(self, message: str, stages: list[StageExecution] | None = None) -> None:
         super().__init__(message)
         self.stages = stages or []
 
@@ -31,8 +30,7 @@ def topological_sort(
     stages: list[StageExecution],
     stage_filter: Callable[[StageExecution], bool] = lambda s: s.parent_stage_id is None,
 ) -> list[StageExecution]:
-    """
-    Sort stages into topological order based on their dependencies.
+    """Sort stages into topological order based on their dependencies.
 
     The algorithm:
 
@@ -101,8 +99,7 @@ def topological_sort(
 
 
 def topological_sort_all_stages(stages: list[StageExecution]) -> list[StageExecution]:
-    """
-    Sort all stages including synthetic stages.
+    """Sort all stages including synthetic stages.
 
     Unlike topological_sort(), this does not filter out synthetic stages.
 
@@ -116,8 +113,7 @@ def topological_sort_all_stages(stages: list[StageExecution]) -> list[StageExecu
 
 
 def validate_dag(stages: list[StageExecution]) -> bool:
-    """
-    Validate that stages form a valid DAG.
+    """Validate that stages form a valid DAG.
 
     Returns True if valid, raises CircularDependencyError if invalid.
 
@@ -204,8 +200,7 @@ def validate_stage_graph(stages: list[StageExecution]) -> None:
 
 
 def find_initial_stages(stages: list[StageExecution]) -> list[StageExecution]:
-    """
-    Find all initial stages (those with no dependencies and not synthetic).
+    """Find all initial stages (those with no dependencies and not synthetic).
 
     Args:
         stages: List of stages to search
@@ -217,8 +212,7 @@ def find_initial_stages(stages: list[StageExecution]) -> list[StageExecution]:
 
 
 def find_terminal_stages(stages: list[StageExecution]) -> list[StageExecution]:
-    """
-    Find all terminal stages (those with no downstream stages and not synthetic).
+    """Find all terminal stages (those with no downstream stages and not synthetic).
 
     Terminal stages are the last stages in the pipeline - no other stages
     depend on them.
@@ -239,8 +233,7 @@ def find_terminal_stages(stages: list[StageExecution]) -> list[StageExecution]:
 
 
 def get_execution_layers(stages: list[StageExecution]) -> list[list[StageExecution]]:
-    """
-    Group stages into execution layers.
+    """Group stages into execution layers.
 
     Stages in the same layer can execute in parallel.
     Each layer depends only on stages in previous layers.

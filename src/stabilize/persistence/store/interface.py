@@ -1,5 +1,4 @@
-"""
-WorkflowStore interface.
+"""WorkflowStore interface.
 
 This module defines the abstract interface for execution persistence.
 All storage backends must implement this interface.
@@ -12,7 +11,6 @@ Enterprise Features:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -29,6 +27,8 @@ from stabilize.persistence.store.signal_defaults import SignalStoreDefaults
 WORKFLOW_ABSENT_ERRORS = (_WorkflowNotFoundErrorStore, _WorkflowNotFoundErrorModel)
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
     from stabilize.queue import Queue
@@ -44,20 +44,17 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
 
     @abstractmethod
     def store(self, execution: Workflow) -> None:
-        """
-        Store a complete execution.
+        """Store a complete execution.
 
         Creates the execution and all its stages.
 
         Args:
             execution: The execution to store
         """
-        pass
 
     @abstractmethod
     def retrieve(self, execution_id: str) -> Workflow:
-        """
-        Retrieve an execution by ID.
+        """Retrieve an execution by ID.
 
         Args:
             execution_id: The execution ID
@@ -68,12 +65,10 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         Raises:
             WorkflowNotFoundError: If not found
         """
-        pass
 
     @abstractmethod
     def retrieve_execution_summary(self, execution_id: str) -> Workflow:
-        """
-        Retrieve execution metadata without stages.
+        """Retrieve execution metadata without stages.
 
         Args:
             execution_id: The execution ID
@@ -84,27 +79,22 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         Raises:
             WorkflowNotFoundError: If not found
         """
-        pass
 
     @abstractmethod
     def update_status(self, execution: Workflow) -> None:
-        """
-        Update the status of an execution.
+        """Update the status of an execution.
 
         Args:
             execution: The execution with updated status
         """
-        pass
 
     @abstractmethod
     def delete(self, execution_id: str) -> None:
-        """
-        Delete an execution and all its stages.
+        """Delete an execution and all its stages.
 
         Args:
             execution_id: The execution ID
         """
-        pass
 
     # ========== Stage Operations ==========
 
@@ -114,8 +104,7 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         stage: StageExecution,
         expected_phase: str | None = None,
     ) -> None:
-        """
-        Store or update a stage.
+        """Store or update a stage.
 
         Args:
             stage: The stage to store
@@ -123,17 +112,14 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
                            This enables phase-aware optimistic locking where updates only
                            succeed if the stage is in the expected status.
         """
-        pass
 
     @abstractmethod
     def add_stage(self, stage: StageExecution) -> None:
-        """
-        Add a new stage to an execution.
+        """Add a new stage to an execution.
 
         Args:
             stage: The stage to add
         """
-        pass
 
     @abstractmethod
     def remove_stage(
@@ -141,19 +127,16 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         execution: Workflow,
         stage_id: str,
     ) -> None:
-        """
-        Remove a stage from an execution.
+        """Remove a stage from an execution.
 
         Args:
             execution: The execution
             stage_id: The stage ID to remove
         """
-        pass
 
     @abstractmethod
     def retrieve_stage(self, stage_id: str) -> StageExecution:
-        """
-        Retrieve a single stage by ID.
+        """Retrieve a single stage by ID.
 
         The returned stage will have a partial parent execution attached
         (containing metadata but no other stages).
@@ -167,7 +150,6 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         Raises:
             ValueError: If stage not found
         """
-        pass
 
     @abstractmethod
     def get_upstream_stages(
@@ -175,8 +157,7 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         execution_id: str,
         stage_ref_id: str,
     ) -> list[StageExecution]:
-        """
-        Get upstream stages for a given stage.
+        """Get upstream stages for a given stage.
 
         Args:
             execution_id: The execution ID
@@ -185,7 +166,6 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         Returns:
             List of upstream stages
         """
-        pass
 
     @abstractmethod
     def get_downstream_stages(
@@ -193,8 +173,7 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         execution_id: str,
         stage_ref_id: str,
     ) -> list[StageExecution]:
-        """
-        Get downstream stages for a given stage.
+        """Get downstream stages for a given stage.
 
         Args:
             execution_id: The execution ID
@@ -203,7 +182,6 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         Returns:
             List of downstream stages
         """
-        pass
 
     @abstractmethod
     def get_synthetic_stages(
@@ -211,8 +189,7 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         execution_id: str,
         parent_stage_id: str,
     ) -> list[StageExecution]:
-        """
-        Get synthetic stages for a given parent stage.
+        """Get synthetic stages for a given parent stage.
 
         Args:
             execution_id: The execution ID
@@ -221,7 +198,6 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         Returns:
             List of synthetic stages
         """
-        pass
 
     @abstractmethod
     def get_merged_ancestor_outputs(
@@ -229,8 +205,7 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         execution_id: str,
         stage_ref_id: str,
     ) -> dict[str, Any]:
-        """
-        Get merged outputs from all ancestor stages.
+        """Get merged outputs from all ancestor stages.
 
         Traverses the DAG upstream, collects outputs, and merges them
         according to topological order (latest wins).
@@ -242,7 +217,6 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         Returns:
             Merged dictionary of outputs
         """
-        pass
 
     # ========== Query Operations ==========
 
@@ -252,8 +226,7 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         pipeline_config_id: str,
         criteria: WorkflowCriteria | None = None,
     ) -> Iterator[Workflow]:
-        """
-        Retrieve executions by pipeline config ID.
+        """Retrieve executions by pipeline config ID.
 
         Args:
             pipeline_config_id: The pipeline config ID
@@ -262,7 +235,6 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         Returns:
             Iterator of matching executions
         """
-        pass
 
     @abstractmethod
     def retrieve_by_application(
@@ -270,8 +242,7 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         application: str,
         criteria: WorkflowCriteria | None = None,
     ) -> Iterator[Workflow]:
-        """
-        Retrieve executions by application.
+        """Retrieve executions by application.
 
         Args:
             application: The application name
@@ -280,7 +251,6 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         Returns:
             Iterator of matching executions
         """
-        pass
 
     # ========== Pause/Resume Operations ==========
 
@@ -290,24 +260,20 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         execution_id: str,
         paused_by: str,
     ) -> None:
-        """
-        Pause an execution.
+        """Pause an execution.
 
         Args:
             execution_id: The execution ID
             paused_by: Who paused it
         """
-        pass
 
     @abstractmethod
     def resume(self, execution_id: str) -> None:
-        """
-        Resume a paused execution.
+        """Resume a paused execution.
 
         Args:
             execution_id: The execution ID
         """
-        pass
 
     # ========== Cancel Operations ==========
 
@@ -318,21 +284,18 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         canceled_by: str,
         reason: str,
     ) -> None:
-        """
-        Cancel an execution.
+        """Cancel an execution.
 
         Args:
             execution_id: The execution ID
             canceled_by: Who canceled it
             reason: Cancellation reason
         """
-        pass
 
     # ========== Message Deduplication ==========
 
     def is_message_processed(self, message_id: str) -> bool:
-        """
-        Check if a message has already been processed.
+        """Check if a message has already been processed.
 
         Used for idempotency - prevents duplicate message processing.
 
@@ -359,8 +322,7 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         raise NotImplementedError(f"{type(self).__name__} does not claim messages")
 
     def cleanup_completed_stage_claims(self) -> int:
-        """
-        Delete stage claims of executions in terminal states.
+        """Delete stage claims of executions in terminal states.
 
         Claims of live executions must never be removed: doing so would
         resurrect the mutex/deferred-choice race the claim prevents.
@@ -377,8 +339,7 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         handler_type: str | None = None,
         execution_id: str | None = None,
     ) -> None:
-        """
-        Mark a message as successfully processed.
+        """Mark a message as successfully processed.
 
         Args:
             message_id: The unique message ID
@@ -386,11 +347,9 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
             execution_id: Optional execution ID for debugging
         """
         # Default implementation: no-op
-        pass
 
     def get_processed_message_ids(self, limit: int | None = None) -> list[str] | None:
-        """
-        Return processed message IDs, for hydrating an in-memory dedup cache.
+        """Return processed message IDs, for hydrating an in-memory dedup cache.
 
         Args:
             limit: Maximum number of IDs to return (None for all)
@@ -406,8 +365,7 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
     # ========== Optional Methods ==========
 
     def is_healthy(self) -> bool:
-        """
-        Check if the repository is healthy.
+        """Check if the repository is healthy.
 
         Returns:
             True if healthy
@@ -415,8 +373,7 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         return True
 
     def count_by_application(self, application: str) -> int:
-        """
-        Count executions for an application.
+        """Count executions for an application.
 
         Args:
             application: The application name
@@ -427,8 +384,7 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         return sum(1 for _ in self.retrieve_by_application(application))
 
     def exists(self, execution_id: str) -> bool:
-        """
-        Check if a workflow exists.
+        """Check if a workflow exists.
 
         Only a genuine absence returns False. An operational failure -- a
         missing table, an unreachable database, a permission error -- is
@@ -452,8 +408,7 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
 
     @contextmanager
     def transaction(self, queue: Queue | None = None) -> Iterator[StoreTransaction]:
-        """
-        Create an atomic transaction for store + queue operations.
+        """Create an atomic transaction for store + queue operations.
 
         Use this when you need to atomically update both stage state AND
         queue a message. This prevents orphaned workflows from crashes
@@ -479,10 +434,5 @@ class WorkflowStore(SignalStoreDefaults, MaintenanceDefaults, QueryDefaults, ABC
         from .noop_transaction import NoOpTransaction
 
         txn = NoOpTransaction(self, queue)
-        try:
-            yield txn
-            # Flush pending messages on successful exit
-            txn._flush_messages()
-        except Exception:
-            # Don't flush on exception
-            raise
+        yield txn
+        txn._flush_messages()

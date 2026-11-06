@@ -1,10 +1,11 @@
-"""
-SQL schema constants for SQLite event store.
+"""SQL schema constants for SQLite event store.
 
 Defines the table schemas for events, snapshots, and subscriptions.
 """
 
 # Schema for events table
+from __future__ import annotations
+
 EVENTS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,

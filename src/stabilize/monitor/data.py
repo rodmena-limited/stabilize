@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import contextlib
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from stabilize.models.status import WorkflowStatus
@@ -30,8 +31,7 @@ if TYPE_CHECKING:
 
 
 def _count(row: Any) -> int:
-    """Read a single COUNT(*) value from a cursor row regardless of whether
-    the driver returns tuples (sqlite3.Row) or dicts (psycopg dict_row)."""
+    """Read one COUNT(*) value from a cursor row, whether the driver returns a tuple-like row or a dict."""
     if row is None:
         return 0
     try:
@@ -42,8 +42,8 @@ def _count(row: Any) -> int:
 
 # Re-export for backward compatibility
 __all__ = [
-    "MonitorDataFetcher",
     "MonitorData",
+    "MonitorDataFetcher",
     "QueueStats",
     "StageView",
     "TaskView",
@@ -62,7 +62,7 @@ class MonitorDataFetcher:
         queue: Queue | None = None,
         stuck_threshold_seconds: int = 300,
         tenant: str | None = None,
-    ):
+    ) -> None:
         self.store = store
         self.queue = queue
         self.stuck_threshold_seconds = stuck_threshold_seconds
@@ -94,14 +94,14 @@ class MonitorDataFetcher:
                 workflows=workflows,
                 queue_stats=queue_stats,
                 workflow_stats=workflow_stats,
-                fetch_time=datetime.now(),
+                fetch_time=datetime.now(UTC).astimezone(),
             )
         except Exception as e:
             return MonitorData(
                 workflows=[],
                 queue_stats=QueueStats(),
                 workflow_stats=WorkflowStats(),
-                fetch_time=datetime.now(),
+                fetch_time=datetime.now(UTC).astimezone(),
                 error=str(e),
             )
 
@@ -120,80 +120,81 @@ class MonitorDataFetcher:
 
         # 1. Fetch Workflows
         # ------------------
+        from stabilize.persistence.sqlite import SqliteWorkflowStore
+
         if hasattr(self.store, "_pool"):
             # PostgreSQL
-            with getattr(self.store, "_pool").connection() as conn:
-                with conn.cursor() as cur:
-                    # Build Query
-                    query, params = self._build_workflow_query(app_filter, limit, status_filter, dialect="postgres")
-                    cur.execute(query, params)
-                    rows = cur.fetchall()
+            with self.store._pool.connection() as conn, conn.cursor() as cur:
+                # Build Query
+                query, params = self._build_workflow_query(app_filter, limit, status_filter, dialect="postgres")
+                cur.execute(query, params)
+                rows = cur.fetchall()
 
-                    for row in rows:
-                        wf_view = self._row_to_workflow_view(row)
-                        workflows_map[wf_view.id] = wf_view
-                        workflow_ids.append(wf_view.id)
+                for row in rows:
+                    wf_view = self._row_to_workflow_view(row)
+                    workflows_map[wf_view.id] = wf_view
+                    workflow_ids.append(wf_view.id)
 
-                    if not workflow_ids:
-                        return []
+                if not workflow_ids:
+                    return []
 
-                    # 2. Fetch Stages
-                    # ---------------
-                    cur.execute(
-                        f"""
+                # 2. Fetch Stages
+                # ---------------
+                cur.execute(
+                    f"""
                         SELECT {_PG_STAGE} FROM stage_executions
                         WHERE execution_id = ANY(%(ids)s){self._pg_tenant()[0]}
                         ORDER BY start_time ASC
                         """,
-                        {"ids": workflow_ids, **self._pg_tenant()[1]},
-                    )
-                    stage_rows = cur.fetchall()
+                    {"ids": workflow_ids, **self._pg_tenant()[1]},
+                )
+                stage_rows = cur.fetchall()
 
-                    stage_map = {}  # id -> StageView
-                    for row in stage_rows:
-                        stage_view = self._row_to_stage_view(row)
-                        # Temp map by ref_id for linking? No, need unique ID
-                        stage_map[stage_view.ref_id] = stage_view
-                        # Actually we need to attach to workflow immediately
-                        if stage_view.execution_id in workflows_map:
-                            workflows_map[stage_view.execution_id].stages.append(stage_view)
-                            stage_ids.append(row["id"])
+                stage_map = {}  # id -> StageView
+                for row in stage_rows:
+                    stage_view = self._row_to_stage_view(row)
+                    # Temp map by ref_id for linking? No, need unique ID
+                    stage_map[stage_view.ref_id] = stage_view
+                    # Actually we need to attach to workflow immediately
+                    if stage_view.execution_id in workflows_map:
+                        workflows_map[stage_view.execution_id].stages.append(stage_view)
+                        stage_ids.append(row["id"])
 
-                    if not stage_ids:
-                        return list(workflows_map.values())
+                if not stage_ids:
+                    return list(workflows_map.values())
 
-                    # 3. Fetch Tasks
-                    # --------------
-                    cur.execute(
-                        f"""
+                # 3. Fetch Tasks
+                # --------------
+                cur.execute(
+                    f"""
                         SELECT {_PG_TASK} FROM task_executions
                         WHERE stage_id = ANY(%(ids)s){self._pg_tenant()[0]}
                         ORDER BY start_time ASC
                         """,
-                        {"ids": stage_ids, **self._pg_tenant()[1]},
-                    )
-                    task_rows = cur.fetchall()
+                    {"ids": stage_ids, **self._pg_tenant()[1]},
+                )
+                task_rows = cur.fetchall()
 
-                    # Map tasks to stages. We need a way to find stage by ID.
-                    # Re-iterate stages to build a lookup map by DB ID
-                    stage_lookup = {}
-                    for wf in workflows_map.values():
-                        for stage in wf.stages:
-                            # We need the internal DB ID to link tasks, but StageView doesn't have it by default.
-                            # We stored it in _row_to_stage_view temporarily
-                            if stage.db_id is not None:
-                                stage_lookup[stage.db_id] = stage
+                # Map tasks to stages. We need a way to find stage by ID.
+                # Re-iterate stages to build a lookup map by DB ID
+                stage_lookup = {}
+                for wf in workflows_map.values():
+                    for stage in wf.stages:
+                        # We need the internal DB ID to link tasks, but StageView doesn't have it by default.
+                        # We stored it in _row_to_stage_view temporarily
+                        if stage.db_id is not None:
+                            stage_lookup[stage.db_id] = stage
 
-                    for row in task_rows:
-                        task_view = self._row_to_task_view(row)
-                        stage_id = row["stage_id"]
-                        if stage_id in stage_lookup:
-                            stage_lookup[stage_id].tasks.append(task_view)
+                for row in task_rows:
+                    task_view = self._row_to_task_view(row)
+                    stage_id = row["stage_id"]
+                    if stage_id in stage_lookup:
+                        stage_lookup[stage_id].tasks.append(task_view)
 
-        elif hasattr(self.store, "_manager"):
+        elif isinstance(self.store, SqliteWorkflowStore):
             # SQLite
-            conn_mgr = getattr(self.store, "_manager")
-            conn = conn_mgr.get_sqlite_connection(getattr(self.store, "connection_string"))
+            conn_mgr = self.store._manager
+            conn = conn_mgr.get_sqlite_connection(self.store.connection_string)
             cursor = conn.cursor()
 
             # 1. Fetch Workflows
@@ -256,11 +257,10 @@ class MonitorDataFetcher:
 
         # Sort stages and tasks just in case DB didn't
         # And convert dictionary to list
-        sorted_workflows = sorted(
+        return sorted(
             workflows_map.values(),
             key=lambda w: (0 if w.status == WorkflowStatus.RUNNING else 1, w.start_time or 0),
         )
-        return sorted_workflows
 
     def _fetch_workflows_through_store(
         self, app_filter: str | None, limit: int, status_filter: str
@@ -355,24 +355,23 @@ class MonitorDataFetcher:
                 LIMIT %(limit)s
             """
             return query, pg_params
-        else:
-            sqlite_params: list[Any] = []
-            if app:
-                clauses.append("application = ?")
-                sqlite_params.append(app)
-            if self.tenant is not None:
-                clauses.append("stabilize_tenant = ?")
-                sqlite_params.append(self.tenant)
+        sqlite_params: list[Any] = []
+        if app:
+            clauses.append("application = ?")
+            sqlite_params.append(app)
+        if self.tenant is not None:
+            clauses.append("stabilize_tenant = ?")
+            sqlite_params.append(self.tenant)
 
-            if status == "running":
-                clauses.append("status = 'RUNNING'")
-            elif status == "failed":
-                clauses.append("status IN ('TERMINAL', 'FAILED_CONTINUE', 'CANCELED')")
+        if status == "running":
+            clauses.append("status = 'RUNNING'")
+        elif status == "failed":
+            clauses.append("status IN ('TERMINAL', 'FAILED_CONTINUE', 'CANCELED')")
 
-            where = "WHERE " + " AND ".join(clauses) if clauses else ""
-            sqlite_params.append(limit)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        sqlite_params.append(limit)
 
-            query = f"""
+        query = f"""
                 SELECT {_SQLITE_PIPELINE} FROM pipeline_executions
                 {where}
                 ORDER BY
@@ -380,7 +379,7 @@ class MonitorDataFetcher:
                     created_at DESC
                 LIMIT ?
             """
-            return query, sqlite_params
+        return query, sqlite_params
 
     def _row_to_workflow_view(self, row: Any) -> WorkflowView:
         return WorkflowView(
@@ -408,7 +407,7 @@ class MonitorDataFetcher:
     def _row_to_task_view(self, row: Any) -> TaskView:
         # Handle JSON exception details safely
         error = None
-        try:
+        with contextlib.suppress(Exception):
             details = row["task_exception_details"]
             if details:
                 if isinstance(details, str):
@@ -417,8 +416,6 @@ class MonitorDataFetcher:
                     details = json.loads(details)
                 if isinstance(details, dict):
                     error = details.get("message")
-        except Exception:
-            pass
 
         return TaskView(
             name=row["name"],

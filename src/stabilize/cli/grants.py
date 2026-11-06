@@ -129,10 +129,10 @@ def format_report(report: GrantReport) -> list[str]:
     lines = [f"{header}, {len(report.tables)} engine table(s) from the shipped migrations"]
     if not report.schema_usage:
         lines.append(f"  MISSING  USAGE on schema {report.schema}")
-    for table in report.missing_tables:
-        lines.append(
-            f"  MISSING  table {report.schema}.{table} does not exist (migrations not applied, or wrong schema)"
-        )
+    lines.extend(
+        f"  MISSING  table {report.schema}.{table} does not exist (migrations not applied, or wrong schema)"
+        for table in report.missing_tables
+    )
     for table, privileges in report.missing_privileges.items():
         lines.append(f"  MISSING  {', '.join(privileges)} on {report.schema}.{table}")
     for table, sequence in report.missing_sequences.items():

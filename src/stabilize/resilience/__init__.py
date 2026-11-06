@@ -1,9 +1,10 @@
-"""
-Resilience patterns for Stabilize.
+"""Resilience patterns for Stabilize.
 
 This package provides bulkhead and circuit breaker patterns using
 bulkman and resilient_circuit libraries.
 """
+
+from __future__ import annotations
 
 from stabilize.resilience.bulkheads import TaskBulkheadManager
 from stabilize.resilience.circuits import WorkflowCircuitFactory

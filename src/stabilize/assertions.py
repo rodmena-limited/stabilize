@@ -1,5 +1,4 @@
-"""
-Assertion helpers for validating preconditions and results.
+"""Assertion helpers for validating preconditions and results.
 
 This module provides assertion utilities that raise descriptive exceptions
 when conditions are not met. These are useful for:
@@ -45,27 +44,27 @@ T = TypeVar("T")
 
 # Re-export exceptions for backward compatibility
 __all__ = [
-    "StabilizeError",
-    "StabilizeFatalError",
-    "StabilizeExpectedError",
-    "PreconditionError",
+    "ConfigError",
     "ContextError",
     "OutputError",
-    "ConfigError",
-    "VerificationError",
+    "PreconditionError",
+    "StabilizeError",
+    "StabilizeExpectedError",
+    "StabilizeFatalError",
     "StageNotReadyError",
-    "assert_true",
+    "VerificationError",
+    "assert_config",
     "assert_context",
-    "assert_context_type",
     "assert_context_in",
+    "assert_context_type",
+    "assert_no_upstream_failures",
+    "assert_non_empty",
+    "assert_not_none",
     "assert_output",
     "assert_output_type",
     "assert_stage_ready",
-    "assert_no_upstream_failures",
-    "assert_config",
+    "assert_true",
     "assert_verified",
-    "assert_not_none",
-    "assert_non_empty",
 ]
 
 
@@ -75,8 +74,7 @@ __all__ = [
 
 
 def assert_true(condition: bool, message: str) -> None:
-    """
-    Assert that a condition is true.
+    """Assert that a condition is true.
 
     Args:
         condition: The condition to check
@@ -97,8 +95,7 @@ def assert_context(
     key: str,
     message: str | None = None,
 ) -> Any:
-    """
-    Assert that a context key exists and return its value.
+    """Assert that a context key exists and return its value.
 
     Args:
         stage: The stage execution
@@ -128,8 +125,7 @@ def assert_context_type(
     expected_type: type[T],
     message: str | None = None,
 ) -> T:
-    """
-    Assert that a context key exists and has the expected type.
+    """Assert that a context key exists and has the expected type.
 
     Args:
         stage: The stage execution
@@ -161,8 +157,7 @@ def assert_context_in(
     allowed_values: list[Any],
     message: str | None = None,
 ) -> Any:
-    """
-    Assert that a context value is in a list of allowed values.
+    """Assert that a context value is in a list of allowed values.
 
     Args:
         stage: The stage execution
@@ -193,8 +188,7 @@ def assert_output(
     key: str,
     message: str | None = None,
 ) -> Any:
-    """
-    Assert that an output key exists and return its value.
+    """Assert that an output key exists and return its value.
 
     Args:
         stage: The stage execution
@@ -224,8 +218,7 @@ def assert_output_type(
     expected_type: type[T],
     message: str | None = None,
 ) -> T:
-    """
-    Assert that an output key exists and has the expected type.
+    """Assert that an output key exists and has the expected type.
 
     Args:
         stage: The stage execution
@@ -255,8 +248,7 @@ def assert_stage_ready(
     stage: StageExecution,
     message: str | None = None,
 ) -> None:
-    """
-    Assert that all upstream stages have completed successfully.
+    """Assert that all upstream stages have completed successfully.
 
     Args:
         stage: The stage execution to check
@@ -279,8 +271,7 @@ def assert_no_upstream_failures(
     stage: StageExecution,
     message: str | None = None,
 ) -> None:
-    """
-    Assert that no upstream stages have failed.
+    """Assert that no upstream stages have failed.
 
     Args:
         stage: The stage execution to check
@@ -304,8 +295,7 @@ def assert_config(
     message: str,
     field: str | None = None,
 ) -> None:
-    """
-    Assert a configuration condition.
+    """Assert a configuration condition.
 
     Args:
         condition: The condition to check
@@ -327,8 +317,7 @@ def assert_verified(
     message: str,
     details: dict[str, Any] | None = None,
 ) -> None:
-    """
-    Assert a verification condition.
+    """Assert a verification condition.
 
     Args:
         condition: The condition to check
@@ -349,8 +338,7 @@ def assert_not_none(
     value: T | None,
     message: str,
 ) -> T:
-    """
-    Assert that a value is not None and return it.
+    """Assert that a value is not None and return it.
 
     Args:
         value: The value to check
@@ -374,8 +362,7 @@ def assert_non_empty(
     value: str | list[Any] | dict[str, Any],
     message: str,
 ) -> str | list[Any] | dict[str, Any]:
-    """
-    Assert that a value is not empty.
+    """Assert that a value is not empty.
 
     Works with strings, lists, and dicts.
 

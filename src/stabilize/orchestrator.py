@@ -1,5 +1,4 @@
-"""
-Orchestrator - starts and manages pipeline executions.
+"""Orchestrator - starts and manages pipeline executions.
 
 This module provides the main entry point for running pipelines.
 """
@@ -30,8 +29,7 @@ if TYPE_CHECKING:
 
 
 class Orchestrator:
-    """
-    Runner for pipeline executions.
+    """Runner for pipeline executions.
 
     Provides methods to start, cancel, restart, and resume executions
     by pushing appropriate messages to the queue atomically with the store.
@@ -47,8 +45,7 @@ class Orchestrator:
         queue: Queue,
         store: WorkflowStore | None = None,
     ) -> None:
-        """
-        Initialize the runner.
+        """Initialize the runner.
 
         Args:
             queue: The message queue
@@ -107,8 +104,7 @@ class Orchestrator:
         execution: Workflow,
         handler_config: HandlerConfig | None = None,
     ) -> None:
-        """
-        Start a pipeline execution atomically.
+        """Start a pipeline execution atomically.
 
         If a store is configured, wraps the queue push in a transaction
         to ensure atomicity with any prior status updates.
@@ -152,8 +148,7 @@ class Orchestrator:
         user: str,
         reason: str,
     ) -> None:
-        """
-        Cancel a running execution atomically.
+        """Cancel a running execution atomically.
 
         Args:
             execution: The execution to cancel
@@ -179,8 +174,7 @@ class Orchestrator:
         execution: Workflow,
         stage_id: str,
     ) -> None:
-        """
-        Restart a stage in an execution atomically.
+        """Restart a stage in an execution atomically.
 
         Args:
             execution: The execution
@@ -200,7 +194,8 @@ class Orchestrator:
                 self.queue.push(message)
 
     def _resume_without_paused_stages(self, execution: Workflow) -> None:
-        assert self.store is not None
+        if self.store is None:
+            raise RuntimeError("Orchestrator has no store; resume needs one")
         with self.store.transaction(self.queue) as txn:
             status, _ = txn.workflow_status(execution.id)
             if status != WorkflowStatus.PAUSED.name:
@@ -247,8 +242,7 @@ class Orchestrator:
             )
 
     def unpause(self, execution: Workflow) -> None:
-        """
-        Resume a paused execution atomically.
+        """Resume a paused execution atomically.
 
         Loads fresh execution state from store (if available) to prevent
         stale read issues where the in-memory execution doesn't reflect
@@ -259,9 +253,7 @@ class Orchestrator:
         """
         # Load fresh state if store available to prevent stale reads
         if self.store:
-            fresh_execution = self.store.retrieve(execution.id)
-            if fresh_execution:
-                execution = fresh_execution
+            execution = self.store.retrieve(execution.id)
             try:
                 with self.store.transaction(self.queue) as txn:
                     if txn.is_atomic:
@@ -271,16 +263,15 @@ class Orchestrator:
                 pass
 
         # Collect all resume messages
-        messages = []
-        for stage in execution.stages:
-            if stage.status.name == "PAUSED":
-                messages.append(
-                    ResumeStage(
-                        execution_type=execution.type.value,
-                        execution_id=execution.id,
-                        stage_id=stage.id,
-                    )
-                )
+        messages = [
+            ResumeStage(
+                execution_type=execution.type.value,
+                execution_id=execution.id,
+                stage_id=stage.id,
+            )
+            for stage in execution.stages
+            if stage.status.name == "PAUSED"
+        ]
 
         if self.store and not messages and execution.status == WorkflowStatus.PAUSED:
             self._resume_without_paused_stages(execution)

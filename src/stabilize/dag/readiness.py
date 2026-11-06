@@ -1,5 +1,4 @@
-"""
-Predicate-based readiness evaluation for stage execution.
+"""Predicate-based readiness evaluation for stage execution.
 
 Provides pure functions to evaluate whether a stage is ready to execute
 based on its upstream dependencies. This logic is extracted from
@@ -35,11 +34,25 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from stabilize.dag.readiness_types import PredicatePhase as PredicatePhase
-from stabilize.dag.readiness_types import ReadinessResult as ReadinessResult
+from stabilize.dag.readiness_types import PredicatePhase, ReadinessResult
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from stabilize.models.stage import StageExecution
+
+__all__ = [
+    "MM_CONSUMED",
+    "MM_FIRINGS",
+    "MM_TRIGGER",
+    "PRUNED",
+    "PRUNED_FROM",
+    "PredicatePhase",
+    "ReadinessResult",
+    "check_recursive_failures",
+    "evaluate_readiness",
+    "multi_merge_candidates",
+]
 
 
 PRUNED_FROM = "_pruned_from"
@@ -68,7 +81,7 @@ def _is_dead_edge(stage: StageExecution, upstream: StageExecution) -> bool:
 
 def evaluate_readiness(
     stage: StageExecution,
-    upstream_stages: list[StageExecution],
+    upstream_stages: Sequence[StageExecution | None],
     jump_bypass: bool = False,
 ) -> ReadinessResult:
     """Pure function: check if stage is ready to execute.
@@ -77,13 +90,15 @@ def evaluate_readiness(
 
     Args:
         stage: The stage being evaluated
-        upstream_stages: List of stages this stage depends on
+        upstream_stages: The stages this stage depends on; None entries are ignored
         jump_bypass: If True, skip prerequisite checks (for dynamic routing)
 
     Returns:
         ReadinessResult with phase and supporting information.
     """
     from stabilize.models.stage import JoinType
+
+    present = [u for u in upstream_stages if u is not None]
 
     # Early exit: jump bypass skips all prerequisite checks
     if jump_bypass:
@@ -93,7 +108,7 @@ def evaluate_readiness(
         )
 
     # No upstream dependencies = ready
-    if not upstream_stages:
+    if not present:
         return ReadinessResult(
             phase=PredicatePhase.READY,
             reason="No upstream dependencies",
@@ -102,7 +117,7 @@ def evaluate_readiness(
     # Drop edges a split de-selected, and edges from stages that were
     # themselves pruned. Absence of a marker means live, so a graph written by
     # an earlier version behaves exactly as it did before.
-    live_upstreams = [u for u in upstream_stages if u is not None and not _is_dead_edge(stage, u)]
+    live_upstreams = [u for u in present if not _is_dead_edge(stage, u)]
 
     if not live_upstreams:
         return ReadinessResult(
@@ -115,15 +130,14 @@ def evaluate_readiness(
 
     if join_type == JoinType.OR:
         return _evaluate_or_join(stage, live_upstreams)
-    elif join_type == JoinType.MULTI_MERGE:
+    if join_type == JoinType.MULTI_MERGE:
         return _evaluate_multi_merge(stage, live_upstreams)
-    elif join_type == JoinType.DISCRIMINATOR:
+    if join_type == JoinType.DISCRIMINATOR:
         return _evaluate_discriminator(stage, live_upstreams)
-    elif join_type == JoinType.N_OF_M:
+    if join_type == JoinType.N_OF_M:
         return _evaluate_n_of_m(stage, live_upstreams)
-    else:
-        # Default: AND join
-        return _evaluate_and_join(stage, live_upstreams)
+    # Default: AND join
+    return _evaluate_and_join(stage, live_upstreams)
 
 
 def _evaluate_and_join(
@@ -144,12 +158,7 @@ def _evaluate_and_join(
     )
 
     # Check for halted upstreams
-    failed_ids: list[str] = []
-    for upstream in upstream_stages:
-        if upstream is None:
-            continue
-        if upstream.status in HALT_STATUSES:
-            failed_ids.append(upstream.id)
+    failed_ids = [upstream.id for upstream in upstream_stages if upstream.status in HALT_STATUSES]
 
     if failed_ids:
         return ReadinessResult(
@@ -163,8 +172,6 @@ def _evaluate_and_join(
     not_complete_ids: list[str] = []
 
     for upstream in upstream_stages:
-        if upstream is None:
-            continue
         if upstream.status not in CONTINUABLE_STATUSES:
             not_complete_ids.append(upstream.id)
             if upstream.status in ACTIVE_STATUSES:
@@ -217,7 +224,7 @@ def _evaluate_or_join(
     activated_set = set(activated_branches)
 
     # Filter upstream stages to only activated ones
-    relevant_upstreams = [u for u in upstream_stages if u is not None and u.ref_id in activated_set]
+    relevant_upstreams = [u for u in upstream_stages if u.ref_id in activated_set]
 
     if not relevant_upstreams:
         return ReadinessResult(
@@ -226,10 +233,7 @@ def _evaluate_or_join(
         )
 
     # Check for halted activated upstreams
-    failed_ids: list[str] = []
-    for upstream in relevant_upstreams:
-        if upstream.status in HALT_STATUSES:
-            failed_ids.append(upstream.id)
+    failed_ids = [upstream.id for upstream in relevant_upstreams if upstream.status in HALT_STATUSES]
 
     if failed_ids:
         return ReadinessResult(
@@ -280,11 +284,7 @@ def multi_merge_candidates(
     from stabilize.models.status import CONTINUABLE_STATUSES
 
     consumed = set(stage.context.get(MM_CONSUMED) or ())
-    return sorted(
-        u.ref_id
-        for u in upstream_stages
-        if u is not None and u.status in CONTINUABLE_STATUSES and u.ref_id not in consumed
-    )
+    return sorted(u.ref_id for u in upstream_stages if u.status in CONTINUABLE_STATUSES and u.ref_id not in consumed)
 
 
 def _evaluate_multi_merge(
@@ -308,18 +308,18 @@ def _evaluate_multi_merge(
         )
 
     # Nothing left to fire for: halted-only means skip, otherwise keep waiting.
-    all_halted = all(u.status in HALT_STATUSES for u in upstream_stages if u is not None)
+    all_halted = all(u.status in HALT_STATUSES for u in upstream_stages)
     if all_halted:
         return ReadinessResult(
             phase=PredicatePhase.SKIP,
             reason="All upstream stages halted",
-            failed_upstream_ids=[u.id for u in upstream_stages if u is not None],
+            failed_upstream_ids=[u.id for u in upstream_stages],
         )
 
     return ReadinessResult(
         phase=PredicatePhase.NOT_READY,
         reason="No unconsumed upstream completion",
-        active_upstream_ids=[u.id for u in upstream_stages if u is not None],
+        active_upstream_ids=[u.id for u in upstream_stages],
     )
 
 
@@ -348,7 +348,7 @@ def _evaluate_discriminator(
 
     if join_fired:
         # Already fired - check if all upstreams are done (reset condition)
-        all_done = all(u.status.is_complete for u in upstream_stages if u is not None)
+        all_done = all(u.status.is_complete for u in upstream_stages)
         if all_done:
             # Reset: clear the flag so discriminator can fire again
             # Caller should handle this
@@ -363,8 +363,6 @@ def _evaluate_discriminator(
 
     # Not yet fired - check if any upstream has completed
     for upstream in upstream_stages:
-        if upstream is None:
-            continue
         if upstream.status in CONTINUABLE_STATUSES:
             return ReadinessResult(
                 phase=PredicatePhase.READY,
@@ -372,18 +370,18 @@ def _evaluate_discriminator(
             )
 
     # Check if all halted
-    all_halted = all(u.status in HALT_STATUSES for u in upstream_stages if u is not None)
+    all_halted = all(u.status in HALT_STATUSES for u in upstream_stages)
     if all_halted:
         return ReadinessResult(
             phase=PredicatePhase.SKIP,
             reason="All upstream stages halted before discriminator fired",
-            failed_upstream_ids=[u.id for u in upstream_stages if u is not None],
+            failed_upstream_ids=[u.id for u in upstream_stages],
         )
 
     return ReadinessResult(
         phase=PredicatePhase.NOT_READY,
         reason="Discriminator waiting for first upstream to complete",
-        active_upstream_ids=[u.id for u in upstream_stages if u is not None],
+        active_upstream_ids=[u.id for u in upstream_stages],
     )
 
 
@@ -422,8 +420,6 @@ def _evaluate_n_of_m(
     active_ids: list[str] = []
 
     for upstream in upstream_stages:
-        if upstream is None:
-            continue
         if upstream.status in CONTINUABLE_STATUSES:
             completed_ids.append(upstream.id)
         elif upstream.status in HALT_STATUSES:
@@ -478,17 +474,9 @@ def check_recursive_failures(
     """
     from stabilize.models.status import HALT_STATUSES, WorkflowStatus
 
-    failed_ids: list[str] = []
-
-    for upstream in upstream_stages:
-        if upstream is None:
-            continue
-
-        if upstream.status in HALT_STATUSES:
-            failed_ids.append(upstream.id)
-        elif upstream.status == WorkflowStatus.NOT_STARTED:
-            # Recursively check this upstream's dependencies
-            if upstream.any_upstream_stages_failed():
-                failed_ids.append(upstream.id)
-
-    return failed_ids
+    return [
+        upstream.id
+        for upstream in upstream_stages
+        if upstream.status in HALT_STATUSES
+        or (upstream.status == WorkflowStatus.NOT_STARTED and upstream.any_upstream_stages_failed())
+    ]

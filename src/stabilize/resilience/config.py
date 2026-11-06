@@ -1,5 +1,4 @@
-"""
-Resilience configuration for Stabilize.
+"""Resilience configuration for Stabilize.
 
 Provides configuration for bulkheads, circuit breakers, and handler behavior,
 with support for loading from environment variables.
@@ -291,8 +290,7 @@ def _default_bulkheads() -> tuple[tuple[str, BulkheadConfig], ...]:
 
 @dataclass(frozen=True)
 class ResilienceConfig:
-    """
-    Configuration for resilience patterns.
+    """Configuration for resilience patterns.
 
     This is a frozen (immutable) dataclass to ensure thread safety
     and enable configuration versioning.
@@ -350,8 +348,7 @@ class ResilienceConfig:
 
     @classmethod
     def from_env(cls) -> ResilienceConfig:
-        """
-        Load configuration from environment variables.
+        """Load configuration from environment variables.
 
         Returns a new frozen instance each time (immutable).
 

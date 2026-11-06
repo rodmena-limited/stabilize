@@ -1,5 +1,4 @@
-"""
-Query operations mixin for SqliteWorkflowStore.
+"""Query operations mixin for SqliteWorkflowStore.
 
 Provides graph traversal queries, listing, filtering, and
 pause/resume/cancel operations.
@@ -7,9 +6,6 @@ pause/resume/cancel operations.
 
 from __future__ import annotations
 
-import sqlite3
-from collections.abc import Iterator
-from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Any
 
 from stabilize.persistence.columns import select_list
@@ -31,14 +27,18 @@ from stabilize.persistence.sqlite.queries import (
 from stabilize.persistence.sqlite.queries import (
     retrieve_by_pipeline_config_id as _retrieve_by_pipeline_config_id,
 )
-from stabilize.persistence.store import WorkflowCriteria
 from stabilize.persistence.store.criteria import cursor_sql, order_sql, time_window_sql, version_sql
 
 _PIPELINE = select_list("pipeline_executions", "sqlite")
 
 if TYPE_CHECKING:
+    import sqlite3
+    from collections.abc import Iterator
+    from contextlib import AbstractContextManager
+
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
+    from stabilize.persistence.store import WorkflowCriteria
 
 
 class SqliteQueriesMixin:
@@ -129,10 +129,7 @@ class SqliteQueriesMixin:
             {"application": application, "limit": limit, "tenant": self.tenant},
         )
 
-        workflows = []
-        for row in result.fetchall():
-            workflows.append(row_to_execution(row))
-        return workflows
+        return [row_to_execution(row) for row in result.fetchall()]
 
     def get_all_pending_workflows(
         self,

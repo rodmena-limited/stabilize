@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from stabilize.dag.merge import merge_ancestor_outputs, topological_order
 from stabilize.persistence.columns import select_list
 from stabilize.persistence.sqlite.converters import row_to_stage, row_to_task
-from stabilize.persistence.store import WorkflowCriteria
 from stabilize.persistence.store.criteria import cursor_sql, order_sql, time_window_sql, version_sql
 
 _STAGE = select_list("stage_executions", "sqlite")
@@ -18,8 +15,12 @@ _TASK = select_list("task_executions", "sqlite")
 _STAGE_QUALIFIED = select_list("stage_executions", "sqlite", alias="stage_executions")
 
 if TYPE_CHECKING:
+    import sqlite3
+    from collections.abc import Callable, Iterator
+
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
+    from stabilize.persistence.store import WorkflowCriteria
 
 
 def load_tasks_for_stages(

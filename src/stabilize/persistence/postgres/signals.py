@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.persistence.tenancy import (
     TenancyModeChanged,
@@ -14,6 +14,9 @@ from stabilize.persistence.tenancy import (
     TenantError,
     TenantMismatchError,
 )
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,10 @@ GRANT_HINT = (
 
 class PostgresSignalMixin:
     tenant: str
+    if TYPE_CHECKING:
+
+        def _borrow(self) -> AbstractContextManager[Any]: ...
+
     """Persistent signal buffering, guarded by a one-time usability check.
 
     `workflow_signals` arrived in 0.28.1 and is read on every stage completion.
@@ -83,7 +90,7 @@ class PostgresSignalMixin:
             return False
 
         try:
-            with self._borrow() as conn:  # type: ignore[attr-defined]
+            with self._borrow() as conn:
                 with conn.cursor() as cur:
                     cur.execute(f"SELECT 1 FROM {SIGNAL_TABLE} WHERE FALSE")
                     cur.fetchall()
@@ -112,7 +119,7 @@ class PostgresSignalMixin:
         if not self.supports_signal_storage():
             return 0
         try:
-            with self._borrow() as conn:  # type: ignore[attr-defined]
+            with self._borrow() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"INSERT INTO {SIGNAL_TABLE} "
@@ -163,7 +170,7 @@ class PostgresSignalMixin:
             clauses += " AND id = %s"
             params.append(row_id)
         try:
-            with self._borrow() as conn:  # type: ignore[attr-defined]
+            with self._borrow() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"UPDATE {SIGNAL_TABLE} SET consumed = TRUE, consumed_at = NOW() "
@@ -191,7 +198,7 @@ class PostgresSignalMixin:
         if not self.supports_signal_storage():
             return 0
         try:
-            with self._borrow() as conn:  # type: ignore[attr-defined]
+            with self._borrow() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"SELECT count(*) AS n FROM {SIGNAL_TABLE} "
@@ -214,7 +221,7 @@ class PostgresSignalMixin:
         if not self.supports_signal_storage():
             return []
         try:
-            with self._borrow() as conn:  # type: ignore[attr-defined]
+            with self._borrow() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"SELECT id, signal_name, signal_data, signal_user FROM {SIGNAL_TABLE} "
@@ -251,7 +258,7 @@ class PostgresSignalMixin:
         if not self.supports_signal_storage():
             return None
         try:
-            with self._borrow() as conn:  # type: ignore[attr-defined]
+            with self._borrow() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"SELECT (EXTRACT(EPOCH FROM max(created_at)) * 1000)::bigint AS ms FROM {SIGNAL_TABLE} "
@@ -272,7 +279,7 @@ class PostgresSignalMixin:
         if not self.supports_signal_storage():
             return 0
         try:
-            with self._borrow() as conn:  # type: ignore[attr-defined]
+            with self._borrow() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"DELETE FROM {SIGNAL_TABLE} WHERE execution_id = %s "

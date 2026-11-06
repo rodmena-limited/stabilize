@@ -23,8 +23,7 @@ logger = logging.getLogger("stabilize.handlers.start_stage.handler")
 
 
 class _ClaimBlockedError(Exception):
-    """Raised inside the claim transaction when a mutex or deferred-choice
-    claim is held by another live stage; rolls the transaction back."""
+    """Raised inside the claim transaction when another live stage holds the mutex or deferred-choice claim."""
 
     def __init__(self, kind: str) -> None:
         super().__init__(kind)
@@ -52,7 +51,7 @@ class StartStageStarting(
             if stage.status == WorkflowStatus.RUNNING:
                 has_tasks = len(stage.tasks) > 0
                 synthetic_stages = self.repository.get_synthetic_stages(stage.execution.id, stage.id)
-                has_synthetic = synthetic_stages is not None and len(synthetic_stages) > 0
+                has_synthetic = len(synthetic_stages) > 0
 
                 if not has_tasks and not has_synthetic:
                     logger.warning(
@@ -61,7 +60,6 @@ class StartStageStarting(
                         stage.id,
                     )
                     # Proceed to planning (fall through)
-                    pass
                 else:
                     logger.debug(
                         "Ignoring StartStage for %s - already %s",
@@ -351,7 +349,7 @@ class StartStageStarting(
 
         # Record event if event recorder is configured
         if self.event_recorder:
-            self.set_event_context(stage.execution.id if stage.execution else "")
+            self.set_event_context(stage.execution.id)
             self.event_recorder.record_stage_started(
                 stage,
                 source_handler="StartStageHandler",

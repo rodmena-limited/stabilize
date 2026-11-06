@@ -1,5 +1,4 @@
-"""
-Orchestration methods for StartStageHandler.
+"""Orchestration methods for StartStageHandler.
 
 These methods collect start messages and cancel deferred-choice siblings.
 """
@@ -48,27 +47,25 @@ class StartStageOrchestrationMixin:
 
         # Fetch synthetic stages (returns empty list if none)
         synthetic_stages = self.repository.get_synthetic_stages(stage.execution.id, stage.id)
-        if synthetic_stages is None:
-            synthetic_stages = []
-        known = {s.id for s in synthetic_stages if s is not None}
+        known = {s.id for s in synthetic_stages}
         synthetic_stages = list(synthetic_stages) + [s for s in planned or [] if s.id not in known]
 
         # Check for before stages
         before_stages = [
             s
             for s in synthetic_stages
-            if s is not None and s.synthetic_stage_owner == SyntheticStageOwner.STAGE_BEFORE and s.is_initial()
+            if s.synthetic_stage_owner == SyntheticStageOwner.STAGE_BEFORE and s.is_initial()
         ]
 
         if before_stages:
-            for before in before_stages:
-                messages.append(
-                    StartStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=before.id,
-                    )
+            messages.extend(
+                StartStage(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=before.id,
                 )
+                for before in before_stages
+            )
             return messages
 
         # No before stages - start first task
@@ -87,20 +84,18 @@ class StartStageOrchestrationMixin:
 
         # No tasks - check for after stages
         after_stages = [
-            s
-            for s in synthetic_stages
-            if s is not None and s.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER and s.is_initial()
+            s for s in synthetic_stages if s.synthetic_stage_owner == SyntheticStageOwner.STAGE_AFTER and s.is_initial()
         ]
 
         if after_stages:
-            for after in after_stages:
-                messages.append(
-                    StartStage(
-                        execution_type=message.execution_type,
-                        execution_id=message.execution_id,
-                        stage_id=after.id,
-                    )
+            messages.extend(
+                StartStage(
+                    execution_type=message.execution_type,
+                    execution_id=message.execution_id,
+                    stage_id=after.id,
                 )
+                for after in after_stages
+            )
             return messages
 
         # No tasks or synthetic stages - complete immediately

@@ -1,6 +1,8 @@
 """Common validation schemas for Stabilize."""
 
 # Schema for shell task context
+from __future__ import annotations
+
 SHELL_TASK_SCHEMA = {
     "type": "object",
     "required": ["command"],

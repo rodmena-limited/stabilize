@@ -27,6 +27,7 @@ from stabilize.persistence.factory import detect_backend
 from stabilize.persistence.tenancy import refuse_foreign_row
 
 if TYPE_CHECKING:
+    from stabilize.persistence.borrow import EngineBorrower
     from stabilize.persistence.store import WorkflowStore
 
 
@@ -70,9 +71,24 @@ class TaskLeaseManager:
 
     # -- table management ---------------------------------------------------
 
+    def _sqlite_connection(self) -> sqlite3.Connection:
+        from stabilize.persistence.sqlite import SqliteWorkflowStore
+
+        if not isinstance(self._store, SqliteWorkflowStore):
+            raise TypeError(f"a sqlite task lease needs a SqliteWorkflowStore, not {type(self._store).__name__}")
+        return self._store._get_connection()
+
+    def _pool(self) -> EngineBorrower:
+        from stabilize.persistence.postgres import PostgresWorkflowStore
+
+        if not isinstance(self._store, PostgresWorkflowStore):
+            raise TypeError(f"a postgres task lease needs a PostgresWorkflowStore, not {type(self._store).__name__}")
+        engine: EngineBorrower = self._store._engine
+        return engine
+
     def _ensure_table(self) -> None:
         if self._backend == "sqlite":
-            conn = self._store._get_connection()  # type: ignore[attr-defined]
+            conn = self._sqlite_connection()
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS task_leases (
@@ -88,7 +104,7 @@ class TaskLeaseManager:
 
             ensure_tenant_schema(conn)
         else:
-            pool = self._store._engine  # type: ignore[attr-defined]
+            pool = self._pool()
             with pool.connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT to_regclass('task_leases') IS NOT NULL AS present")
@@ -117,7 +133,7 @@ class TaskLeaseManager:
         return self._acquire_postgres(task_id, now, expires)
 
     def _acquire_sqlite(self, task_id: str, now: int, expires: int) -> bool:
-        conn = self._store._get_connection()  # type: ignore[attr-defined]
+        conn = self._sqlite_connection()
         try:
             # Single transaction: clear an expired/owned lease, then claim.
             with conn:
@@ -131,14 +147,15 @@ class TaskLeaseManager:
                     "VALUES (?, ?, ?, ?, ?)",
                     (task_id, self.owner, now, expires, self._tenant),
                 )
-            return True
         except sqlite3.IntegrityError:
             held = conn.execute("SELECT stabilize_tenant FROM task_leases WHERE task_id = ?", (task_id,)).fetchone()
             refuse_foreign_row("task_leases", task_id, held[0] if held else None, self._tenant)
             return False
+        else:
+            return True
 
     def _acquire_postgres(self, task_id: str, now: int, expires: int) -> bool:
-        pool = self._store._engine  # type: ignore[attr-defined]
+        pool = self._pool()
         with pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -173,14 +190,14 @@ class TaskLeaseManager:
     def release(self, task_id: str) -> None:
         """Release the lease for a task if this worker holds it."""
         if self._backend == "sqlite":
-            conn = self._store._get_connection()  # type: ignore[attr-defined]
+            conn = self._sqlite_connection()
             with conn:
                 conn.execute(
                     "DELETE FROM task_leases WHERE task_id = ? AND owner = ? AND stabilize_tenant = ?",
                     (task_id, self.owner, self._tenant),
                 )
         else:
-            pool = self._store._engine  # type: ignore[attr-defined]
+            pool = self._pool()
             with pool.connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(

@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from stabilize.validation.errors import ValidationError
 from stabilize.validation.validator import SchemaValidator
+
+if TYPE_CHECKING:
+    from stabilize.validation.errors import ValidationError
 
 
 def validate_context(
     context: dict[str, Any],
     schema: dict[str, Any],
 ) -> list[ValidationError]:
-    """
-    Validate a stage context against a schema.
+    """Validate a stage context against a schema.
 
     Args:
         context: The stage context dictionary
@@ -42,8 +43,7 @@ def validate_outputs(
     outputs: dict[str, Any],
     schema: dict[str, Any],
 ) -> list[ValidationError]:
-    """
-    Validate stage outputs against a schema.
+    """Validate stage outputs against a schema.
 
     Args:
         outputs: The stage outputs dictionary
@@ -57,8 +57,7 @@ def validate_outputs(
 
 
 def is_valid(data: Any, schema: dict[str, Any]) -> bool:
-    """
-    Check if data is valid against a schema.
+    """Check if data is valid against a schema.
 
     Args:
         data: The data to validate

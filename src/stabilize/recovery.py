@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -41,6 +40,8 @@ from stabilize.queue.ownership import DEFAULT_TABLE, queue_table_name, workflow_
 from stabilize.recovery_plan import plan_running_workflow
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from stabilize.models.workflow import Workflow
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
@@ -192,12 +193,7 @@ class WorkflowRecovery:
                             result.stages_requeued,
                         )
                 except Exception as e:
-                    logger.error(
-                        "Failed to recover workflow %s: %s",
-                        workflow.id,
-                        e,
-                        exc_info=True,
-                    )
+                    logger.exception("Failed to recover workflow %s", workflow.id)
                     results.append(
                         RecoveryResult(
                             workflow_id=workflow.id,
@@ -213,8 +209,9 @@ class WorkflowRecovery:
                     own_table,
                     unowned,
                 )
-            for config_id in sorted(waiting_configs):
-                results.append(self._wake_waiting(config_id, waiting_limits.get(config_id, 0)))
+            results.extend(
+                self._wake_waiting(config_id, waiting_limits.get(config_id, 0)) for config_id in sorted(waiting_configs)
+            )
             if application is None and len(applications) > 1:
                 logger.warning(
                     "Unfiltered recovery on queue table %s examined %d applications (%s); "
@@ -280,7 +277,7 @@ class WorkflowRecovery:
         if application:
             return self.store.retrieve_by_application(application, criteria)
         if hasattr(self.store, "get_all_pending_workflows"):
-            return iter(getattr(self.store, "get_all_pending_workflows")(criteria))
+            return iter(self.store.get_all_pending_workflows(criteria))
         logger.warning(
             "Store doesn't support get_all_pending_workflows, recovery may be incomplete without application filter"
         )

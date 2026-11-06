@@ -1,5 +1,4 @@
-"""
-Resilience executor for Stabilize.
+"""Resilience executor for Stabilize.
 
 Provides a unified execution function that combines bulkhead and circuit
 breaker protection, mapping library exceptions to Stabilize's error types.
@@ -8,10 +7,8 @@ breaker protection, mapping library exceptions to Stabilize's error types.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from typing import Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
-from bulkman.config import ExecutionResult
 from bulkman.exceptions import (
     BulkheadCircuitOpenError,
     BulkheadError,
@@ -19,12 +16,18 @@ from bulkman.exceptions import (
     BulkheadShutdownError,
     BulkheadTimeoutError,
 )
-from resilient_circuit import CircuitProtectorPolicy
 from resilient_circuit.exceptions import ProtectedCallError
 
 from stabilize.errors import TaskTimeoutError, TransientError
-from stabilize.resilience.bulkheads import TaskBulkheadManager
 from stabilize.threads import in_context
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from bulkman.config import ExecutionResult
+    from resilient_circuit import CircuitProtectorPolicy
+
+    from stabilize.resilience.bulkheads import TaskBulkheadManager
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +46,7 @@ def execute_with_resilience(
     stage_id: str | None = None,
     execution_id: str | None = None,
 ) -> T:
-    """
-    Execute a function with bulkhead and circuit breaker protection.
+    """Execute a function with bulkhead and circuit breaker protection.
 
     This function:
     1. Checks the circuit breaker - fails fast if circuit is open
@@ -100,13 +102,11 @@ def execute_with_resilience(
 
         # Check if the execution was successful
         if result.success:
-            return cast(T, result.result)
-        else:
-            # Re-raise the original error from the task
-            if result.error:
-                raise task_exception(result.error)
-            else:
-                raise RuntimeError(f"Task failed without error: {result}")
+            return cast("T", result.result)
+        # Re-raise the original error from the task
+        if result.error:
+            raise task_exception(result.error)
+        raise RuntimeError(f"Task failed without error: {result}")
 
     except BulkheadFullError as e:
         # Bulkhead is at capacity - retry later when capacity available
@@ -177,8 +177,7 @@ def extract_result_or_raise(
     stage_id: str | None = None,
     execution_id: str | None = None,
 ) -> Any:
-    """
-    Extract the result from an ExecutionResult or raise the appropriate error.
+    """Extract the result from an ExecutionResult or raise the appropriate error.
 
     Args:
         result: The ExecutionResult from bulkhead execution

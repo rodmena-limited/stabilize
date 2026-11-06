@@ -5,8 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.workflow import PausedDetails
@@ -15,6 +14,9 @@ from stabilize.persistence.postgres.converters import paused_to_dict
 from stabilize.persistence.signal_scope import signal_status_filter as _signal_status_filter
 from stabilize.persistence.tenancy import refuse_foreign_row
 from stabilize.queue.message_ids import owner_prefix
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -124,31 +126,29 @@ def cancel_execution(engine: Any, execution_id: str, canceled_by: str, reason: s
 
 def is_message_processed(engine: Any, message_id: str) -> bool:
     """Check if a message has already been processed."""
-    with engine.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT 1 FROM processed_messages WHERE message_id = %(message_id)s AND stabilize_tenant = %(tenant)s",
-                {"message_id": message_id, "tenant": engine.tenant},
-            )
-            return cur.fetchone() is not None
+    with engine.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM processed_messages WHERE message_id = %(message_id)s AND stabilize_tenant = %(tenant)s",
+            {"message_id": message_id, "tenant": engine.tenant},
+        )
+        return cur.fetchone() is not None
 
 
 def get_processed_message_ids(engine: Any, limit: int | None = None) -> list[str]:
     """Return processed message IDs, for hydrating an in-memory dedup cache."""
-    with engine.connection() as conn:
-        with conn.cursor() as cur:
-            if limit is not None:
-                cur.execute(
-                    "SELECT message_id FROM processed_messages WHERE stabilize_tenant = %(tenant)s LIMIT %(limit)s",
-                    {"limit": limit, "tenant": engine.tenant},
-                )
-            else:
-                cur.execute(
-                    "SELECT message_id FROM processed_messages WHERE stabilize_tenant = %(tenant)s",
-                    {"tenant": engine.tenant},
-                )
-            # Pool uses dict_row: rows are dict-like, access by column name.
-            return [row["message_id"] for row in cur.fetchall()]
+    with engine.connection() as conn, conn.cursor() as cur:
+        if limit is not None:
+            cur.execute(
+                "SELECT message_id FROM processed_messages WHERE stabilize_tenant = %(tenant)s LIMIT %(limit)s",
+                {"limit": limit, "tenant": engine.tenant},
+            )
+        else:
+            cur.execute(
+                "SELECT message_id FROM processed_messages WHERE stabilize_tenant = %(tenant)s",
+                {"tenant": engine.tenant},
+            )
+        # Pool uses dict_row: rows are dict-like, access by column name.
+        return [row["message_id"] for row in cur.fetchall()]
 
 
 def mark_message_processed(
@@ -359,10 +359,9 @@ def count_buffered_signal_stages(
         sql += " AND status = ANY(%(statuses)s)"
         params["statuses"] = selected
 
-    with engine.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-            row = cur.fetchone()
+    with engine.connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        row = cur.fetchone()
     if row is None:
         return 0
     return int(row["n"] if isinstance(row, dict) else row[0])

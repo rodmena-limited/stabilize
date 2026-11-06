@@ -1,5 +1,4 @@
-"""
-Event replay for state reconstruction.
+"""Event replay for state reconstruction.
 
 The EventReplayer allows rebuilding workflow state at any point
 in time by replaying events from the event store.
@@ -8,9 +7,7 @@ in time by replaying events from the event store.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import (
@@ -24,6 +21,9 @@ from stabilize.events.base import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from datetime import datetime
+
     from stabilize.events.snapshots import SnapshotStore
     from stabilize.events.store.interface import EventStore
 
@@ -70,8 +70,7 @@ class WorkflowState:
 
 
 class EventReplayer:
-    """
-    Replays events to reconstruct state.
+    """Replays events to reconstruct state.
 
     Supports:
     - Full state reconstruction from events
@@ -85,8 +84,7 @@ class EventReplayer:
         event_store: EventStore,
         snapshot_store: SnapshotStore | None = None,
     ) -> None:
-        """
-        Initialize the event replayer.
+        """Initialize the event replayer.
 
         Args:
             event_store: The event store to replay from.
@@ -100,8 +98,7 @@ class EventReplayer:
         workflow_id: str,
         as_of_sequence: int | None = None,
     ) -> dict[str, Any]:
-        """
-        Rebuild complete workflow state from events.
+        """Rebuild complete workflow state from events.
 
         Args:
             workflow_id: The workflow to rebuild.
@@ -148,8 +145,7 @@ class EventReplayer:
         workflow_id: str,
         as_of_time: datetime,
     ) -> dict[str, Any]:
-        """
-        Get workflow state at a specific point in time.
+        """Get workflow state at a specific point in time.
 
         Args:
             workflow_id: The workflow to query.
@@ -180,8 +176,7 @@ class EventReplayer:
         checkpoint_sequence: int,
         event_handler: Callable[[Event], None],
     ) -> None:
-        """
-        Replay events through a custom handler.
+        """Replay events through a custom handler.
 
         Useful for:
         - Testing event handlers
@@ -270,9 +265,8 @@ class EventReplayer:
         elif event.event_type == EventType.WORKFLOW_RESUMED:
             state.status = "RUNNING"
 
-        elif event.event_type == EventType.CONTEXT_UPDATED:
-            if "context" in event.data:
-                state.context.update(event.data["context"])
+        elif event.event_type == EventType.CONTEXT_UPDATED and "context" in event.data:
+            state.context.update(event.data["context"])
 
     def _apply_stage_event(self, state: WorkflowState, event: Event) -> None:
         """Apply a stage event."""
@@ -354,8 +348,7 @@ class EventReplayer:
         entity_type: EntityType,
         entity_id: str,
     ) -> list[dict[str, Any]]:
-        """
-        Get the complete event history for an entity.
+        """Get the complete event history for an entity.
 
         Args:
             entity_type: Type of entity.
@@ -373,8 +366,7 @@ class EventReplayer:
         sequence1: int,
         sequence2: int,
     ) -> dict[str, Any]:
-        """
-        Compare workflow state at two different points.
+        """Compare workflow state at two different points.
 
         Useful for debugging what changed between two points in time.
 

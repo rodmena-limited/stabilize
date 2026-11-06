@@ -1,5 +1,7 @@
 """Persistence layer for pipeline execution."""
 
+from __future__ import annotations
+
 from stabilize.persistence.factory import (
     create_queue,
     create_repository,
@@ -13,14 +15,14 @@ from stabilize.persistence.store import (
 )
 
 __all__ = [
-    # Abstract interface
-    "WorkflowStore",
-    "WorkflowNotFoundError",
     # Implementations
     "PostgresWorkflowStore",
     "SqliteWorkflowStore",
+    "WorkflowNotFoundError",
+    # Abstract interface
+    "WorkflowStore",
+    "create_queue",
     # Factory functions
     "create_repository",
-    "create_queue",
     "detect_backend",
 ]

@@ -1,5 +1,4 @@
-"""
-Workflow timeline projection.
+"""Workflow timeline projection.
 
 Builds a human-readable timeline of workflow execution events,
 showing stages, tasks, and their durations.
@@ -8,11 +7,13 @@ showing stages, tasks, and their durations.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EntityType, Event, EventType
 from stabilize.events.projections.base import Projection
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 
 @dataclass
@@ -66,8 +67,7 @@ class WorkflowTimeline:
 
 
 class WorkflowTimelineProjection(Projection):
-    """
-    Builds a human-readable timeline from workflow events.
+    """Builds a human-readable timeline from workflow events.
 
     The timeline shows:
     - Workflow start/end with status
@@ -77,8 +77,7 @@ class WorkflowTimelineProjection(Projection):
     """
 
     def __init__(self, workflow_id: str) -> None:
-        """
-        Initialize the timeline projection.
+        """Initialize the timeline projection.
 
         Args:
             workflow_id: The workflow ID to build timeline for.
@@ -125,18 +124,22 @@ class WorkflowTimelineProjection(Projection):
             self._start_times[event.entity_id] = event.timestamp
 
         # Calculate duration for completion events
-        if event.event_type in {
-            EventType.WORKFLOW_COMPLETED,
-            EventType.WORKFLOW_FAILED,
-            EventType.STAGE_COMPLETED,
-            EventType.STAGE_FAILED,
-            EventType.TASK_COMPLETED,
-            EventType.TASK_FAILED,
-        }:
-            if duration_ms is None and event.entity_id in self._start_times:
-                start = self._start_times[event.entity_id]
-                delta = event.timestamp - start
-                duration_ms = int(delta.total_seconds() * 1000)
+        if (
+            event.event_type
+            in {
+                EventType.WORKFLOW_COMPLETED,
+                EventType.WORKFLOW_FAILED,
+                EventType.STAGE_COMPLETED,
+                EventType.STAGE_FAILED,
+                EventType.TASK_COMPLETED,
+                EventType.TASK_FAILED,
+            }
+            and duration_ms is None
+            and event.entity_id in self._start_times
+        ):
+            start = self._start_times[event.entity_id]
+            delta = event.timestamp - start
+            duration_ms = int(delta.total_seconds() * 1000)
 
         # Build details dict
         details = {}
@@ -193,7 +196,7 @@ class WorkflowTimelineProjection(Projection):
             self._timeline.status = event.data.get("status")
 
             # Calculate total duration
-            if self._timeline.start_time and self._timeline.end_time:
+            if self._timeline.start_time is not None and self._timeline.end_time is not None:
                 delta = self._timeline.end_time - self._timeline.start_time
                 self._timeline.total_duration_ms = int(delta.total_seconds() * 1000)
 

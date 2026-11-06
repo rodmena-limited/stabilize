@@ -1,5 +1,4 @@
-"""
-Condition-checking methods for StartStageHandler.
+"""Condition-checking methods for StartStageHandler.
 
 These methods determine whether a stage should be skipped, expired,
 blocked, or claimed by a deferred choice.
@@ -31,8 +30,7 @@ class StartStageConditionsMixin:
         def current_time_millis(self) -> int: ...
 
     def _should_skip(self, stage: StageExecution) -> bool:
-        """
-        Check if stage should be skipped.
+        """Check if stage should be skipped.
 
         Checks the 'stageEnabled' context for conditional execution.
         """
@@ -51,10 +49,9 @@ class StartStageConditionsMixin:
                     try:
                         # Build evaluation context from stage context and upstream outputs
                         eval_context = dict(stage.context)
-                        if hasattr(stage, "execution") and stage.execution:
-                            for s in stage.execution.stages:
-                                if s.ref_id != stage.ref_id and s.outputs:
-                                    eval_context[s.ref_id] = s.outputs
+                        for s in stage.execution.stages:
+                            if s.ref_id != stage.ref_id and s.outputs:
+                                eval_context[s.ref_id] = s.outputs
                         result = evaluate_expression(expression, eval_context)
                         return not bool(result)
                     except ExpressionError:
@@ -104,13 +101,7 @@ class StartStageConditionsMixin:
         if milestone_stage.status == required_status:
             return False
 
-        # If milestone has already completed (progressed past required), expired
-        if milestone_stage.status.is_complete:
-            return True
-
-        # Milestone is still active but not in required status yet
-        # This could mean it hasn't reached the milestone yet - don't skip
-        return False
+        return bool(milestone_stage.status.is_complete)
 
     def _is_deferred_choice_claimed(self, stage: StageExecution) -> bool:
         """Check if a sibling in the deferred choice group already started (WCP-16).

@@ -1,5 +1,4 @@
-"""
-Stage event recording mixin.
+"""Stage event recording mixin.
 
 Provides record_stage_* methods for the EventRecorder.
 """
@@ -33,7 +32,7 @@ class StageEventsMixin:
         event = create_stage_event(
             event_type=EventType.STAGE_STARTED,
             stage_id=stage.id,
-            workflow_id=stage.execution.id if stage.execution else "",
+            workflow_id=stage.execution.id,
             version=stage.version,
             data={
                 "ref_id": stage.ref_id,
@@ -58,7 +57,7 @@ class StageEventsMixin:
         event = create_stage_event(
             event_type=EventType.STAGE_COMPLETED,
             stage_id=stage.id,
-            workflow_id=stage.execution.id if stage.execution else "",
+            workflow_id=stage.execution.id,
             version=stage.version,
             data={
                 "ref_id": stage.ref_id,
@@ -84,7 +83,7 @@ class StageEventsMixin:
         event = create_stage_event(
             event_type=EventType.STAGE_FAILED,
             stage_id=stage.id,
-            workflow_id=stage.execution.id if stage.execution else "",
+            workflow_id=stage.execution.id,
             version=stage.version,
             data={
                 "ref_id": stage.ref_id,
@@ -109,7 +108,7 @@ class StageEventsMixin:
         event = create_stage_event(
             event_type=EventType.STAGE_SKIPPED,
             stage_id=stage.id,
-            workflow_id=stage.execution.id if stage.execution else "",
+            workflow_id=stage.execution.id,
             version=stage.version,
             data={
                 "ref_id": stage.ref_id,
@@ -135,7 +134,7 @@ class StageEventsMixin:
         event = create_stage_event(
             event_type=EventType.STAGE_SUSPENDED,
             stage_id=stage.id,
-            workflow_id=stage.execution.id if stage.execution else "",
+            workflow_id=stage.execution.id,
             version=stage.version,
             data={
                 "ref_id": stage.ref_id,
@@ -157,7 +156,7 @@ class StageEventsMixin:
         event = create_stage_event(
             event_type=EventType.STAGE_RESUMED,
             stage_id=stage.id,
-            workflow_id=stage.execution.id if stage.execution else "",
+            workflow_id=stage.execution.id,
             version=stage.version,
             data={
                 "ref_id": stage.ref_id,
@@ -179,7 +178,7 @@ class StageEventsMixin:
         event = create_stage_event(
             event_type=EventType.STAGE_CANCELED,
             stage_id=stage.id,
-            workflow_id=stage.execution.id if stage.execution else "",
+            workflow_id=stage.execution.id,
             version=stage.version,
             data={
                 "ref_id": stage.ref_id,

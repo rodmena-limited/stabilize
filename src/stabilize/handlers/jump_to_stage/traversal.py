@@ -152,7 +152,7 @@ def get_skipped_stages(
     Returns:
         List of stages to mark as SKIPPED
     """
-    source_downstream = set(s.ref_id for s in get_skippable_downstream_stages(execution, source_stage.ref_id))
+    source_downstream = {s.ref_id for s in get_skippable_downstream_stages(execution, source_stage.ref_id)}
 
     # Get target and all stages downstream of target
     target_chain = {target_stage.ref_id}

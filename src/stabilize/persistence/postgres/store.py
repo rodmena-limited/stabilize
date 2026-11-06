@@ -1,5 +1,4 @@
-"""
-PostgreSQL execution repository.
+"""PostgreSQL execution repository.
 
 Production-grade persistence using native psycopg3 with connection pooling.
 Uses singleton ConnectionManager for efficient connection pool sharing.
@@ -9,11 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from stabilize.models.workflow import Workflow
 from stabilize.persistence.borrow import EngineBorrower
 from stabilize.persistence.columns import select_list
 from stabilize.persistence.connection import release_pool_once
@@ -59,6 +56,11 @@ from stabilize.persistence.tenancy import (
     validate_tenant,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from stabilize.models.workflow import Workflow
+
 _PIPELINE = select_list("pipeline_executions", "postgres")
 _STAGE = select_list("stage_executions", "postgres")
 _TASK = select_list("task_executions", "postgres")
@@ -78,8 +80,7 @@ logger = logging.getLogger(__name__)
 class PostgresWorkflowStore(
     PostgresSignalMixin, PostgresMaintenanceMixin, PostgresStageQueryMixin, PostgresWorkflowOpsMixin, WorkflowStore
 ):
-    """
-    PostgreSQL implementation of WorkflowStore.
+    """PostgreSQL implementation of WorkflowStore.
 
     Uses native psycopg3 with connection pooling for database operations.
     Supports concurrent access and provides efficient queries for pipeline
@@ -106,6 +107,7 @@ class PostgresWorkflowStore(
                 connections inherit the server defaults and carry no
                 statement_timeout and no lock_timeout.
             health_timeout: Bound on is_healthy()'s wait for a connection.
+            tenant: The tenant this store reads and writes; '' in single-tenant mode.
         """
         from stabilize.persistence.connection import get_connection_manager
 
@@ -153,37 +155,36 @@ class PostgresWorkflowStore(
 
     def retrieve(self, execution_id: str) -> Workflow:
         """Retrieve an execution by ID."""
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
-                    {"id": execution_id, "tenant": self.tenant},
-                )
-                row = cur.fetchone()
-                if not row:
-                    raise WorkflowNotFoundError(execution_id)
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
+                {"id": execution_id, "tenant": self.tenant},
+            )
+            row = cur.fetchone()
+            if not row:
+                raise WorkflowNotFoundError(execution_id)
 
-                execution = row_to_execution(row)
+            execution = row_to_execution(row)
 
-                cur.execute(
-                    f"SELECT {_STAGE} FROM stage_executions "
-                    "WHERE execution_id = %(execution_id)s AND stabilize_tenant = %(tenant)s ORDER BY id",
-                    {"execution_id": execution_id, "tenant": self.tenant},
-                )
+            cur.execute(
+                f"SELECT {_STAGE} FROM stage_executions "
+                "WHERE execution_id = %(execution_id)s AND stabilize_tenant = %(tenant)s ORDER BY id",
+                {"execution_id": execution_id, "tenant": self.tenant},
+            )
 
-                stages_by_id: dict[str, Any] = {}
-                stages: list[Any] = []
-                for stage_row in cur.fetchall():
-                    stage = row_to_stage(stage_row)
-                    stage.execution = execution
-                    stages_by_id[stage.id] = stage
-                    stages.append(stage)
+            stages_by_id: dict[str, Any] = {}
+            stages: list[Any] = []
+            for stage_row in cur.fetchall():
+                stage = row_to_stage(stage_row)
+                stage.execution = execution
+                stages_by_id[stage.id] = stage
+                stages.append(stage)
 
-                if stages:
-                    load_tasks_for_stages(cur, stages, self.tenant)
+            if stages:
+                load_tasks_for_stages(cur, stages, self.tenant)
 
-                execution.stages = stages
-                return execution
+            execution.stages = stages
+            return execution
 
     def store_stage(
         self,
@@ -294,63 +295,62 @@ class PostgresWorkflowStore(
 
     def retrieve_stage(self, stage_id: str) -> Any:
         """Retrieve a single stage by ID."""
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_STAGE} FROM stage_executions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
+                {"id": stage_id, "tenant": self.tenant},
+            )
+            stage_row = cur.fetchone()
+            if not stage_row:
+                raise ValueError(f"Stage {stage_id} not found")
+
+            stage = row_to_stage(stage_row)
+
+            cur.execute(
+                f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
+                {"id": stage_row["execution_id"], "tenant": self.tenant},
+            )
+            exec_row = cur.fetchone()
+            if exec_row:
+                execution = row_to_execution(exec_row)
+                stage.set_execution_strong(execution)
+
+                requisites = list(stage.requisite_stage_ref_ids)
                 cur.execute(
-                    f"SELECT {_STAGE} FROM stage_executions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
-                    {"id": stage_id, "tenant": self.tenant},
-                )
-                stage_row = cur.fetchone()
-                if not stage_row:
-                    raise ValueError(f"Stage {stage_id} not found")
-
-                stage = row_to_stage(stage_row)
-
-                cur.execute(
-                    f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
-                    {"id": stage_row["execution_id"], "tenant": self.tenant},
-                )
-                exec_row = cur.fetchone()
-                if exec_row:
-                    execution = row_to_execution(exec_row)
-                    stage.set_execution_strong(execution)
-
-                    requisites = list(stage.requisite_stage_ref_ids)
-                    cur.execute(
-                        f"""
+                    f"""
                         SELECT {_STAGE} FROM stage_executions
                         WHERE execution_id = %(execution_id)s
                         AND (ref_id = ANY(%(requisites)s) OR parent_stage_id = %(stage_id)s)
                         AND stabilize_tenant = %(tenant)s
                         ORDER BY id
                         """,
-                        {
-                            "execution_id": execution.id,
-                            "requisites": requisites,
-                            "stage_id": stage.id,
-                            "tenant": self.tenant,
-                        },
-                    )
-                    related = cur.fetchall()
-                    upstream = [row_to_stage(r) for r in related if r["ref_id"] in stage.requisite_stage_ref_ids]
-                    synthetic = [row_to_stage(r) for r in related if r["parent_stage_id"] == stage.id]
-                    load_tasks_for_stages(cur, synthetic, self.tenant)
-                    for related_stage in upstream + synthetic:
-                        related_stage.set_execution_strong(execution)
-                    execution.stages = [stage, *upstream, *synthetic]
-
-                # ORDER BY id ensures consistent task sequencing (ULID encodes creation time)
-                cur.execute(
-                    f"SELECT {_TASK} FROM task_executions "
-                    "WHERE stage_id = %(stage_id)s AND stabilize_tenant = %(tenant)s ORDER BY id ASC",
-                    {"stage_id": stage.id, "tenant": self.tenant},
+                    {
+                        "execution_id": execution.id,
+                        "requisites": requisites,
+                        "stage_id": stage.id,
+                        "tenant": self.tenant,
+                    },
                 )
-                for task_row in cur.fetchall():
-                    task = row_to_task(task_row)
-                    task.stage = stage
-                    stage.tasks.append(task)
+                related = cur.fetchall()
+                upstream = [row_to_stage(r) for r in related if r["ref_id"] in stage.requisite_stage_ref_ids]
+                synthetic = [row_to_stage(r) for r in related if r["parent_stage_id"] == stage.id]
+                load_tasks_for_stages(cur, synthetic, self.tenant)
+                for related_stage in upstream + synthetic:
+                    related_stage.set_execution_strong(execution)
+                execution.stages = [stage, *upstream, *synthetic]
 
-                return stage
+            # ORDER BY id ensures consistent task sequencing (ULID encodes creation time)
+            cur.execute(
+                f"SELECT {_TASK} FROM task_executions "
+                "WHERE stage_id = %(stage_id)s AND stabilize_tenant = %(tenant)s ORDER BY id ASC",
+                {"stage_id": stage.id, "tenant": self.tenant},
+            )
+            for task_row in cur.fetchall():
+                task = row_to_task(task_row)
+                task.stage = stage
+                stage.tasks.append(task)
+
+            return stage
 
     def get_upstream_stages(self, execution_id: str, stage_ref_id: str) -> list[Any]:
         """Get upstream stages with tasks loaded."""

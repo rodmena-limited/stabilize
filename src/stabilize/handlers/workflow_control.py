@@ -1,5 +1,4 @@
-"""
-Workflow-level control handlers: cancel, restart, resume, pause.
+"""Workflow-level control handlers: cancel, restart, resume, pause.
 
 These handle the control messages pushed by the Orchestrator facade
 (`cancel()`, `restart()`, `unpause()`) and by the engine itself
@@ -11,7 +10,6 @@ handler and silently dropped.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.handlers.base import StabilizeHandler
@@ -28,9 +26,10 @@ from stabilize.queue.messages import (
     RunTask,
     StartStage,
 )
-from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.models.task import TaskExecution
@@ -38,6 +37,7 @@ if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
     from stabilize.queue.messages import Message
+    from stabilize.resilience.config import HandlerConfig
     from stabilize.tasks.registry import TaskRegistry
 
 logger = logging.getLogger(__name__)
@@ -46,12 +46,15 @@ logger = logging.getLogger(__name__)
 class _ControlHandler:
     """Shared helper mixin for the control handlers."""
 
+    repository: WorkflowStore
+    queue: Queue
+
     def _mark_processed_only(self, message: Message, handler_type: str) -> None:
         """Consume a message idempotently without any state change."""
         message_id = getattr(message, "message_id", None)
         if not message_id:
             return
-        with self.repository.transaction(self.queue) as txn:  # type: ignore[attr-defined]
+        with self.repository.transaction(self.queue) as txn:
             txn.mark_message_processed(
                 message_id=message_id,
                 handler_type=handler_type,
@@ -60,8 +63,7 @@ class _ControlHandler:
 
 
 class CancelWorkflowHandler(StabilizeHandler[CancelWorkflow], _ControlHandler):
-    """
-    Handler for CancelWorkflow messages.
+    """Handler for CancelWorkflow messages.
 
     Execution flow:
     1. If the execution is already complete, consume idempotently.
@@ -145,8 +147,7 @@ class CancelWorkflowHandler(StabilizeHandler[CancelWorkflow], _ControlHandler):
 
 
 class RestartStageHandler(StabilizeHandler[RestartStage], _ControlHandler):
-    """
-    Handler for RestartStage messages.
+    """Handler for RestartStage messages.
 
     Resets a terminal stage (and its tasks) to NOT_STARTED, brings a
     completed execution back to RUNNING, and pushes StartStage.
@@ -177,8 +178,6 @@ class RestartStageHandler(StabilizeHandler[RestartStage], _ControlHandler):
     def _handle_with_retry(self, message: RestartStage) -> None:
         def on_stage(stage: StageExecution) -> None:
             execution = stage.execution
-            if execution is None:
-                execution = self.repository.retrieve(message.execution_id)
 
             if execution.is_canceled:
                 # Restarting inside a canceled execution would race the
@@ -247,8 +246,7 @@ class RestartStageHandler(StabilizeHandler[RestartStage], _ControlHandler):
 
 
 class ResumeStageHandler(StabilizeHandler[ResumeStage], _ControlHandler):
-    """
-    Handler for ResumeStage messages.
+    """Handler for ResumeStage messages.
 
     Returns a PAUSED stage to RUNNING, re-arms its paused tasks as
     NOT_STARTED, lifts a workflow-level PAUSED status, and pushes
@@ -287,8 +285,6 @@ class ResumeStageHandler(StabilizeHandler[ResumeStage], _ControlHandler):
                 return
 
             execution = stage.execution
-            if execution is None:
-                execution = self.repository.retrieve(message.execution_id)
 
             self.set_stage_status(stage, WorkflowStatus.RUNNING)
             paused_at = stage.context.pop("_paused_at", None)
@@ -348,8 +344,7 @@ class ResumeStageHandler(StabilizeHandler[ResumeStage], _ControlHandler):
 
 
 class PauseTaskHandler(StabilizeHandler[PauseTask], _ControlHandler):
-    """
-    Handler for PauseTask messages.
+    """Handler for PauseTask messages.
 
     Pushed by RunTaskHandler when it finds the workflow PAUSED: parks the
     task and its stage as PAUSED so ResumeStage can later re-arm and

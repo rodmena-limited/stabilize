@@ -1,5 +1,4 @@
-"""
-CompleteWorkflowHandler - handles execution completion.
+"""CompleteWorkflowHandler - handles execution completion.
 
 This handler determines the final execution status based on all
 top-level stages and marks the execution as complete.
@@ -8,7 +7,6 @@ top-level stages and marks the execution as complete.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize import metrics
@@ -19,14 +17,16 @@ from stabilize.queue.messages import (
     CompleteWorkflow,
     StartWaitingWorkflows,
 )
-from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.resilience.config import HandlerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +40,7 @@ _ACTIVE_STAGE_STATUSES = frozenset(
 
 
 class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
-    """
-    Handler for CompleteWorkflow messages.
+    """Handler for CompleteWorkflow messages.
 
     Execution flow:
     1. Check if execution already complete
@@ -192,8 +191,7 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
         execution: Workflow,
         message: CompleteWorkflow,
     ) -> WorkflowStatus | None:
-        """
-        Determine the final execution status.
+        """Determine the final execution status.
 
         Returns None if execution is not ready to complete.
         """
@@ -269,7 +267,6 @@ class CompleteWorkflowHandler(StabilizeHandler[CompleteWorkflow]):
     def _should_override_success(self, execution: Workflow) -> bool:
         """Check if success should be overridden to failure."""
         for stage in execution.stages:
-            if stage.status == WorkflowStatus.STOPPED:
-                if stage.context.get("completeOtherBranchesThenFail"):
-                    return True
+            if stage.status == WorkflowStatus.STOPPED and stage.context.get("completeOtherBranchesThenFail"):
+                return True
         return False

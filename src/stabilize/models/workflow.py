@@ -1,5 +1,4 @@
-"""
-Workflow model.
+"""Workflow model.
 
 A pipeline execution represents a running instance of a pipeline, containing
 all stages and their runtime state. The execution tracks:
@@ -13,10 +12,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus
+
+if TYPE_CHECKING:
+    from stabilize.models.stage import StageExecution
 
 
 def _generate_execution_id() -> str:
@@ -27,8 +28,7 @@ def _generate_execution_id() -> str:
 
 
 class WorkflowType(Enum):
-    """
-    Type of execution.
+    """Type of execution.
 
     PIPELINE: A full pipeline execution
     ORCHESTRATION: An ad-hoc orchestration (single stage)
@@ -40,8 +40,7 @@ class WorkflowType(Enum):
 
 @dataclass
 class Trigger:
-    """
-    Trigger information for a pipeline execution.
+    """Trigger information for a pipeline execution.
 
     Contains details about what triggered the pipeline (manual, webhook, cron, etc.)
     and any parameters passed to the execution.
@@ -77,9 +76,7 @@ class Trigger:
 
 @dataclass
 class PausedDetails:
-    """
-    Details about a paused execution.
-    """
+    """Details about a paused execution."""
 
     paused_by: str = ""
     pause_time: int | None = None
@@ -94,8 +91,7 @@ class PausedDetails:
 
 @dataclass
 class Workflow:
-    """
-    Represents a pipeline execution.
+    """Represents a pipeline execution.
 
     This is the top-level container for all execution state. It holds all stages
     and tracks the overall execution status.
@@ -172,8 +168,7 @@ class Workflow:
         self.stages.clear()
 
     def stage_by_id(self, stage_id: str) -> StageExecution:
-        """
-        Get a stage by its ID.
+        """Get a stage by its ID.
 
         Raises:
             ValueError: If stage not found
@@ -193,8 +188,7 @@ class Workflow:
     # ========== Stage Queries ==========
 
     def initial_stages(self) -> list[StageExecution]:
-        """
-        Get all initial stages (no dependencies, not synthetic).
+        """Get all initial stages (no dependencies, not synthetic).
 
         These are the stages that can start immediately when execution begins.
         """
@@ -207,8 +201,7 @@ class Workflow:
     # ========== Context Aggregation ==========
 
     def get_context(self) -> dict[str, Any]:
-        """
-        Get aggregated context from all stages.
+        """Get aggregated context from all stages.
 
         Returns merged outputs from all stages in topological order.
         Collections are concatenated, latest value wins for non-collections.
@@ -283,14 +276,12 @@ class Workflow:
         self.status = WorkflowStatus.RUNNING
 
     def paused_duration_relative_to(self, instant_ms: int) -> int:
-        """
-        Get paused duration relative to a given instant.
+        """Get paused duration relative to a given instant.
 
         Returns 0 if not paused or pause was before the instant.
         """
-        if self.paused and self.paused.pause_time:
-            if self.paused.pause_time > instant_ms:
-                return self.paused.paused_ms
+        if self.paused and self.paused.pause_time and self.paused.pause_time > instant_ms:
+            return self.paused.paused_ms
         return 0
 
     # ========== Factory Methods ==========
@@ -307,8 +298,7 @@ class Workflow:
         pipeline_config: dict[str, Any] | None = None,
         pipeline_config_version: str | None = None,
     ) -> Workflow:
-        """
-        Factory method to create a new pipeline execution.
+        """Factory method to create a new pipeline execution.
 
         Args:
             application: Application name
@@ -362,8 +352,7 @@ class Workflow:
         name: str,
         stages: list[StageExecution],
     ) -> Workflow:
-        """
-        Factory method to create an orchestration (ad-hoc execution).
+        """Factory method to create an orchestration (ad-hoc execution).
 
         Args:
             application: Application name
@@ -373,10 +362,9 @@ class Workflow:
         Returns:
             A new Workflow with type ORCHESTRATION
         """
-        execution = cls(
+        return cls(
             type=WorkflowType.ORCHESTRATION,
             application=application,
             name=name,
             stages=stages,
         )
-        return execution

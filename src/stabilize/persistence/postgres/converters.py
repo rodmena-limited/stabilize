@@ -202,7 +202,7 @@ def row_to_task(row: dict[str, Any]) -> TaskExecution:
         exception_details = json.loads(raw_exception) if raw_exception else {}
     else:
         # Already a dict (JSONB auto-parsed by psycopg)
-        exception_details = raw_exception if raw_exception else {}
+        exception_details = raw_exception or {}
 
     task = TaskExecution(
         id=row["id"],

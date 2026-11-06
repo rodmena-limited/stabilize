@@ -1,5 +1,4 @@
-"""
-LLM toolkit for building agentic workflows on stabilize (agentic ergonomics).
+"""LLM toolkit for building agentic workflows on stabilize (agentic ergonomics).
 
 Optional, dependency-light (stdlib-only) building blocks for LLM agents:
 
@@ -12,18 +11,20 @@ Nothing here is imported by the core engine, so it adds no runtime cost to
 workflows that do not use it.
 """
 
+from __future__ import annotations
+
 from stabilize.llm.client import ChatMessage, ChatResponse, LLMClient, LLMError
 from stabilize.llm.tasks import AgentLoopTask, LLMTask
 from stabilize.llm.tools import ToolRegistry, ToolSpec, tool
 
 __all__ = [
-    "LLMClient",
+    "AgentLoopTask",
     "ChatMessage",
     "ChatResponse",
+    "LLMClient",
     "LLMError",
     "LLMTask",
-    "AgentLoopTask",
-    "tool",
     "ToolRegistry",
     "ToolSpec",
+    "tool",
 ]

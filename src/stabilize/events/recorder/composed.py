@@ -1,5 +1,4 @@
-"""
-Composed EventRecorder class.
+"""Composed EventRecorder class.
 
 Combines all mixin classes into the final EventRecorder that provides
 the full API for recording workflow, stage, task, and generic events.
@@ -21,8 +20,7 @@ class EventRecorder(
     GenericEventsMixin,
     EventRecorderBase,
 ):
-    """
-    Records events for all state transitions.
+    """Records events for all state transitions.
 
     Integrates with EventStore for persistence and EventBus for
     pub/sub notifications. All record methods return the created

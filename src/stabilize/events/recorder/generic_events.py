@@ -1,5 +1,4 @@
-"""
-Generic event recording mixin.
+"""Generic event recording mixin.
 
 Provides record_status_change, record_context_updated,
 record_outputs_updated, and record_jump_executed methods.

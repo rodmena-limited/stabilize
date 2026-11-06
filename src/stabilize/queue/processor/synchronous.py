@@ -1,5 +1,4 @@
-"""
-Synchronous queue processor for testing.
+"""Synchronous queue processor for testing.
 
 This module provides the SynchronousQueueProcessor class that
 processes messages immediately without threading.
@@ -9,22 +8,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from stabilize.queue import Queue
-from stabilize.queue.messages import Message
-from stabilize.queue.processor.config import QueueProcessorConfig
 from stabilize.queue.processor.processor import QueueProcessor
-from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
+    from stabilize.queue import Queue
+    from stabilize.queue.messages import Message
+    from stabilize.queue.processor.config import QueueProcessorConfig
     from stabilize.resilience.bulkheads import TaskBulkheadManager
     from stabilize.resilience.circuits import WorkflowCircuitFactory
+    from stabilize.resilience.config import HandlerConfig
     from stabilize.tasks.registry import TaskRegistry
 
 
 class SynchronousQueueProcessor(QueueProcessor):
-    """
-    A synchronous queue processor that processes messages immediately.
+    """A synchronous queue processor that processes messages immediately.
 
     Useful for testing where you want deterministic execution order.
 
@@ -54,15 +52,13 @@ class SynchronousQueueProcessor(QueueProcessor):
 
     def start(self) -> None:
         """No-op for synchronous processor."""
-        pass
 
     def stop(self, wait: bool = True, timeout: float | None = None) -> int:
         """No-op for synchronous processor."""
         return 0
 
     def push_and_process(self, message: Message) -> None:
-        """
-        Push a message and process it immediately.
+        """Push a message and process it immediately.
 
         Args:
             message: The message to push and process

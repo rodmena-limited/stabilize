@@ -8,8 +8,7 @@ from datetime import datetime
 
 @dataclass
 class Message:
-    """
-    Base class for all queue messages.
+    """Base class for all queue messages.
 
     Each message includes metadata for tracking and debugging.
     """
@@ -45,8 +44,7 @@ class Message:
 
 @dataclass
 class WorkflowLevel(Message):
-    """
-    Base class for execution-level messages.
+    """Base class for execution-level messages.
 
     These messages target a specific pipeline execution.
     """
@@ -57,8 +55,7 @@ class WorkflowLevel(Message):
 
 @dataclass
 class StageLevel(WorkflowLevel):
-    """
-    Base class for stage-level messages.
+    """Base class for stage-level messages.
 
     These messages target a specific stage within an execution.
 
@@ -83,8 +80,7 @@ class StageLevel(WorkflowLevel):
 
 @dataclass
 class TaskLevel(StageLevel):
-    """
-    Base class for task-level messages.
+    """Base class for task-level messages.
 
     These messages target a specific task within a stage.
     """

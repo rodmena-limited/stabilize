@@ -13,5 +13,5 @@ def redelivery_delay(base: timedelta, message: Any, store_unavailable: bool) -> 
         return base
     retries = int(getattr(message, "store_retries", 0) or 0)
     grown: timedelta = base * (2 ** min(retries, 16))
-    cap: timedelta = base if base > STORE_RETRY_MAX_DELAY else STORE_RETRY_MAX_DELAY
-    return grown if grown < cap else cap
+    cap: timedelta = max(STORE_RETRY_MAX_DELAY, base)
+    return min(cap, grown)

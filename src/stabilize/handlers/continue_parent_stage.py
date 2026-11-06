@@ -1,5 +1,4 @@
-"""
-ContinueParentStageHandler - handles synthetic stage completion notification.
+"""ContinueParentStageHandler - handles synthetic stage completion notification.
 
 This handler is invoked when a synthetic stage (before/after stage) completes
 and the parent stage needs to be notified to continue processing.
@@ -8,7 +7,6 @@ and the parent stage needs to be notified to continue processing.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.handlers.base import StabilizeHandler
@@ -22,13 +20,15 @@ from stabilize.queue.messages import (
     StartStage,
     StartTask,
 )
-from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.resilience.config import HandlerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +36,7 @@ _ACTIVE = frozenset({WorkflowStatus.RUNNING, WorkflowStatus.PAUSED, WorkflowStat
 
 
 class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
-    """
-    Handler for ContinueParentStage messages.
+    """Handler for ContinueParentStage messages.
 
     Execution flow based on phase:
 
@@ -88,12 +87,6 @@ class ContinueParentStageHandler(StabilizeHandler[ContinueParentStage]):
                 self._handle_before_phase(stage, message)
             elif phase == SyntheticStageOwner.STAGE_AFTER:
                 self._handle_after_phase(stage, message)
-            else:
-                logger.warning(
-                    "Unknown synthetic stage phase %s for parent %s",
-                    phase,
-                    stage.id,
-                )
 
         self.with_stage(message, on_stage)
 

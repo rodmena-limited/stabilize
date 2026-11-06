@@ -1,5 +1,4 @@
-"""
-Durable subscriptions for event processing.
+"""Durable subscriptions for event processing.
 
 Durable subscriptions persist their position and can resume
 after restarts, ensuring at-least-once delivery of events.
@@ -10,14 +9,15 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from stabilize.events.base import Event, EventType
 from stabilize.threads import in_context
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from stabilize.events.base import Event, EventType
     from stabilize.events.store.interface import EventStore
 
 logger = logging.getLogger(__name__)
@@ -25,8 +25,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DurableSubscription:
-    """
-    A durable subscription that survives restarts.
+    """A durable subscription that survives restarts.
 
     Position is persisted to the database, allowing the
     subscription to resume from where it left off.
@@ -49,26 +48,22 @@ class DurableSubscription:
         if not self.enabled:
             return False
 
-        if self.event_types is not None:
-            if event.event_type not in self.event_types:
-                return False
+        if self.event_types is not None and event.event_type not in self.event_types:
+            return False
 
         if self.entity_filter is not None:
             # Filter by entity type
-            if "entity_type" in self.entity_filter:
-                if event.entity_type.value != self.entity_filter["entity_type"]:
-                    return False
+            if "entity_type" in self.entity_filter and event.entity_type.value != self.entity_filter["entity_type"]:
+                return False
             # Filter by workflow
-            if "workflow_id" in self.entity_filter:
-                if event.workflow_id != self.entity_filter["workflow_id"]:
-                    return False
+            if "workflow_id" in self.entity_filter and event.workflow_id != self.entity_filter["workflow_id"]:
+                return False
 
         return True
 
 
 class SubscriptionManager:
-    """
-    Manages durable subscriptions that survive restarts.
+    """Manages durable subscriptions that survive restarts.
 
     Features:
     - Persisted position (survives restarts)
@@ -84,8 +79,7 @@ class SubscriptionManager:
         poll_interval: float = 1.0,
         batch_size: int = 100,
     ) -> None:
-        """
-        Initialize the subscription manager.
+        """Initialize the subscription manager.
 
         Args:
             event_store: The event store to poll.
@@ -109,8 +103,7 @@ class SubscriptionManager:
         webhook_url: str | None = None,
         start_from: str = "latest",
     ) -> None:
-        """
-        Create a durable subscription.
+        """Create a durable subscription.
 
         Args:
             subscription_id: Unique identifier for this subscription.
@@ -145,7 +138,7 @@ class SubscriptionManager:
 
         # Persist subscription
         if hasattr(self._event_store, "save_subscription"):
-            getattr(self._event_store, "save_subscription")(
+            self._event_store.save_subscription(
                 subscription_id=subscription_id,
                 event_types=event_types,
                 entity_filter=entity_filter,
@@ -179,8 +172,7 @@ class SubscriptionManager:
         return "0", 0
 
     def delete_subscription(self, subscription_id: str) -> bool:
-        """
-        Delete a subscription.
+        """Delete a subscription.
 
         Args:
             subscription_id: The subscription to delete.
@@ -193,7 +185,7 @@ class SubscriptionManager:
                 del self._subscriptions[subscription_id]
 
         if hasattr(self._event_store, "delete_subscription"):
-            getattr(self._event_store, "delete_subscription")(subscription_id)
+            self._event_store.delete_subscription(subscription_id)
 
         logger.info("Deleted subscription %s", subscription_id)
         return True
@@ -203,8 +195,7 @@ class SubscriptionManager:
         subscription_id: str,
         handler: Callable[[Event], None],
     ) -> bool:
-        """
-        Load a persisted subscription.
+        """Load a persisted subscription.
 
         Args:
             subscription_id: The subscription to load.
@@ -216,7 +207,7 @@ class SubscriptionManager:
         if not hasattr(self._event_store, "get_subscription"):
             return False
 
-        data = getattr(self._event_store, "get_subscription")(subscription_id)
+        data = self._event_store.get_subscription(subscription_id)
         if data is None:
             return False
 
@@ -231,12 +222,15 @@ class SubscriptionManager:
             last_commit_cursor=str(data.get("last_commit_cursor") or "0"),
             last_commit_sequence=int(data.get("last_commit_sequence") or 0),
         )
-        if subscription.last_commit_cursor == "0" and subscription.last_commit_sequence == 0:
-            if subscription.last_sequence > 0:
-                cursor, sequence = self._commit_position("sequence", subscription.last_sequence)
-                subscription.last_commit_cursor = cursor
-                subscription.last_commit_sequence = sequence
-                self._persist_position(subscription)
+        if (
+            subscription.last_commit_cursor == "0"
+            and subscription.last_commit_sequence == 0
+            and subscription.last_sequence > 0
+        ):
+            cursor, sequence = self._commit_position("sequence", subscription.last_sequence)
+            subscription.last_commit_cursor = cursor
+            subscription.last_commit_sequence = sequence
+            self._persist_position(subscription)
 
         with self._lock:
             self._subscriptions[subscription_id] = subscription
@@ -271,8 +265,8 @@ class SubscriptionManager:
         while self._running:
             try:
                 self._process_pending_events()
-            except Exception as e:
-                logger.exception("Error in subscription poll loop: %s", e)
+            except Exception:
+                logger.exception("Error in subscription poll loop")
 
             time.sleep(self._poll_interval)
 
@@ -287,12 +281,8 @@ class SubscriptionManager:
 
             try:
                 self._process_subscription(subscription)
-            except Exception as e:
-                logger.exception(
-                    "Error processing subscription %s: %s",
-                    subscription.id,
-                    e,
-                )
+            except Exception:
+                logger.exception("Error processing subscription %s", subscription.id)
                 subscription.error_count += 1
 
                 if subscription.error_count >= subscription.max_errors:
@@ -306,10 +296,7 @@ class SubscriptionManager:
 
     def _uses_commit_cursor(self) -> bool:
         """Whether the store can deliver in commit order."""
-        if not hasattr(self._event_store, "get_events_since_committed"):
-            return False
-        supports = getattr(self._event_store, "supports_commit_cursor", None)
-        return bool(supports()) if callable(supports) else True
+        return self._event_store.supports_commit_cursor()
 
     def _process_subscription(self, subscription: DurableSubscription) -> None:
         """Process events for a single subscription."""
@@ -319,7 +306,7 @@ class SubscriptionManager:
         next_sequence = subscription.last_commit_sequence
 
         if commit_ordered:
-            events, next_cursor, next_sequence = getattr(self._event_store, "get_events_since_committed")(
+            events, next_cursor, next_sequence = self._event_store.get_events_since_committed(
                 subscription.last_commit_cursor,
                 limit=self._batch_size,
                 after_sequence=subscription.last_commit_sequence,
@@ -380,7 +367,7 @@ class SubscriptionManager:
             )
             return
         if hasattr(self._event_store, "update_subscription_sequence"):
-            getattr(self._event_store, "update_subscription_sequence")(
+            self._event_store.update_subscription_sequence(
                 subscription.id,
                 subscription.last_sequence,
             )
@@ -403,8 +390,7 @@ class SubscriptionManager:
         return True
 
     def process_once(self) -> int:
-        """
-        Process pending events once (for testing).
+        """Process pending events once (for testing).
 
         Returns:
             Number of events processed.

@@ -1,5 +1,4 @@
-"""
-RunTaskHandler - executes tasks.
+"""RunTaskHandler - executes tasks.
 
 This is the handler that actually runs task implementations.
 It handles execution, retries, timeouts, and result processing.
@@ -16,7 +15,7 @@ import threading
 import time
 from dataclasses import replace
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from resilient_circuit import ExponentialDelay
 
@@ -70,8 +69,7 @@ logger = logging.getLogger(__name__)
 
 
 class RunTaskHandler(StabilizeHandler[RunTask], RunTaskSavingMixin):
-    """
-    Handler for RunTask messages.
+    """Handler for RunTask messages.
 
     This is where tasks are actually executed. The handler:
     1. Resolves the task implementation
@@ -83,7 +81,7 @@ class RunTaskHandler(StabilizeHandler[RunTask], RunTaskSavingMixin):
 
     # Class-level lock to track tasks currently being executed (prevents duplicate execution)
     # Maps task_id -> start_time (monotonic) for staleness detection
-    _executing_tasks: dict[tuple[str, int], float] = {}
+    _executing_tasks: ClassVar[dict[tuple[str, int], float]] = {}
     _executing_lock = threading.Lock()
 
     def __init__(
@@ -322,13 +320,12 @@ class RunTaskHandler(StabilizeHandler[RunTask], RunTaskSavingMixin):
                             elapsed,
                         )
                         return
-                    else:
-                        logger.warning(
-                            "Stale execution lock for task %s (%.1fs > %ds), allowing re-execution",
-                            task_model.name,
-                            elapsed,
-                            stale_threshold_s,
-                        )
+                    logger.warning(
+                        "Stale execution lock for task %s (%.1fs > %ds), allowing re-execution",
+                        task_model.name,
+                        elapsed,
+                        stale_threshold_s,
+                    )
                 RunTaskHandler._executing_tasks[execution_key] = time.monotonic()
 
             # Register a cooperative cancellation token so a concurrent
@@ -414,12 +411,7 @@ class RunTaskHandler(StabilizeHandler[RunTask], RunTaskSavingMixin):
                         e,
                     )
                 else:
-                    logger.error(
-                        "Error executing task %s: %s",
-                        task_model.name,
-                        e,
-                        exc_info=True,
-                    )
+                    logger.exception("Error executing task %s", task_model.name)
                 handle_exception(
                     stage,
                     task_model,

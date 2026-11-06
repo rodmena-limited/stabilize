@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    import sqlite3
+
     from stabilize.models.stage import StageExecution
 
 logger = logging.getLogger(__name__)

@@ -51,9 +51,9 @@ def sweep_once(processor: Any) -> int:
         else:
             removed = store.cleanup_old_processed_messages(max_age_hours=cfg.processed_messages_max_age_hours)
         claims = store.cleanup_completed_stage_claims()
-    except Exception as e:
+    except Exception:
         processor._retention_failures += 1
-        logger.error("Retention sweep failed (%d so far): %s", processor._retention_failures, e, exc_info=True)
+        logger.exception("Retention sweep failed (%d so far)", processor._retention_failures)
         return 0
     if removed or claims:
         logger.info("Retention sweep removed %d processed-message record(s), %d stage claim(s)", removed, claims)

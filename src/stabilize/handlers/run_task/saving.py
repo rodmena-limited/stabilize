@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from stabilize.errors.delivery import DuplicateDeliveryError
+from stabilize.errors.store_errors import is_store_unavailable
 from stabilize.handlers.run_task import held_results
 from stabilize.handlers.run_task.error import complete_with_error
 from stabilize.handlers.run_task.generation import same_generation
@@ -35,12 +36,11 @@ def save_or_hold(handler: Any, task_model: TaskExecution, result: TaskResult, me
     except (TenancyModeChanged, TenantMismatchError, TenantContextError, DuplicateDeliveryError):
         raise
     except Exception as e:
-        if held_results.is_store_unavailable(e):
+        if is_store_unavailable(e):
             held_results.hold(task_model, result)
-            logger.error(
+            logger.exception(
                 "Task %s completed but its result could not be saved; holding it for the redelivery",
                 task_model.id,
-                exc_info=True,
             )
             raise
         logger.error("Task %s completed but its result cannot be stored: %s", task_model.name, e)

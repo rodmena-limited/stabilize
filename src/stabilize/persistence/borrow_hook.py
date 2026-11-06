@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import functools
-from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
 
 
 class BorrowHookError(RuntimeError):
@@ -38,7 +40,7 @@ def borrow_hook_pool_class() -> type[Any]:
 
 
 def engine_connection_class() -> type[Any]:
-    """psycopg's Connection with one addition: a pending tenant arm runs before the next statement.
+    """Psycopg's Connection with one addition: a pending tenant arm runs before the next statement.
 
     ``armed()`` marks the connection pending; the cursor's ``execute`` arms it before the first
     statement, and ``commit``/``rollback`` mark it pending again so the next statement re-arms.
@@ -48,11 +50,13 @@ def engine_connection_class() -> type[Any]:
 
     class EngineCursor(psycopg.Cursor):
         def execute(self, query: Any, params: Any = None, **kwargs: Any) -> Any:
-            self.connection._stabilize_arm_if_pending()  # type: ignore[attr-defined]
+            connection: Any = self.connection
+            connection._stabilize_arm_if_pending()
             return super().execute(query, params, **kwargs)
 
         def executemany(self, query: Any, params_seq: Any, **kwargs: Any) -> Any:
-            self.connection._stabilize_arm_if_pending()  # type: ignore[attr-defined]
+            connection: Any = self.connection
+            connection._stabilize_arm_if_pending()
             return super().executemany(query, params_seq, **kwargs)
 
     class EngineConnection(psycopg.Connection):

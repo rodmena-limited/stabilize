@@ -38,21 +38,18 @@ class StoreTransaction(ABC):
             expected_phase: If provided, adds status check to WHERE clause for
                            phase-aware optimistic locking (CAS pattern).
         """
-        pass
 
     @abstractmethod
     def update_workflow_status(self, workflow: Workflow) -> None:
         """Update workflow status within the transaction."""
-        pass
 
     def set_config_version(self, workflow_id: str, config_version: str) -> None:
         """Record the configuration fingerprint of a workflow within the transaction."""
-        return None
+        return
 
     @abstractmethod
     def push_message(self, message: Message, delay: float = 0) -> None:
         """Push a message to the queue within the transaction."""
-        pass
 
     @abstractmethod
     def mark_message_processed(
@@ -61,8 +58,7 @@ class StoreTransaction(ABC):
         handler_type: str | None = None,
         execution_id: str | None = None,
     ) -> bool:
-        """
-        Mark a message as successfully processed within the transaction.
+        """Mark a message as successfully processed within the transaction.
 
         This ensures that message processing is only marked complete if
         the transaction commits successfully.
@@ -71,7 +67,6 @@ class StoreTransaction(ABC):
             DuplicateDeliveryError: the message was already marked processed, so this
             delivery is a duplicate and its transaction must roll back.
         """
-        pass
 
     def acquire_claim(
         self,

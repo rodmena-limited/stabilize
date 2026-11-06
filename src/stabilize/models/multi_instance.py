@@ -1,5 +1,4 @@
-"""
-Multi-instance configuration for WCP-12 through WCP-15.
+"""Multi-instance configuration for WCP-12 through WCP-15.
 
 Defines how a stage spawns and synchronizes multiple parallel instances.
 """

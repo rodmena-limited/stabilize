@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.models.status import WorkflowStatus
 from stabilize.models.workflow import PausedDetails
@@ -17,6 +15,10 @@ from stabilize.persistence.signal_scope import signal_status_filter as _signal_s
 from stabilize.persistence.sqlite.converters import paused_to_dict
 from stabilize.persistence.tenancy import refuse_foreign_row
 from stabilize.queue.message_ids import owner_prefix
+
+if TYPE_CHECKING:
+    import sqlite3
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 

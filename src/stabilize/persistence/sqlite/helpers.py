@@ -169,12 +169,14 @@ def upsert_task(
                     "generation": task.generation,
                 },
             )
-        except sqlite3.IntegrityError:
+        except sqlite3.IntegrityError as exc:
             held = conn.execute(
                 "SELECT stabilize_tenant FROM task_executions WHERE id = :id", {"id": task.id}
             ).fetchone()
             refuse_foreign_row("task_executions", task.id, held[0] if held else None, tenant)
-            raise ConcurrencyError(f"Task {task.id} was modified concurrently (expected version {task.version})")
+            raise ConcurrencyError(
+                f"Task {task.id} was modified concurrently (expected version {task.version})"
+            ) from exc
     else:
         # Update successful - increment local version
         task.version += 1

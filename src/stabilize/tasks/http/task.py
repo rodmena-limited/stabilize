@@ -1,5 +1,4 @@
-"""
-HTTPTask for making HTTP requests using Python stdlib.
+"""HTTPTask for making HTTP requests using Python stdlib.
 
 This module provides a production-ready HTTPTask with:
 - All HTTP methods (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS)
@@ -127,10 +126,12 @@ def _validate_url_safety(url: str) -> None:
             # resolved again, differently, by the connection itself.
             raise ValueError(f"SSRF blocked: cannot resolve host '{hostname}': {exc}") from exc
         if not addrs:
-            raise ValueError(f"SSRF blocked: host '{hostname}' resolved to no addresses")
+            raise ValueError(f"SSRF blocked: host '{hostname}' resolved to no addresses") from None
         for addr in addrs:
             if _is_blocked(addr):
-                raise ValueError(f"SSRF blocked: URL '{redact_userinfo(url)}' resolves to blocked address {addr}")
+                raise ValueError(
+                    f"SSRF blocked: URL '{redact_userinfo(url)}' resolves to blocked address {addr}"
+                ) from None
         return
 
     if _is_blocked(addr):
@@ -153,8 +154,7 @@ class _SafeRedirectHandler(HTTPRedirectHandler):
 
 
 class HTTPTask(Task):
-    """
-    Make HTTP requests using Python's stdlib urllib.
+    """Make HTTP requests using Python's stdlib urllib.
 
     Supports all standard HTTP methods, file upload/download, authentication,
     retries, and SSL/TLS configuration with zero external dependencies.
@@ -353,9 +353,7 @@ class HTTPTask(Task):
                 return True
             if isinstance(e, HTTPError) and e.code in retry_on_status:
                 return True
-            if isinstance(e, (URLError, TimeoutError, OSError)):
-                return True
-            return False
+            return bool(isinstance(e, (URLError, TimeoutError, OSError)))
 
         http_retry_policy = RetryWithBackoffPolicy(
             max_retries=retries,
@@ -380,8 +378,6 @@ class HTTPTask(Task):
                     logger.debug("HTTPTask got %s, will retry", resp.status)
                     raise RetryableStatusError(resp)
 
-                return resp
-
             except HTTPError as e:
                 last_error = e
                 if e.code in retry_on_status:
@@ -394,6 +390,8 @@ class HTTPTask(Task):
                 last_error = e
                 logger.debug("HTTPTask error: %s, will retry", e)
                 raise
+            else:
+                return resp
 
         # Execute with retry
         if retries > 0:

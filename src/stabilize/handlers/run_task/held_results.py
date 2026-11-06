@@ -5,8 +5,6 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
-from stabilize.errors.store_errors import is_store_unavailable as is_store_unavailable
-
 if TYPE_CHECKING:
     from stabilize.models.task import TaskExecution
     from stabilize.tasks.result import TaskResult

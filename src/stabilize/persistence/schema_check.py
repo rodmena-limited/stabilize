@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
-from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.persistence.columns import ENGINE_COLUMNS, columns
 from stabilize.persistence.function_sources import FENCE_NAME, OWNER_NAME, function_problems
 from stabilize.persistence.tenancy import MODE_TENANCY, TENANT_CHECK, TENANT_COLUMN, EngineSchemaError
+
+if TYPE_CHECKING:
+    import sqlite3
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -148,10 +150,10 @@ def check_sqlite_tables(conn: sqlite3.Connection, tables: list[str], mode: str) 
         present: dict[str, dict[str, Any]] = {}
         for row in conn.execute(f'PRAGMA table_info("{table}")').fetchall():
             present[str(row[1])] = {"type": str(row[2]).upper(), "nullable": not row[3], "default": row[4]}
-        for problem in _problems_for_columns(table, present, "sqlite", mode):
-            problems.append(
-                problem.replace("ALTER COLUMN stabilize_tenant TYPE text", "recreate stabilize_tenant as TEXT")
-            )
+        problems.extend(
+            problem.replace("ALTER COLUMN stabilize_tenant TYPE text", "recreate stabilize_tenant as TEXT")
+            for problem in _problems_for_columns(table, present, "sqlite", mode)
+        )
         if mode == MODE_TENANCY and f"stabilize_fence_del_{table}" not in triggers:
             problems.append(f"trigger stabilize_fence_del_{table} is missing; run stabilize mg-tenancy enable")
     if problems:

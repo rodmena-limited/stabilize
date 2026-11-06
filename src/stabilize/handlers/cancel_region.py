@@ -1,5 +1,4 @@
-"""
-CancelRegionHandler - cancels all stages in a named region.
+"""CancelRegionHandler - cancels all stages in a named region.
 
 Implements WCP-25: Cancel Region.
 Finds all stages with matching cancel_region and pushes CancelStage for each active one.
@@ -8,24 +7,24 @@ Finds all stages with matching cancel_region and pushes CancelStage for each act
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.handlers.base import StabilizeHandler
 from stabilize.queue.messages import CancelRegion, CancelStage
-from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from stabilize.events.recorder import EventRecorder
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.resilience.config import HandlerConfig
 
 logger = logging.getLogger(__name__)
 
 
 class CancelRegionHandler(StabilizeHandler[CancelRegion]):
-    """
-    Handler for CancelRegion messages.
+    """Handler for CancelRegion messages.
 
     Execution flow:
     1. Load the workflow execution

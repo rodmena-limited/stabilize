@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
-from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Any
 
-from stabilize.models.workflow import Workflow
 from stabilize.persistence.columns import select_list
 from stabilize.persistence.postgres.converters import (
     paused_to_dict,
@@ -30,6 +27,12 @@ from stabilize.persistence.store import (
     WorkflowNotFoundError,
 )
 from stabilize.persistence.store.owned_rows import WORKFLOW_OWNED_ROWS
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from contextlib import AbstractContextManager
+
+    from stabilize.models.workflow import Workflow
 
 _PIPELINE = select_list("pipeline_executions", "postgres")
 
@@ -57,38 +60,36 @@ class PostgresWorkflowOpsMixin:
     def recovery_candidate_ids(self, queue_table: str | None, after_id: str | None, limit: int) -> list[str]:
         """Ids of this tenant's live workflows on *queue_table*, keyset-paged by id; the default table owns NULL."""
         own_default = (queue_table or "queue_messages") == "queue_messages"
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id FROM pipeline_executions WHERE stabilize_tenant = %(tenant)s "
-                    "AND status = ANY(%(statuses)s) AND (queue_table = %(queue_table)s "
-                    "OR (%(own_default)s AND queue_table IS NULL)) "
-                    "AND (%(after_id)s::text IS NULL OR id > %(after_id)s) ORDER BY id LIMIT %(limit)s",
-                    {
-                        "tenant": self.tenant,
-                        "statuses": ["RUNNING", "NOT_STARTED", "BUFFERED"],
-                        "queue_table": queue_table or "queue_messages",
-                        "own_default": own_default,
-                        "after_id": after_id,
-                        "limit": int(limit),
-                    },
-                )
-                rows = cur.fetchall()
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM pipeline_executions WHERE stabilize_tenant = %(tenant)s "
+                "AND status = ANY(%(statuses)s) AND (queue_table = %(queue_table)s "
+                "OR (%(own_default)s AND queue_table IS NULL)) "
+                "AND (%(after_id)s::text IS NULL OR id > %(after_id)s) ORDER BY id LIMIT %(limit)s",
+                {
+                    "tenant": self.tenant,
+                    "statuses": ["RUNNING", "NOT_STARTED", "BUFFERED"],
+                    "queue_table": queue_table or "queue_messages",
+                    "own_default": own_default,
+                    "after_id": after_id,
+                    "limit": int(limit),
+                },
+            )
+            rows = cur.fetchall()
         return [str(r["id"]) for r in rows]
 
     def retrieve_execution_summary(self, execution_id: str) -> Workflow:
         """Retrieve execution metadata without stages."""
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
-                    {"id": execution_id, "tenant": self.tenant},
-                )
-                row = cur.fetchone()
-                if not row:
-                    raise WorkflowNotFoundError(execution_id)
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_PIPELINE} FROM pipeline_executions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
+                {"id": execution_id, "tenant": self.tenant},
+            )
+            row = cur.fetchone()
+            if not row:
+                raise WorkflowNotFoundError(execution_id)
 
-                return row_to_execution(row)
+            return row_to_execution(row)
 
     def update_status(self, execution: Workflow) -> None:
         """Update execution status."""
@@ -195,9 +196,9 @@ class PostgresWorkflowOpsMixin:
         """
         budget = self._health_timeout if timeout is None else timeout
         try:
-            with self._pool.connection(timeout=budget) as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 1")
-            return True
+            with self._pool.connection(timeout=budget) as conn, conn.cursor() as cur:
+                cur.execute("SELECT 1")
         except Exception:
             return False
+        else:
+            return True

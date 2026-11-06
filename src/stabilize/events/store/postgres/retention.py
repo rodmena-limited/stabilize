@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from stabilize.events.store.retention import (
@@ -14,6 +13,8 @@ from stabilize.events.store.retention import (
 from stabilize.events.store.subscription_names import unqualify
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from psycopg import Connection
     from psycopg.rows import DictRow
     from psycopg_pool import ConnectionPool
@@ -34,10 +35,9 @@ class PostgresRetentionMixin:
         """The position after every transaction that has committed so far."""
         if not self.supports_commit_cursor():
             return "0", 0
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(_WATERMARK)
-                row = cur.fetchone()
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(_WATERMARK)
+            row = cur.fetchone()
         return (str(row["wm"]) if row else "0"), 0
 
     def commit_cursor_for_sequence(self, sequence: int) -> tuple[str, int]:
@@ -49,19 +49,18 @@ class PostgresRetentionMixin:
         """
         if not self.supports_commit_cursor():
             return "0", 0
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT min(coalesce(commit_xid, '0'::xid8))::text AS xid FROM events "
-                    "WHERE stabilize_tenant = %(tenant)s AND sequence > %(sequence)s",
-                    {"tenant": self.tenant, "sequence": int(sequence)},
-                )
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT min(coalesce(commit_xid, '0'::xid8))::text AS xid FROM events "
+                "WHERE stabilize_tenant = %(tenant)s AND sequence > %(sequence)s",
+                {"tenant": self.tenant, "sequence": int(sequence)},
+            )
+            row = cur.fetchone()
+            xid = row["xid"] if row else None
+            if xid is None:
+                cur.execute(_WATERMARK)
                 row = cur.fetchone()
-                xid = row["xid"] if row else None
-                if xid is None:
-                    cur.execute(_WATERMARK)
-                    row = cur.fetchone()
-                    return (str(row["wm"]) if row else "0"), 0
+                return (str(row["wm"]) if row else "0"), 0
         return str(xid), 0
 
     def purge_events(

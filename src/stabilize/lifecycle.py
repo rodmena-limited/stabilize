@@ -1,5 +1,4 @@
-"""
-Lifecycle management for graceful shutdown.
+"""Lifecycle management for graceful shutdown.
 
 This module provides the LifecycleManager class for:
 - Signal handling (SIGTERM, SIGINT)
@@ -29,6 +28,7 @@ Usage:
 from __future__ import annotations
 
 import atexit
+import contextlib
 import logging
 import signal
 import threading
@@ -50,8 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 class LifecycleManager:
-    """
-    Manages application lifecycle for graceful shutdown.
+    """Manages application lifecycle for graceful shutdown.
 
     Handles signal registration, atexit hooks, and coordinated shutdown
     of processing components.
@@ -66,8 +65,7 @@ class LifecycleManager:
         shutdown_timeout: float = 30.0,
         graceful_shutdown_delay: float = 5.0,
     ) -> None:
-        """
-        Initialize the lifecycle manager.
+        """Initialize the lifecycle manager.
 
         Args:
             shutdown_timeout: Max seconds to wait for active tasks during shutdown
@@ -90,8 +88,7 @@ class LifecycleManager:
         self._original_sigint: SignalHandler = signal.SIG_DFL
 
     def register_processor(self, processor: QueueProcessor) -> None:
-        """
-        Register a QueueProcessor for graceful shutdown.
+        """Register a QueueProcessor for graceful shutdown.
 
         Args:
             processor: The queue processor to manage
@@ -102,8 +99,7 @@ class LifecycleManager:
                 logger.debug("Registered QueueProcessor for lifecycle management")
 
     def unregister_processor(self, processor: QueueProcessor) -> None:
-        """
-        Unregister a QueueProcessor.
+        """Unregister a QueueProcessor.
 
         Args:
             processor: The queue processor to unregister
@@ -113,8 +109,7 @@ class LifecycleManager:
                 self._processors.remove(processor)
 
     def register_bulkhead_manager(self, manager: TaskBulkheadManager) -> None:
-        """
-        Register a TaskBulkheadManager for graceful shutdown.
+        """Register a TaskBulkheadManager for graceful shutdown.
 
         Args:
             manager: The bulkhead manager to manage
@@ -125,8 +120,7 @@ class LifecycleManager:
                 logger.debug("Registered TaskBulkheadManager for lifecycle management")
 
     def unregister_bulkhead_manager(self, manager: TaskBulkheadManager) -> None:
-        """
-        Unregister a TaskBulkheadManager.
+        """Unregister a TaskBulkheadManager.
 
         Args:
             manager: The bulkhead manager to unregister
@@ -136,8 +130,7 @@ class LifecycleManager:
                 self._bulkhead_managers.remove(manager)
 
     def on_shutdown(self, callback: Callable[[], None]) -> Callable[[], None]:
-        """
-        Decorator to register a shutdown callback.
+        """Decorator to register a shutdown callback.
 
         Callbacks are executed in registration order during shutdown.
 
@@ -157,8 +150,7 @@ class LifecycleManager:
         return callback
 
     def add_shutdown_callback(self, callback: Callable[[], None]) -> None:
-        """
-        Add a shutdown callback.
+        """Add a shutdown callback.
 
         Args:
             callback: Function to call on shutdown
@@ -167,17 +159,13 @@ class LifecycleManager:
             self._shutdown_callbacks.append(callback)
 
     def install_handlers(self) -> None:
-        """
-        Install signal and atexit handlers.
+        """Install signal and atexit handlers.
 
         Registers handlers for SIGTERM and SIGINT for graceful shutdown.
         Also registers an atexit handler as a fallback.
 
         Safe to call multiple times - will only install once.
         """
-        if self._handlers_installed:
-            return
-
         with self._lock:
             if self._handlers_installed:
                 return
@@ -193,14 +181,10 @@ class LifecycleManager:
             logger.info("Lifecycle handlers installed (SIGTERM, SIGINT, atexit)")
 
     def uninstall_handlers(self) -> None:
-        """
-        Uninstall signal and atexit handlers.
+        """Uninstall signal and atexit handlers.
 
         Restores original signal handlers and unregisters atexit callback.
         """
-        if not self._handlers_installed:
-            return
-
         with self._lock:
             if not self._handlers_installed:
                 return
@@ -210,17 +194,14 @@ class LifecycleManager:
             signal.signal(signal.SIGINT, self._original_sigint)
 
             # Unregister atexit (best effort, may not work if already called)
-            try:
+            with contextlib.suppress(Exception):
                 atexit.unregister(self._shutdown)
-            except Exception:
-                pass
 
             self._handlers_installed = False
             logger.debug("Lifecycle handlers uninstalled")
 
     def request_shutdown(self) -> None:
-        """
-        Request graceful shutdown.
+        """Request graceful shutdown.
 
         This sets the shutdown flag and begins the shutdown sequence.
         Can be called from any thread.
@@ -239,8 +220,7 @@ class LifecycleManager:
         return self._shutdown_in_progress.is_set()
 
     def wait_for_shutdown(self, timeout: float | None = None) -> bool:
-        """
-        Wait for shutdown to complete.
+        """Wait for shutdown to complete.
 
         Args:
             timeout: Maximum seconds to wait (None = wait forever)
@@ -262,8 +242,7 @@ class LifecycleManager:
             threading.Thread(target=in_context(self._shutdown), daemon=True).start()
 
     def _shutdown(self) -> None:
-        """
-        Execute graceful shutdown sequence.
+        """Execute graceful shutdown sequence.
 
         1. Stop accepting new work (request_stop on processors)
         2. Wait for active tasks to complete
@@ -393,8 +372,7 @@ _lifecycle_manager: LifecycleManager | None = None
 
 
 def get_lifecycle_manager() -> LifecycleManager:
-    """
-    Get the global lifecycle manager.
+    """Get the global lifecycle manager.
 
     Creates a new manager if one doesn't exist.
 
@@ -408,8 +386,7 @@ def get_lifecycle_manager() -> LifecycleManager:
 
 
 def set_lifecycle_manager(manager: LifecycleManager) -> None:
-    """
-    Set the global lifecycle manager.
+    """Set the global lifecycle manager.
 
     Args:
         manager: The manager to use globally
@@ -422,8 +399,7 @@ def install_shutdown_handlers(
     shutdown_timeout: float = 30.0,
     graceful_shutdown_delay: float = 5.0,
 ) -> LifecycleManager:
-    """
-    Convenience function to install shutdown handlers.
+    """Convenience function to install shutdown handlers.
 
     Creates and installs a lifecycle manager with the given configuration.
 

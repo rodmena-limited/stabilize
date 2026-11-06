@@ -1,5 +1,4 @@
-"""
-DockerTask for executing Docker commands.
+"""DockerTask for executing Docker commands.
 
 This module provides a production-ready DockerTask with:
 - Container lifecycle management (run, exec, stop, rm)
@@ -27,8 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class DockerTask(DockerCommandMixin, Task):
-    """
-    Execute Docker commands.
+    """Execute Docker commands.
 
     Supports container lifecycle, image management, and inspection commands.
 
@@ -181,6 +179,7 @@ class DockerTask(DockerCommandMixin, Task):
         try:
             result = subprocess.run(
                 cmd,
+                check=False,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -217,11 +216,10 @@ class DockerTask(DockerCommandMixin, Task):
             if result.returncode == 0:
                 logger.debug("DockerTask success")
                 return TaskResult.success(outputs=outputs)
-            else:
-                error_msg = f"Docker command failed with exit code {result.returncode}"
-                if continue_on_failure:
-                    return TaskResult.failed_continue(error=error_msg, outputs=outputs)
-                return TaskResult.terminal(error=error_msg, context=outputs)
+            error_msg = f"Docker command failed with exit code {result.returncode}"
+            if continue_on_failure:
+                return TaskResult.failed_continue(error=error_msg, outputs=outputs)
+            return TaskResult.terminal(error=error_msg, context=outputs)
 
         except subprocess.TimeoutExpired:
             error_msg = f"Docker command timed out after {timeout}s"
@@ -233,6 +231,7 @@ class DockerTask(DockerCommandMixin, Task):
                         ["docker", "kill", stage.context["name"]],
                         capture_output=True,
                         timeout=30,
+                        check=False,
                     )
                     logger.warning("Killed timed-out container %s", stage.context["name"])
                 except Exception as kill_error:

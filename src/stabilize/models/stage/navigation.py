@@ -1,5 +1,4 @@
-"""
-DAG navigation and synthetic stage methods for StageExecution.
+"""DAG navigation and synthetic stage methods for StageExecution.
 
 This mixin provides methods for traversing the DAG structure, querying
 upstream/downstream stages, and managing synthetic stages.
@@ -7,6 +6,7 @@ upstream/downstream stages, and managing synthetic stages.
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 
 from stabilize.models.stage.enums import SyntheticStageOwner
@@ -40,16 +40,14 @@ class StageNavigationMixin:
         return len(self.requisite_stage_ref_ids) == 0
 
     def is_join(self) -> bool:
-        """
-        Check if this is a join point (multiple dependencies).
+        """Check if this is a join point (multiple dependencies).
 
         A join point waits for multiple upstream stages to complete.
         """
         return len(self.requisite_stage_ref_ids) > 1
 
     def upstream_stages(self) -> list[StageExecution]:
-        """
-        Get all stages directly upstream of this stage.
+        """Get all stages directly upstream of this stage.
 
         Returns stages whose ref_id is in this stage's requisite_stage_ref_ids.
         Returns empty list if stage is not attached to an execution.
@@ -59,8 +57,7 @@ class StageNavigationMixin:
         return [stage for stage in self.execution.stages if stage.ref_id in self.requisite_stage_ref_ids]
 
     def downstream_stages(self) -> list[StageExecution]:
-        """
-        Get all stages directly downstream of this stage.
+        """Get all stages directly downstream of this stage.
 
         Returns stages that have this stage's ref_id in their requisite_stage_ref_ids.
         Returns empty list if stage is not attached to an execution.
@@ -70,8 +67,7 @@ class StageNavigationMixin:
         return [stage for stage in self.execution.stages if self.ref_id in stage.requisite_stage_ref_ids]
 
     def all_upstream_stages_complete(self) -> bool:
-        """
-        Check if all upstream stages have completed successfully.
+        """Check if all upstream stages have completed successfully.
 
         Returns True if all upstream stages have status in CONTINUABLE_STATUSES
         (SUCCEEDED, FAILED_CONTINUE, or SKIPPED).
@@ -79,8 +75,7 @@ class StageNavigationMixin:
         return all(stage.status in CONTINUABLE_STATUSES for stage in self.upstream_stages())
 
     def any_upstream_stages_failed(self) -> bool:
-        """
-        Check if any upstream stages have failed with a halt status.
+        """Check if any upstream stages have failed with a halt status.
 
         Returns True if any upstream stage has TERMINAL, STOPPED, or CANCELED status.
         """
@@ -131,8 +126,7 @@ class StageNavigationMixin:
         return [stage for stage in self.after_stages() if stage.is_initial()]
 
     def parent(self) -> StageExecution:
-        """
-        Get the parent stage for this synthetic stage.
+        """Get the parent stage for this synthetic stage.
 
         Raises:
             ValueError: If this is not a synthetic stage or not attached to an execution
@@ -153,8 +147,7 @@ class StageNavigationMixin:
     # ========== Ancestor Traversal ==========
 
     def ancestors(self) -> list[StageExecution]:
-        """
-        Get all ancestor stages in dependency order.
+        """Get all ancestor stages in dependency order.
 
         Includes requisite stages and parent stages.
         """
@@ -173,18 +166,14 @@ class StageNavigationMixin:
 
             # Visit parent stage
             if stage.parent_stage_id:
-                try:
+                with contextlib.suppress(ValueError):
                     visit(stage.parent())
-                except ValueError:
-                    pass
 
         # Start with upstream stages (not self)
         for upstream in self.upstream_stages():
             visit(upstream)
         if self.parent_stage_id:
-            try:
+            with contextlib.suppress(ValueError):
                 visit(self.parent())
-            except ValueError:
-                pass
 
         return result

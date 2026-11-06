@@ -1,5 +1,4 @@
-"""
-SkipStageHandler - handles stage skipping.
+"""SkipStageHandler - handles stage skipping.
 
 This handler is invoked when a stage should be skipped due to conditional
 execution or start time expiry.
@@ -8,7 +7,6 @@ execution or start time expiry.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from stabilize.dag.readiness import PRUNED
@@ -22,15 +20,17 @@ from stabilize.queue.messages import (
     SkipStage,
     StartStage,
 )
-from stabilize.resilience.config import HandlerConfig
 from stabilize.tasks.handles import bind_engine
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.models.task import TaskExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.resilience.config import HandlerConfig
     from stabilize.tasks.registry import TaskRegistry
 
 logger = logging.getLogger(__name__)
@@ -42,8 +42,7 @@ _LIVE_TASK_STATUSES = frozenset(
 
 
 class SkipStageHandler(StabilizeHandler[SkipStage]):
-    """
-    Handler for SkipStage messages.
+    """Handler for SkipStage messages.
 
     Execution flow:
     1. Check if stage is still in a skippable state
@@ -120,7 +119,7 @@ class SkipStageHandler(StabilizeHandler[SkipStage]):
             logger.info("Skipped stage %s (%s)%s", stage.name, stage.id, " (pruned)" if message.pruned else "")
 
             if self.event_recorder:
-                self.set_event_context(stage.execution.id if stage.execution else "")
+                self.set_event_context(stage.execution.id)
                 self.event_recorder.record_stage_skipped(
                     stage,
                     reason="Stage pruned" if message.pruned else "Stage skipped",

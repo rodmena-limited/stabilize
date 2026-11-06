@@ -1,5 +1,4 @@
-"""
-Configuration for the queue processor.
+"""Configuration for the queue processor.
 
 This module provides the QueueProcessorConfig dataclass with
 values that can be loaded from environment variables via HandlerConfig.

@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import logging
-import threading
-from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from stabilize.errors.delivery import DuplicateDeliveryError
 from stabilize.errors.store_errors import is_store_unavailable
 from stabilize.persistence.tenancy import TenancyModeChanged
-from stabilize.queue import Queue
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.processor.lease_guard import start_lock_heartbeat
 from stabilize.queue.processor.redelivery import redelivery_delay
 from stabilize.threads import in_context
+
+if TYPE_CHECKING:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from stabilize.queue import Queue
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +72,7 @@ class MessageSubmissionMixin:
             except TenancyModeChanged as e:
                 self._latch(e)
             except Exception as e:
-                logger.error(
-                    "Error handling %s: %s",
-                    get_message_type_name(message),
-                    e,
-                    exc_info=True,
-                )
+                logger.exception("Error handling %s", get_message_type_name(message))
                 # Store error context for debugging and auditing
                 # This allows tracking of failure patterns across retries
                 message.set_error_context(e)

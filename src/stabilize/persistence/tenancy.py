@@ -5,12 +5,14 @@ from __future__ import annotations
 import re
 import threading
 import time
-from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.errors.base import StabilizeError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
 
 TENANT_RE = re.compile(r"^[A-Za-z0-9.:-]{1,64}$")
 TENANT_SETTING_RE = re.compile(r"^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$")

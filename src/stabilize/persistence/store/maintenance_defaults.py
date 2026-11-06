@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class MaintenanceDefaults:
@@ -14,13 +17,14 @@ class MaintenanceDefaults:
         table_name: str | None = None,
         live: Callable[[list[str]], set[str]] | None = None,
     ) -> int:
-        """
-        Clean up old processed message records.
+        """Clean up old processed message records.
 
         Args:
             max_age_hours: Delete records older than this many hours
             batch_size: Rows deleted per transaction (backend default when None)
             max_rows: Stop after this many rows (no limit when None)
+            table_name: Queue table whose live messages are kept (the default table when None)
+            live: Returns the ids still live in the queue among those given (the store's own check when None)
 
         Returns:
             Number of records deleted

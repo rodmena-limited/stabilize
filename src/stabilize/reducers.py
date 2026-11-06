@@ -1,5 +1,4 @@
-"""
-Declarative fan-in reducers for parallel branches (agentic ergonomics).
+"""Declarative fan-in reducers for parallel branches (agentic ergonomics).
 
 LangGraph channels take a reducer (e.g. ``operator.add``) so parallel nodes
 APPEND to a shared list instead of overwriting it. Stabilize's default

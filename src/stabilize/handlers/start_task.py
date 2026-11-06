@@ -1,5 +1,4 @@
-"""
-StartTaskHandler - handles task startup.
+"""StartTaskHandler - handles task startup.
 
 This handler prepares a task for execution and triggers RunTask.
 """
@@ -7,7 +6,6 @@ This handler prepares a task for execution and triggers RunTask.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.error_codes import classify_error
@@ -21,23 +19,24 @@ from stabilize.queue.messages import (
     RunTask,
     StartTask,
 )
-from stabilize.resilience.config import HandlerConfig
 from stabilize.tasks.interface import SkippableTask
 from stabilize.tasks.registry import TaskNotFoundError, TaskRegistry
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.models.task import TaskExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.resilience.config import HandlerConfig
 
 logger = logging.getLogger(__name__)
 
 
 class StartTaskHandler(StabilizeHandler[StartTask]):
-    """
-    Handler for StartTask messages.
+    """Handler for StartTask messages.
 
     Execution flow:
     1. Check if task is enabled (SkippableTask)

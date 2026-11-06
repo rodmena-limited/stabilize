@@ -1,5 +1,4 @@
-"""
-Enterprise-ready ShellTask for executing shell commands.
+"""Enterprise-ready ShellTask for executing shell commands.
 
 This module provides a production-ready ShellTask with:
 - Working directory support
@@ -18,6 +17,7 @@ This module provides a production-ready ShellTask with:
 from __future__ import annotations
 
 import base64
+import contextlib
 import ctypes
 import logging
 import os
@@ -25,6 +25,7 @@ import shlex
 import signal
 import subprocess
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from stabilize.errors import TransientError
@@ -65,8 +66,7 @@ RESERVED_KEYS = frozenset(
 
 
 class ShellTask(Task):
-    """
-    Enterprise-ready shell command execution.
+    """Enterprise-ready shell command execution.
 
     Executes shell commands with full control over execution environment,
     input/output handling, and error management.
@@ -195,11 +195,11 @@ class ShellTask(Task):
 
             if isinstance(shell, str):
                 real_path = os.path.realpath(shell)
-                if not os.path.isfile(real_path):
+                if not Path(real_path).is_file():
                     return TaskResult.terminal(error=f"Shell not found: {shell}")
                 if not os.access(real_path, os.X_OK):
                     return TaskResult.terminal(error=f"Shell not executable: {shell}")
-                if not os.path.isabs(real_path):
+                if not Path(real_path).is_absolute():
                     return TaskResult.terminal(error=f"Shell must be an absolute path: {shell}")
                 popen_kwargs["shell"] = True
                 popen_kwargs["executable"] = real_path
@@ -223,13 +223,11 @@ class ShellTask(Task):
                 # Communicate with timeout
                 stdin_data: bytes | None = None
                 if stdin_input is not None:
-                    stdin_data = stdin_input.encode() if not binary else stdin_input.encode()
+                    stdin_data = stdin_input.encode()
 
                 stdout_bytes, stderr_bytes = proc.communicate(input=stdin_data, timeout=timeout)
-                assert isinstance(stdout_bytes, bytes)
-                assert isinstance(stderr_bytes, bytes)
 
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as timeout_error:
                 # Kill entire process tree on timeout
                 self._kill_process_tree(proc)
                 # Collect any partial output
@@ -265,7 +263,9 @@ class ShellTask(Task):
 
                 error_msg = f"Command timed out after {timeout}s"
                 if restart_on_failure:
-                    raise TransientError(error_msg, context_update={"_last_outputs": timeout_outputs})
+                    raise TransientError(
+                        error_msg, context_update={"_last_outputs": timeout_outputs}
+                    ) from timeout_error
                 if continue_on_failure:
                     return TaskResult.failed_continue(error=error_msg, outputs=timeout_outputs)
                 return TaskResult.terminal(error=error_msg, context=timeout_outputs)
@@ -306,17 +306,16 @@ class ShellTask(Task):
             # Check exit code
             if proc.returncode in expected_codes:
                 return TaskResult.success(outputs=outputs)
-            else:
-                error_msg = f"Command exited with code {proc.returncode} (expected: {expected_codes})"
-                if outputs.get("stderr"):
-                    error_msg += f": {outputs['stderr'][:200]}"
+            error_msg = f"Command exited with code {proc.returncode} (expected: {expected_codes})"
+            if outputs.get("stderr"):
+                error_msg += f": {outputs['stderr'][:200]}"
 
-                if restart_on_failure:
-                    raise TransientError(error_msg, context_update={"_last_outputs": outputs})
+            if restart_on_failure:
+                raise TransientError(error_msg, context_update={"_last_outputs": outputs})
 
-                if continue_on_failure:
-                    return TaskResult.failed_continue(error=error_msg, outputs=outputs)
-                return TaskResult.terminal(error=error_msg, context=outputs)
+            if continue_on_failure:
+                return TaskResult.failed_continue(error=error_msg, outputs=outputs)
+            return TaskResult.terminal(error=error_msg, context=outputs)
 
         except TransientError:
             # Let TransientError propagate for retry handling
@@ -377,23 +376,17 @@ class ShellTask(Task):
 
                 # Send SIGTERM to all (children first, leaf to root)
                 for child in reversed(children):
-                    try:
+                    with contextlib.suppress(psutil.NoSuchProcess):
                         child.send_signal(signal.SIGTERM)
-                    except psutil.NoSuchProcess:
-                        pass
 
-                try:
+                with contextlib.suppress(psutil.NoSuchProcess):
                     parent.send_signal(signal.SIGTERM)
-                except psutil.NoSuchProcess:
-                    pass
 
                 # Wait for processes to exit, then SIGKILL survivors
-                gone, alive = psutil.wait_procs(children + [parent], timeout=5)
+                _gone, alive = psutil.wait_procs([*children, parent], timeout=5)
                 for p in alive:
-                    try:
+                    with contextlib.suppress(psutil.NoSuchProcess):
                         p.kill()
-                    except psutil.NoSuchProcess:
-                        pass
 
             except psutil.NoSuchProcess:
                 pass  # Process already dead

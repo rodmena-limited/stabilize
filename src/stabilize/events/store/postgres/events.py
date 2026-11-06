@@ -1,11 +1,8 @@
-"""
-Event append, query, and retrieval methods for PostgreSQL event store.
-"""
+"""Event append, query, and retrieval methods for PostgreSQL event store."""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -18,16 +15,19 @@ from stabilize.events.base import (
     EventType,
     parse_event_type,
 )
-from stabilize.events.store.interface import EventQuery
 from stabilize.persistence.columns import columns, select_list
 from stabilize.persistence.tenancy import TenantMismatchError
 
 _EVENTS = select_list("events", "postgres")
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from psycopg import Connection
     from psycopg.rows import DictRow
     from psycopg_pool import ConnectionPool
+
+    from stabilize.events.store.interface import EventQuery
 
 
 class PostgresEventsMixin:
@@ -153,11 +153,10 @@ class PostgresEventsMixin:
 
         sql: Any = " ".join(sql_parts)
 
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, params)
-                for row in cur.fetchall():
-                    yield self._row_to_event(row)
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(sql, params)
+            for row in cur.fetchall():
+                yield self._row_to_event(row)
 
     def get_events_for_entity(
         self,
@@ -166,24 +165,23 @@ class PostgresEventsMixin:
         from_version: int = 0,
     ) -> list[Event]:
         """Get all events for a specific entity."""
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"""
                     SELECT {_EVENTS} FROM events
                     WHERE entity_type = %(entity_type)s
                       AND entity_id = %(entity_id)s
                       AND version > %(from_version)s AND stabilize_tenant = %(tenant)s
                     ORDER BY sequence ASC
                     """,
-                    {
-                        "entity_type": entity_type.value,
-                        "entity_id": entity_id,
-                        "from_version": from_version,
-                        "tenant": self.tenant,
-                    },
-                )
-                return [self._row_to_event(row) for row in cur.fetchall()]
+                {
+                    "entity_type": entity_type.value,
+                    "entity_id": entity_id,
+                    "from_version": from_version,
+                    "tenant": self.tenant,
+                },
+            )
+            return [self._row_to_event(row) for row in cur.fetchall()]
 
     def get_events_for_workflow(
         self,
@@ -191,31 +189,27 @@ class PostgresEventsMixin:
         from_sequence: int = 0,
     ) -> list[Event]:
         """Get all events for a workflow execution."""
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"""
                     SELECT {_EVENTS} FROM events
                     WHERE workflow_id = %(workflow_id)s
                       AND sequence > %(from_sequence)s AND stabilize_tenant = %(tenant)s
                     ORDER BY sequence ASC
                     """,
-                    {"workflow_id": workflow_id, "from_sequence": from_sequence, "tenant": self.tenant},
-                )
-                return [self._row_to_event(row) for row in cur.fetchall()]
+                {"workflow_id": workflow_id, "from_sequence": from_sequence, "tenant": self.tenant},
+            )
+            return [self._row_to_event(row) for row in cur.fetchall()]
 
     def get_current_sequence(self) -> int:
         """Get the current (latest) global sequence number."""
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT MAX(sequence) FROM events WHERE stabilize_tenant = %(tenant)s", {"tenant": self.tenant}
-                )
-                row = cur.fetchone()
-                if row is None:
-                    return 0
-                value = row.get("max")
-                return value if value is not None else 0
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute("SELECT MAX(sequence) FROM events WHERE stabilize_tenant = %(tenant)s", {"tenant": self.tenant})
+            row = cur.fetchone()
+            if row is None:
+                return 0
+            value = row.get("max")
+            return value if value is not None else 0
 
     def get_events_since(
         self,
@@ -223,18 +217,17 @@ class PostgresEventsMixin:
         limit: int = 1000,
     ) -> list[Event]:
         """Get events since a sequence number."""
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"""
                     SELECT {_EVENTS} FROM events
                     WHERE sequence > %(sequence)s AND stabilize_tenant = %(tenant)s
                     ORDER BY sequence ASC
                     LIMIT %(limit)s
                     """,
-                    {"sequence": sequence, "limit": limit, "tenant": self.tenant},
-                )
-                return [self._row_to_event(row) for row in cur.fetchall()]
+                {"sequence": sequence, "limit": limit, "tenant": self.tenant},
+            )
+            return [self._row_to_event(row) for row in cur.fetchall()]
 
     def get_events_since_committed(
         self,
@@ -255,16 +248,15 @@ class PostgresEventsMixin:
         the watermark. Events written before the commit_xid column exists carry
         NULL and are coalesced to '0'::xid8, which keeps them deliverable.
         """
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT pg_snapshot_xmin(pg_current_snapshot())::text AS wm")
-                row = cur.fetchone()
-                if row is None:
-                    return [], cursor or "0", int(after_sequence or 0)
-                watermark = str(row["wm"] if isinstance(row, dict) else row[0])
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute("SELECT pg_snapshot_xmin(pg_current_snapshot())::text AS wm")
+            row = cur.fetchone()
+            if row is None:
+                return [], cursor or "0", int(after_sequence or 0)
+            watermark = str(row["wm"] if isinstance(row, dict) else row[0])
 
-                cur.execute(
-                    f"""
+            cur.execute(
+                f"""
                     SELECT {_EVENTS} FROM events
                     WHERE stabilize_tenant = %(tenant)s
                       AND (coalesce(commit_xid, '0'::xid8), sequence) > (%(cursor)s::xid8, %(after)s::bigint)
@@ -272,16 +264,16 @@ class PostgresEventsMixin:
                     ORDER BY coalesce(commit_xid, '0'::xid8) ASC, sequence ASC
                     LIMIT %(limit)s
                     """,
-                    {
-                        "cursor": cursor or "0",
-                        "after": int(after_sequence or 0),
-                        "watermark": watermark,
-                        "limit": limit,
-                        "tenant": self.tenant,
-                    },
-                )
-                rows = cur.fetchall()
-                events = [self._row_to_event(row) for row in rows]
+                {
+                    "cursor": cursor or "0",
+                    "after": int(after_sequence or 0),
+                    "watermark": watermark,
+                    "limit": limit,
+                    "tenant": self.tenant,
+                },
+            )
+            rows = cur.fetchall()
+            events = [self._row_to_event(row) for row in rows]
 
         if rows and len(rows) >= limit:
             last = rows[-1]
@@ -291,59 +283,55 @@ class PostgresEventsMixin:
 
     def get_event_by_id(self, event_id: str) -> Event | None:
         """Get a single event by its ID."""
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT {_EVENTS} FROM events WHERE event_id = %(event_id)s AND stabilize_tenant = %(tenant)s",
-                    {"event_id": event_id, "tenant": self.tenant},
-                )
-                row = cur.fetchone()
-                return self._row_to_event(row) if row else None
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_EVENTS} FROM events WHERE event_id = %(event_id)s AND stabilize_tenant = %(tenant)s",
+                {"event_id": event_id, "tenant": self.tenant},
+            )
+            row = cur.fetchone()
+            return self._row_to_event(row) if row else None
 
     def count_events(self, query: EventQuery | None = None) -> int:
         """Count events matching query."""
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                if query is None:
-                    cur.execute(
-                        "SELECT COUNT(*) FROM events WHERE stabilize_tenant = %(tenant)s", {"tenant": self.tenant}
-                    )
-                else:
-                    sql_parts = ["SELECT COUNT(*) FROM events WHERE stabilize_tenant = %(tenant)s"]
-                    params: dict[str, Any] = {"tenant": self.tenant}
+        with self._borrow() as conn, conn.cursor() as cur:
+            if query is None:
+                cur.execute("SELECT COUNT(*) FROM events WHERE stabilize_tenant = %(tenant)s", {"tenant": self.tenant})
+            else:
+                sql_parts = ["SELECT COUNT(*) FROM events WHERE stabilize_tenant = %(tenant)s"]
+                params: dict[str, Any] = {"tenant": self.tenant}
 
-                    if query.entity_type is not None:
-                        sql_parts.append("AND entity_type = %(entity_type)s")
-                        params["entity_type"] = query.entity_type.value
+                if query.entity_type is not None:
+                    sql_parts.append("AND entity_type = %(entity_type)s")
+                    params["entity_type"] = query.entity_type.value
 
-                    if query.entity_id is not None:
-                        sql_parts.append("AND entity_id = %(entity_id)s")
-                        params["entity_id"] = query.entity_id
+                if query.entity_id is not None:
+                    sql_parts.append("AND entity_id = %(entity_id)s")
+                    params["entity_id"] = query.entity_id
 
-                    if query.workflow_id is not None:
-                        sql_parts.append("AND workflow_id = %(workflow_id)s")
-                        params["workflow_id"] = query.workflow_id
+                if query.workflow_id is not None:
+                    sql_parts.append("AND workflow_id = %(workflow_id)s")
+                    params["workflow_id"] = query.workflow_id
 
-                    if query.event_types:
-                        sql_parts.append("AND event_type = ANY(%(event_types)s)")
-                        params["event_types"] = [et.value for et in query.event_types]
+                if query.event_types:
+                    sql_parts.append("AND event_type = ANY(%(event_types)s)")
+                    params["event_types"] = [et.value for et in query.event_types]
 
-                    if query.from_sequence is not None:
-                        sql_parts.append("AND sequence > %(from_sequence)s")
-                        params["from_sequence"] = query.from_sequence
+                if query.from_sequence is not None:
+                    sql_parts.append("AND sequence > %(from_sequence)s")
+                    params["from_sequence"] = query.from_sequence
 
-                    if query.to_sequence is not None:
-                        sql_parts.append("AND sequence <= %(to_sequence)s")
-                        params["to_sequence"] = query.to_sequence
+                if query.to_sequence is not None:
+                    sql_parts.append("AND sequence <= %(to_sequence)s")
+                    params["to_sequence"] = query.to_sequence
 
-                    sql_query: Any = " ".join(sql_parts)
-                    cur.execute(sql_query, params)
+                sql_query: Any = " ".join(sql_parts)
+                cur.execute(sql_query, params)
 
-                row = cur.fetchone()
-                if row is None:
-                    return 0
-                count_val = row.get("count", 0)
-                return count_val if count_val is not None else 0
+            row = cur.fetchone()
+            if row is None:
+                return 0
+            count_val = row.get("count", 0)
+            return count_val if count_val is not None else 0
 
     def _row_to_event(self, row: Any) -> Event:
         """Convert a database row to an Event."""

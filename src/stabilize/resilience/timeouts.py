@@ -1,5 +1,4 @@
-"""
-Centralized timeout management.
+"""Centralized timeout management.
 
 Provides consistent timeout calculation logic for tasks and stages.
 """
@@ -26,8 +25,7 @@ class TimeoutManager:
         self.default_task_timeout_seconds = default_task_timeout_seconds
 
     def get_task_timeout(self, stage: StageExecution, task: Task) -> timedelta:
-        """
-        Get the effective timeout for a task.
+        """Get the effective timeout for a task.
 
         Priority:
         1. Task-specific dynamic timeout (if RetryableTask)
@@ -44,7 +42,7 @@ class TimeoutManager:
             if isinstance(task, RetryableTask):
                 return task.get_execution_timeout(stage)
             # Fallback if hasattr but not instance (duck typing)
-            result: timedelta = getattr(task, "get_dynamic_timeout")(stage)
+            result: timedelta = task.get_dynamic_timeout(stage)
             return result
 
         # 2. Stage-level override (standard context key)

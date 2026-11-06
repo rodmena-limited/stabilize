@@ -1,5 +1,4 @@
-"""
-Global event recorder instance management.
+"""Global event recorder instance management.
 
 Provides get_event_recorder(), configure_event_recorder(), and
 reset_event_recorder() for managing the singleton EventRecorder.
@@ -32,8 +31,7 @@ def configure_event_recorder(
     event_store: EventStore,
     publish_to_bus: bool = True,
 ) -> EventRecorder:
-    """
-    Configure the global event recorder.
+    """Configure the global event recorder.
 
     Args:
         event_store: Store for persisting events.

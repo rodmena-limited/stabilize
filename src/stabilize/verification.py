@@ -1,5 +1,4 @@
-"""
-Verification system for validating task and stage outputs.
+"""Verification system for validating task and stage outputs.
 
 This module provides:
 - VerifyResult: Result of a verification check
@@ -41,8 +40,7 @@ class VerifyStatus(Enum):
 
 @dataclass
 class VerifyResult:
-    """
-    Result of a verification check.
+    """Result of a verification check.
 
     Attributes:
         status: The verification status
@@ -60,8 +58,7 @@ class VerifyResult:
 
     @classmethod
     def ok(cls, message: str = "Verification passed") -> VerifyResult:
-        """
-        Create a successful verification result.
+        """Create a successful verification result.
 
         Args:
             message: Success message
@@ -77,8 +74,7 @@ class VerifyResult:
         message: str = "Verification pending, will retry",
         details: dict[str, Any] | None = None,
     ) -> VerifyResult:
-        """
-        Create a retry verification result.
+        """Create a retry verification result.
 
         Use when verification cannot complete yet but may succeed later.
 
@@ -101,8 +97,7 @@ class VerifyResult:
         message: str,
         details: dict[str, Any] | None = None,
     ) -> VerifyResult:
-        """
-        Create a failed verification result.
+        """Create a failed verification result.
 
         Args:
             message: Failure message (required)
@@ -119,8 +114,7 @@ class VerifyResult:
 
     @classmethod
     def skipped(cls, message: str = "Verification skipped") -> VerifyResult:
-        """
-        Create a skipped verification result.
+        """Create a skipped verification result.
 
         Args:
             message: Skip reason
@@ -154,8 +148,7 @@ class VerifyResult:
 
 
 class Verifier(ABC):
-    """
-    Base class for custom verifiers.
+    """Base class for custom verifiers.
 
     Verifiers validate stage outputs after task completion.
     They can be registered in the TaskRegistry and run automatically.
@@ -178,8 +171,7 @@ class Verifier(ABC):
 
     @abstractmethod
     def verify(self, stage: StageExecution) -> VerifyResult:
-        """
-        Verify the stage outputs.
+        """Verify the stage outputs.
 
         Args:
             stage: The stage execution with outputs to verify
@@ -187,12 +179,10 @@ class Verifier(ABC):
         Returns:
             VerifyResult indicating the verification status
         """
-        pass
 
     @property
     def max_retries(self) -> int:
-        """
-        Maximum number of verification retries.
+        """Maximum number of verification retries.
 
         Override to change the default.
 
@@ -203,8 +193,7 @@ class Verifier(ABC):
 
     @property
     def retry_delay_seconds(self) -> float:
-        """
-        Delay between verification retries in seconds.
+        """Delay between verification retries in seconds.
 
         Override to change the default.
 
@@ -215,8 +204,7 @@ class Verifier(ABC):
 
 
 class OutputVerifier(Verifier):
-    """
-    Verifier that checks for required outputs.
+    """Verifier that checks for required outputs.
 
     Example:
         verifier = OutputVerifier(required_keys=["url", "status_code"])
@@ -228,8 +216,7 @@ class OutputVerifier(Verifier):
         required_keys: list[str] | None = None,
         type_checks: dict[str, type] | None = None,
     ) -> None:
-        """
-        Initialize the output verifier.
+        """Initialize the output verifier.
 
         Args:
             required_keys: List of keys that must be present in outputs
@@ -240,12 +227,8 @@ class OutputVerifier(Verifier):
 
     def verify(self, stage: StageExecution) -> VerifyResult:
         """Verify that required outputs exist with correct types."""
-        missing = []
+        missing = [key for key in self.required_keys if key not in stage.outputs]
         type_errors = []
-
-        for key in self.required_keys:
-            if key not in stage.outputs:
-                missing.append(key)
 
         for key, expected_type in self.type_checks.items():
             if key in stage.outputs:
@@ -269,8 +252,7 @@ class OutputVerifier(Verifier):
 
 
 class CallableVerifier(Verifier):
-    """
-    Verifier that wraps a callable function.
+    """Verifier that wraps a callable function.
 
     Example:
         def check_url(stage):
@@ -286,15 +268,13 @@ class CallableVerifier(Verifier):
         max_retries: int = 3,
         retry_delay: float = 1.0,
     ) -> None:
-        """
-        Initialize with a callable.
+        """Initialize with a callable.
 
         Args:
             func: The verification function
             max_retries: Maximum retry count
             retry_delay: Delay between retries in seconds
         """
-
         self._func = func
         self._max_retries = max_retries
         self._retry_delay = retry_delay

@@ -1,5 +1,4 @@
-"""
-CompleteStageHandler - handles stage completion.
+"""CompleteStageHandler - handles stage completion.
 
 This is a critical handler that:
 1. Determines stage status from tasks and synthetic stages
@@ -11,7 +10,6 @@ This is a critical handler that:
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize import metrics
@@ -31,21 +29,22 @@ from stabilize.queue.messages import (
     ContinueParentStage,
     StartStage,
 )
-from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.resilience.config import HandlerConfig
     from stabilize.tasks.registry import TaskRegistry
 
 logger = logging.getLogger(__name__)
 
 
 class CompleteStageHandler(CompleteStageDeferredMixin, CompleteStageFanOutMixin, CompleteStageSupport):
-    """
-    Handler for CompleteStage messages.
+    """Handler for CompleteStage messages.
 
     Execution flow:
     1. Check if stage already complete
@@ -301,12 +300,7 @@ class CompleteStageHandler(CompleteStageDeferredMixin, CompleteStageFanOutMixin,
                 if is_transient(e) or is_store_unavailable(e):
                     raise
 
-                logger.error(
-                    "Error completing stage %s: %s",
-                    stage.name,
-                    e,
-                    exc_info=True,
-                )
+                logger.exception("Error completing stage %s", stage.name)
                 stage.context["exception"] = {
                     "details": {"error": str(e)},
                 }

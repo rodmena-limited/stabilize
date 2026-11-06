@@ -1,5 +1,4 @@
-"""
-Audit logging for Stabilize.
+"""Audit logging for Stabilize.
 
 Provides an immutable, structured audit trail for compliance-critical operations.
 Audits are distinct from operational logs:
@@ -96,8 +95,7 @@ def audit(
     details: dict[str, Any] | None = None,
     ip_address: str | None = None,
 ) -> None:
-    """
-    Record an audit event.
+    """Record an audit event.
 
     Args:
         event_type: Category (e.g., "WORKFLOW_LIFECYCLE", "SECURITY")

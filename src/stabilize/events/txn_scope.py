@@ -1,5 +1,4 @@
-"""
-Thread-local store-transaction scope for event recording.
+"""Thread-local store-transaction scope for event recording.
 
 The workflow stores bind a scope for the duration of a ``store.transaction``
 block. While a scope is active on the current thread:
@@ -20,10 +19,11 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from stabilize.events.base import Event
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 class TxnScope:
     """State of the store transaction active on the current thread."""
 
-    __slots__ = ("connection", "url", "pending", "depth")
+    __slots__ = ("connection", "depth", "pending", "url")
 
     def __init__(self, connection: Any, url: str | None) -> None:
         self.connection = connection

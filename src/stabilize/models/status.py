@@ -1,5 +1,4 @@
-"""
-WorkflowStatus enum.
+"""WorkflowStatus enum.
 
 This enum represents all possible states for executions, stages, and tasks.
 Each status has two boolean properties:
@@ -7,12 +6,13 @@ Each status has two boolean properties:
 - halt: Whether downstream execution should be blocked
 """
 
+from __future__ import annotations
+
 from enum import Enum
 
 
 class WorkflowStatus(Enum):
-    """
-    Execution status enum.
+    """Execution status enum.
 
     Each value is a tuple of (name, complete, halt).
     """
@@ -60,8 +60,7 @@ class WorkflowStatus(Enum):
 
     @property
     def is_complete(self) -> bool:
-        """
-        Indicates that the task/stage/pipeline has finished its work.
+        """Indicates that the task/stage/pipeline has finished its work.
 
         Returns True for: CANCELED, SUCCEEDED, STOPPED, SKIPPED, TERMINAL, FAILED_CONTINUE
         """
@@ -69,8 +68,7 @@ class WorkflowStatus(Enum):
 
     @property
     def is_halt(self) -> bool:
-        """
-        Indicates an abnormal completion - nothing downstream should run.
+        """Indicates an abnormal completion - nothing downstream should run.
 
         Returns True for: TERMINAL, CANCELED, STOPPED
         """

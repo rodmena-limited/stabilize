@@ -1,5 +1,4 @@
-"""
-CancelStageHandler - handles stage cancellation.
+"""CancelStageHandler - handles stage cancellation.
 
 This handler is invoked when a stage needs to be canceled, typically
 due to upstream failure or execution cancellation.
@@ -8,7 +7,6 @@ due to upstream failure or execution cancellation.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from stabilize.handlers.base import StabilizeHandler
@@ -17,15 +15,17 @@ from stabilize.handlers.deferred_choice import record_settle_row
 from stabilize.models.stage.completion_records import recorded_completion
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import CancelStage, CompleteStage, CompleteWorkflow
-from stabilize.resilience.config import HandlerConfig
 from stabilize.tasks.handles import bind_engine
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.models.task import TaskExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.resilience.config import HandlerConfig
     from stabilize.tasks.registry import TaskRegistry
 
 logger = logging.getLogger(__name__)
@@ -36,8 +36,7 @@ _LIVE_TASK_STATUSES = frozenset(
 
 
 class CancelStageHandler(StabilizeHandler[CancelStage]):
-    """
-    Handler for CancelStage messages.
+    """Handler for CancelStage messages.
 
     Execution flow:
     1. Check if stage is still in a cancellable state
@@ -151,7 +150,7 @@ class CancelStageHandler(StabilizeHandler[CancelStage]):
             settled["moved"] = moved
 
             if self.event_recorder:
-                self.set_event_context(stage.execution.id if stage.execution else "")
+                self.set_event_context(stage.execution.id)
                 self.event_recorder.record_stage_canceled(stage, source_handler="CancelStageHandler")
 
             logger.info("Canceled stage %s (%s)", stage.name, stage.id)

@@ -23,6 +23,8 @@ Example:
     }
 """
 
+from __future__ import annotations
+
 from stabilize.tasks.highway.config import HighwayConfig
 from stabilize.tasks.highway.task import HighwayTask
 

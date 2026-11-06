@@ -1,5 +1,4 @@
-"""
-Task interface definitions.
+"""Task interface definitions.
 
 This module defines the Task interface and its variants (RetryableTask,
 SkippableTask) that all task implementations must follow.
@@ -8,19 +7,19 @@ SkippableTask) that all task implementations must follow.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from stabilize.tasks.result import TaskResult
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from stabilize.models.stage import StageExecution
 
 
 class Task(ABC):
-    """
-    Base interface for all tasks.
+    """Base interface for all tasks.
 
     Tasks are the atomic units of work in a pipeline. Each task:
     - Receives the current stage context
@@ -47,8 +46,7 @@ class Task(ABC):
 
     @abstractmethod
     def execute(self, stage: StageExecution) -> TaskResult:
-        """
-        Execute the task.
+        """Execute the task.
 
         Args:
             stage: The stage execution context
@@ -59,11 +57,9 @@ class Task(ABC):
         Raises:
             Exception: Any exception will be caught and handled by the runner
         """
-        pass
 
     def on_timeout(self, stage: StageExecution) -> TaskResult | None:
-        """
-        Called when the task times out.
+        """Called when the task times out.
 
         Override to provide custom timeout handling. If None is returned,
         the default timeout behavior applies.
@@ -77,8 +73,7 @@ class Task(ABC):
         return None
 
     def on_cancel(self, stage: StageExecution) -> TaskResult | None:
-        """
-        Called when the execution is canceled.
+        """Called when the execution is canceled.
 
         Override to provide cleanup logic when execution is canceled.
 
@@ -91,8 +86,7 @@ class Task(ABC):
         return None
 
     def on_cleanup(self, stage: StageExecution) -> None:
-        """
-        Called when stage enters terminal state.
+        """Called when stage enters terminal state.
 
         Override to clean up resources when the stage completes, fails,
         or is canceled. This is called after the stage status is set
@@ -117,12 +111,10 @@ class Task(ABC):
                 if container_id:
                     docker_client.remove(container_id, force=True)
         """
-        pass
 
     @property
     def aliases(self) -> list[str]:
-        """
-        Alternative names for this task type.
+        """Alternative names for this task type.
 
         Used for backward compatibility when task types are renamed.
 
@@ -133,8 +125,7 @@ class Task(ABC):
 
 
 class RetryableTask(Task):
-    """
-    A task that can be retried with timeout and backoff.
+    """A task that can be retried with timeout and backoff.
 
     Retryable tasks return RUNNING status while waiting for some condition.
     They are re-executed after a backoff period until they succeed, fail,
@@ -162,8 +153,7 @@ class RetryableTask(Task):
 
     @abstractmethod
     def get_timeout(self) -> timedelta:
-        """
-        Get the total time this task may spend across all its executions.
+        """Get the total time this task may spend across all its executions.
 
         Measured from the task's first start. When it is exceeded the engine
         calls on_timeout(stage); a returned TaskResult is processed as the
@@ -172,11 +162,9 @@ class RetryableTask(Task):
         Returns:
             Total lifecycle limit
         """
-        pass
 
     def get_execution_timeout(self, stage: StageExecution) -> timedelta:
-        """
-        Get the limit for a single execute() call.
+        """Get the limit for a single execute() call.
 
         Defaults to get_dynamic_timeout(stage), the lifecycle limit. Override
         to bound each call separately, e.g. a 30 s poll inside a 2 h wait.
@@ -194,8 +182,7 @@ class RetryableTask(Task):
         stage: StageExecution,
         duration: timedelta,
     ) -> timedelta:
-        """
-        Get the backoff period before retrying.
+        """Get the backoff period before retrying.
 
         Override to implement dynamic backoff based on how long
         the task has been running.
@@ -210,8 +197,7 @@ class RetryableTask(Task):
         return timedelta(seconds=1)
 
     def get_dynamic_timeout(self, stage: StageExecution) -> timedelta:
-        """
-        Get dynamic timeout based on stage context.
+        """Get dynamic timeout based on stage context.
 
         Override to implement context-based timeouts.
 
@@ -228,8 +214,7 @@ class RetryableTask(Task):
         stage: StageExecution,
         duration: timedelta,
     ) -> timedelta:
-        """
-        Get dynamic backoff based on stage context.
+        """Get dynamic backoff based on stage context.
 
         Args:
             stage: The stage execution context
@@ -242,8 +227,7 @@ class RetryableTask(Task):
 
 
 class OverridableTimeoutRetryableTask(RetryableTask):
-    """
-    A retryable task whose timeout can be overridden by the stage.
+    """A retryable task whose timeout can be overridden by the stage.
 
     The stage can set a 'stageTimeoutMs' context value to override
     the default timeout.
@@ -257,15 +241,13 @@ class OverridableTimeoutRetryableTask(RetryableTask):
 
 
 class SkippableTask(Task):
-    """
-    A task that can be conditionally skipped.
+    """A task that can be conditionally skipped.
 
     Override is_enabled() to control when the task should be skipped.
     """
 
     def is_enabled(self, stage: StageExecution) -> bool:
-        """
-        Check if this task is enabled.
+        """Check if this task is enabled.
 
         Override to implement skip logic.
 
@@ -288,8 +270,7 @@ class SkippableTask(Task):
 
     @abstractmethod
     def do_execute(self, stage: StageExecution) -> TaskResult:
-        """
-        Perform the actual task execution.
+        """Perform the actual task execution.
 
         Args:
             stage: The stage execution context
@@ -297,12 +278,10 @@ class SkippableTask(Task):
         Returns:
             TaskResult indicating status
         """
-        pass
 
 
 class CallableTask(Task):
-    """
-    A task that wraps a callable function.
+    """A task that wraps a callable function.
 
     Allows using simple functions as tasks without creating a class.
 
@@ -318,8 +297,7 @@ class CallableTask(Task):
         func: Callable[[StageExecution], TaskResult],
         name: str | None = None,
     ) -> None:
-        """
-        Initialize with a callable.
+        """Initialize with a callable.
 
         Args:
             func: The function to call
@@ -339,8 +317,7 @@ class CallableTask(Task):
 
 
 class NoOpTask(Task):
-    """
-    A task that does nothing.
+    """A task that does nothing.
 
     Useful for testing or placeholder stages.
     """
@@ -373,7 +350,7 @@ def parse_until(value: object) -> int:
         except ValueError:
             pass
         try:
-            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(text)
         except ValueError as e:
             raise ValueError(f"until {value!r} is not an ISO 8601 time: {e}") from e
         if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -383,8 +360,7 @@ def parse_until(value: object) -> int:
 
 
 class TimerTask(RetryableTask):
-    """
-    A durable timer: fires at an absolute time and re-arms on an early delivery.
+    """A durable timer: fires at an absolute time and re-arms on an early delivery.
 
     Reads exactly one of ``until`` (ISO 8601 with an offset, or epoch seconds) and
     ``duration_seconds`` (counted from the first execution) from the stage context.
@@ -417,12 +393,12 @@ class TimerTask(RetryableTask):
         """The epoch millisecond this timer fires at; raises ValueError when the context is not a timer."""
         until = stage.context.get("until")
         duration = stage.context.get("duration_seconds")
-        if (until is None) == (duration is None):
-            raise ValueError("TimerTask needs exactly one of 'until' and 'duration_seconds' in the stage context")
-        if until is not None:
+        if until is not None and duration is None:
             return parse_until(until)
+        if until is not None or duration is None:
+            raise ValueError("TimerTask needs exactly one of 'until' and 'duration_seconds' in the stage context")
         try:
-            seconds = float(duration)  # type: ignore[arg-type]
+            seconds = float(duration)
         except (TypeError, ValueError) as e:
             raise ValueError(f"duration_seconds {duration!r} is not a number") from e
         if not seconds > 0:
@@ -452,8 +428,7 @@ class TimerTask(RetryableTask):
 
 
 class WaitTask(TimerTask):
-    """
-    Waits ``waitTime`` seconds from its first execution.
+    """Waits ``waitTime`` seconds from its first execution.
 
     Keeps ``waitStartTime`` (epoch seconds) in the stage context and reports
     ``waitedSeconds`` in the outputs, as it always has; the due time is

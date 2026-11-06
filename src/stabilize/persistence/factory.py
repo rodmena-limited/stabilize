@@ -1,5 +1,4 @@
-"""
-Factory functions for creating database backends.
+"""Factory functions for creating database backends.
 
 Automatically selects PostgreSQL or SQLite based on connection string.
 """
@@ -9,16 +8,14 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from stabilize.persistence.pool_options import PoolOptions
-
 if TYPE_CHECKING:
+    from stabilize.persistence.pool_options import PoolOptions
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
 
 
 def detect_backend(connection_string: str) -> str:
-    """
-    Detect the database backend type from a connection string.
+    """Detect the database backend type from a connection string.
 
     Args:
         connection_string: Database connection URL
@@ -47,8 +44,7 @@ def create_repository(
     schema: str | None = None,
     options: PoolOptions | None = None,
 ) -> WorkflowStore:
-    """
-    Create an execution repository based on the connection string.
+    """Create an execution repository based on the connection string.
 
     Automatically detects whether to use PostgreSQL or SQLite based
     on the connection string prefix.
@@ -92,10 +88,9 @@ def create_repository(
         from stabilize.persistence.sqlite import SqliteWorkflowStore
 
         return SqliteWorkflowStore(connection_string, create_tables, tenant=tenant)
-    else:
-        from stabilize.persistence.postgres import PostgresWorkflowStore
+    from stabilize.persistence.postgres import PostgresWorkflowStore
 
-        return PostgresWorkflowStore(connection_string, schema=schema, options=options, tenant=tenant)
+    return PostgresWorkflowStore(connection_string, schema=schema, options=options, tenant=tenant)
 
 
 def create_queue(
@@ -109,8 +104,7 @@ def create_queue(
     options: PoolOptions | None = None,
     store_retry_budget: timedelta | None = None,
 ) -> Queue:
-    """
-    Create a message queue based on the connection string.
+    """Create a message queue based on the connection string.
 
     Automatically detects whether to use PostgreSQL or SQLite based
     on the connection string prefix.
@@ -151,16 +145,15 @@ def create_queue(
             tenant=tenant,
             **budget,
         )
-    else:
-        from stabilize.queue import PostgresQueue
+    from stabilize.queue import PostgresQueue
 
-        return PostgresQueue(
-            connection_string,
-            table_name=table_name,
-            lock_duration=lock_duration,
-            max_attempts=max_attempts,
-            tenant=tenant,
-            schema=schema,
-            options=options,
-            **budget,
-        )
+    return PostgresQueue(
+        connection_string,
+        table_name=table_name,
+        lock_duration=lock_duration,
+        max_attempts=max_attempts,
+        tenant=tenant,
+        schema=schema,
+        options=options,
+        **budget,
+    )

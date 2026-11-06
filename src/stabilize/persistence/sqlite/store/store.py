@@ -1,5 +1,4 @@
-"""
-SQLite execution repository.
+"""SQLite execution repository.
 
 Lightweight persistence using SQLite for development and small deployments.
 Uses singleton ConnectionManager for efficient connection sharing.
@@ -13,8 +12,6 @@ Enterprise Features:
 from __future__ import annotations
 
 import logging
-import sqlite3
-from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -43,6 +40,9 @@ from stabilize.persistence.tenancy import check_mode_admits, require_same_tenant
 from stabilize.queue.ownership import DEFAULT_TABLE
 
 if TYPE_CHECKING:
+    import sqlite3
+    from collections.abc import Callable, Iterator
+
     from stabilize.persistence.store import StoreTransaction
     from stabilize.queue import Queue
 
@@ -56,8 +56,7 @@ class SqliteWorkflowStore(
     SqliteStageQueryMixin,
     WorkflowStore,
 ):
-    """
-    SQLite implementation of WorkflowStore.
+    """SQLite implementation of WorkflowStore.
 
     Uses native sqlite3 for file-based or in-memory storage.
     Suitable for development, testing, and single-node deployments.
@@ -76,12 +75,12 @@ class SqliteWorkflowStore(
         create_tables: bool = False,
         tenant: str = "",
     ) -> None:
-        """
-        Initialize the repository.
+        """Initialize the repository.
 
         Args:
             connection_string: SQLite connection string (e.g., sqlite:///./db.sqlite)
             create_tables: Whether to create tables if they don't exist
+            tenant: The tenant this store reads and writes; '' in single-tenant mode
         """
         from stabilize.persistence.connection import get_connection_manager
 
@@ -101,8 +100,7 @@ class SqliteWorkflowStore(
         self._manager.bind_sqlite_tenant(connection_string, self.tenant)
 
     def _get_connection(self) -> sqlite3.Connection:
-        """
-        Get thread-local connection from ConnectionManager.
+        """Get thread-local connection from ConnectionManager.
 
         Returns a connection configured with:
         - Row factory for dict-like access
@@ -125,9 +123,10 @@ class SqliteWorkflowStore(
         try:
             conn = self._get_connection()
             conn.execute("SELECT 1")
-            return True
         except Exception:
             return False
+        else:
+            return True
 
     @contextmanager
     def transaction(self, queue: Queue | None = None) -> Iterator[StoreTransaction]:

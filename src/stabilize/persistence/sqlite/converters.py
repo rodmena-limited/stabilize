@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from typing import TYPE_CHECKING, Any
 
 from stabilize.models.stage import StageExecution, SyntheticStageOwner
@@ -18,7 +17,7 @@ from stabilize.models.workflow import (
 from stabilize.persistence.task_state import mark_persisted
 
 if TYPE_CHECKING:
-    pass
+    import sqlite3
 
 
 def _now_ms() -> int:

@@ -1,5 +1,4 @@
-"""
-StartWorkflowHandler - handles pipeline execution startup.
+"""StartWorkflowHandler - handles pipeline execution startup.
 
 This handler is triggered when a new pipeline execution is started.
 It finds initial stages (those with no dependencies) and queues them
@@ -9,7 +8,6 @@ for execution.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.audit import audit
@@ -22,21 +20,22 @@ from stabilize.queue.messages import (
     StartWorkflow,
 )
 from stabilize.queue.ownership import queue_table_name
-from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
     from stabilize.persistence.store import StoreTransaction, WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.resilience.config import HandlerConfig
 
 logger = logging.getLogger(__name__)
 
 
 class StartWorkflowHandler(StabilizeHandler[StartWorkflow]):
-    """
-    Handler for StartWorkflow messages.
+    """Handler for StartWorkflow messages.
 
     When a pipeline execution starts:
     1. Check if execution should be queued (concurrent limits)

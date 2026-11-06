@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import re
+from pathlib import Path
 from typing import Any
 from urllib.error import URLError
 
@@ -55,15 +55,14 @@ def format_error(error: Exception) -> str:
     """Format exception as error message."""
     if isinstance(error, URLError):
         return f"URL error: {error.reason}"
-    elif isinstance(error, TimeoutError):
+    if isinstance(error, TimeoutError):
         return "Request timed out"
-    elif isinstance(error, OSError):
+    if isinstance(error, OSError):
         return f"Connection error: {error}"
-    else:
-        return str(error)
+    return str(error)
 
 
 def guess_content_type(filename: str) -> str:
     """Guess content type from filename extension."""
-    ext = os.path.splitext(filename)[1].lower()
+    ext = Path(filename).suffix.lower()
     return CONTENT_TYPES.get(ext, "application/octet-stream")

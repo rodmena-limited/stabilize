@@ -1,5 +1,4 @@
-"""
-Context variable setup for event causality tracking.
+"""Context variable setup for event causality tracking.
 
 Provides ContextVar-based tracking of correlation IDs, causation IDs,
 and actors across async boundaries.
@@ -22,8 +21,7 @@ def set_event_context(
     causation_id: str | None = None,
     actor: str = "system",
 ) -> None:
-    """
-    Set the current event context for correlation tracking.
+    """Set the current event context for correlation tracking.
 
     Args:
         correlation_id: Links related events (typically workflow ID).
@@ -36,8 +34,7 @@ def set_event_context(
 
 
 def get_event_metadata(source_handler: str | None = None) -> EventMetadata:
-    """
-    Get metadata for a new event from current context.
+    """Get metadata for a new event from current context.
 
     Args:
         source_handler: The handler creating this event.

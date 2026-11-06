@@ -1,5 +1,4 @@
-"""
-Snapshot operations for SQLite event store.
+"""Snapshot operations for SQLite event store.
 
 Provides the SqliteSnapshotsMixin with snapshot save/retrieve methods.
 """
@@ -8,17 +7,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
 from typing import TYPE_CHECKING, Any
 
-from stabilize.events.base import EntityType
 from stabilize.persistence.columns import select_list
 from stabilize.persistence.tenancy import refuse_foreign_row
 
-_SNAPSHOTS = select_list("snapshots", "sqlite")
-
 if TYPE_CHECKING:
-    pass
+    import sqlite3
+
+    from stabilize.events.base import EntityType
+
+_SNAPSHOTS = select_list("snapshots", "sqlite")
 
 
 class SqliteSnapshotsMixin:
@@ -111,7 +110,7 @@ class SqliteSnapshotsMixin:
             "sequence": row["sequence"],
             "state": state,
         }
-        state_hash = row["state_hash"] if "state_hash" in row.keys() else None
+        state_hash = dict(row).get("state_hash")
         if state_hash is not None:
             result["state_hash"] = state_hash
         return result

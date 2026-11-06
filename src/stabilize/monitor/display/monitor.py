@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import curses
 import queue
 from typing import TYPE_CHECKING, Any
@@ -47,10 +48,8 @@ class MonitorDisplay:
         self.lines: list[dict[str, Any]] = []
         init_colors()
 
-        try:
+        with contextlib.suppress(Exception):
             curses.set_escdelay(25)
-        except Exception:
-            pass
 
         self.data_queue: queue.Queue[MonitorData] = queue.Queue()
         self.fetcher_thread: DataFetcherThread | None = None
@@ -145,7 +144,7 @@ class MonitorDisplay:
             pass
 
         finally:
-            if self.fetcher_thread:
+            if self.fetcher_thread is not None:
                 self.fetcher_thread.stop()
                 self.fetcher_thread.join(timeout=1.0)
 

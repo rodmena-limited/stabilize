@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import sqlite3
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import sqlite3
 
 
 class SqliteQueueLookupsMixin:

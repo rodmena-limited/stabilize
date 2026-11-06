@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any, cast
 
 from stabilize.dag.merge import merge_ancestor_outputs, topological_order
@@ -12,15 +11,17 @@ from stabilize.persistence.postgres.converters import (
     row_to_stage,
     row_to_task,
 )
-from stabilize.persistence.store import WorkflowCriteria
 from stabilize.persistence.store.criteria import cursor_sql, order_sql, time_window_sql, version_sql
 
 _STAGE = select_list("stage_executions", "postgres")
 _TASK = select_list("task_executions", "postgres")
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
+    from stabilize.persistence.store import WorkflowCriteria
 
 
 def load_tasks_for_stages(cur: Any, stages: list[StageExecution], tenant: str) -> None:
@@ -42,7 +43,7 @@ def load_tasks_for_stages(cur: Any, stages: list[StageExecution], tenant: str) -
     )
 
     for row in cur.fetchall():
-        task_row = cast(dict[str, Any], row)
+        task_row = cast("dict[str, Any]", row)
         task = row_to_task(task_row)
         stage_ref = stage_map.get(task_row["stage_id"])
         if stage_ref:
@@ -52,109 +53,105 @@ def load_tasks_for_stages(cur: Any, stages: list[StageExecution], tenant: str) -
 
 def get_upstream_stages(engine: Any, execution_id: str, stage_ref_id: str) -> list[StageExecution]:
     """Get upstream stages with tasks loaded."""
-    with engine.connection() as conn:
-        with conn.cursor() as cur:
-            # First find the requisite ref ids of the target stage
-            cur.execute(
-                """
+    with engine.connection() as conn, conn.cursor() as cur:
+        # First find the requisite ref ids of the target stage
+        cur.execute(
+            """
                 SELECT requisite_stage_ref_ids FROM stage_executions
                 WHERE execution_id = %(execution_id)s AND ref_id = %(ref_id)s AND stabilize_tenant = %(tenant)s
                 """,
-                {"execution_id": execution_id, "ref_id": stage_ref_id, "tenant": engine.tenant},
-            )
-            row = cur.fetchone()
-            if not row or not row["requisite_stage_ref_ids"]:
-                return []
+            {"execution_id": execution_id, "ref_id": stage_ref_id, "tenant": engine.tenant},
+        )
+        row = cur.fetchone()
+        if not row or not row["requisite_stage_ref_ids"]:
+            return []
 
-            requisites = list(row["requisite_stage_ref_ids"])
+        requisites = list(row["requisite_stage_ref_ids"])
 
-            # Now fetch those stages
-            cur.execute(
-                f"""
+        # Now fetch those stages
+        cur.execute(
+            f"""
                 SELECT {_STAGE} FROM stage_executions
                 WHERE execution_id = %(execution_id)s
                 AND ref_id = ANY(%(requisites)s) AND stabilize_tenant = %(tenant)s
                 ORDER BY id
                 """,
-                {"execution_id": execution_id, "requisites": requisites, "tenant": engine.tenant},
-            )
+            {"execution_id": execution_id, "requisites": requisites, "tenant": engine.tenant},
+        )
 
-            stages = []
-            for stage_row in cur.fetchall():
-                stage = row_to_stage(cast(dict[str, Any], stage_row))
-                stages.append(stage)
+        stages = []
+        for stage_row in cur.fetchall():
+            stage = row_to_stage(cast("dict[str, Any]", stage_row))
+            stages.append(stage)
 
-            # Load tasks for all stages
-            load_tasks_for_stages(cur, stages, engine.tenant)
+        # Load tasks for all stages
+        load_tasks_for_stages(cur, stages, engine.tenant)
 
-            return stages
+        return stages
 
 
 def get_downstream_stages(engine: Any, execution_id: str, stage_ref_id: str) -> list[StageExecution]:
     """Get downstream stages with tasks loaded."""
-    with engine.connection() as conn:
-        with conn.cursor() as cur:
-            # Find stages that have stage_ref_id in their requisites
-            cur.execute(
-                f"""
+    with engine.connection() as conn, conn.cursor() as cur:
+        # Find stages that have stage_ref_id in their requisites
+        cur.execute(
+            f"""
                 SELECT {_STAGE} FROM stage_executions
                 WHERE execution_id = %(execution_id)s
                 AND %(ref_id)s = ANY(requisite_stage_ref_ids) AND stabilize_tenant = %(tenant)s
                 ORDER BY id
                 """,
-                {"execution_id": execution_id, "ref_id": stage_ref_id, "tenant": engine.tenant},
-            )
+            {"execution_id": execution_id, "ref_id": stage_ref_id, "tenant": engine.tenant},
+        )
 
-            stages = []
-            for stage_row in cur.fetchall():
-                stage = row_to_stage(cast(dict[str, Any], stage_row))
-                stages.append(stage)
+        stages = []
+        for stage_row in cur.fetchall():
+            stage = row_to_stage(cast("dict[str, Any]", stage_row))
+            stages.append(stage)
 
-            # Load tasks for all stages
-            load_tasks_for_stages(cur, stages, engine.tenant)
+        # Load tasks for all stages
+        load_tasks_for_stages(cur, stages, engine.tenant)
 
-            return stages
+        return stages
 
 
 def get_synthetic_stages(engine: Any, execution_id: str, parent_stage_id: str) -> list[StageExecution]:
     """Get synthetic stages with tasks loaded."""
-    with engine.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
+    with engine.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"""
                 SELECT {_STAGE} FROM stage_executions
                 WHERE execution_id = %(execution_id)s
                 AND parent_stage_id = %(parent_id)s AND stabilize_tenant = %(tenant)s
                 ORDER BY id
                 """,
-                {"execution_id": execution_id, "parent_id": parent_stage_id, "tenant": engine.tenant},
-            )
+            {"execution_id": execution_id, "parent_id": parent_stage_id, "tenant": engine.tenant},
+        )
 
-            stages = []
-            for stage_row in cur.fetchall():
-                stage = row_to_stage(cast(dict[str, Any], stage_row))
-                stages.append(stage)
+        stages = []
+        for stage_row in cur.fetchall():
+            stage = row_to_stage(cast("dict[str, Any]", stage_row))
+            stages.append(stage)
 
-            # Load tasks for all stages
-            load_tasks_for_stages(cur, stages, engine.tenant)
+        # Load tasks for all stages
+        load_tasks_for_stages(cur, stages, engine.tenant)
 
-            return stages
+        return stages
 
 
 def get_merged_ancestor_outputs(engine: Any, execution_id: str, stage_ref_id: str) -> dict[str, Any]:
     """Get merged outputs from all ancestor stages."""
     # Fetch lightweight graph (ref_id, requisites, outputs)
-    with engine.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with engine.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
                 SELECT ref_id, requisite_stage_ref_ids, outputs
                 FROM stage_executions
                 WHERE execution_id = %(execution_id)s AND stabilize_tenant = %(tenant)s
                 """,
-                {"execution_id": execution_id, "tenant": engine.tenant},
-            )
-            rows = cur.fetchall()
+            {"execution_id": execution_id, "tenant": engine.tenant},
+        )
+        rows = cur.fetchall()
 
     # Build graph in memory
     nodes: dict[str, dict[str, Any]] = {}
@@ -212,11 +209,10 @@ def retrieve_by_pipeline_config_id(
     """
     params: dict[str, Any] = {"config_id": pipeline_config_id, "tenant": engine.tenant}
 
-    if criteria:
-        if criteria.statuses:
-            status_names = [s.name for s in criteria.statuses]
-            query += " AND status = ANY(%(statuses)s)"
-            params["statuses"] = status_names
+    if criteria and criteria.statuses:
+        status_names = [s.name for s in criteria.statuses]
+        query += " AND status = ANY(%(statuses)s)"
+        params["statuses"] = status_names
 
     query += time_window_sql(criteria, params, "%")
     query += version_sql(criteria, params, "%")
@@ -226,10 +222,9 @@ def retrieve_by_pipeline_config_id(
     if criteria and criteria.page_size:
         query += f" LIMIT {int(criteria.page_size)}"
 
-    with engine.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, params)
-            ids = [cast(dict[str, Any], row)["id"] for row in cur.fetchall()]
+    with engine.connection() as conn, conn.cursor() as cur:
+        cur.execute(query, params)
+        ids = [cast("dict[str, Any]", row)["id"] for row in cur.fetchall()]
     for execution_id in ids:
         yield retrieve_fn(execution_id)
 
@@ -260,10 +255,9 @@ def get_all_pending_workflows(
     if criteria and criteria.page_size:
         query += f" LIMIT {int(criteria.page_size)}"
 
-    with engine.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, params)
-            ids = [cast(dict[str, Any], row)["id"] for row in cur.fetchall()]
+    with engine.connection() as conn, conn.cursor() as cur:
+        cur.execute(query, params)
+        ids = [cast("dict[str, Any]", row)["id"] for row in cur.fetchall()]
     for execution_id in ids:
         yield retrieve_fn(execution_id)
 
@@ -281,11 +275,10 @@ def retrieve_by_application(
     """
     params: dict[str, Any] = {"application": application, "tenant": engine.tenant}
 
-    if criteria:
-        if criteria.statuses:
-            status_names = [s.name for s in criteria.statuses]
-            query += " AND status = ANY(%(statuses)s)"
-            params["statuses"] = status_names
+    if criteria and criteria.statuses:
+        status_names = [s.name for s in criteria.statuses]
+        query += " AND status = ANY(%(statuses)s)"
+        params["statuses"] = status_names
 
     query += time_window_sql(criteria, params, "%")
     query += version_sql(criteria, params, "%")
@@ -295,9 +288,8 @@ def retrieve_by_application(
     if criteria and criteria.page_size:
         query += f" LIMIT {int(criteria.page_size)}"
 
-    with engine.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, params)
-            ids = [cast(dict[str, Any], row)["id"] for row in cur.fetchall()]
+    with engine.connection() as conn, conn.cursor() as cur:
+        cur.execute(query, params)
+        ids = [cast("dict[str, Any]", row)["id"] for row in cur.fetchall()]
     for execution_id in ids:
         yield retrieve_fn(execution_id)

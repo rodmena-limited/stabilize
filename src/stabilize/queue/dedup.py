@@ -1,5 +1,4 @@
-"""
-Bloom filter for probabilistic message deduplication.
+"""Bloom filter for probabilistic message deduplication.
 
 Provides fast, memory-efficient deduplication for message processing
 with zero false negatives and configurable false positive rate.
@@ -28,7 +27,10 @@ import hashlib
 import math
 import threading
 import time
-from collections.abc import Iterable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 class BloomDeduplicator:
@@ -88,9 +90,6 @@ class BloomDeduplicator:
         self._expected_items = expected_items
         self._fp_rate = false_positive_rate
 
-        # Calculate optimal bit array size and number of hash functions
-        # m = -n * ln(p) / (ln(2)^2)
-        # k = (m/n) * ln(2)
         self._size = self._optimal_size(expected_items, false_positive_rate)
         self._num_hashes = self._optimal_hashes(self._size, expected_items)
 
@@ -119,9 +118,8 @@ class BloomDeduplicator:
         Returns:
             Optimal number of bits
         """
-        # m = -n * ln(p) / (ln(2)^2)
         m = -n * math.log(p) / (math.log(2) ** 2)
-        return int(math.ceil(m))
+        return math.ceil(m)
 
     @staticmethod
     def _optimal_hashes(m: int, n: int) -> int:
@@ -134,9 +132,8 @@ class BloomDeduplicator:
         Returns:
             Optimal number of hash functions
         """
-        # k = (m/n) * ln(2)
         k = (m / n) * math.log(2)
-        return max(1, int(math.ceil(k)))
+        return max(1, math.ceil(k))
 
     def _get_hash_positions(self, item: str) -> list[int]:
         """Get bit positions for an item using double hashing.
@@ -153,8 +150,8 @@ class BloomDeduplicator:
         item_bytes = item.encode("utf-8")
 
         # Get two independent hashes
-        h1 = int(hashlib.md5(item_bytes).hexdigest(), 16)
-        h2 = int(hashlib.sha1(item_bytes).hexdigest(), 16)
+        h1 = int(hashlib.md5(item_bytes, usedforsecurity=False).hexdigest(), 16)
+        h2 = int(hashlib.sha1(item_bytes, usedforsecurity=False).hexdigest(), 16)
 
         # Generate k hash positions using double hashing
         positions = []
@@ -192,10 +189,7 @@ class BloomDeduplicator:
         positions = self._get_hash_positions(message_id)
 
         with self._lock:
-            for pos in positions:
-                if not self._get_bit(pos):
-                    return False
-            return True
+            return all(self._get_bit(pos) for pos in positions)
 
     def mark_seen(self, message_id: str) -> None:
         """Mark message as seen in the filter.
@@ -235,8 +229,7 @@ class BloomDeduplicator:
             return self._authoritative
 
     def hydrate(self, message_ids: Iterable[str]) -> int:
-        """Load processed message IDs from the durable store and grant
-        authority to bloom negatives.
+        """Load processed message ids from the durable store and make bloom negatives authoritative.
 
         The caller is responsible for passing the COMPLETE set of processed
         message IDs (e.g. all rows of processed_messages); passing a partial
@@ -270,7 +263,7 @@ class BloomDeduplicator:
             Ratio of set bits to total bits.
         """
         with self._lock:
-            set_bits = sum(bin(b).count("1") for b in self._bit_array)
+            set_bits = sum((b).bit_count() for b in self._bit_array)
             return set_bits / self._size
 
     @property

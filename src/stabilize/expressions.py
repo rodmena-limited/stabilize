@@ -1,5 +1,4 @@
-"""
-Safe expression evaluator for workflow control-flow conditions.
+"""Safe expression evaluator for workflow control-flow conditions.
 
 Used by OR-split (WCP-6) to evaluate per-downstream conditions,
 and by other patterns that need runtime condition evaluation.
@@ -12,8 +11,10 @@ from __future__ import annotations
 
 import ast
 import operator
-from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _SAFE_OPERATORS: dict[type, Callable[..., Any]] = {
     ast.Eq: operator.eq,
@@ -113,10 +114,7 @@ def _eval_node(node: ast.AST, context: dict[str, Any]) -> Any:
 
     if isinstance(node, ast.Subscript):
         value = _eval_node(node.value, context)
-        if isinstance(node.slice, ast.Constant):
-            key = node.slice.value
-        else:
-            key = _eval_node(node.slice, context)
+        key = node.slice.value if isinstance(node.slice, ast.Constant) else _eval_node(node.slice, context)
         if isinstance(value, dict):
             return value.get(key)
         if isinstance(value, (list, tuple)) and isinstance(key, int):
@@ -128,7 +126,7 @@ def _eval_node(node: ast.AST, context: dict[str, Any]) -> Any:
 
     if isinstance(node, ast.Compare):
         left = _eval_node(node.left, context)
-        for op, comparator in zip(node.ops, node.comparators):
+        for op, comparator in zip(node.ops, node.comparators, strict=False):
             right = _eval_node(comparator, context)
             op_func = _SAFE_OPERATORS.get(type(op))
             if op_func is None:

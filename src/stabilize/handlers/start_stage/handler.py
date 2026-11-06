@@ -1,5 +1,4 @@
-"""
-StartStageHandler - handles stage startup.
+"""StartStageHandler - handles stage startup.
 
 This is one of the most critical handlers in the execution engine.
 It checks if upstream stages are complete, plans the stage's tasks
@@ -9,7 +8,6 @@ and synthetic stages, and starts execution.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.dag.readiness import PRUNED, PredicatePhase, evaluate_readiness
@@ -25,20 +23,21 @@ from stabilize.queue.messages import (
     SkipStage,
     StartStage,
 )
-from stabilize.resilience.config import HandlerConfig
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from stabilize.events.recorder import EventRecorder
     from stabilize.models.stage import StageExecution
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.resilience.config import HandlerConfig
 
 logger = logging.getLogger(__name__)
 
 
 class StartStageHandler(StartStageStarting):
-    """
-    Handler for StartStage messages.
+    """Handler for StartStage messages.
 
     Execution flow:
     1. Check if any upstream stages failed -> CompleteWorkflow
@@ -75,9 +74,6 @@ class StartStageHandler(StartStageStarting):
             try:
                 # Get upstream stages from repository (returns empty list if none)
                 upstream_stages = self.repository.get_upstream_stages(stage.execution.id, stage.ref_id)
-                if upstream_stages is None:
-                    upstream_stages = []
-
                 # Check for jump bypass flag
                 jump_bypass = bool(stage.context.get("_jump_bypass"))
                 if jump_bypass:
@@ -150,7 +146,7 @@ class StartStageHandler(StartStageStarting):
                 if readiness.active_upstream_ids:
                     any_active = False
                     for upstream in upstream_stages:
-                        if upstream and upstream.status in ACTIVE_STATUSES:
+                        if upstream.status in ACTIVE_STATUSES:
                             any_active = True
                             logger.debug(
                                 "Stage %s (%s) waiting for active upstream stage %s (%s)",
@@ -218,22 +214,12 @@ class StartStageHandler(StartStageStarting):
                 if is_transient(e) or is_store_unavailable(e):
                     raise
 
-                logger.error(
-                    "Error starting stage %s (%s): %s",
-                    stage.name,
-                    stage.id,
-                    e,
-                    exc_info=True,
-                )
+                logger.exception("Error starting stage %s (%s)", stage.name, stage.id)
                 error_str = str(e)
 
                 def do_mark_error() -> None:
                     # Re-fetch stage to get current version on each retry attempt
                     fresh_stage = self.repository.retrieve_stage(message.stage_id)
-                    if fresh_stage is None:
-                        logger.error("Stage %s not found during error handling", message.stage_id)
-                        return
-
                     fresh_stage.context["exception"] = {
                         "details": {"error": error_str},
                     }

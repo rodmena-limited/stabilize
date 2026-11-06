@@ -1,6 +1,4 @@
-"""
-Subscription CRUD operations for PostgreSQL event store.
-"""
+"""Subscription CRUD operations for PostgreSQL event store."""
 
 from __future__ import annotations
 
@@ -81,41 +79,39 @@ class PostgresSubscriptionsMixin:
     def get_subscription(self, subscription_id: str) -> dict[str, Any] | None:
         """Get a durable subscription by ID."""
         subscription_id = qualify(self.tenant, subscription_id)
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT {_SUBSCRIPTIONS} FROM event_subscriptions "
-                    "WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
-                    {"id": subscription_id, "tenant": self.tenant},
-                )
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_SUBSCRIPTIONS} FROM event_subscriptions WHERE id = %(id)s AND stabilize_tenant = %(tenant)s",
+                {"id": subscription_id, "tenant": self.tenant},
+            )
 
-                row = cur.fetchone()
-                if row is None:
-                    return None
+            row = cur.fetchone()
+            if row is None:
+                return None
 
-                data = row if isinstance(row, dict) else dict(zip(_SUBSCRIPTION_COLUMNS, row, strict=True))
+            data = row if isinstance(row, dict) else dict(zip(_SUBSCRIPTION_COLUMNS, row, strict=True))
 
-                event_types = None
-                if data["event_types"]:
-                    event_types = [parse_event_type(et) for et in data["event_types"]]
+            event_types = None
+            if data["event_types"]:
+                event_types = [parse_event_type(et) for et in data["event_types"]]
 
-                entity_filter = data["entity_filter"]
-                if isinstance(entity_filter, str):
-                    try:
-                        entity_filter = json.loads(entity_filter)
-                    except (json.JSONDecodeError, TypeError):
-                        entity_filter = None
+            entity_filter = data["entity_filter"]
+            if isinstance(entity_filter, str):
+                try:
+                    entity_filter = json.loads(entity_filter)
+                except (json.JSONDecodeError, TypeError):
+                    entity_filter = None
 
-                return {
-                    "id": data["id"],
-                    "event_types": event_types,
-                    "entity_filter": entity_filter,
-                    "last_sequence": data["last_sequence"],
-                    "webhook_url": data["webhook_url"],
-                    "last_commit_cursor": data.get("last_commit_cursor", "0"),
-                    "enabled": bool(data.get("enabled", True)),
-                    "last_commit_sequence": int(data.get("last_commit_sequence") or 0),
-                }
+            return {
+                "id": data["id"],
+                "event_types": event_types,
+                "entity_filter": entity_filter,
+                "last_sequence": data["last_sequence"],
+                "webhook_url": data["webhook_url"],
+                "last_commit_cursor": data.get("last_commit_cursor", "0"),
+                "enabled": bool(data.get("enabled", True)),
+                "last_commit_sequence": int(data.get("last_commit_sequence") or 0),
+            }
 
     def update_subscription_sequence(self, subscription_id: str, last_sequence: int) -> None:
         """Update the last processed sequence for a subscription."""
@@ -190,16 +186,15 @@ class PostgresSubscriptionsMixin:
 
     def list_subscriptions(self) -> list[dict[str, Any]]:
         """List all durable subscriptions."""
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id, last_sequence FROM event_subscriptions WHERE stabilize_tenant = %(tenant)s",
-                    {"tenant": self.tenant},
-                )
-                return [
-                    {
-                        "id": unqualify(self.tenant, row["id"]),
-                        "last_sequence": row["last_sequence"],
-                    }
-                    for row in cur.fetchall()
-                ]
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, last_sequence FROM event_subscriptions WHERE stabilize_tenant = %(tenant)s",
+                {"tenant": self.tenant},
+            )
+            return [
+                {
+                    "id": unqualify(self.tenant, row["id"]),
+                    "last_sequence": row["last_sequence"],
+                }
+                for row in cur.fetchall()
+            ]

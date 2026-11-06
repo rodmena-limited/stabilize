@@ -28,11 +28,7 @@ def has_started(stage: StageExecution) -> bool:
         return True
 
     # Check if any tasks have started
-    for task in stage.tasks:
-        if task.start_time is not None:
-            return True
-
-    return False
+    return any(task.start_time is not None for task in stage.tasks)
 
 
 def can_start(stage: StageExecution, workflow: Workflow) -> bool:
@@ -58,9 +54,8 @@ def can_start(stage: StageExecution, workflow: Workflow) -> bool:
         return True
 
     # DISCRIMINATOR / N_OF_M that already fired should not be re-queued
-    if stage.join_type in (JoinType.DISCRIMINATOR, JoinType.N_OF_M):
-        if stage.context.get("_join_fired", False):
-            return False
+    if stage.join_type in (JoinType.DISCRIMINATOR, JoinType.N_OF_M) and stage.context.get("_join_fired", False):
+        return False
 
     # Check all upstream stages
     upstream_stages = []
@@ -90,8 +85,4 @@ def can_start(stage: StageExecution, workflow: Workflow) -> bool:
         return completed >= threshold
 
     # Default (AND join): all upstreams must be complete
-    for upstream in upstream_stages:
-        if upstream.status not in CONTINUABLE_STATUSES:
-            return False
-
-    return True
+    return all(upstream.status in CONTINUABLE_STATUSES for upstream in upstream_stages)

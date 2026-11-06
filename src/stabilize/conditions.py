@@ -1,5 +1,4 @@
-"""
-Structured status conditions for workflows, stages, and tasks.
+"""Structured status conditions for workflows, stages, and tasks.
 
 This module provides a condition-based status system inspired by Kubernetes
 conditions. Conditions provide:
@@ -17,11 +16,14 @@ Example:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import contextlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class ConditionType(Enum):
@@ -77,8 +79,7 @@ class ConditionReason(Enum):
 
 @dataclass
 class Condition:
-    """
-    A condition representing the state of an aspect of an entity.
+    """A condition representing the state of an aspect of an entity.
 
     Attributes:
         type: The type of condition (e.g., Ready, Progressing)
@@ -99,16 +100,12 @@ class Condition:
     def __post_init__(self) -> None:
         """Convert string types to enums if possible."""
         if isinstance(self.type, str):
-            try:
+            with contextlib.suppress(ValueError):
                 self.type = ConditionType(self.type)
-            except ValueError:
-                pass  # Keep as string for custom types
 
         if isinstance(self.reason, str):
-            try:
+            with contextlib.suppress(ValueError):
                 self.reason = ConditionReason(self.reason)
-            except ValueError:
-                pass  # Keep as string for custom reasons
 
     # ========== Factory Methods ==========
 
@@ -194,8 +191,7 @@ class Condition:
         reason: ConditionReason | str | None = None,
         message: str | None = None,
     ) -> Condition:
-        """
-        Create an updated condition with new values.
+        """Create an updated condition with new values.
 
         Only updates last_transition_time if status actually changed.
 
@@ -256,8 +252,7 @@ class Condition:
 
 
 class ConditionSet:
-    """
-    A collection of conditions with convenient access methods.
+    """A collection of conditions with convenient access methods.
 
     Example:
         conditions = ConditionSet()
@@ -276,8 +271,7 @@ class ConditionSet:
                 self._conditions[c.type] = c
 
     def set(self, condition: Condition) -> None:
-        """
-        Set or update a condition.
+        """Set or update a condition.
 
         If a condition of the same type exists, it's replaced.
         """

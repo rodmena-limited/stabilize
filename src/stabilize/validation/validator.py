@@ -1,5 +1,4 @@
-"""
-JSON Schema-like validator for configuration dictionaries.
+"""JSON Schema-like validator for configuration dictionaries.
 
 This module provides JSON Schema-based validation for:
 - Stage context dictionaries
@@ -35,14 +34,13 @@ Example:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from stabilize.validation.errors import ValidationError
 
 
 class SchemaValidator:
-    """
-    JSON Schema-like validator for configuration dictionaries.
+    """JSON Schema-like validator for configuration dictionaries.
 
     This is a lightweight implementation that doesn't require jsonschema package.
     Supports common validation patterns:
@@ -72,7 +70,7 @@ class SchemaValidator:
         #          ValidationError("age", "must be >= 0")]
     """
 
-    TYPE_MAP: dict[str, type | tuple[type, ...]] = {
+    TYPE_MAP: ClassVar[dict[str, type | tuple[type, ...]]] = {
         "string": str,
         "integer": int,
         "number": (int, float),
@@ -83,8 +81,7 @@ class SchemaValidator:
     }
 
     def __init__(self, schema: dict[str, Any]) -> None:
-        """
-        Initialize with a JSON Schema.
+        """Initialize with a JSON Schema.
 
         Args:
             schema: The JSON Schema dictionary
@@ -92,8 +89,7 @@ class SchemaValidator:
         self.schema = schema
 
     def validate(self, data: Any, path: str = "") -> list[ValidationError]:
-        """
-        Validate data against the schema.
+        """Validate data against the schema.
 
         Args:
             data: The data to validate
@@ -143,41 +139,38 @@ class SchemaValidator:
                         )
                     )
                     return errors
-            else:
-                if not self._check_type(value, expected_type):
-                    errors.append(
-                        ValidationError(
-                            path,
-                            f"must be {expected_type}, got {type(value).__name__}",
-                            value,
-                            "type",
-                        )
+            elif not self._check_type(value, expected_type):
+                errors.append(
+                    ValidationError(
+                        path,
+                        f"must be {expected_type}, got {type(value).__name__}",
+                        value,
+                        "type",
                     )
-                    return errors
+                )
+                return errors
 
         # Enum validation
-        if "enum" in schema:
-            if value not in schema["enum"]:
-                errors.append(
-                    ValidationError(
-                        path,
-                        f"must be one of: {schema['enum']}",
-                        value,
-                        "enum",
-                    )
+        if "enum" in schema and value not in schema["enum"]:
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must be one of: {schema['enum']}",
+                    value,
+                    "enum",
                 )
+            )
 
         # Const validation
-        if "const" in schema:
-            if value != schema["const"]:
-                errors.append(
-                    ValidationError(
-                        path,
-                        f"must be exactly {schema['const']!r}",
-                        value,
-                        "const",
-                    )
+        if "const" in schema and value != schema["const"]:
+            errors.append(
+                ValidationError(
+                    path,
+                    f"must be exactly {schema['const']!r}",
+                    value,
+                    "const",
                 )
+            )
 
         # String validations
         if isinstance(value, str):
@@ -252,7 +245,7 @@ class SchemaValidator:
 
     def _validate_number(
         self,
-        value: int | float,
+        value: float,
         schema: dict[str, Any],
         path: str,
     ) -> list[ValidationError]:
@@ -340,7 +333,7 @@ class SchemaValidator:
                 )
             )
 
-        if "uniqueItems" in schema and schema["uniqueItems"]:
+        if schema.get("uniqueItems"):
             # Check for duplicates (works for hashable items)
             try:
                 if len(value) != len(set(value)):
@@ -411,10 +404,10 @@ class SchemaValidator:
         elif isinstance(additional, dict):
             # Validate additional properties against schema
             allowed = set(properties.keys())
-            for field in value:
+            for field, item in value.items():
                 if field not in allowed:
                     field_path = f"{path}.{field}" if path else field
-                    errors.extend(self._validate_value(value[field], additional, field_path))
+                    errors.extend(self._validate_value(item, additional, field_path))
 
         # Min/max properties
         if "minProperties" in schema and len(value) < schema["minProperties"]:

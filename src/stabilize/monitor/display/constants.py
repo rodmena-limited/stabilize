@@ -1,6 +1,8 @@
 """Constants for the monitor display."""
 
 # Column positions from right edge (absolute positioning)
+from __future__ import annotations
+
 COL_PROGRESS = 6  # width - 6
 COL_DURATION = 14  # width - 14
 COL_STATUS = 26  # width - 26

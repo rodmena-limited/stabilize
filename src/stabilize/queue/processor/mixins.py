@@ -1,5 +1,4 @@
-"""
-Mixin classes for QueueProcessor.
+"""Mixin classes for QueueProcessor.
 
 Provides handler registration, message deduplication, and DLQ management logic.
 """
@@ -19,13 +18,13 @@ from stabilize.persistence.committed_marks import (
     delivery_defects,
 )
 from stabilize.persistence.tenancy import TenancyModeChanged, bind_tenant
-from stabilize.queue.dedup import BloomDeduplicator
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.processor.handler_base import MessageHandler
 
 if TYPE_CHECKING:
     from stabilize.persistence.store import WorkflowStore
     from stabilize.queue import Queue
+    from stabilize.queue.dedup import BloomDeduplicator
     from stabilize.resilience.bulkheads import TaskBulkheadManager
     from stabilize.resilience.circuits import WorkflowCircuitFactory
     from stabilize.resilience.config import HandlerConfig
@@ -60,6 +59,11 @@ class _DiagnosticMarkerHandler(MessageHandler[Any]):
 
 class QueueProcessorMixin:
     """Mixin providing handler registration, message handling, and DLQ management."""
+
+    delivery_defects: list[DeliveryDefect]
+    if TYPE_CHECKING:
+
+        def _latch(self, exc: BaseException) -> None: ...
 
     _dedup: BloomDeduplicator
 
@@ -159,14 +163,14 @@ class QueueProcessorMixin:
             # re-execute on redelivery. The negative-cache fast path is
             # therefore opt-in via dedup_trust_negative_cache.
             trust_negative = getattr(self.config, "dedup_trust_negative_cache", False)
-            if dedup.maybe_seen(message_id) or not (trust_negative and dedup.authoritative):
-                if self._store is not None and self._store.is_message_processed(message_id):
-                    logger.info(
-                        "Skipping duplicate message %s (%s)",
-                        message_id,
-                        get_message_type_name(message),
-                    )
-                    return
+            durable_check = dedup.maybe_seen(message_id) or not (trust_negative and dedup.authoritative)
+            if durable_check and self._store is not None and self._store.is_message_processed(message_id):
+                logger.info(
+                    "Skipping duplicate message %s (%s)",
+                    message_id,
+                    get_message_type_name(message),
+                )
+                return
 
             # Check if bloom filter needs rotation
             if dedup.should_reset(threshold=0.7):
@@ -212,7 +216,7 @@ class QueueProcessorMixin:
         if not reasons:
             return
         kind = get_message_type_name(message)
-        defects: list[DeliveryDefect] = self.delivery_defects  # type: ignore[attr-defined]
+        defects = self.delivery_defects
         if len(defects) < DEFECT_LIMIT:
             defects.append(DeliveryDefect(message_type=kind, message_id=message_id, reasons=tuple(reasons)))
         metrics.increment("stabilize.delivery.defects", message_type=kind)
@@ -257,11 +261,11 @@ class QueueProcessorMixin:
         """
         if hasattr(self.queue, "check_and_move_expired"):
             try:
-                moved = getattr(self.queue, "check_and_move_expired")()
+                moved = self.queue.check_and_move_expired()
                 if moved > 0:
                     logger.info("Moved %d expired messages to DLQ", moved)
             except TenancyModeChanged as e:
-                self._latch(e)  # type: ignore[attr-defined]
+                self._latch(e)
                 raise
             except Exception as e:
                 logger.warning("Error checking DLQ: %s", e)

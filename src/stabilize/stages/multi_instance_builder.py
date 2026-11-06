@@ -1,5 +1,4 @@
-"""
-Multi-instance stage builder.
+"""Multi-instance stage builder.
 
 Provides builder methods for creating multi-instance stage patterns:
 - WCP-12: Multiple Instances without Synchronization
@@ -29,13 +28,10 @@ Usage:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from stabilize.models.multi_instance import MultiInstanceConfig
 from stabilize.models.stage import JoinType, StageExecution
-
-if TYPE_CHECKING:
-    pass
 
 
 class MultiInstanceBuilder:
@@ -118,10 +114,7 @@ class MultiInstanceBuilder:
             join_ref_id = f"{parent_stage.ref_id}_mi_join"
 
             # Determine join type
-            if join_threshold > 0:
-                join_type = JoinType.N_OF_M
-            else:
-                join_type = JoinType.AND
+            join_type = JoinType.N_OF_M if join_threshold > 0 else JoinType.AND
 
             join_stage = StageExecution.create(
                 type="noop",

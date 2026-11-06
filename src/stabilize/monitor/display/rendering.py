@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import curses
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from stabilize.models.status import WorkflowStatus
@@ -31,6 +31,10 @@ if TYPE_CHECKING:
     from stabilize.monitor.data import MonitorData, StageView, TaskView, WorkflowView
 
 
+def _local_time(epoch_ms: int) -> datetime:
+    return datetime.fromtimestamp(epoch_ms / 1000, tz=UTC).astimezone()
+
+
 def init_colors() -> None:
     """Initialize curses color pairs."""
     curses.start_color()
@@ -51,19 +55,18 @@ def get_status_attr(status: WorkflowStatus) -> int:
     """Get color attribute for a status."""
     if status == WorkflowStatus.SUCCEEDED:
         return curses.color_pair(PAIR_SUCCEEDED)
-    elif status == WorkflowStatus.RUNNING:
+    if status == WorkflowStatus.RUNNING:
         return curses.color_pair(PAIR_RUNNING) | curses.A_BOLD
-    elif status in (
+    if status in (
         WorkflowStatus.TERMINAL,
         WorkflowStatus.FAILED_CONTINUE,
         WorkflowStatus.CANCELED,
         WorkflowStatus.STOPPED,
     ):
         return curses.color_pair(PAIR_FAILED) | curses.A_BOLD
-    elif status in (WorkflowStatus.PAUSED, WorkflowStatus.SUSPENDED):
+    if status in (WorkflowStatus.PAUSED, WorkflowStatus.SUSPENDED):
         return curses.color_pair(PAIR_PAUSED)
-    else:
-        return curses.A_NORMAL
+    return curses.A_NORMAL
 
 
 def addstr(stdscr: Any, y: int, x: int, text: str, attr: int = 0) -> None:
@@ -196,7 +199,7 @@ def render_workflow_line(stdscr: Any, y: int, width: int, wf: WorkflowView, base
     duration = format_duration(wf.start_time, wf.end_time)[:7]
 
     if wf.start_time:
-        start_dt = datetime.fromtimestamp(wf.start_time / 1000)
+        start_dt = _local_time(wf.start_time)
         ms = wf.start_time % 1000
         time_str = start_dt.strftime("%Y-%m-%d %H:%M:%S") + f".{ms:03d}"
     else:
@@ -241,7 +244,7 @@ def render_stage_line(stdscr: Any, y: int, width: int, stage: StageView, is_last
     duration = format_duration(stage.start_time, stage.end_time)[:7]
 
     if stage.start_time:
-        start_dt = datetime.fromtimestamp(stage.start_time / 1000)
+        start_dt = _local_time(stage.start_time)
         ms = stage.start_time % 1000
         time_str = start_dt.strftime("%Y-%m-%d %H:%M:%S") + f".{ms:03d}"
     else:
@@ -293,7 +296,7 @@ def render_task_line(
     duration = format_duration(task.start_time, task.end_time)[:7]
 
     if task.start_time:
-        start_dt = datetime.fromtimestamp(task.start_time / 1000)
+        start_dt = _local_time(task.start_time)
         ms = task.start_time % 1000
         time_str = start_dt.strftime("%Y-%m-%d %H:%M:%S") + f".{ms:03d}"
     else:

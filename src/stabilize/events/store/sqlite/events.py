@@ -1,5 +1,4 @@
-"""
-Event append, query, and retrieval methods for SQLite event store.
+"""Event append, query, and retrieval methods for SQLite event store.
 
 Provides the SqliteEventStoreMixin with all event-related operations.
 """
@@ -7,8 +6,6 @@ Provides the SqliteEventStoreMixin with all event-related operations.
 from __future__ import annotations
 
 import json
-import sqlite3
-from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -21,14 +18,16 @@ from stabilize.events.base import (
     EventType,
     parse_event_type,
 )
-from stabilize.events.store.interface import EventQuery
 from stabilize.persistence.columns import select_list
 from stabilize.persistence.tenancy import TenantMismatchError
 
-_EVENTS = select_list("events", "sqlite")
-
 if TYPE_CHECKING:
-    pass
+    import sqlite3
+    from collections.abc import Iterator
+
+    from stabilize.events.store.interface import EventQuery
+
+_EVENTS = select_list("events", "sqlite")
 
 
 class SqliteEventStoreMixin:
@@ -93,13 +92,12 @@ class SqliteEventStoreMixin:
 
             if should_commit:
                 conn.commit()
-
-            return result_events
-
         except Exception:
             if should_commit:
                 conn.rollback()
             raise
+        else:
+            return result_events
 
     def get_events(self, query: EventQuery) -> Iterator[Event]:
         """Query events matching criteria."""

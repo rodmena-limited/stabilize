@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 def walk_causes(error: BaseException) -> Iterator[BaseException]:

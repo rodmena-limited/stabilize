@@ -1,5 +1,4 @@
-"""
-Frozen state snapshots for read-only stage/task inspection.
+"""Frozen state snapshots for read-only stage/task inspection.
 
 Provides immutable snapshots of stage and task state for:
 - Thread-safe concurrent access

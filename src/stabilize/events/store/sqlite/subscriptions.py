@@ -1,5 +1,4 @@
-"""
-Subscription CRUD operations for SQLite event store.
+"""Subscription CRUD operations for SQLite event store.
 
 Provides the SqliteSubscriptionsMixin with subscription management methods.
 """
@@ -7,7 +6,6 @@ Provides the SqliteSubscriptionsMixin with subscription management methods.
 from __future__ import annotations
 
 import json
-import sqlite3
 from typing import TYPE_CHECKING, Any
 
 from stabilize.events.base import EventType, parse_event_type
@@ -15,10 +13,10 @@ from stabilize.events.store.subscription_names import qualify, unqualify
 from stabilize.persistence.columns import select_list
 from stabilize.persistence.tenancy import refuse_foreign_row
 
-_SUBSCRIPTIONS = select_list("event_subscriptions", "sqlite")
-
 if TYPE_CHECKING:
-    pass
+    import sqlite3
+
+_SUBSCRIPTIONS = select_list("event_subscriptions", "sqlite")
 
 
 def _row_value(row: Any, column: str, default: str = "0") -> str:

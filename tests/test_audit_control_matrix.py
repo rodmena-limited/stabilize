@@ -138,11 +138,13 @@ def test_pause_a_buffered_workflow_then_resume(repository: WorkflowStore, queue:
         w.keep_waiting_pipelines = True
         return w
 
+    HELD.add("first")
     first = _start(repository, queue, limited("first", "poll"))
     _until(processor, repository, first.id, lambda w: w.status == WorkflowStatus.RUNNING)
     second = _start(repository, queue, limited("second", "ok"))
     _until(processor, repository, second.id, lambda w: w.status == WorkflowStatus.BUFFERED)
     repository.pause(second.id, paused_by="audit")
+    HELD.discard("first")
     _assert_done(drive(processor, repository, first.id, timeout=30, idle=2.0), "first of a limited pair")
     Orchestrator(queue, store=repository).unpause(repository.retrieve(second.id))
     for _ in range(10):

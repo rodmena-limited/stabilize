@@ -1,10 +1,11 @@
-"""
-SQL schema constants for PostgreSQL event store.
+"""SQL schema constants for PostgreSQL event store.
 
 Defines the DDL for events, snapshots, and subscription tables.
 """
 
 # Schema for events table (PostgreSQL)
+from __future__ import annotations
+
 EVENTS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
     sequence BIGSERIAL PRIMARY KEY,

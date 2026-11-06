@@ -1,6 +1,8 @@
 """HTTP task constants."""
 
 # Default settings
+from __future__ import annotations
+
 DEFAULT_TIMEOUT = 30
 DEFAULT_MAX_RESPONSE_SIZE = 10 * 1024 * 1024  # 10MB
 DEFAULT_RETRY_ON_STATUS = [502, 503, 504]

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -11,10 +10,11 @@ from typing import TYPE_CHECKING, Any
 from stabilize.persistence.columns import select_list
 from stabilize.queue.message_ids import row_id
 
+if TYPE_CHECKING:
+    import sqlite3
+
 _DLQ = select_list("queue_messages_dlq", "sqlite")
 
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 

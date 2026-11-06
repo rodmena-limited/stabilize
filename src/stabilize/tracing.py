@@ -23,10 +23,12 @@ all tracing operations become no-ops.
 from __future__ import annotations
 
 import importlib
-import types
-from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any, Self
+
+if TYPE_CHECKING:
+    import types
+    from collections.abc import Iterator
 
 # OpenTelemetry is optional - gracefully degrade to no-ops
 trace: types.ModuleType | None
@@ -61,24 +63,20 @@ class NoOpSpan:
 
     def set_attribute(self, key: str, value: Any) -> None:
         """No-op."""
-        pass
 
     def set_status(self, status: Any) -> None:
         """No-op."""
-        pass
 
     def record_exception(self, exception: BaseException) -> None:
         """No-op."""
-        pass
 
     def add_event(self, name: str, attributes: dict[str, Any] | None = None) -> None:
         """No-op."""
-        pass
 
-    def __enter__(self) -> NoOpSpan:
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         pass
 
 
@@ -113,7 +111,7 @@ def configure_tracing(
     """
     global _tracer, _configured
 
-    if not OTEL_AVAILABLE:
+    if trace is None:
         _configured = True
         return
 
@@ -124,7 +122,6 @@ def configure_tracing(
     if environment:
         resource_attrs["deployment.environment"] = environment
 
-    assert trace is not None
     resource = Resource.create(resource_attrs)
 
     # Create and set tracer provider
@@ -312,10 +309,9 @@ def add_event(name: str, attributes: dict[str, Any] | None = None) -> None:
         name: Event name
         attributes: Optional event attributes
     """
-    if not OTEL_AVAILABLE:
+    if trace is None:
         return
 
-    assert trace is not None
     span = trace.get_current_span()
     if span:
         span.add_event(name, attributes=attributes or {})
@@ -328,10 +324,9 @@ def set_attribute(key: str, value: Any) -> None:
         key: Attribute key
         value: Attribute value
     """
-    if not OTEL_AVAILABLE:
+    if trace is None:
         return
 
-    assert trace is not None
     span = trace.get_current_span()
     if span and value is not None:
         span.set_attribute(key, str(value))

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from stabilize.persistence.tenancy import bind_tenant
@@ -10,6 +9,8 @@ from stabilize.resilience.executor import execute_with_resilience
 from stabilize.tasks.registry import TaskNotFoundError
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     from stabilize.models.stage import StageExecution
     from stabilize.models.task import TaskExecution
     from stabilize.queue.messages import RunTask
@@ -81,7 +82,7 @@ def execute_with_timeout(
         TransientError: If bulkhead is full or circuit is open
     """
     task_name = getattr(task, "name", type(task).__name__)
-    execution_id = stage.execution.id if stage.execution else None
+    execution_id = stage.execution.id
 
     # Get circuit breaker for this workflow + task type
     circuit = circuit_factory.get_circuit(
@@ -107,7 +108,7 @@ def execute_with_timeout(
 
         reset_handle = bind_current_token(get_token(message.task_id))
         try:
-            with bind_tenant(s.execution.tenant if s.execution is not None else ""):
+            with bind_tenant(s.execution.tenant):
                 return task.execute(s)
         finally:
             reset_current_token(reset_handle)

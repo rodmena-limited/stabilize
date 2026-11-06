@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import re
 import sys
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.cli.driver import announce_driver, import_psycopg
 from stabilize.cli.migrate import _describe, _target
 from stabilize.cli.tenancy_cli import _read_record
 from stabilize.persistence.tenancy import MODE_TENANCY
 from stabilize.redaction import redact_text
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 NAME_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 

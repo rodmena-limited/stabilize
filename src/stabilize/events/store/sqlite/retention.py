@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from stabilize.events.store.retention import (
@@ -13,6 +11,10 @@ from stabilize.events.store.retention import (
     describe_bound,
 )
 from stabilize.events.store.subscription_names import unqualify
+
+if TYPE_CHECKING:
+    import sqlite3
+    from datetime import datetime
 
 
 class SqliteRetentionMixin:

@@ -1,5 +1,4 @@
-"""
-Stage planning methods for StartStageHandler.
+"""Stage planning methods for StartStageHandler.
 
 Builds tasks and before-stages for a stage that is ready to run.
 """
@@ -27,9 +26,7 @@ class StartStagePlannerMixin:
     repository: WorkflowStore
 
     def _plan_stage(self, stage: StageExecution) -> list[StageExecution]:
-        """
-        Plan the stage - build tasks and before stages.
-        """
+        """Plan the stage - build tasks and before stages."""
         # Hydrate context with ancestor outputs
         # This ensures tasks have access to upstream data even with partial loading
         ancestor_outputs = self.repository.get_merged_ancestor_outputs(stage.execution.id, stage.ref_id)
@@ -44,7 +41,7 @@ class StartStagePlannerMixin:
             from stabilize.reducers import apply_output_reducers
 
             upstreams = self.repository.get_upstream_stages(stage.execution.id, stage.ref_id) or []
-            branch_outputs = [u.outputs for u in upstreams if u is not None and u.outputs]
+            branch_outputs = [u.outputs for u in upstreams if u.outputs]
             ancestor_outputs.update(apply_output_reducers(reducers, branch_outputs))
 
         ancestor_keys = set(ancestor_outputs)

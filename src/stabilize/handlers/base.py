@@ -1,5 +1,4 @@
-"""
-Base message handler classes.
+"""Base message handler classes.
 
 This module provides the base classes for all message handlers in the
 pipeline execution engine.
@@ -10,7 +9,6 @@ from __future__ import annotations
 import logging
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from datetime import timedelta
 from typing import TYPE_CHECKING, Generic, TypeVar
 
@@ -20,10 +18,7 @@ from resilient_circuit.exceptions import RetryLimitReached
 from stabilize.errors import ConcurrencyError
 from stabilize.events.txn_scope import held_snapshot, restore_held
 from stabilize.handlers.event_recording import EventRecordingMixin
-from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus, validate_transition
-from stabilize.models.task import TaskExecution
-from stabilize.models.workflow import Workflow
 from stabilize.persistence.store import WorkflowNotFoundError
 from stabilize.queue.messages import (
     InvalidStageId,
@@ -38,7 +33,12 @@ from stabilize.queue.messages import (
 from stabilize.resilience.config import HandlerConfig, get_handler_config
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from stabilize.events.recorder import EventRecorder
+    from stabilize.models.stage import StageExecution
+    from stabilize.models.task import TaskExecution
+    from stabilize.models.workflow import Workflow
     from stabilize.persistence.store import WorkflowStore
     from stabilize.persistence.store.transaction import StoreTransaction
     from stabilize.queue import Queue
@@ -51,8 +51,7 @@ M = TypeVar("M", bound=Message)
 
 
 class MessageHandler(ABC, Generic[M]):
-    """
-    Base class for message handlers.
+    """Base class for message handlers.
 
     Each handler processes a specific type of message.
     """
@@ -61,17 +60,14 @@ class MessageHandler(ABC, Generic[M]):
     @abstractmethod
     def message_type(self) -> type[M]:
         """Return the type of message this handler processes."""
-        pass
 
     @abstractmethod
     def handle(self, message: M) -> None:
         """Handle a message."""
-        pass
 
 
 class StabilizeHandler(EventRecordingMixin, MessageHandler[M], ABC):
-    """
-    Base handler with common utilities.
+    """Base handler with common utilities.
 
     Provides helper methods for retrieving executions, stages, and tasks,
     as well as the startNext() implementation.
@@ -129,8 +125,7 @@ class StabilizeHandler(EventRecordingMixin, MessageHandler[M], ABC):
         message: WorkflowLevel,
         block: Callable[[Workflow], None],
     ) -> None:
-        """
-        Execute a block with the execution for a message.
+        """Execute a block with the execution for a message.
 
         Args:
             message: Message containing execution ID
@@ -166,8 +161,7 @@ class StabilizeHandler(EventRecordingMixin, MessageHandler[M], ABC):
         message: StageLevel,
         block: Callable[[StageExecution], None],
     ) -> None:
-        """
-        Execute a block with the stage for a message.
+        """Execute a block with the stage for a message.
 
         Args:
             message: Message containing stage ID
@@ -245,8 +239,7 @@ class StabilizeHandler(EventRecordingMixin, MessageHandler[M], ABC):
         message: TaskLevel,
         block: Callable[[StageExecution, TaskExecution], None],
     ) -> None:
-        """
-        Execute a block with the stage and task for a message.
+        """Execute a block with the stage and task for a message.
 
         Args:
             message: Message containing task ID

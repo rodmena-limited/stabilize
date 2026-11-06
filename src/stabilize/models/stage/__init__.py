@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from stabilize.models.stage.enums import JoinType, SplitType, SyntheticStageOwner
 from stabilize.models.stage.stage import StageExecution
 

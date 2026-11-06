@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-import sqlite3
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import sqlite3
 
 TENANT_COLUMN = "stabilize_tenant"
 MODE_TABLE = "stabilize_tenancy"
@@ -52,7 +55,7 @@ def engine_shaped_tables(conn: sqlite3.Connection) -> list[str]:
     for name in sorted(present):
         if name in found or name.startswith("sqlite_"):
             continue
-        if _QUEUE_COLUMNS <= _columns(conn, name) and f"{name}_dlq" in present:
+        if _columns(conn, name) >= _QUEUE_COLUMNS and f"{name}_dlq" in present:
             found.extend([name, f"{name}_dlq"])
     return found
 
@@ -104,20 +107,28 @@ FENCE_PREFIXES = ("stabilize_fence_ins_", "stabilize_fence_insm_", "stabilize_fe
 def _fence_ddl(table: str) -> list[str]:
     q = f'"{table}"'
     return [
-        f"CREATE TRIGGER IF NOT EXISTS stabilize_fence_ins_{table} BEFORE INSERT ON {q} FOR EACH ROW "
-        f"WHEN NEW.{TENANT_COLUMN} IS NULL OR NEW.{TENANT_COLUMN} = '' "
-        "BEGIN SELECT RAISE(ABORT, 'ST001: stabilize_tenant is empty; stabilize 0.34 sets it on every row'); END",
-        f"CREATE TRIGGER IF NOT EXISTS stabilize_fence_insm_{table} BEFORE INSERT ON {q} FOR EACH ROW "
-        f"WHEN NEW.{TENANT_COLUMN} IS NOT NULL AND NEW.{TENANT_COLUMN} <> '' "
-        f"AND stabilize_tenant() <> '*' AND NEW.{TENANT_COLUMN} <> stabilize_tenant() "
-        "BEGIN SELECT RAISE(ABORT, 'ST002: row tenant does not match the connection tenant'); END",
-        f"CREATE TRIGGER IF NOT EXISTS stabilize_fence_upd_{table} BEFORE UPDATE ON {q} FOR EACH ROW "
-        f"WHEN stabilize_tenant() <> '*' AND (OLD.{TENANT_COLUMN} <> stabilize_tenant() "
-        f"OR NEW.{TENANT_COLUMN} IS NOT OLD.{TENANT_COLUMN}) "
-        "BEGIN SELECT RAISE(ABORT, 'ST002: row tenant does not match the connection tenant'); END",
-        f"CREATE TRIGGER IF NOT EXISTS stabilize_fence_del_{table} BEFORE DELETE ON {q} FOR EACH ROW "
-        f"WHEN stabilize_tenant() <> '*' AND OLD.{TENANT_COLUMN} <> stabilize_tenant() "
-        "BEGIN SELECT RAISE(ABORT, 'ST002: row tenant does not match the connection tenant'); END",
+        (
+            f"CREATE TRIGGER IF NOT EXISTS stabilize_fence_ins_{table} BEFORE INSERT ON {q} FOR EACH ROW "
+            f"WHEN NEW.{TENANT_COLUMN} IS NULL OR NEW.{TENANT_COLUMN} = '' "
+            "BEGIN SELECT RAISE(ABORT, 'ST001: stabilize_tenant is empty; stabilize 0.34 sets it on every row'); END"
+        ),
+        (
+            f"CREATE TRIGGER IF NOT EXISTS stabilize_fence_insm_{table} BEFORE INSERT ON {q} FOR EACH ROW "
+            f"WHEN NEW.{TENANT_COLUMN} IS NOT NULL AND NEW.{TENANT_COLUMN} <> '' "
+            f"AND stabilize_tenant() <> '*' AND NEW.{TENANT_COLUMN} <> stabilize_tenant() "
+            "BEGIN SELECT RAISE(ABORT, 'ST002: row tenant does not match the connection tenant'); END"
+        ),
+        (
+            f"CREATE TRIGGER IF NOT EXISTS stabilize_fence_upd_{table} BEFORE UPDATE ON {q} FOR EACH ROW "
+            f"WHEN stabilize_tenant() <> '*' AND (OLD.{TENANT_COLUMN} <> stabilize_tenant() "
+            f"OR NEW.{TENANT_COLUMN} IS NOT OLD.{TENANT_COLUMN}) "
+            "BEGIN SELECT RAISE(ABORT, 'ST002: row tenant does not match the connection tenant'); END"
+        ),
+        (
+            f"CREATE TRIGGER IF NOT EXISTS stabilize_fence_del_{table} BEFORE DELETE ON {q} FOR EACH ROW "
+            f"WHEN stabilize_tenant() <> '*' AND OLD.{TENANT_COLUMN} <> stabilize_tenant() "
+            "BEGIN SELECT RAISE(ABORT, 'ST002: row tenant does not match the connection tenant'); END"
+        ),
     ]
 
 

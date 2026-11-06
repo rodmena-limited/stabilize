@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import os
 import threading
-from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
 
 _local = threading.local()
 

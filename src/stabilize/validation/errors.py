@@ -8,8 +8,7 @@ from typing import Any
 
 @dataclass
 class ValidationError:
-    """
-    A validation error with path and message.
+    """A validation error with path and message.
 
     Attributes:
         path: JSON path to the invalid field (e.g., "timeout" or "servers[0].host")

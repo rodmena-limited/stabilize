@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-import sqlite3
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import sqlite3
 
 # SQLite schema definition
 SCHEMA = """
@@ -131,8 +134,8 @@ def create_tables(conn: sqlite3.Connection) -> None:
     in order. This is additive and idempotent: existing databases upgrade in
     place without the baseline DDL being re-run.
     """
-    for statement in SCHEMA.split(";"):
-        statement = statement.strip()
+    for raw in SCHEMA.split(";"):
+        statement = raw.strip()
         if statement:
             conn.execute(statement)
     conn.commit()

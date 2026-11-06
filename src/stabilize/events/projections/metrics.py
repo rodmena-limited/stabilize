@@ -1,5 +1,4 @@
-"""
-Stage metrics projection.
+"""Stage metrics projection.
 
 Aggregates metrics across stage executions for analytics.
 """
@@ -141,8 +140,7 @@ class TaskMetrics:
 
 
 class StageMetricsProjection(Projection):
-    """
-    Aggregates stage execution metrics for analytics.
+    """Aggregates stage execution metrics for analytics.
 
     Tracks:
     - Execution counts per stage type

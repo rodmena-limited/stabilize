@@ -1,5 +1,4 @@
-"""
-SubWorkflowTask - executes a child workflow and waits for completion.
+"""SubWorkflowTask - executes a child workflow and waits for completion.
 
 Implements WCP-22: Recursion.
 

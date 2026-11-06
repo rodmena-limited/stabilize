@@ -1,5 +1,4 @@
-"""
-SSHTask for executing commands on remote hosts via SSH.
+"""SSHTask for executing commands on remote hosts via SSH.
 
 This module provides a production-ready SSHTask with:
 - SSH command execution via subprocess
@@ -31,8 +30,7 @@ _VALID_USER_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 
 class SSHTask(Task):
-    """
-    Execute commands on remote hosts via SSH.
+    """Execute commands on remote hosts via SSH.
 
     Uses the ssh CLI command via subprocess for maximum compatibility.
     Key-based authentication is recommended for automation.
@@ -114,6 +112,7 @@ class SSHTask(Task):
                 ["ssh", "-V"],
                 capture_output=True,
                 timeout=5,
+                check=False,
             )
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return TaskResult.terminal(error="SSH client not available. Ensure ssh is installed.")
@@ -160,6 +159,7 @@ class SSHTask(Task):
         try:
             result = subprocess.run(
                 ssh_cmd,
+                check=False,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -189,17 +189,16 @@ class SSHTask(Task):
             if result.returncode == 0:
                 logger.debug("SSHTask success on %s", host)
                 return TaskResult.success(outputs=outputs)
-            elif result.returncode == 255:
+            if result.returncode == 255:
                 # SSH connection error
                 error_msg = f"SSH connection failed to {host}: {result.stderr}"
                 if continue_on_failure:
                     return TaskResult.failed_continue(error=error_msg, outputs=outputs)
                 return TaskResult.terminal(error=error_msg, context=outputs)
-            else:
-                error_msg = f"Remote command failed with exit code {result.returncode}"
-                if continue_on_failure:
-                    return TaskResult.failed_continue(error=error_msg, outputs=outputs)
-                return TaskResult.terminal(error=error_msg, context=outputs)
+            error_msg = f"Remote command failed with exit code {result.returncode}"
+            if continue_on_failure:
+                return TaskResult.failed_continue(error=error_msg, outputs=outputs)
+            return TaskResult.terminal(error=error_msg, context=outputs)
 
         except subprocess.TimeoutExpired:
             error_msg = f"SSH command timed out after {timeout}s"

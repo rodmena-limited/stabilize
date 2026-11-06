@@ -1,5 +1,4 @@
-"""
-Stage context with ancestor output lookup.
+"""Stage context with ancestor output lookup.
 
 The StageContext class provides access to stage inputs with automatic
 fallback to ancestor stage outputs. This enables data flow between
@@ -16,8 +15,7 @@ if TYPE_CHECKING:
 
 
 class StageContext(MutableMapping[str, Any]):
-    """
-    Stage context with ancestor output lookup.
+    """Stage context with ancestor output lookup.
 
     When a key is not found in the stage's own context, it automatically
     searches ancestor stages' outputs. This enables data to flow from
@@ -36,8 +34,7 @@ class StageContext(MutableMapping[str, Any]):
         stage: StageExecution,
         delegate: dict[str, Any],
     ) -> None:
-        """
-        Initialize the context.
+        """Initialize the context.
 
         Args:
             stage: The stage this context belongs to
@@ -52,8 +49,7 @@ class StageContext(MutableMapping[str, Any]):
         return self._stage
 
     def __getitem__(self, key: str) -> Any:
-        """
-        Get a value by key.
+        """Get a value by key.
 
         First checks the stage's own context, then falls back to
         ancestor outputs.
@@ -103,32 +99,25 @@ class StageContext(MutableMapping[str, Any]):
             return default
 
     def get_current_only(self, key: str, default: Any = None) -> Any:
-        """
-        Get a value only from the current stage's context.
+        """Get a value only from the current stage's context.
 
         Does not search ancestor outputs.
         """
         return self._delegate.get(key, default)
 
     def get_all(self, key: str) -> list[Any]:
-        """
-        Get all values of a key from ancestors.
+        """Get all values of a key from ancestors.
 
         Returns values sorted by proximity (closest ancestor first).
         """
-        values = []
-        for ancestor in self._stage.ancestors():
-            if key in ancestor.outputs:
-                values.append(ancestor.outputs[key])
-        return values
+        return [ancestor.outputs[key] for ancestor in self._stage.ancestors() if key in ancestor.outputs]
 
     def to_dict(self) -> dict[str, Any]:
         """Get the underlying dictionary."""
         return dict(self._delegate)
 
     def merge_with_ancestors(self) -> dict[str, Any]:
-        """
-        Get merged context including all ancestor outputs.
+        """Get merged context including all ancestor outputs.
 
         Returns a new dictionary with all keys from this context
         and all ancestor outputs. Own values take precedence.
@@ -146,8 +135,7 @@ class StageContext(MutableMapping[str, Any]):
 
 
 def create_merged_context(stage: StageExecution) -> StageContext:
-    """
-    Create a StageContext with merged ancestor data.
+    """Create a StageContext with merged ancestor data.
 
     The returned context will have the stage's own context merged
     with ancestor outputs, with the stage's values taking precedence.

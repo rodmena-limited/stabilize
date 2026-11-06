@@ -1,5 +1,4 @@
-"""
-Bulkhead management for Stabilize.
+"""Bulkhead management for Stabilize.
 
 Provides per-task-type bulkheads using BulkheadThreading from bulkman.
 """
@@ -9,14 +8,16 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from bulkman.config import BulkheadConfig as BulkmanConfig
 from bulkman.config import ExecutionResult
 from bulkman.threading import BulkheadThreading
 
-from stabilize.resilience.config import ResilienceConfig
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from stabilize.resilience.config import ResilienceConfig
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +25,7 @@ T = TypeVar("T")
 
 
 class TaskBulkheadManager:
-    """
-    Manages per-task-type bulkheads.
+    """Manages per-task-type bulkheads.
 
     Each task type (shell, python, http, docker, ssh) gets its own
     BulkheadThreading instance with independent thread pool and
@@ -48,8 +48,7 @@ class TaskBulkheadManager:
     """
 
     def __init__(self, config: ResilienceConfig) -> None:
-        """
-        Initialize bulkhead manager with per-task-type bulkheads.
+        """Initialize bulkhead manager with per-task-type bulkheads.
 
         Args:
             config: Resilience configuration with bulkhead settings
@@ -78,7 +77,7 @@ class TaskBulkheadManager:
                 )
             )
             logger.debug(
-                f"Created bulkhead for task type '{task_type}' with max_concurrent={bulkhead_config.max_concurrent}"
+                "Created bulkhead for task type %r with max_concurrent=%s", task_type, bulkhead_config.max_concurrent
             )
 
         # Create a default bulkhead for unknown task types
@@ -93,8 +92,7 @@ class TaskBulkheadManager:
         )
 
     def get(self, task_type: str) -> BulkheadThreading:
-        """
-        Get the bulkhead for a task type.
+        """Get the bulkhead for a task type.
 
         Args:
             task_type: The task type (shell, python, http, docker, ssh)
@@ -107,8 +105,7 @@ class TaskBulkheadManager:
 
     @property
     def is_shutdown(self) -> bool:
-        """
-        Whether shutdown() has been entered on this manager.
+        """Whether shutdown() has been entered on this manager.
 
         Once true, every underlying bulkhead is terminal: an execute attempt
         raises RuntimeError instead of returning an ExecutionResult. Callers
@@ -125,8 +122,7 @@ class TaskBulkheadManager:
         timeout: float | None = None,
         **kwargs: Any,
     ) -> ExecutionResult:
-        """
-        Execute a function through the appropriate bulkhead with timeout.
+        """Execute a function through the appropriate bulkhead with timeout.
 
         Args:
             task_type: The task type to select the bulkhead
@@ -142,8 +138,7 @@ class TaskBulkheadManager:
         return bulkhead.execute_with_timeout(func, *args, timeout=timeout, **kwargs)
 
     def get_all_stats(self) -> dict[str, dict[str, Any]]:
-        """
-        Get statistics for all bulkheads.
+        """Get statistics for all bulkheads.
 
         Returns:
             Dict mapping task type to bulkhead statistics
@@ -155,8 +150,7 @@ class TaskBulkheadManager:
         return stats
 
     def shutdown(self, wait: bool = True, timeout: float | None = None) -> None:
-        """
-        Shutdown all bulkheads.
+        """Shutdown all bulkheads.
 
         Distributes timeout budget across bulkheads. If a bulkhead finishes
         quickly, remaining time is redistributed to subsequent bulkheads.

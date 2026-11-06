@@ -1,5 +1,4 @@
-"""
-Workflow CRUD operations mixin for SqliteWorkflowStore.
+"""Workflow CRUD operations mixin for SqliteWorkflowStore.
 
 Provides store, retrieve, update_status, delete, and exists operations.
 """
@@ -7,7 +6,6 @@ Provides store, retrieve, update_status, delete, and exists operations.
 from __future__ import annotations
 
 import json
-import sqlite3
 from typing import TYPE_CHECKING
 
 from stabilize.persistence.columns import select_list
@@ -28,6 +26,8 @@ _STAGE = select_list("stage_executions", "sqlite")
 _TASK = select_list("task_executions", "sqlite")
 
 if TYPE_CHECKING:
+    import sqlite3
+
     from stabilize.models.workflow import Workflow
 
 

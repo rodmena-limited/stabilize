@@ -1,5 +1,4 @@
-"""
-In-process event bus for pub/sub.
+"""In-process event bus for pub/sub.
 
 Provides thread-safe event publishing and subscription
 with support for filtering by event type and entity type.
@@ -10,14 +9,17 @@ from __future__ import annotations
 import logging
 import threading
 from collections import deque
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from stabilize.events.base import EntityType, Event, EventType
 from stabilize.threads import in_context
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from stabilize.events.base import EntityType, Event, EventType
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +33,7 @@ class SubscriptionMode(Enum):
 
 @dataclass
 class Subscription:
-    """
-    A subscription to events.
+    """A subscription to events.
 
     Subscribers can filter by:
     - event_types: Only specific event types
@@ -59,10 +60,7 @@ class Subscription:
         if self.entity_types is not None and event.entity_type not in self.entity_types:
             return False
 
-        if self.workflow_filter is not None and event.workflow_id != self.workflow_filter:
-            return False
-
-        return True
+        return not (self.workflow_filter is not None and event.workflow_id != self.workflow_filter)
 
 
 @dataclass
@@ -77,8 +75,7 @@ class EventBusStats:
 
 
 class EventBus:
-    """
-    Thread-safe in-process event bus.
+    """Thread-safe in-process event bus.
 
     Supports:
     - Sync and async subscription modes
@@ -92,8 +89,7 @@ class EventBus:
         max_workers: int = 4,
         error_handler: Callable[[str, Event, Exception], None] | None = None,
     ) -> None:
-        """
-        Initialize the event bus.
+        """Initialize the event bus.
 
         Args:
             max_workers: Maximum worker threads for async handlers.
@@ -121,8 +117,7 @@ class EventBus:
         workflow_filter: str | None = None,
         mode: SubscriptionMode = SubscriptionMode.SYNC,
     ) -> None:
-        """
-        Subscribe to events.
+        """Subscribe to events.
 
         Args:
             subscription_id: Unique identifier for this subscription.
@@ -144,8 +139,7 @@ class EventBus:
             self._stats.subscriptions_active = len(self._subscriptions)
 
     def unsubscribe(self, subscription_id: str) -> bool:
-        """
-        Unsubscribe from events.
+        """Unsubscribe from events.
 
         Args:
             subscription_id: The subscription to remove.
@@ -173,8 +167,7 @@ class EventBus:
                 self._subscriptions[subscription_id].enabled = False
 
     def publish(self, event: Event) -> None:
-        """
-        Publish an event to all matching subscribers.
+        """Publish an event to all matching subscribers.
 
         Sync handlers are called in the current thread.
         Async handlers are submitted to the thread pool.
@@ -258,7 +251,7 @@ class EventBus:
         with self._lock:
             self._stats.errors += 1
 
-        logger.exception(
+        logger.error(
             "Error in event handler %s for event %s: %s",
             subscription_id,
             event.event_id,
@@ -268,12 +261,11 @@ class EventBus:
         if self._error_handler:
             try:
                 self._error_handler(subscription_id, event, error)
-            except Exception as e:
-                logger.exception("Error in error handler: %s", e)
+            except Exception:
+                logger.exception("Error in error handler")
 
     def on_error(self, handler: Callable[[str, Event, Exception], None]) -> Callable[[str, Event, Exception], None]:
-        """
-        Set or replace the global error handler.
+        """Set or replace the global error handler.
 
         Args:
             handler: Callable(subscription_id, event, error)
@@ -302,8 +294,7 @@ class EventBus:
             return list(self._subscriptions.keys())
 
     def shutdown(self, wait: bool = True) -> None:
-        """
-        Shutdown the event bus.
+        """Shutdown the event bus.
 
         Args:
             wait: If True, wait for pending async handlers to complete.
@@ -347,8 +338,7 @@ def configure_event_bus(
     max_workers: int = 4,
     error_handler: Callable[[str, Event, Exception], None] | None = None,
 ) -> EventBus:
-    """
-    Configure the global event bus.
+    """Configure the global event bus.
 
     Must be called before first use of get_event_bus().
 

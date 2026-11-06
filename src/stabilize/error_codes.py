@@ -1,5 +1,4 @@
-"""
-Structured error codes for Stabilize.
+"""Structured error codes for Stabilize.
 
 Provides semantic error classification and exception chain traversal
 following enterprise patterns from Flyte and similar workflow systems.
@@ -174,13 +173,13 @@ def classify_error(error: Exception) -> ErrorCode:
                 pass
     """
     if hasattr(error, "error_code"):
-        code: ErrorCode = getattr(error, "error_code")
+        code: ErrorCode = error.error_code
         return code
 
     for exc in error_chain(error):
         if hasattr(exc, "error_code"):
-            code = getattr(exc, "error_code")
-            return code
+            chained: ErrorCode = exc.error_code
+            return chained
 
     # Type-based classification for common exception types
     error_type = type(error).__name__.lower()

@@ -1,8 +1,29 @@
 # Changelog
 
-## [Unreleased]
+## [0.34.4] - 2026-11-06
 
 ### Changed
+
+- **The engine lints under every ruff rule and type-checks under a stricter mypy (#109).** `src/`
+  passes ruff with `select = ["ALL"]`. The 36 disabled rules are listed with their reasons in
+  `SPECS/109-strict-ruff-mypy.md`. `mypy --strict` runs with `warn_unreachable`, `truthy-bool`,
+  `possibly-undefined` and `ignore-without-code`. The global missing-import ignore is gone and the two
+  typing stubs it hid are dev dependencies. The 24 inline `type: ignore` comments are gone. Two
+  `noqa: N818` remain on public exception names. Runtime behaviour that changed:
+  - The monitor's timestamps are timezone-aware. Its JSON detail view carries the local UTC offset.
+  - The `assert` statements in `logging`, `tracing`, `Orchestrator`, `PythonTask`, `ShellTask` and
+    the redirect handler are explicit checks that survive `python -O`.
+  - `EventStore.supports_commit_cursor()` is part of the store interface. It returns False unless
+    the store overrides it, which the SQLite and PostgreSQL stores do. A custom event store is polled
+    by sequence. On 0.34.3 it failed with AttributeError.
+  - `TaskLeaseManager` refuses a store of the wrong backend class with a TypeError.
+  - Errors raised inside exception handlers in the SSRF guard, the SQLite task writer and the shell
+    timeout carry `from None` or their cause.
+  - The handlers' lines on unexpected errors are written with `logger.exception` and keep the
+    traceback they had.
+  - Branches that guarded against `None` from store lookups that raise instead are removed.
+  Exception types, the messages callers see and the public API are unchanged.
+  `tests/test_event_store_contract.py`.
 
 - **Lock-contention retry exhaustion logs at WARNING (#108, asked by Casebound).** When a handler
   transaction gives up after its retries on a deadlock, serialisation failure or `ConcurrencyError`,

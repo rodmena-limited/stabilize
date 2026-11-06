@@ -41,7 +41,7 @@ def topological_order(
     Ties are broken by ref_id so the result does not depend on set iteration
     order, which varies with the process hash seed.
     """
-    in_degree = {aid: 0 for aid in ancestors}
+    in_degree = dict.fromkeys(ancestors, 0)
     graph: dict[str, list[str]] = {aid: [] for aid in ancestors}
 
     for aid in sorted(ancestors):

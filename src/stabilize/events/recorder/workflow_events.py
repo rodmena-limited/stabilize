@@ -1,5 +1,4 @@
-"""
-Workflow event recording mixin.
+"""Workflow event recording mixin.
 
 Provides record_workflow_* methods for the EventRecorder.
 """
@@ -38,7 +37,7 @@ class WorkflowEventsMixin:
                 "application": workflow.application,
                 "name": workflow.name,
                 "type": workflow.type.value,
-                "trigger_type": workflow.trigger.type if workflow.trigger else "manual",
+                "trigger_type": workflow.trigger.type,
                 "stage_count": len(workflow.stages),
                 "initial_stage_count": len(workflow.initial_stages()),
             },

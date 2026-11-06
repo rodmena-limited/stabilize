@@ -1,5 +1,4 @@
-"""
-PostgreSQL-backed queue implementation.
+"""PostgreSQL-backed queue implementation.
 
 Uses FOR UPDATE SKIP LOCKED for concurrent message processing across
 multiple workers. Messages are stored in a table with delivery time.
@@ -12,10 +11,9 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.persistence.borrow import EngineBorrower
 from stabilize.persistence.committed_marks import record_bare_push
@@ -35,6 +33,9 @@ from stabilize.queue.message_ids import delivery_key, own_row_ids, row_id
 from stabilize.queue.messages import Message, get_message_type_name
 from stabilize.queue.postgres_lookups import DELIVERABLE, PostgresQueueLookupsMixin
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
 _VALID_TABLE_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 logger = logging.getLogger(__name__)
@@ -45,8 +46,7 @@ _DELIVERABLE = DELIVERABLE
 
 
 class PostgresQueue(PostgresQueueLookupsMixin, Queue):
-    """
-    PostgreSQL-backed queue implementation.
+    """PostgreSQL-backed queue implementation.
 
     Uses FOR UPDATE SKIP LOCKED for concurrent message processing across
     multiple workers. Messages are stored in a table with delivery time.
@@ -66,8 +66,7 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
         tenant: str = "",
         store_retry_budget: timedelta = timedelta(minutes=30),
     ) -> None:
-        """
-        Initialize the PostgreSQL queue.
+        """Initialize the PostgreSQL queue.
 
         Args:
             connection_string: PostgreSQL connection string
@@ -86,6 +85,9 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
             max_attempts: Maximum retry attempts before dropping message
             options: Pool and connection options. Pass the same PoolOptions
                 instance given to PostgresWorkflowStore to share one pool.
+            tenant: The tenant this queue serves; '' in single-tenant mode.
+            store_retry_budget: How long a message is redelivered while the store is
+                unavailable before it is dead-lettered.
         """
         from stabilize.persistence.connection import get_connection_manager
 
@@ -163,7 +165,6 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
         connection: Any | None = None,
     ) -> None:
         """Push a message onto the queue."""
-
         message_type = get_message_type_name(message)
         message_id = str(uuid.uuid4())
         payload = self._serialize_message(message)
@@ -205,12 +206,8 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
         """Poll for a message and process it with the callback."""
         message = self.poll_one()
         if message:
-            try:
-                callback(message)
-                self.ack(message)
-            except Exception:
-                # Message will be retried after lock expires
-                raise
+            callback(message)
+            self.ack(message)
 
     def poll_one(self) -> Message | None:
         """Poll for a single message without callback."""
@@ -362,13 +359,12 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
         owned = own_row_ids(self.table_name, keys)
         if not owned:
             return set()
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT id FROM {self.table_name} WHERE id = ANY(%(ids)s){_TENANT}",
-                    {"ids": list(owned), "tenant": self.tenant},
-                )
-                rows = cur.fetchall()
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT id FROM {self.table_name} WHERE id = ANY(%(ids)s){_TENANT}",
+                {"ids": list(owned), "tenant": self.tenant},
+            )
+            rows = cur.fetchall()
         return {owned[int(r["id"])] for r in rows}
 
     def size(self) -> int:
@@ -377,14 +373,13 @@ class PostgresQueue(PostgresQueueLookupsMixin, Queue):
         if self._size_cache is not None and now - self._last_size_check < self._size_cache_ttl:
             return self._size_cache
 
-        with self._borrow() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT COUNT(*) as cnt FROM {self.table_name} WHERE stabilize_tenant = %(tenant)s",
-                    {"tenant": self.tenant},
-                )
-                row = cur.fetchone()
-                count = row["cnt"] if row else 0
+        with self._borrow() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT COUNT(*) as cnt FROM {self.table_name} WHERE stabilize_tenant = %(tenant)s",
+                {"tenant": self.tenant},
+            )
+            row = cur.fetchone()
+            count = row["cnt"] if row else 0
 
         self._size_cache = count
         self._last_size_check = now

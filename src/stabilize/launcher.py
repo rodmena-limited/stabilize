@@ -1,5 +1,4 @@
-"""
-WorkflowLauncher - creates and starts pipeline executions.
+"""WorkflowLauncher - creates and starts pipeline executions.
 
 This module provides the high-level interface for launching pipelines.
 """
@@ -25,8 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class WorkflowLauncher:
-    """
-    Launcher for pipeline executions.
+    """Launcher for pipeline executions.
 
     Creates executions from configuration and starts them via the runner.
     """
@@ -38,8 +36,7 @@ class WorkflowLauncher:
         stage_builder_factory: StageDefinitionBuilderFactory | None = None,
         task_registry: TaskRegistry | None = None,
     ) -> None:
-        """
-        Initialize the launcher.
+        """Initialize the launcher.
 
         Args:
             repository: The execution repository
@@ -57,8 +54,7 @@ class WorkflowLauncher:
         pipeline_config: dict[str, Any],
         trigger: dict[str, Any] | None = None,
     ) -> Workflow:
-        """
-        Start a pipeline execution from configuration.
+        """Start a pipeline execution from configuration.
 
         Args:
             pipeline_config: Pipeline configuration dictionary
@@ -85,8 +81,7 @@ class WorkflowLauncher:
         config: dict[str, Any],
         trigger_config: dict[str, Any] | None = None,
     ) -> Workflow:
-        """
-        Parse a pipeline configuration into an execution.
+        """Parse a pipeline configuration into an execution.
 
         Args:
             config: Pipeline configuration
@@ -130,8 +125,7 @@ class WorkflowLauncher:
         self,
         stage_configs: list[dict[str, Any]],
     ) -> list[StageExecution]:
-        """
-        Parse stage configurations into StageExecution objects.
+        """Parse stage configurations into StageExecution objects.
 
         Args:
             stage_configs: List of stage configuration dictionaries
@@ -148,8 +142,7 @@ class WorkflowLauncher:
         return stages
 
     def _parse_stage(self, config: dict[str, Any]) -> StageExecution:
-        """
-        Parse a single stage configuration.
+        """Parse a single stage configuration.
 
         Args:
             config: Stage configuration dictionary
@@ -203,8 +196,7 @@ class WorkflowLauncher:
         name: str,
         stages: list[dict[str, Any]],
     ) -> Workflow:
-        """
-        Create an ad-hoc orchestration (single execution not from a pipeline).
+        """Create an ad-hoc orchestration (single execution not from a pipeline).
 
         Args:
             application: Application name
@@ -233,8 +225,7 @@ def create_simple_pipeline(
     application: str,
     stages: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """
-    Create a simple pipeline configuration.
+    """Create a simple pipeline configuration.
 
     Helper function for building pipeline configs programmatically.
 
@@ -271,8 +262,7 @@ def create_stage_config(
     requisites: list[str] | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """
-    Create a stage configuration.
+    """Create a stage configuration.
 
     Helper function for building stage configs.
 

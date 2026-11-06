@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, quote, unquote, urlencode
 
-from stabilize.redaction import redact_db_url as redact_db_url
+from stabilize.redaction import redact_db_url
 
 if TYPE_CHECKING:
     from typing import Any
@@ -88,7 +88,7 @@ def load_config(config_path: Path | None = None) -> dict[str, Any]:
         print("Set MG_DATABASE_URL instead")
         sys.exit(1)
     try:
-        with open(config_path) as f:
+        with Path(config_path).open() as f:
             raw = yaml.safe_load(f)
     except OSError as exc:
         print(f"Error: cannot read {config_path}: {exc.strerror}")

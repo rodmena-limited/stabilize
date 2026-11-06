@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.cli.legacy_history import PLACEHOLDER_SQL, MigrettiState, TakeoverRefusedError
 from stabilize.cli.migrations import migretti_checksum
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
 
 DEFAULT_HISTORY_SCHEMA = "stabilize_history"
 

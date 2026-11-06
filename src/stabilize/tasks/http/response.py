@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
-from http.client import HTTPResponse
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError
 
 from stabilize.redaction import redact_userinfo
 from stabilize.tasks.http.constants import CHUNK_SIZE, DEFAULT_MAX_RESPONSE_SIZE
 from stabilize.tasks.http.utils import get_charset
 from stabilize.tasks.result import TaskResult
+
+if TYPE_CHECKING:
+    from http.client import HTTPResponse
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +79,7 @@ def process_response(
                 raise ValueError(f"Path traversal blocked in download_to: {download_to}")
             resolved = os.path.realpath(download_to)
             bytes_written = 0
-            with open(resolved, "wb") as f:
+            with Path(resolved).open("wb") as f:
                 while chunk := response_obj.read(CHUNK_SIZE):
                     bytes_written += len(chunk)
                     if bytes_written > max_size:
@@ -93,10 +97,8 @@ def process_response(
             content_length = len(body_bytes)
 
             if parse_json:
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     body_json = json.loads(body)
-                except json.JSONDecodeError:
-                    pass
 
     except ValueError as e:
         if continue_on_failure:
@@ -131,17 +133,15 @@ def process_response(
             if continue_on_failure:
                 return TaskResult.failed_continue(error=error_msg, outputs=outputs)
             return TaskResult.terminal(error=error_msg, context=outputs)
-        else:
-            # Status is in expected list - this is success
-            logger.debug("HTTPTask success (expected status %s)", status_code)
-            return TaskResult.success(outputs=outputs)
+        # Status is in expected list - this is success
+        logger.debug("HTTPTask success (expected status %s)", status_code)
+        return TaskResult.success(outputs=outputs)
 
     # Success for 2xx, failure otherwise
     if 200 <= status_code < 300:
         logger.debug("HTTPTask success: %s", status_code)
         return TaskResult.success(outputs=outputs)
-    else:
-        error_msg = f"HTTP {status_code}"
-        if continue_on_failure:
-            return TaskResult.failed_continue(error=error_msg, outputs=outputs)
-        return TaskResult.terminal(error=error_msg, context=outputs)
+    error_msg = f"HTTP {status_code}"
+    if continue_on_failure:
+        return TaskResult.failed_continue(error=error_msg, outputs=outputs)
+    return TaskResult.terminal(error=error_msg, context=outputs)

@@ -1,5 +1,4 @@
-"""
-Metrics collection for Stabilize.
+"""Metrics collection for Stabilize.
 
 Provides a unified interface for metrics collection, supporting:
 - Null/Log-based implementation (default)
@@ -18,11 +17,15 @@ Metrics tracked:
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any, Self
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+    from types import TracebackType
 
 logger = logging.getLogger(__name__)
 
@@ -33,17 +36,14 @@ class MetricsProvider(ABC):
     @abstractmethod
     def increment(self, name: str, value: float = 1.0, tags: dict[str, str] | None = None) -> None:
         """Increment a counter."""
-        pass
 
     @abstractmethod
     def gauge(self, name: str, value: float, tags: dict[str, str] | None = None) -> None:
         """Set a gauge value."""
-        pass
 
     @abstractmethod
     def histogram(self, name: str, value: float, tags: dict[str, str] | None = None) -> None:
         """Record a value in a histogram."""
-        pass
 
 
 class LogMetricsProvider(MetricsProvider):
@@ -143,8 +143,7 @@ def set_metrics_provider(provider: MetricsProvider) -> None:
 
 
 def configure_metrics() -> None:
-    """
-    Auto-configure metrics based on available libraries.
+    """Auto-configure metrics based on available libraries.
 
     Tries to initialize OpenTelemetry if available.
     Falls back to LogMetricsProvider if STABILIZE_LOG_METRICS is set.
@@ -158,8 +157,10 @@ def configure_metrics() -> None:
         return
 
     try:
-        import opentelemetry.metrics  # noqa: F401
-    except ImportError:
+        otel_metrics = importlib.util.find_spec("opentelemetry.metrics")
+    except ModuleNotFoundError:
+        otel_metrics = None
+    if otel_metrics is None:
         set_metrics_provider(NoOpMetricsProvider())
         return
     set_metrics_provider(OpenTelemetryMetricsProvider())
@@ -201,11 +202,13 @@ class Timer:
         self.tags = tags
         self.start_time: float = 0
 
-    def __enter__(self) -> Timer:
+    def __enter__(self) -> Self:
         self.start_time = time.perf_counter()
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
+    ) -> None:
         duration = time.perf_counter() - self.start_time
         status = "failed" if exc_type else "success"
         self.tags["status"] = status

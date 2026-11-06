@@ -80,7 +80,7 @@ class CompleteStagesSplitMixin:
                 stage.name,
             )
             activated.append(downstream_stages[0])
-            skipped = [d for d in downstream_stages[1:]]
+            skipped = list(downstream_stages[1:])
 
         return activated, skipped
 
@@ -99,8 +99,6 @@ class CompleteStagesSplitMixin:
             if downstream.join_type not in (JoinType.DISCRIMINATOR, JoinType.N_OF_M):
                 continue
             fresh_downstream = self.repository.retrieve_stage(downstream.id)
-            if fresh_downstream is None:
-                continue
             completed = list(fresh_downstream.context.get("_completed_branches", []))
             if stage.ref_id in completed:
                 continue

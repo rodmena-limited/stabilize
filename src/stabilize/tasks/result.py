@@ -1,5 +1,4 @@
-"""
-TaskResult - result of task execution.
+"""TaskResult - result of task execution.
 
 This module defines the TaskResult class that encapsulates the result
 of executing a task, including status, context updates, and outputs.
@@ -15,8 +14,7 @@ from stabilize.models.status import WorkflowStatus
 
 @dataclass
 class TaskResult:
-    """
-    Result of a task execution.
+    """Result of a task execution.
 
     Tasks return a TaskResult to indicate their status and provide
     data to downstream stages.
@@ -43,8 +41,7 @@ class TaskResult:
         outputs: dict[str, Any] | None = None,
         context: dict[str, Any] | None = None,
     ) -> TaskResult:
-        """
-        Create a successful result.
+        """Create a successful result.
 
         Args:
             outputs: Values available to downstream stages
@@ -65,14 +62,14 @@ class TaskResult:
         context: dict[str, Any] | None = None,
         scheduled_time: int | None = None,
     ) -> TaskResult:
-        """
-        Create a running result (task will be re-executed).
+        """Create a running result (task will be re-executed).
 
         Use this when a task needs to poll/wait for something.
         The task will be re-queued and executed again after a backoff period.
 
         Args:
             context: Updated context values
+            scheduled_time: Epoch millisecond before which the task is not run again
 
         Returns:
             A TaskResult with RUNNING status
@@ -89,8 +86,7 @@ class TaskResult:
         error: str,
         context: dict[str, Any] | None = None,
     ) -> TaskResult:
-        """
-        Create a terminal failure result.
+        """Create a terminal failure result.
 
         The stage and pipeline will fail.
 
@@ -115,8 +111,7 @@ class TaskResult:
         outputs: dict[str, Any] | None = None,
         context: dict[str, Any] | None = None,
     ) -> TaskResult:
-        """
-        Create a failed result that allows pipeline to continue.
+        """Create a failed result that allows pipeline to continue.
 
         The stage will be marked as failed but downstream stages will run.
 
@@ -138,8 +133,7 @@ class TaskResult:
 
     @classmethod
     def skipped(cls) -> TaskResult:
-        """
-        Create a skipped result.
+        """Create a skipped result.
 
         Returns:
             A TaskResult with SKIPPED status
@@ -151,8 +145,7 @@ class TaskResult:
         cls,
         outputs: dict[str, Any] | None = None,
     ) -> TaskResult:
-        """
-        Create a canceled result.
+        """Create a canceled result.
 
         Args:
             outputs: Final outputs to preserve
@@ -170,8 +163,7 @@ class TaskResult:
         cls,
         outputs: dict[str, Any] | None = None,
     ) -> TaskResult:
-        """
-        Create a stopped result.
+        """Create a stopped result.
 
         Args:
             outputs: Final outputs to preserve
@@ -189,8 +181,7 @@ class TaskResult:
         cls,
         context: dict[str, Any] | None = None,
     ) -> TaskResult:
-        """
-        Create a suspended result (waiting for external signal).
+        """Create a suspended result (waiting for external signal).
 
         The stage will be set to SUSPENDED status and will wait for a
         SignalStage message to resume (WCP-23/24).
@@ -211,8 +202,7 @@ class TaskResult:
         cls,
         context: dict[str, Any] | None = None,
     ) -> TaskResult:
-        """
-        Create a redirect result.
+        """Create a redirect result.
 
         Indicates a decision branch should be followed.
 
@@ -234,8 +224,7 @@ class TaskResult:
         context: dict[str, Any] | None = None,
         outputs: dict[str, Any] | None = None,
     ) -> TaskResult:
-        """
-        Create a jump result to redirect flow to a different stage.
+        """Create a jump result to redirect flow to a different stage.
 
         The target stage will be reset to NOT_STARTED and re-executed
         with the provided context merged into its existing context.
@@ -273,8 +262,7 @@ class TaskResult:
 
     @classmethod
     def builder(cls, status: WorkflowStatus) -> TaskResultBuilder:
-        """
-        Create a builder for more complex results.
+        """Create a builder for more complex results.
 
         Args:
             status: The execution status
@@ -287,8 +275,7 @@ class TaskResult:
     # ========== Utility Methods ==========
 
     def merge_outputs(self, other: TaskResult | None) -> TaskResult:
-        """
-        Merge outputs from another result.
+        """Merge outputs from another result.
 
         Args:
             other: Result to merge outputs from
@@ -309,8 +296,7 @@ class TaskResult:
 
 
 class TaskResultBuilder:
-    """
-    Builder for TaskResult objects.
+    """Builder for TaskResult objects.
 
     Provides a fluent API for constructing complex task results.
     """

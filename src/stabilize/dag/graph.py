@@ -1,5 +1,4 @@
-"""
-Stage graph builder for constructing synthetic stages.
+"""Stage graph builder for constructing synthetic stages.
 
 This module provides the StageGraphBuilder class for building graphs of
 synthetic stages (before/after stages) that are dynamically injected
@@ -8,16 +7,16 @@ by StageDefinitionBuilders.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from stabilize.models.stage import StageExecution, SyntheticStageOwner
 
 
 class StageGraphBuilder:
-    """
-    Builder for constructing graphs of synthetic stages.
+    """Builder for constructing graphs of synthetic stages.
 
     Used by StageDefinitionBuilder to add before/after stages to a parent stage.
     Manages dependencies between synthetic stages and connects them properly.
@@ -50,16 +49,14 @@ class StageGraphBuilder:
         parent: StageExecution,
         owner: SyntheticStageOwner,
         requisite_stage_ref_ids: set[str] | None = None,
-    ):
-        """
-        Initialize a StageGraphBuilder.
+    ) -> None:
+        """Initialize a StageGraphBuilder.
 
         Args:
             parent: The parent stage these synthetic stages belong to
             owner: STAGE_BEFORE or STAGE_AFTER
             requisite_stage_ref_ids: Initial requisites for first stage
         """
-
         self.parent = parent
         self.owner = owner
         self.requisite_stage_ref_ids = requisite_stage_ref_ids or set()
@@ -68,8 +65,7 @@ class StageGraphBuilder:
 
     @classmethod
     def before_stages(cls, parent: StageExecution) -> StageGraphBuilder:
-        """
-        Create a builder for before stages.
+        """Create a builder for before stages.
 
         Before stages run before the parent's tasks.
         """
@@ -83,8 +79,7 @@ class StageGraphBuilder:
         parent: StageExecution,
         requisite_stage_ref_ids: set[str] | None = None,
     ) -> StageGraphBuilder:
-        """
-        Create a builder for after stages.
+        """Create a builder for after stages.
 
         After stages run after the parent completes.
         """
@@ -97,8 +92,7 @@ class StageGraphBuilder:
         )
 
     def add(self, stage: StageExecution) -> StageGraphBuilder:
-        """
-        Add a stage to the graph.
+        """Add a stage to the graph.
 
         The stage will be configured as a synthetic stage of the parent.
         If this is the first stage and requisite_stage_ref_ids is set,
@@ -128,8 +122,7 @@ class StageGraphBuilder:
         return self
 
     def append(self, stage: StageExecution) -> StageGraphBuilder:
-        """
-        Append a stage after the last added stage.
+        """Append a stage after the last added stage.
 
         Creates a sequential dependency from the last stage to this one.
 
@@ -144,8 +137,7 @@ class StageGraphBuilder:
         return self.add(stage)
 
     def connect(self, previous: StageExecution, next_stage: StageExecution) -> None:
-        """
-        Connect two stages with a dependency.
+        """Connect two stages with a dependency.
 
         The next stage will depend on the previous stage.
 
@@ -175,8 +167,7 @@ class StageGraphBuilder:
         next_stage.requisite_stage_ref_ids = requisites
 
     def build(self) -> list[StageExecution]:
-        """
-        Build and return the list of stages.
+        """Build and return the list of stages.
 
         Returns:
             List of configured synthetic stages
@@ -199,8 +190,7 @@ class StageGraphBuilder:
 
 
 def connect_stages_linearly(stages: list[StageExecution]) -> None:
-    """
-    Connect a list of stages in linear sequence.
+    """Connect a list of stages in linear sequence.
 
     Each stage will depend on the previous one.
 
@@ -219,8 +209,7 @@ def add_stages_to_execution(
     stages: list[StageExecution],
     add_stage: Callable[[StageExecution], None],
 ) -> None:
-    """
-    Add multiple stages to an execution.
+    """Add multiple stages to an execution.
 
     Calls the provided add_stage function for each stage.
 

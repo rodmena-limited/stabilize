@@ -1,9 +1,10 @@
-"""
-PostgreSQL event store implementation.
+"""PostgreSQL event store implementation.
 
 Provides durable, append-only event storage using PostgreSQL.
 Uses BIGSERIAL for sequence numbers and JSONB for event data.
 """
+
+from __future__ import annotations
 
 from stabilize.events.store.postgres.events import PostgresEventsMixin
 from stabilize.events.store.postgres.schema import (
@@ -16,11 +17,11 @@ from stabilize.events.store.postgres.store import PostgresEventStore
 from stabilize.events.store.postgres.subscriptions import PostgresSubscriptionsMixin
 
 __all__ = [
+    "EVENTS_SCHEMA",
+    "SNAPSHOTS_SCHEMA",
+    "SUBSCRIPTIONS_SCHEMA",
     "PostgresEventStore",
     "PostgresEventsMixin",
     "PostgresSnapshotsMixin",
     "PostgresSubscriptionsMixin",
-    "EVENTS_SCHEMA",
-    "SNAPSHOTS_SCHEMA",
-    "SUBSCRIPTIONS_SCHEMA",
 ]

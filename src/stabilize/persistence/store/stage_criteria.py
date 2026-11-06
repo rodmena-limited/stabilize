@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from stabilize.models.status import WorkflowStatus
+if TYPE_CHECKING:
+    from stabilize.models.status import WorkflowStatus
 
 MAX_PAGE_SIZE = 500
 

@@ -1,5 +1,4 @@
-"""
-Process-isolated task execution.
+"""Process-isolated task execution.
 
 This module provides a mechanism to execute tasks in separate processes.
 This protects the main worker process from:
@@ -15,17 +14,20 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import multiprocessing
 import pickle
 import traceback
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.models.stage import StageExecution
 from stabilize.models.status import WorkflowStatus
-from stabilize.tasks.interface import Task
 from stabilize.tasks.result import TaskResult
+
+if TYPE_CHECKING:
+    from stabilize.tasks.interface import Task
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +52,7 @@ def _worker_wrapper(
     stage_data: dict[str, Any],
     queue: multiprocessing.Queue[ProcessResult],
 ) -> None:
-    """
-    Worker function that runs in the separate process.
+    """Worker function that runs in the separate process.
 
     We pass raw data instead of full StageExecution object to avoid
     pickling issues with complex objects attached to stage (like execution ref).
@@ -114,8 +115,7 @@ class ProcessIsolatedTaskExecutor:
         self.timeout_seconds = timeout_seconds
 
     def execute(self, task: Task, stage: StageExecution, timeout_seconds: float | None = None) -> TaskResult:
-        """
-        Execute the task in a separate process.
+        """Execute the task in a separate process.
 
         Args:
             task: The task instance to execute
@@ -184,24 +184,21 @@ class ProcessIsolatedTaskExecutor:
 
             if result_wrapper.success and result_wrapper.result:
                 return result_wrapper.result
-            else:
-                # Exception in task execution
-                error_msg = result_wrapper.error or "Unknown error"
-                logger.error("Task process failed: %s\n%s", error_msg, result_wrapper.traceback)
-                # We return terminal, but handlers might convert to retry if transient
-                # For now, let's wrap it in a logic that allows the handler to decide?
-                # Actually, RunTaskHandler catches exceptions. We should re-raise
-                # if we want RunTaskHandler's standard logic to apply.
-                if result_wrapper.exception is not None:
-                    raise result_wrapper.exception
-                kind = result_wrapper.exception_type or "Exception"
-                raise RuntimeError(f"{kind}: {result_wrapper.error or 'Unknown error'}")
+            # Exception in task execution
+            error_msg = result_wrapper.error or "Unknown error"
+            logger.error("Task process failed: %s\n%s", error_msg, result_wrapper.traceback)
+            # We return terminal, but handlers might convert to retry if transient
+            # For now, let's wrap it in a logic that allows the handler to decide?
+            # Actually, RunTaskHandler catches exceptions. We should re-raise
+            # if we want RunTaskHandler's standard logic to apply.
+            if result_wrapper.exception is not None:
+                raise result_wrapper.exception
+            kind = result_wrapper.exception_type or "Exception"
+            raise RuntimeError(f"{kind}: {result_wrapper.error or 'Unknown error'}")
 
         finally:
             # Cleanup
             if process.is_alive():
-                try:
+                with contextlib.suppress(Exception):
                     process.terminate()
-                except Exception:
-                    pass
             queue.close()

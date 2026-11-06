@@ -1,5 +1,4 @@
-"""
-Queue interface and common types.
+"""Queue interface and common types.
 
 This module provides the abstract Queue interface and common types
 used by all queue implementations.
@@ -8,18 +7,18 @@ used by all queue implementations.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from stabilize.queue.messages import Message
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from datetime import timedelta
+
+    from stabilize.queue.messages import Message
 
 
 class QueueFullError(Exception):
     """Raised when the queue is full and overflow policy is 'raise'."""
-
-    pass
 
 
 @dataclass(frozen=True)
@@ -32,8 +31,7 @@ class QueueCounts:
 
 
 class Queue(ABC):
-    """
-    Abstract queue interface for message handling.
+    """Abstract queue interface for message handling.
 
     The queue is the core of the execution engine, managing all messages
     that drive stage and task execution.
@@ -46,20 +44,17 @@ class Queue(ABC):
         delay: timedelta | None = None,
         connection: Any | None = None,
     ) -> None:
-        """
-        Push a message onto the queue.
+        """Push a message onto the queue.
 
         Args:
             message: The message to push
             delay: Optional delay before message is delivered
             connection: Optional database connection for atomic transactions
         """
-        pass
 
     @abstractmethod
     def poll(self, callback: Callable[[Message], None]) -> None:
-        """
-        Poll for a message and process it with the callback.
+        """Poll for a message and process it with the callback.
 
         If a message is available, calls callback(message).
         After callback returns, the message is automatically acknowledged.
@@ -67,12 +62,10 @@ class Queue(ABC):
         Args:
             callback: Function to call with the message
         """
-        pass
 
     @abstractmethod
     def poll_one(self) -> Message | None:
-        """
-        Poll for a single message without callback.
+        """Poll for a single message without callback.
 
         Returns the message if available, None otherwise.
         Message must be manually acknowledged.
@@ -80,7 +73,6 @@ class Queue(ABC):
         Returns:
             The message or None
         """
-        pass
 
     def live_delivery_keys(self, keys: list[str]) -> set[str]:
         """The keys among keys whose message is still in this queue; every key when the queue cannot tell."""
@@ -88,13 +80,11 @@ class Queue(ABC):
 
     @abstractmethod
     def ack(self, message: Message) -> None:
-        """
-        Acknowledge a message, removing it from the queue.
+        """Acknowledge a message, removing it from the queue.
 
         Args:
             message: The message to acknowledge
         """
-        pass
 
     @abstractmethod
     def ensure(
@@ -102,8 +92,7 @@ class Queue(ABC):
         message: Message,
         delay: timedelta,
     ) -> None:
-        """
-        Ensure a message is in the queue with the given delay.
+        """Ensure a message is in the queue with the given delay.
 
         If the message is already in the queue, updates its delay.
         If not, adds it with the given delay.
@@ -112,7 +101,6 @@ class Queue(ABC):
             message: The message to ensure
             delay: Delay before message is delivered
         """
-        pass
 
     @abstractmethod
     def reschedule(
@@ -122,8 +110,7 @@ class Queue(ABC):
         *,
         store_unavailable: bool = False,
     ) -> None:
-        """
-        Reschedule a message with a new delay.
+        """Reschedule a message with a new delay.
 
         Args:
             message: The message to reschedule
@@ -131,12 +118,10 @@ class Queue(ABC):
             store_unavailable: The handler failed because the store was unreachable;
                 the message spends its store-retry budget instead of an attempt.
         """
-        pass
 
     @abstractmethod
     def size(self) -> int:
         """Get the number of messages in the queue."""
-        pass
 
     def next_ready_in(self) -> float | None:
         """Seconds until the earliest message this consumer can poll; 0 when one is ready, None when none is pending."""
@@ -156,7 +141,6 @@ class Queue(ABC):
     @abstractmethod
     def clear(self) -> None:
         """Clear all messages from the queue."""
-        pass
 
     def has_pending_message_for_task(self, task_id: str) -> bool:
         """Check if there's already a pending message for a specific task.

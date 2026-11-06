@@ -1,5 +1,7 @@
 """DAG operations for pipeline execution."""
 
+from __future__ import annotations
+
 from stabilize.dag.graph import StageGraphBuilder
 from stabilize.dag.topological import (
     CircularDependencyError,
@@ -10,10 +12,10 @@ from stabilize.dag.topological import (
 )
 
 __all__ = [
-    "topological_sort",
-    "topological_sort_all_stages",
-    "validate_stage_graph",
     "CircularDependencyError",
     "InvalidStageGraphError",
     "StageGraphBuilder",
+    "topological_sort",
+    "topological_sort_all_stages",
+    "validate_stage_graph",
 ]

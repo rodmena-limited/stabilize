@@ -1,6 +1,6 @@
 [project]
 name = "stabilize"
-version = "0.34.3"
+version = "0.34.4"
 description = "Stabilize Workflow Orchestration - Agentic Parallel Workflows"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -104,6 +104,8 @@ dev = [
     "testcontainers>=4.0",
     "ruff>=0.1",
     "mypy>=1.8",
+    "types-psutil>=7.0",
+    "types-PyYAML>=6.0",
     "structlog>=24.0",
     "opentelemetry-api>=1.20",
     "opentelemetry-sdk>=1.20",
@@ -141,20 +143,72 @@ line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP"]
+select = ["ALL"]
 ignore = [
-    "N804",  # First argument of a class method should be named `cls` - we use `mcs` for metaclasses
+    "COM812",
+    "ISC001",
+    "CPY001",
+    "D100",
+    "D101",
+    "D102",
+    "D103",
+    "D104",
+    "D105",
+    "D106",
+    "D107",
+    "ANN401",
+    "PLC0415",
+    "TRY003",
+    "EM101",
+    "EM102",
+    "FBT001",
+    "FBT002",
+    "FBT003",
+    "ARG001",
+    "ARG002",
+    "ARG005",
+    "C901",
+    "PLR0911",
+    "PLR0912",
+    "PLR0913",
+    "PLR0915",
+    "PLR0917",
+    "PLR2004",
+    "BLE001",
+    "SLF001",
+    "PLW0603",
+    "S603",
+    "S608",
+    "B027",
+    "TRY400",
+    "TRY301",
+    "TRY004",
 ]
 
+[tool.ruff.lint.isort]
+required-imports = ["from __future__ import annotations"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
 [tool.ruff.lint.per-file-ignores]
-# Examples use logging.basicConfig before imports intentionally to suppress noise
-# Also have hyphenated filenames which are not valid module names (not meant to be imported)
+"src/stabilize/queue/messages.py" = ["TC001", "TC002", "TC003"]
+"src/stabilize/queue/messages/*" = ["TC001", "TC002", "TC003"]
+"src/stabilize/cli/*" = ["T201"]
+"src/stabilize/models/stage/stage.py" = ["A002"]
+"src/stabilize/tasks/http/request.py" = ["S310"]
+"src/stabilize/tasks/highway/task.py" = ["S310"]
+"src/stabilize/llm/client.py" = ["S310"]
+"src/stabilize/tasks/docker.py" = ["S607"]
+"src/stabilize/tasks/ssh.py" = ["S607"]
+"!src/**" = ["A", "AIR", "ANN", "ARG", "ASYNC", "B", "BLE", "C4", "C90", "COM", "CPY", "D", "DJ", "DOC", "DTZ", "EM", "ERA", "EXE", "FA", "FAST", "FBT", "FIX", "FLY", "FURB", "G", "I002", "ICN", "INP", "INT", "ISC", "LOG", "NPY", "PD", "PERF", "PGH", "PIE", "PLC", "PLE", "PLR", "PLW", "PT", "PTH", "PYI", "Q", "RET", "RSE", "RUF", "S", "SIM", "SLF", "SLOT", "T10", "T20", "TC", "TD", "TID", "TRY", "YTT"]
 "examples/*" = ["E402", "N999", "E501"]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
-ignore_missing_imports = true
+warn_unreachable = true
+enable_error_code = ["ignore-without-code", "truthy-bool", "possibly-undefined"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

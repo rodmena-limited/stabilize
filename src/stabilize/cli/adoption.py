@@ -151,4 +151,4 @@ def adoption_level(models: list[MigrationModel], catalog: Catalog) -> int:
 def legacy_rows_for(shipped_plain: dict[str, str], level: int) -> dict[str, str]:
     """The stabilize_migrations rows the old runner would have recorded for the first *level* migrations."""
     names = sorted(shipped_plain)[:level]
-    return {name: hashlib.md5(shipped_plain[name].encode()).hexdigest() for name in names}
+    return {name: hashlib.md5(shipped_plain[name].encode(), usedforsecurity=False).hexdigest() for name in names}

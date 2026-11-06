@@ -106,8 +106,7 @@ def insert_stage(cur: Any, stage: StageExecution, execution_id: str, tenant: str
 def upsert_tasks_bulk(
     cur: Any, tasks: list[TaskExecution], stage_id: str, tenant: str, only_changed: bool = False
 ) -> None:
-    """
-    Batch upsert tasks with optimistic locking.
+    """Batch upsert tasks with optimistic locking.
 
     Uses INSERT ... ON CONFLICT to handle both new and existing tasks efficiently.
     For updates, it increments version and checks the previous version to prevent lost updates.

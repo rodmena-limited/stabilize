@@ -1,5 +1,7 @@
 """Message handlers for pipeline execution."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from stabilize.handlers.add_multi_instance import AddMultiInstanceHandler
@@ -26,27 +28,27 @@ from stabilize.handlers.workflow_control import (
 )
 
 __all__ = [
+    "AddMultiInstanceHandler",
+    "CancelRegionHandler",
+    "CancelStageHandler",
+    "CancelWorkflowHandler",
+    "CompleteStageHandler",
+    "CompleteTaskHandler",
+    "CompleteWorkflowHandler",
+    "ContinueParentStageHandler",
+    "JumpToStageHandler",
     "MessageHandler",
+    "PauseTaskHandler",
+    "RestartStageHandler",
+    "ResumeStageHandler",
+    "RunTaskHandler",
+    "SignalStageHandler",
+    "SkipStageHandler",
     "StabilizeHandler",
-    "StartWorkflowHandler",
     "StartStageHandler",
     "StartTaskHandler",
     "StartWaitingWorkflowsHandler",
-    "RunTaskHandler",
-    "CompleteTaskHandler",
-    "CompleteStageHandler",
-    "CompleteWorkflowHandler",
-    "SkipStageHandler",
-    "CancelStageHandler",
-    "ContinueParentStageHandler",
-    "JumpToStageHandler",
-    "SignalStageHandler",
-    "CancelRegionHandler",
-    "AddMultiInstanceHandler",
-    "CancelWorkflowHandler",
-    "RestartStageHandler",
-    "ResumeStageHandler",
-    "PauseTaskHandler",
+    "StartWorkflowHandler",
 ]
 
 
@@ -56,8 +58,7 @@ def register_all_handlers(
     task_registry: Any,
     queue: Any,
 ) -> None:
-    """
-    Register all handlers with a queue processor.
+    """Register all handlers with a queue processor.
 
     .. deprecated::
         Pass ``store`` and ``task_registry`` to :class:`QueueProcessor` instead.

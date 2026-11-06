@@ -11,6 +11,7 @@ The Golden Rule:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import urllib.error
@@ -152,8 +153,6 @@ class HighwayTask(RetryableTask):
         if not workflow_def:
             return TaskResult.terminal(error="highway_workflow_definition not provided in stage context")
 
-        # CRITICAL: Deterministic Idempotency Key
-        # Format: stabilize-{execution_id}-{stage_id}
         exec_id = stage.execution.id if hasattr(stage, "execution") else "unknown"
         stage_id = stage.id if hasattr(stage, "id") else "unknown"
         idempotency_key = f"stabilize-{exec_id}-{stage_id}"
@@ -226,10 +225,8 @@ class HighwayTask(RetryableTask):
 
         except urllib.error.HTTPError as e:
             error_body = ""
-            try:
+            with contextlib.suppress(Exception):
                 error_body = e.read().decode("utf-8")
-            except Exception:
-                pass
 
             # 401/403: Auth error - terminal
             if e.code in (401, 403):
@@ -253,13 +250,11 @@ class HighwayTask(RetryableTask):
                     error_body,
                 )
                 # Try to extract existing run_id from error response
-                try:
+                with contextlib.suppress(Exception):
                     error_data = json.loads(error_body)
                     existing_run_id = error_data.get("existing_run_id")
                     if existing_run_id:
                         return TaskResult.running(context={"highway_run_id": existing_run_id})
-                except Exception:
-                    pass
                 return TaskResult.terminal(error=f"Highway idempotency conflict: {error_body}")
 
             # 5xx: Server error - retry (return running)
@@ -327,7 +322,7 @@ class HighwayTask(RetryableTask):
             # Extract status from response
             # Highway API returns: {"data": {"state": "...", "result": ...}}
             if not isinstance(response_data, dict):
-                logger.error(f"Unexpected response type: {type(response_data)}")
+                logger.error("Unexpected response type: %s", type(response_data))
                 return TaskResult.terminal(error="Invalid Highway response format")
 
             data = response_data.get("data", response_data)
@@ -379,10 +374,8 @@ class HighwayTask(RetryableTask):
 
         except urllib.error.HTTPError as e:
             error_body = ""
-            try:
+            with contextlib.suppress(Exception):
                 error_body = e.read().decode("utf-8")
-            except Exception:
-                pass
 
             # 401/403: Auth error - terminal
             if e.code in (401, 403):

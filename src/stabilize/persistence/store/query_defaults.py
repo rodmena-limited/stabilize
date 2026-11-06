@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from stabilize.persistence.store.criteria import WORKFLOW_CRITERIA_FIELDS
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
     from stabilize.persistence.store.criteria import WorkflowCriteria

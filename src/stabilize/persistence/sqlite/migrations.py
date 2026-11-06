@@ -16,11 +16,14 @@ Design goals:
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from stabilize.persistence.sqlite.signals import signal_table_statements
 from stabilize.queue.sqlite.schema import queue_lookup_indexes
+
+if TYPE_CHECKING:
+    import sqlite3
 
 # Version of the baseline schema defined in schema.SCHEMA. Bump only if the
 # baseline itself is ever redefined (normally you add a Migration instead).
@@ -54,9 +57,6 @@ class Migration:
     statements: tuple[str, ...]
 
 
-# Forward-only migrations applied *after* the baseline (version 1).
-# Append new migrations here with strictly increasing version numbers, e.g.:
-#     Migration(2, "add_foo_column", ("ALTER TABLE stage_executions ADD COLUMN foo TEXT",))
 ACTIVITY_WATCHED: dict[str, tuple[str, ...]] = {
     "pipeline_executions": (
         "status",
@@ -153,10 +153,14 @@ MIGRATIONS: tuple[Migration, ...] = (
         6,
         "add_purge_and_lookup_indexes",
         (
-            "CREATE INDEX IF NOT EXISTS idx_execution_end_time ON pipeline_executions(end_time) "
-            "WHERE end_time IS NOT NULL",
-            "CREATE INDEX IF NOT EXISTS idx_execution_application_end_time "
-            "ON pipeline_executions(application, end_time) WHERE end_time IS NOT NULL",
+            (
+                "CREATE INDEX IF NOT EXISTS idx_execution_end_time ON pipeline_executions(end_time) "
+                "WHERE end_time IS NOT NULL"
+            ),
+            (
+                "CREATE INDEX IF NOT EXISTS idx_execution_application_end_time "
+                "ON pipeline_executions(application, end_time) WHERE end_time IS NOT NULL"
+            ),
             *queue_lookup_indexes("queue_messages"),
         ),
     ),
@@ -173,8 +177,10 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE stage_executions ADD COLUMN stabilize_updated_at INTEGER",
             "ALTER TABLE task_executions ADD COLUMN stabilize_updated_at INTEGER",
             "ALTER TABLE pipeline_executions ADD COLUMN created_at_ms INTEGER",
-            "UPDATE pipeline_executions SET created_at_ms = CAST(strftime('%s', created_at) AS INTEGER) * 1000 "
-            "WHERE created_at_ms IS NULL AND created_at IS NOT NULL",
+            (
+                "UPDATE pipeline_executions SET created_at_ms = CAST(strftime('%s', created_at) AS INTEGER) * 1000 "
+                "WHERE created_at_ms IS NULL AND created_at IS NOT NULL"
+            ),
             *activity_triggers(),
         ),
     ),
@@ -194,8 +200,10 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE pipeline_executions ADD COLUMN pipeline_config_version TEXT",
             "ALTER TABLE pipeline_executions ADD COLUMN pipeline_config_sha256 TEXT",
             "ALTER TABLE pipeline_executions ADD COLUMN pipeline_config_hash_alg TEXT",
-            "CREATE INDEX IF NOT EXISTS idx_executions_tenant_config_version "
-            "ON pipeline_executions(pipeline_config_id, pipeline_config_version)",
+            (
+                "CREATE INDEX IF NOT EXISTS idx_executions_tenant_config_version "
+                "ON pipeline_executions(pipeline_config_id, pipeline_config_version)"
+            ),
         ),
     ),
 )

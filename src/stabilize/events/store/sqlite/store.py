@@ -1,5 +1,4 @@
-"""
-SQLite event store implementation.
+"""SQLite event store implementation.
 
 Provides durable, append-only event storage using SQLite.
 Events are stored with auto-incrementing sequence numbers
@@ -8,9 +7,8 @@ for global ordering.
 
 from __future__ import annotations
 
-import sqlite3
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.events.store.interface import EventStore
 from stabilize.events.store.sqlite.events import SqliteEventStoreMixin
@@ -27,6 +25,9 @@ from stabilize.persistence.schema_check import check_sqlite_tables
 from stabilize.persistence.sqlite.tenant_schema import engine_shaped_tables, ensure_tenant_schema, read_mode
 from stabilize.persistence.tenancy import check_mode_admits, validate_tenant
 
+if TYPE_CHECKING:
+    import sqlite3
+
 
 class SqliteEventStore(
     SqliteEventStoreMixin,
@@ -35,8 +36,7 @@ class SqliteEventStore(
     SqliteRetentionMixin,
     EventStore,
 ):
-    """
-    SQLite implementation of event store.
+    """SQLite implementation of event store.
 
     Uses the shared ConnectionManager for thread-local connections.
     Events are stored in an append-only table with auto-incrementing
@@ -53,12 +53,12 @@ class SqliteEventStore(
         create_tables: bool = True,
         tenant: str = "",
     ) -> None:
-        """
-        Initialize SQLite event store.
+        """Initialize SQLite event store.
 
         Args:
             connection_string: SQLite connection string (e.g., "sqlite:///./app.db")
             create_tables: Whether to create tables if they don't exist.
+            tenant: The tenant this store reads and writes; '' in single-tenant mode.
         """
         self.tenant = validate_tenant(tenant)
         self._connection_string = connection_string

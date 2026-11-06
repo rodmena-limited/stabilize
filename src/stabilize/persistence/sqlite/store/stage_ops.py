@@ -1,5 +1,4 @@
-"""
-Stage operations mixin for SqliteWorkflowStore.
+"""Stage operations mixin for SqliteWorkflowStore.
 
 Provides store_stage, add_stage, remove_stage, and retrieve_stage operations.
 """
@@ -7,7 +6,6 @@ Provides store_stage, add_stage, remove_stage, and retrieve_stage operations.
 from __future__ import annotations
 
 import json
-import sqlite3
 from typing import TYPE_CHECKING
 
 from stabilize.errors import ConcurrencyError
@@ -26,6 +24,8 @@ _STAGE = select_list("stage_executions", "sqlite")
 _TASK = select_list("task_executions", "sqlite")
 
 if TYPE_CHECKING:
+    import sqlite3
+
     from stabilize.models.stage import StageExecution
     from stabilize.models.workflow import Workflow
 

@@ -1,5 +1,4 @@
-"""
-Event sourcing for Stabilize.
+"""Event sourcing for Stabilize.
 
 This module provides event sourcing capabilities for the Stabilize workflow engine.
 Events become the source of truth, enabling:
@@ -33,6 +32,8 @@ Quick Start:
 """
 
 # Base types
+from __future__ import annotations
+
 from stabilize.events.base import (
     EntityType,
     Event,
@@ -96,65 +97,65 @@ from stabilize.events.store.retention import SubscriptionBehindError
 from stabilize.events.subscriptions import DurableSubscription, SubscriptionManager
 
 __all__ = [
+    "AppendResult",
+    # Subscriptions
+    "DurableSubscription",
+    "EntityType",
     # Base types
     "Event",
-    "EventType",
-    "EntityType",
-    "EventMetadata",
-    "create_workflow_event",
-    "create_stage_event",
-    "create_task_event",
-    "EventMigrator",
-    "get_event_migrator",
-    "reset_event_migrator",
     # Event bus
     "EventBus",
     "EventBusStats",
-    "Subscription",
-    "SubscriptionMode",
-    "get_event_bus",
-    "reset_event_bus",
-    "configure_event_bus",
+    "EventMetadata",
+    "EventMigrator",
+    "EventQuery",
     # Event recorder
     "EventRecorder",
-    "get_event_recorder",
-    "configure_event_recorder",
-    "reset_event_recorder",
-    "set_event_context",
-    "get_event_metadata",
-    # Event store
-    "EventStore",
-    "EventQuery",
-    "AppendResult",
-    "SqliteEventStore",
-    "SubscriptionBehindError",
-    # Projections
-    "Projection",
-    "TimelineEntry",
-    "WorkflowTimeline",
-    "WorkflowTimelineProjection",
-    "StageMetrics",
-    "StageMetricsProjection",
     # Replay
     "EventReplayer",
+    # Event store
+    "EventStore",
+    "EventType",
+    # Projections
+    "Projection",
     "ReplayResult",
-    "WorkflowState",
     # Snapshots
     "Snapshot",
-    "SnapshotStore",
     "SnapshotPolicy",
-    # Subscriptions
-    "DurableSubscription",
+    "SnapshotStore",
+    "SqliteEventStore",
+    "StageMetrics",
+    "StageMetricsProjection",
+    "Subscription",
+    "SubscriptionBehindError",
     "SubscriptionManager",
+    "SubscriptionMode",
+    "TimelineEntry",
+    "WorkflowState",
+    "WorkflowTimeline",
+    "WorkflowTimelineProjection",
+    "configure_event_bus",
+    "configure_event_recorder",
     # Configuration
     "configure_event_sourcing",
+    "create_stage_event",
+    "create_task_event",
+    "create_workflow_event",
+    "get_event_bus",
+    "get_event_metadata",
+    "get_event_migrator",
+    "get_event_recorder",
+    "reset_event_bus",
+    "reset_event_migrator",
+    "reset_event_recorder",
+    "set_event_context",
 ]
 
 # PostgreSQL support is optional
 try:
-    from stabilize.events.store.postgres import PostgresEventStore  # noqa: F401
+    from stabilize.events.store.postgres import PostgresEventStore
 
-    __all__.append("PostgresEventStore")
+    __all__ += ["PostgresEventStore"]
 except ImportError:
     pass
 
@@ -164,8 +165,7 @@ def configure_event_sourcing(
     publish_to_bus: bool = True,
     bus_max_workers: int = 4,
 ) -> EventRecorder:
-    """
-    One-line setup for event sourcing.
+    """One-line setup for event sourcing.
 
     This configures both the event bus and event recorder,
     setting up the global instances for use throughout the application.
@@ -188,6 +188,4 @@ def configure_event_sourcing(
     configure_event_bus(max_workers=bus_max_workers)
 
     # Configure the event recorder
-    recorder = configure_event_recorder(event_store, publish_to_bus=publish_to_bus)
-
-    return recorder
+    return configure_event_recorder(event_store, publish_to_bus=publish_to_bus)

@@ -1,5 +1,4 @@
-"""
-Finalizer registry for cleanup callbacks.
+"""Finalizer registry for cleanup callbacks.
 
 Provides a centralized registry for tracking and executing cleanup
 callbacks when stages enter terminal states. This ensures resources
@@ -29,13 +28,15 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.threads import in_context
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 

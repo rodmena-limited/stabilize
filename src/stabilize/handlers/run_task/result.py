@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import replace
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
-
-from resilient_circuit import ExponentialDelay
 
 from stabilize.models.status import WorkflowStatus
 from stabilize.queue.messages import CompleteTask, JumpToStage
 from stabilize.tasks.interface import RetryableTask
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from resilient_circuit import ExponentialDelay
+
     from stabilize.models.stage import StageExecution
     from stabilize.models.task import TaskExecution
     from stabilize.persistence.store import StoreTransaction
@@ -120,15 +121,11 @@ def _handle_redirect(
     txn_helper: TransactionHelper,
 ) -> None:
     """Handle REDIRECT status - dynamic routing to a different stage."""
-    # target_stage_ref_id is guaranteed non-None when this function is called
-    # (checked at the call site before invoking _handle_redirect)
-    assert result.target_stage_ref_id is not None
+    target = result.target_stage_ref_id
+    if target is None:
+        raise ValueError("REDIRECT result without target_stage_ref_id")
 
-    logger.info(
-        "Task %s requested jump to stage %s",
-        task_model.name,
-        result.target_stage_ref_id,
-    )
+    logger.info("Task %s requested jump to stage %s", task_model.name, target)
 
     # Atomic: store stage + mark processed + push JumpToStage + CompleteTask
     txn_helper.execute_atomic(
@@ -140,7 +137,7 @@ def _handle_redirect(
                     execution_type=message.execution_type,
                     execution_id=message.execution_id,
                     stage_id=message.stage_id,
-                    target_stage_ref_id=result.target_stage_ref_id,
+                    target_stage_ref_id=target,
                     jump_context=result.context or {},
                     jump_outputs=result.outputs or {},
                 ),

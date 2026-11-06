@@ -1,5 +1,4 @@
-"""
-Signal persistence for WCP-24 (Persistent Trigger).
+"""Signal persistence for WCP-24 (Persistent Trigger).
 
 Provides a table for buffering signals that arrive before the target
 stage is ready to consume them.
@@ -8,10 +7,12 @@ stage is ready to consume them.
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import sqlite3
 
 SIGNALS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS workflow_signals (

@@ -1,5 +1,4 @@
-"""
-EventRecorderBase — core recording infrastructure.
+"""EventRecorderBase — core recording infrastructure.
 
 Contains __init__, _record, and _record_batch methods.
 """
@@ -10,20 +9,19 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any
 
-from stabilize.events.base import Event
 from stabilize.events.bus import get_event_bus
 from stabilize.events.recorder.digests import resolve_audit_key
 from stabilize.events.txn_scope import current_scope, hold_until_transaction
 
 if TYPE_CHECKING:
+    from stabilize.events.base import Event
     from stabilize.events.store.interface import EventStore
 
 logger = logging.getLogger(__name__)
 
 
 class EventRecorderBase:
-    """
-    Base class for event recording infrastructure.
+    """Base class for event recording infrastructure.
 
     Provides the core _record and _record_batch methods that integrate
     with EventStore for persistence and EventBus for pub/sub notifications.
@@ -35,8 +33,7 @@ class EventRecorderBase:
         publish_to_bus: bool = True,
         audit_key: bytes | None = None,
     ) -> None:
-        """
-        Initialize the event recorder.
+        """Initialize the event recorder.
 
         Args:
             event_store: Store for persisting events.
@@ -62,8 +59,7 @@ class EventRecorderBase:
         event: Event,
         connection: Any | None = None,
     ) -> Event:
-        """
-        Record an event to store and optionally publish to bus.
+        """Record an event to store and optionally publish to bus.
 
         Note: Event recording is best-effort when called outside a DB transaction.
         If the process crashes between a workflow state update and event recording,
@@ -91,8 +87,8 @@ class EventRecorderBase:
         except Exception as e:
             logger.error(
                 "Failed to persist event %s for %s/%s: %s",
-                event.event_type.value if event.event_type else "unknown",
-                event.entity_type.value if event.entity_type else "unknown",
+                event.event_type.value,
+                event.entity_type.value,
                 event.entity_id,
                 e,
             )
@@ -112,8 +108,7 @@ class EventRecorderBase:
         return recorded
 
     def _store_matches_scope(self, scope: Any) -> bool:
-        """Whether this recorder's event store lives in the same database as
-        the transaction bound to the current thread (safe to join)."""
+        """Whether the recorder's event store shares the database of the thread's bound transaction."""
         if scope.url is None:
             return False
         store_url = getattr(self._event_store, "_connection_string", None)

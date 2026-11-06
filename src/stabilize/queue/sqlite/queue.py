@@ -1,5 +1,4 @@
-"""
-SQLite-backed queue implementation.
+"""SQLite-backed queue implementation.
 
 Uses optimistic locking for concurrent message processing since SQLite
 does not support FOR UPDATE SKIP LOCKED.
@@ -14,11 +13,9 @@ Enterprise Features:
 from __future__ import annotations
 
 import logging
-import sqlite3
 import uuid
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from stabilize.persistence.committed_marks import record_bare_push
 from stabilize.persistence.schema_check import check_sqlite_tables
@@ -33,6 +30,10 @@ from stabilize.queue.sqlite.lookups import SqliteQueueLookupsMixin
 from stabilize.queue.sqlite.schema import create_queue_tables, ensure_redelivery_columns
 from stabilize.queue.sqlite.serialization import serialize_message
 
+if TYPE_CHECKING:
+    import sqlite3
+    from collections.abc import Callable
+
 logger = logging.getLogger(__name__)
 
 _FENCE = " AND (:attempts IS NULL OR attempts = :attempts)"
@@ -44,8 +45,7 @@ _DELIVERABLE = (
 
 
 class SqliteQueue(SqliteDLQMixin, SqliteQueueLookupsMixin, Queue):
-    """
-    SQLite-backed queue implementation.
+    """SQLite-backed queue implementation.
 
     Uses optimistic locking with a version column for concurrent access.
     Multiple workers can safely poll messages, though with lower
@@ -73,14 +73,16 @@ class SqliteQueue(SqliteDLQMixin, SqliteQueueLookupsMixin, Queue):
         tenant: str = "",
         store_retry_budget: timedelta = timedelta(minutes=30),
     ) -> None:
-        """
-        Initialize the SQLite queue.
+        """Initialize the SQLite queue.
 
         Args:
             connection_string: SQLite connection string (e.g., sqlite:///./db.sqlite)
             table_name: Name of the queue table
             lock_duration: How long to lock messages during processing
             max_attempts: Maximum retry attempts before dropping message
+            tenant: The tenant this queue serves; '' in single-tenant mode
+            store_retry_budget: How long a message is redelivered while the store is
+                unavailable before it is dead-lettered
         """
         from stabilize.persistence.connection import get_connection_manager
 
@@ -101,8 +103,7 @@ class SqliteQueue(SqliteDLQMixin, SqliteQueueLookupsMixin, Queue):
         self._manager.bind_sqlite_tenant(connection_string, self.tenant)
 
     def _get_connection(self) -> sqlite3.Connection:
-        """
-        Get thread-local connection from ConnectionManager.
+        """Get thread-local connection from ConnectionManager.
 
         Returns a connection configured with:
         - Row factory for dict-like access
@@ -171,16 +172,11 @@ class SqliteQueue(SqliteDLQMixin, SqliteQueueLookupsMixin, Queue):
         """Poll for a message and process it with the callback."""
         message = self.poll_one()
         if message:
-            try:
-                callback(message)
-                self.ack(message)
-            except Exception:
-                # Message will be retried after lock expires
-                raise
+            callback(message)
+            self.ack(message)
 
     def poll_one(self) -> Message | None:
-        """
-        Poll for a single message using optimistic locking.
+        """Poll for a single message using optimistic locking.
 
         This implementation uses a version column to handle concurrent
         access without FOR UPDATE SKIP LOCKED:
