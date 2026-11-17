@@ -329,6 +329,7 @@ class NoOpTask(Task):
 
 TIMER_ARMED_AT = "_timer_armed_at"
 TIMER_DUE_AT = "_timer_due_at"
+NO_LIFETIME = timedelta(days=36500)
 
 
 def _now_ms() -> int:
@@ -366,7 +367,8 @@ class TimerTask(RetryableTask):
     ``duration_seconds`` (counted from the first execution) from the stage context.
     The first execution writes ``_timer_armed_at`` and ``_timer_due_at`` (epoch ms) and
     asks to run again at the due time; every later execution before the due time asks
-    again; the one at or after it succeeds.
+    again; the one at or after it succeeds. The total lifetime is ``NO_LIFETIME``;
+    ``grace`` and ``unarmed_timeout`` bound one ``execute()`` call.
     """
 
     reset_context_keys: tuple[str, ...] = (TIMER_ARMED_AT, TIMER_DUE_AT)
@@ -374,14 +376,14 @@ class TimerTask(RetryableTask):
     unarmed_timeout = timedelta(hours=1)
 
     def get_timeout(self) -> timedelta:
-        return self.unarmed_timeout
+        return NO_LIFETIME
 
-    def get_dynamic_timeout(self, stage: StageExecution) -> timedelta:
+    def get_execution_timeout(self, stage: StageExecution) -> timedelta:
         due = stage.context.get(TIMER_DUE_AT)
         armed = stage.context.get(TIMER_ARMED_AT)
         if isinstance(due, int) and isinstance(armed, int):
             return timedelta(milliseconds=max(0, due - armed)) + self.grace
-        return self.get_timeout()
+        return self.unarmed_timeout
 
     def get_backoff_period(self, stage: StageExecution, duration: timedelta) -> timedelta:
         due = stage.context.get(TIMER_DUE_AT)

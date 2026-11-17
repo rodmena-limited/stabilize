@@ -93,8 +93,19 @@ class SubWorkflowTask(RetryableTask):
         return None
 
     def on_timeout(self, stage: Any) -> TaskResult | None:
+        finished = self._finished_child(stage)
+        if finished is not None:
+            return finished
         self._cancel_child(stage, "parent task timed out")
         return None
+
+    def _finished_child(self, stage: Any) -> TaskResult | None:
+        child_id = stage.context.get("_sub_workflow_id")
+        engine = self._engine()
+        if not child_id or engine is None:
+            return None
+        result = self._poll_child(stage, child_id, engine)
+        return None if result.status == WorkflowStatus.RUNNING else result
 
     def _engine(self) -> EngineHandles | None:
         engine = current_engine()

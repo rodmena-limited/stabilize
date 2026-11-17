@@ -19,6 +19,7 @@ import urllib.request
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
+from stabilize.models.status import WorkflowStatus
 from stabilize.tasks.highway.config import HighwayConfig
 from stabilize.tasks.interface import RetryableTask
 from stabilize.tasks.result import TaskResult
@@ -95,6 +96,17 @@ class HighwayTask(RetryableTask):
         """Get timeout from config or stage context."""
         config = HighwayConfig.from_stage_context(stage.context)
         return config.timeout
+
+    def on_timeout(self, stage: StageExecution) -> TaskResult | None:
+        """Poll a submitted run once; a run in a terminal state gives its result, anything else None."""
+        run_id = stage.context.get("highway_run_id")
+        if not run_id:
+            return None
+        config = HighwayConfig.from_stage_context(stage.context)
+        if config.validate():
+            return None
+        result = self._poll_workflow(run_id, stage, config)
+        return None if result.status == WorkflowStatus.RUNNING else result
 
     def execute(self, stage: StageExecution) -> TaskResult:
         """Execute Highway workflow.

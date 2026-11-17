@@ -358,8 +358,11 @@ def test_a_highway_run_that_failed_before_the_timeout_was_noticed_reports_its_ow
     tmp_path: Path, highway: str
 ) -> None:
     status, stage = _highway_outcome(tmp_path, highway, "run-failed")
+    assert _Highway.polls == ["run-failed"]
     assert status == "TERMINAL"
-    assert "step 3 raised" in str(stage.context.get("exception"))
+    assert stage.context.get("error") == "Highway workflow failed: step 3 raised"
+    assert stage.context.get("highway_status") == "failed"
+    assert "exceeded total timeout" not in str(stage.context.get("exception"))
 
 
 def test_a_highway_run_still_going_at_the_timeout_fails_with_the_timeout(tmp_path: Path, highway: str) -> None:

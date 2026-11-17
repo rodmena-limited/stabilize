@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.34.5] - 2026-11-17
+
+### Fixed
+
+- **A timer handled after its due time fires (#110, reported by the procurement desk).** Before it
+  runs a retryable task, the engine compares the time since the task started with the task's
+  lifetime. A `TimerTask` reported `(due - armed) + 5 minutes` once armed and one hour before
+  that. A timer handled later ended TERMINAL with "Task exceeded total timeout" and did not fire,
+  and its stage and workflow ended TERMINAL with it. `TimerTask` and `WaitTask`, which is built on it,
+  failed in three situations.
+  - An engine outage longer than five minutes around the due time failed the workflows whose
+    timers fell due in it.
+  - A first run more than five minutes after the task started failed the timer at its due time
+    with the engine running throughout, because the lifetime ran from the task's start and the
+    allowance from arming.
+  - A timer that waited more than an hour for its first run failed when that run came.
+
+  `TimerTask` and `WaitTask` now have no lifetime (`NO_LIFETIME`, 36,500 days), and a timer handled
+  late fires when it is handled. The limit on one `execute()` call is the one 0.34.4 had, and
+  `grace` and `unarmed_timeout` apply to that call. `tests/test_late_handling.py`.
+
+- **A sub-workflow or Highway run that finished before its timeout was noticed gives its own result
+  (#110).** `SubWorkflowTask` with `sub_workflow_timeout_seconds` and `HighwayTask` failed with the
+  timeout when the engine was down past the limit, although the child or the run had already
+  finished. Both now look once in `on_timeout`. A finished child or run supplies the task's result,
+  whether it succeeded or failed. A child still running is cancelled and the task ends TERMINAL as
+  before. A Highway run that is still in progress, or that cannot be reached, ends TERMINAL as
+  before. The Highway path was tested against a local HTTP stand-in for Highway's status endpoint,
+  not against Highway.
+
+### Documentation
+
+- The task guide says that a retryable task's lifetime is wall-clock time and includes time the
+  engine was not running, that `on_timeout` is where a task looks once more, that an exception
+  other than `TransientError` ends the task TERMINAL, and that `scheduled_time` is a record while
+  the delay comes from `get_backoff_period`.
+- The flow-control guide and `stabilize prompt` say that the jump limit is counted on the stage that
+  jumps and copied to its target. They said "per execution" and named `execution.context`.
+
+No schema change and no migration. A `RetryableTask` of your own keeps its lifetime check as it
+was.
+
 ## [0.34.4] - 2026-11-06
 
 ### Changed

@@ -496,8 +496,8 @@ Arbitrary Cycles (WCP-10)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``TaskResult.jump_to()`` enables jumping to any stage (forward or backward).
-The target stage is reset to ``NOT_STARTED``. Max 10 jumps by default to
-prevent infinite loops.
+The target stage is reset to ``NOT_STARTED``. A stage may jump 10 times by default,
+which prevents infinite loops (see Jump Count Limiting).
 
 Structured Loops (WCP-21)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -590,7 +590,9 @@ from the parent task's start time and a hash of the tenant, execution, task and
 generation. A redelivery after a crash therefore finds the child it already stored. A
 sub-workflow inside a loop starts a new child on each pass. ``sub_workflow_timeout_seconds``
 in the stage context bounds the whole child run. Without it there is no cap. Cancelling
-the parent task, or its timeout, cancels the child. The task cannot run under process
+the parent task, or its timeout, cancels the child. A child that has already finished when
+the timeout is noticed, for example after an engine outage, gives the parent its own
+result. The task cannot run under process
 isolation, because the worker process has no store or queue.
 
 
@@ -893,8 +895,11 @@ Jump Count Limiting
 
 To prevent infinite loops, jump count is tracked and limited:
 
-- Default maximum: 10 jumps per execution
-- Configurable via ``_max_jumps`` in execution context
+- Default maximum: 10 jumps, counted on the stage that jumps. The count is kept in that
+  stage's ``_jump_count`` and copied to the target, so two stages that jump independently
+  each have their own count. It is not one counter for the execution.
+- Configurable via ``_max_jumps`` in the execution context, or in the jumping stage's
+  context when the execution does not set it
 - Jump history recorded in ``_jump_history`` for debugging
 
 .. code-block:: python

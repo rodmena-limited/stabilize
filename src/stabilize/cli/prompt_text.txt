@@ -782,8 +782,9 @@ JUMP_TO - Dynamic routing to another stage:
                         context={"retry_reason": "tests failed"}
                     )
 
-    Jump count is tracked in execution.context["_jump_count"] to prevent
-    infinite loops (default max: 10, configurable via _max_jumps context key).
+    Jump count is tracked in the jumping stage's context["_jump_count"] and
+    copied to the target, to prevent infinite loops (default max: 10 per
+    jumping stage, configurable via the _max_jumps context key).
 
 Builder Pattern (for complex results):
     TaskResult.builder(status).context({...}).outputs({...}).build()

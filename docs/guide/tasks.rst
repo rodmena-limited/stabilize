@@ -110,8 +110,14 @@ A retryable task has two limits:
     total limit; override it to bound each poll separately. A call that exceeds it also goes
     through ``on_timeout(stage)``.
 
+The total limit is wall-clock time. Time the engine was not running counts towards it, and
+the engine checks it before it calls ``execute()``. A task whose answer may have arrived
+while nothing was polling should look once more in ``on_timeout`` and return what it finds.
+``SubWorkflowTask`` and ``HighwayTask`` do this.
+
 A ``TransientError`` raised by ``execute()`` is retried with backoff up to ``max_attempts``
-(10) **consecutive** times; a ``RUNNING`` result resets the count.
+(10) **consecutive** times; a ``RUNNING`` result resets the count. Any other exception ends
+the task ``TERMINAL``.
 
 .. code-block:: python
 
@@ -137,7 +143,11 @@ from the task's first execution. The first execution records ``_timer_armed_at``
 ``_timer_due_at`` in the stage context and asks the engine to run it again at the due
 time. The execution at or after the due time succeeds. A delivery before the due time,
 after a crash or a redelivery, asks again for the due time. A pause does not move the
-due time, and the task's lifetime is the timer's length plus five minutes.
+due time.
+
+A timer has no total limit. One that is handled after its due time fires then, however
+late: after an engine outage, or behind a backlog. ``grace`` (five minutes) and
+``unarmed_timeout`` (one hour) bound a single ``execute()`` call.
 
 .. code-block:: python
 
@@ -151,7 +161,8 @@ due time, and the task's lifetime is the timer's length plus five minutes.
 
 A ``RUNNING`` result from any ``RetryableTask`` may carry ``scheduled_time`` (an epoch
 millisecond). The engine stores it on ``stage.scheduled_time`` while the task waits and
-clears it when the task completes.
+clears it when the task completes. It is a record for whoever reads the stage. The delay
+before the next execution comes from ``get_backoff_period``.
 
 Task Cleanup
 ~~~~~~~~~~~~
